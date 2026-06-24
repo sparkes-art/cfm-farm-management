@@ -13,7 +13,7 @@ import { mountMarketPrices } from './market-prices.js';
 let _invoices = [];
 let _contracts = [];
 let _unsub = null;
-let _activeTab = 'contracts';
+let _activeTab = 'overview';
 
 // ── Entry point ───────────────────────────────────────────────
 export async function mountOutputs(container) {
@@ -61,12 +61,140 @@ export function unmountOutputs() {
 async function _loadTab() {
   const content = qs('#tab-content');
   if (!content) return;
-  if (_activeTab === 'contracts') {
+  if (_activeTab === 'overview') {
+    await _mountOverview(content);
+  } else if (_activeTab === 'contracts') {
     await mountContracts(content);
   } else if (_activeTab === 'prices') {
     await mountMarketPrices(content);
   } else {
     await _mountInvoices(content);
+  }
+}
+
+async function _mountOverview(container) {
+  const farm = getActiveFarm();
+  const season = qs('#out-season-select')?.value || currentSeason();
+
+  container.innerHTML = `<div class="empty-state"><span class="loading-spinner"></span></div>`;
+
+  try {
+    const [contracts, invoices] = await Promise.all([
+      dbSelect('forward_contracts', \`farm_id=eq.\${farm.id}&season=eq.\${season}&select=*\`),
+      dbSelect('invoices', \`farm_id=eq.\${farm.id}&season=eq.\${season}&select=*\`),
+    ]);
+
+    const totalContractValue = contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
+    const totalInvoiced = invoices.reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
+    const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
+    const contractCount = contracts.length;
+
+    // Group contracts by commodity for summary
+    const byCommodity = {};
+    contracts.forEach(c => {
+      const key = c.commodity || 'Other';
+      if (!byCommodity[key]) byCommodity[key] = { contracts: 0, quantity: 0, value: 0, unit: c.unit || 'tonne' };
+      byCommodity[key].contracts++;
+      byCommodity[key].quantity += parseFloat(c.quantity) || 0;
+      byCommodity[key].value += (parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0);
+    });
+
+    container.innerHTML = \`
+      <div class="stats-strip" style="grid-template-columns:repeat(4,1fr)">
+        <div class="stat-card">
+          <div class="stat-label">Forward contracts</div>
+          <div class="stat-value">\${contractCount}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Contract value</div>
+          <div class="stat-value blue">\${formatCurrency(totalContractValue, 0)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total invoiced</div>
+          <div class="stat-value">\${formatCurrency(totalInvoiced, 0)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Paid to date</div>
+          <div class="stat-value green">\${formatCurrency(totalPaid, 0)}</div>
+        </div>
+      </div>
+
+      \${Object.keys(byCommodity).length ? \`
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header">
+            <h2>Commodity position — \${season}</h2>
+            <span class="text-hint text-sm">Commodity cards with full hedging position coming soon</span>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Commodity</th>
+                <th class="num">Contracts</th>
+                <th class="num">Units contracted</th>
+                <th class="num">Contract value</th>
+                <th class="num">Avg price</th>
+              </tr>
+            </thead>
+            <tbody>
+              \${Object.entries(byCommodity).map(([name, data]) => \`
+                <tr>
+                  <td><strong>\${name}</strong></td>
+                  <td class="num">\${data.contracts}</td>
+                  <td class="num">\${formatNumber(data.quantity, 0)} \${data.unit}</td>
+                  <td class="num"><strong>\${formatCurrency(data.value, 0)}</strong></td>
+                  <td class="num">\${data.quantity ? formatCurrency(data.value / data.quantity, 2) : '—'}</td>
+                </tr>
+              \`).join('')}
+            </tbody>
+          </table>
+        </div>
+      \` : \`
+        <div class="card">
+          <div class="card-body">
+            <div class="empty-state">
+              <div class="empty-icon">📦</div>
+              <p>No contracts recorded for \${season} yet.</p>
+              <p>Switch to the Contracts tab to add your first forward contract.</p>
+            </div>
+          </div>
+        </div>
+      \`}
+
+      \${invoices.length ? \`
+        <div class="card">
+          <div class="card-header">
+            <h2>Recent invoices</h2>
+            <button class="btn btn-ghost btn-sm" onclick="document.querySelector('[data-tab=invoices]')?.click()">View all →</button>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Invoice #</th>
+                <th>Commodity</th>
+                <th>Buyer</th>
+                <th>Date</th>
+                <th class="num">Amount</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              \${invoices.slice(0,5).map(inv => \`
+                <tr>
+                  <td><strong>\${inv.invoice_number}</strong></td>
+                  <td>\${commodityBadge(inv.commodity_type)}</td>
+                  <td class="muted">\${inv.buyer}</td>
+                  <td class="muted">\${formatDate(inv.invoice_date)}</td>
+                  <td class="num"><strong>\${formatCurrency(inv.net_amount ?? inv.gross_amount)}</strong></td>
+                  <td>\${statusBadge(inv.status)}</td>
+                </tr>
+              \`).join('')}
+            </tbody>
+          </table>
+        </div>
+      \` : ''}
+    \`;
+  } catch (err) {
+    container.innerHTML = \`<div class="empty-state"><p>Failed to load overview: \${err.message}</p></div>\`;
   }
 }
 
