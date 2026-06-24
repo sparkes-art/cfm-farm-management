@@ -148,8 +148,9 @@ async function _mountOverview(container) {
     html += '<h2 style="font-size:var(--text-md);font-weight:600">Commodity position — ' + season + '</h2>';
     html += '</div>';
 
-    // Commodity cards
-    html += await buildCommodityCards(season);
+    // Commodity cards - also get the commodity map back for mini charts
+    const { html: cardsHtml, commodityMap } = await buildCommodityCards(season);
+    html += cardsHtml;
 
     container.innerHTML = html;
 
@@ -157,13 +158,6 @@ async function _mountOverview(container) {
       document.querySelector('[data-tab=prices]')?.click();
     });
 
-    // Build commodity map for mini charts
-    const commodityMap = {};
-    contracts.forEach(c => {
-      const key = c.commodity_id || c.commodity || 'other';
-      if (!commodityMap[key]) commodityMap[key] = { id: c.commodity_id, name: c.commodity, contracts: [] };
-      commodityMap[key].contracts.push(c);
-    });
     await drawMiniCharts(commodityMap, season);
 
   } catch (err) {

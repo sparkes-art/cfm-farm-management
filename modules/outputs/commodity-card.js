@@ -20,17 +20,38 @@ export async function buildCommodityCards(season) {
   ]);
 
   // Get all unique commodities across contracts, budgets and invoices
+  // Use commodity_id as primary key when available, fall back to name
   const commodityMap = {};
+  const nameToKey = {}; // map commodity name -> key for merging
 
   const addCommodity = (id, name) => {
-    if (!id && !name) return;
-    const key = id || name;
-    if (!commodityMap[key]) commodityMap[key] = { id, name: name || id, contracts: [], invoices: [], budgets: [], forecasts: [], harvests: [] };
+    if (!id && !name) return null;
+    // If we have an id, use it as the key
+    // If we only have a name, check if we've seen this name already under an id
+    let key = id || nameToKey[name?.toLowerCase()] || name;
+    if (!commodityMap[key]) {
+      commodityMap[key] = { id: id || null, name: name || key, contracts: [], invoices: [], budgets: [], forecasts: [], harvests: [] };
+    }
+    // Record name->key mapping so name-only entries can find id-based entries
+    if (name && id) nameToKey[name.toLowerCase()] = key;
+    // Update id if we now have one
+    if (id && !commodityMap[key].id) commodityMap[key].id = id;
+    if (name && !commodityMap[key].name) commodityMap[key].name = name;
+    return key;
   };
 
-  contracts.forEach(c => { addCommodity(c.commodity_id, c.commodity); commodityMap[c.commodity_id || c.commodity]?.contracts.push(c); });
-  invoices.forEach(i => { addCommodity(null, i.commodity_type); commodityMap[i.commodity_type]?.invoices.push(i); });
-  budgets.forEach(b => { addCommodity(b.commodity_id, b.commodity); commodityMap[b.commodity_id || b.commodity]?.budgets.push(b); });
+  contracts.forEach(c => {
+    const key = addCommodity(c.commodity_id, c.commodity);
+    if (key) commodityMap[key].contracts.push(c);
+  });
+  budgets.forEach(b => {
+    const key = addCommodity(b.commodity_id, b.commodity);
+    if (key) commodityMap[key].budgets.push(b);
+  });
+  invoices.forEach(i => {
+    const key = addCommodity(null, i.commodity_type);
+    if (key) commodityMap[key].invoices.push(i);
+  });
   forecasts.forEach(f => { addCommodity(f.commodity_id, f.commodity); });
   harvests.forEach(h => { addCommodity(h.commodity_id, null); });
 
@@ -47,18 +68,15 @@ export async function buildCommodityCards(season) {
   await Promise.all(pricePromises);
 
   const cards = Object.values(commodityMap);
-  if (!cards.length) return `
-    <div class="card">
-      <div class="card-body">
-        <div class="empty-state">
-          <div class="empty-icon">📦</div>
-          <p>No commodity data for ${season} yet.</p>
-          <p>Add contracts or budgets to see the position dashboard.</p>
-        </div>
-      </div>
-    </div>`;
+  if (!cards.length) return {
+    html: '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">📦</div><p>No commodity data for ' + season + ' yet.</p><p>Add contracts or budgets to see the position dashboard.</p></div></div></div>',
+    commodityMap: {}
+  };
 
-  return cards.map(com => _buildCard(com, forecasts, harvests, season)).join('');
+  return {
+    html: cards.map(com => _buildCard(com, forecasts, harvests, season)).join(''),
+    commodityMap
+  };
 }
 
 function _buildCard(com, allForecasts, allHarvests, season) {
@@ -73,13 +91,13 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   const budgetYield = totalBudgetArea ? totalBudgetProd / totalBudgetArea : null;
   const budgetPrice = budgets.length ? budgets.reduce((s, b) => s + (parseFloat(b.price) || 0), 0) / budgets.filter(b => b.price).length : null;
 
-  // Latest forecast
-  const comForecasts = allForecasts.filter(f => f.commodity_id === com.id || f.commodity === com.name);
+  // Latest forecast — only use if one actually exists
+  const comForecasts = allForecasts.filter(f => f.commodity_id === com.id || f.commodity?.toLowerCase() === com.name?.toLowerCase());
   const latestForecast = comForecasts[comForecasts.length - 1] || null;
   const forecastProd = latestForecast
     ? (parseFloat(latestForecast.forecast_production) || (parseFloat(latestForecast.area_ha)||0) * (parseFloat(latestForecast.yield_per_ha)||0))
-    : totalBudgetProd;
-  const forecastArea = latestForecast ? parseFloat(latestForecast.area_ha) : totalBudgetArea;
+    : null; // null = no forecast entered yet
+  const forecastArea = latestForecast ? parseFloat(latestForecast.area_ha) : null;
   const forecastYield = forecastArea ? forecastProd / forecastArea : null;
 
   // Harvest
@@ -91,7 +109,7 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   const totalContracted = contracts.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0);
   const totalContractValue = contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
   const avgFwdPrice = totalContracted ? totalContractValue / totalContracted : null;
-  const denominator = isHarvested ? totalHarvest : (forecastProd || totalBudgetProd);
+  const denominator = isHarvested ? totalHarvest : (forecastProd !== null ? forecastProd : totalBudgetProd);
   const pctHedged = denominator && totalContracted ? Math.round((totalContracted / denominator) * 100) : 0;
   const unhedged = Math.max(0, (denominator || 0) - totalContracted);
 
@@ -111,9 +129,9 @@ function _buildCard(com, allForecasts, allHarvests, season) {
 
   // Production bar width
   const budgetBarW = 100;
-  const forecastBarW = totalBudgetProd ? Math.min(100, (forecastProd / totalBudgetProd) * 100) : 0;
+  const forecastBarW = (forecastProd !== null && totalBudgetProd) ? Math.min(100, (forecastProd / totalBudgetProd) * 100) : 0;
   const harvestBarW = totalBudgetProd ? Math.min(100, (totalHarvest / totalBudgetProd) * 100) : 0;
-  const forecastVsBudget = totalBudgetProd ? Math.round((forecastProd / totalBudgetProd) * 100) : null;
+  const forecastVsBudget = (forecastProd !== null && totalBudgetProd) ? Math.round((forecastProd / totalBudgetProd) * 100) : null;
 
   // Unit
   const unit = contracts[0]?.unit || budgets[0]?.unit || 'bale';
@@ -158,8 +176,10 @@ function _buildCard(com, allForecasts, allHarvests, season) {
                 </div>
                 <div>
                   <p style="font-size:10px;color:var(--hint);margin-bottom:2px">Forecast</p>
-                  <p style="font-size:15px;font-weight:600;color:var(--blue);font-variant-numeric:tabular-nums">${forecastYield ? formatNumber(forecastYield, 2) : '—'}</p>
-                  <p style="font-size:11px;color:var(--hint)">${forecastArea ? formatNumber(forecastArea, 0) + ' ha' : ''}</p>
+                  ${latestForecast
+                    ? '<p style="font-size:15px;font-weight:600;color:var(--blue);font-variant-numeric:tabular-nums">' + (forecastYield ? formatNumber(forecastYield, 2) : '—') + '</p><p style="font-size:11px;color:var(--hint)">' + (forecastArea ? formatNumber(forecastArea, 0) + ' ha' : '') + '</p>'
+                    : '<p style="font-size:13px;color:var(--hint)">None entered</p>'
+                  }
                 </div>
                 <div>
                   <p style="font-size:10px;color:var(--hint);margin-bottom:2px">Actual</p>
@@ -188,13 +208,7 @@ function _buildCard(com, allForecasts, allHarvests, season) {
                   <div style="flex:1;height:7px;background:var(--border);border-radius:4px"><div style="height:100%;width:100%;background:var(--blue);border-radius:4px"></div></div>
                   <span style="font-size:11px;font-variant-numeric:tabular-nums;width:80px;text-align:right">${formatNumber(totalBudgetProd, 0)} ${unit}</span>
                 </div>
-                <div style="display:flex;align-items:center;gap:8px">
-                  <span style="font-size:11px;color:var(--muted);width:58px;flex-shrink:0">Forecast</span>
-                  <div style="flex:1;height:7px;background:var(--border);border-radius:4px"><div style="height:100%;width:${forecastBarW}%;background:${forecastBarW < 80 ? 'var(--red)' : 'var(--blue)'};border-radius:4px"></div></div>
-                  <span style="font-size:11px;font-variant-numeric:tabular-nums;width:80px;text-align:right;color:${forecastVsBudget && forecastVsBudget < 100 ? 'var(--red)' : 'inherit'}">
-                    ${formatNumber(forecastProd, 0)}${forecastVsBudget ? ' <span style="font-size:10px">▼' + Math.abs(100-forecastVsBudget) + '%</span>' : ''}
-                  </span>
-                </div>
+                ${latestForecast ? '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--muted);width:58px;flex-shrink:0">Forecast</span><div style="flex:1;height:7px;background:var(--border);border-radius:4px"><div style="height:100%;width:' + forecastBarW + '%;background:' + (forecastBarW < 80 ? 'var(--red)' : 'var(--blue)') + ';border-radius:4px"></div></div><span style="font-size:11px;font-variant-numeric:tabular-nums;width:80px;text-align:right">' + formatNumber(forecastProd, 0) + (forecastVsBudget && forecastVsBudget < 100 ? ' <span style="font-size:10px;color:var(--red)">▼' + Math.abs(100-forecastVsBudget) + '%</span>' : '') + '</span></div>' : ''}
                 ${isHarvested ? `
                   <div style="display:flex;align-items:center;gap:8px">
                     <span style="font-size:11px;color:var(--muted);width:58px;flex-shrink:0">Actual</span>
