@@ -80,6 +80,18 @@ export async function dbUpdate(table, id, patch) {
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
+export async function dbUpsert(table, rows) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: 'POST',
+    headers: {
+      ..._headers(),
+      'Prefer': 'resolution=merge-duplicates,return=minimal',
+    },
+    body: JSON.stringify(rows),
+  });
+  if (!res.ok) throw new Error(`UPSERT ${table} failed: ${await res.text()}`);
+}
+
 export async function dbDelete(table, id) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
     method: 'DELETE',

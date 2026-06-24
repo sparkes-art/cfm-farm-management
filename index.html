@@ -38,7 +38,13 @@
     <img class="cfm-logo" src="/assets/logo-icon.png" alt="CFM" onerror="this.style.display='none'">
     <span class="cfm-wordmark">CFM <span>Farm Management</span></span>
     <div id="farm-selector">
-      <select id="farm-select" aria-label="Active farm"></select>
+      <div style="display:flex;align-items:center;gap:6px">
+        <select id="farm-select" aria-label="Active farm"></select>
+        <button id="btn-farm-settings" title="Farm settings"
+          style="background:rgba(255,255,255,0.08);border:0.5px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);border-radius:var(--radius-sm);width:28px;height:28px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;font-size:14px;transition:background 120ms ease">
+          ✏️
+        </button>
+      </div>
     </div>
     <div class="user-info" id="user-info-display"></div>
     <button class="btn" id="btn-logout" style="margin-left:8px;background:transparent;border-color:rgba(255,255,255,0.18);color:rgba(255,255,255,0.5);font-size:var(--text-xs)">Sign out</button>

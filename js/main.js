@@ -33,8 +33,8 @@ const MODULE_LOADERS = {
     return { mount: m.mountBudget };
   },
   settings: async () => {
-    const m = await import('../modules/settings/commodities-settings.js');
-    return { mount: m.mountCommoditySettings };
+    const m = await import('../modules/settings/settings.js');
+    return { mount: m.mountSettings };
   },
 };
 
@@ -89,6 +89,11 @@ qs('#btn-logout')?.addEventListener('click', () => {
   if (_activeModuleInstance?.unmount) _activeModuleInstance.unmount();
   logout();
   toast('Signed out');
+});
+
+// Farm settings pencil button — navigate to settings with farm tab active
+document.getElementById('btn-farm-settings')?.addEventListener('click', () => {
+  _navigateTo('settings');
 });
 
 // ── Farm selector ─────────────────────────────────────────────

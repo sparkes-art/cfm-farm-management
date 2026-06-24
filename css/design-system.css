@@ -145,27 +145,33 @@ body {
 }
 
 #farm-selector select {
-  background: rgba(255,255,255,0.07);
-  color: rgba(255,255,255,0.85);
-  border: 0.5px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.12);
+  color: #ffffff;
+  border: 1px solid rgba(255,255,255,0.25);
   border-radius: var(--radius-sm);
-  padding: 4px 26px 4px 10px;
-  font-size: var(--text-sm);
+  padding: 5px 28px 5px 12px;
+  font-size: var(--text-base);
+  font-weight: 500;
   font-family: var(--font-ui);
   cursor: pointer;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.5)' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.7)' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 7px center;
+  background-position: right 8px center;
   transition: border-color var(--t-fast), background var(--t-fast);
+  min-width: 180px;
 }
 #farm-selector select:hover {
-  border-color: rgba(255,255,255,0.3);
-  background-color: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.4);
+  background-color: rgba(255,255,255,0.18);
 }
 #farm-selector select option {
-  background: var(--navy);
+  background: #1a2535;
   color: #ffffff;
+  font-weight: 400;
+}
+#btn-farm-settings:hover {
+  background: rgba(255,255,255,0.15) !important;
 }
 
 #topbar .user-info {

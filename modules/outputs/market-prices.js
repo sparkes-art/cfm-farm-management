@@ -16,21 +16,34 @@ export async function mountMarketPrices(container) {
 
   if (commodities.length) _selectedCommodityId = commodities[0].id;
 
+  const activeCommodity = commodities.find(c => c.id === _selectedCommodityId);
+
   container.innerHTML = `
     <div class="page-header">
       <div>
-        <h1>Market Prices</h1>
+        <h1>Market prices</h1>
         <p class="page-subtitle">Manual price history — import from Excel or add individual entries</p>
       </div>
       <div class="flex gap-2">
-        <select id="mp-commodity" class="form-select" style="width:160px">
-          ${commodities.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-        </select>
         ${canWrite() ? `
           <button class="btn btn-secondary" id="btn-import-excel">⬆ Import Excel</button>
           <button class="btn btn-primary" id="btn-add-price">＋ Add price</button>
         ` : ''}
       </div>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+      ${commodities.map(c => `
+        <button class="commodity-pill ${c.id === _selectedCommodityId ? 'active' : ''}" data-id="${c.id}"
+          style="padding:7px 16px;border-radius:20px;font-size:var(--text-sm);font-weight:500;cursor:pointer;border:1px solid ${c.id === _selectedCommodityId ? 'var(--blue)' : 'var(--border)'};background:${c.id === _selectedCommodityId ? 'var(--blue)' : 'var(--white)'};color:${c.id === _selectedCommodityId ? 'white' : 'var(--muted)'};transition:all 120ms ease">
+          ${c.name}
+        </button>
+      `).join('')}
+    </div>
+
+    <div id="mp-commodity-heading" style="margin-bottom:16px">
+      <h2 style="font-size:var(--text-lg);font-weight:600;color:var(--ink)">${activeCommodity?.name || ''}</h2>
+      <p class="page-subtitle">Price history</p>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 320px;gap:20px">
@@ -56,11 +69,25 @@ export async function mountMarketPrices(container) {
     <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" style="display:none">
   `;
 
-  qs('#mp-commodity', container)?.addEventListener('change', async (e) => {
-    _selectedCommodityId = e.target.value;
-    await _loadData();
-    _renderTable();
-    _renderChart();
+  container.querySelectorAll('.commodity-pill').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      _selectedCommodityId = btn.dataset.id;
+      // Update pill styles
+      container.querySelectorAll('.commodity-pill').forEach(b => {
+        const active = b.dataset.id === _selectedCommodityId;
+        b.style.background = active ? 'var(--blue)' : 'var(--white)';
+        b.style.color = active ? 'white' : 'var(--muted)';
+        b.style.borderColor = active ? 'var(--blue)' : 'var(--border)';
+      });
+      // Update heading
+      const commodities = getCommodities().filter(c => !c.is_livestock);
+      const active = commodities.find(c => c.id === _selectedCommodityId);
+      const heading = qs('#mp-commodity-heading', container);
+      if (heading) heading.querySelector('h2').textContent = active?.name || '';
+      await _loadData();
+      _renderTable();
+      _renderChart();
+    });
   });
 
   if (canWrite()) {
@@ -347,24 +374,38 @@ async function _importExcel(file) {
         </div>
       `,
       onConfirm: async () => {
-        let imported = 0;
-        let skipped = 0;
+        if (!_selectedCommodityId) throw new Error('No commodity selected — please select a commodity from the dropdown first');
 
-        for (const entry of entries) {
-          try {
-            await dbInsert('market_prices', {
-              commodity_id: _selectedCommodityId,
-              price_date: entry.date,
-              price: entry.price,
-              created_by: getSession()?.user?.id,
-            });
-            imported++;
-          } catch {
-            skipped++; // Duplicate date — skip
+        // Bulk upsert all rows at once
+        const rows = entries.map(e => ({
+          commodity_id: _selectedCommodityId,
+          price_date: e.date,
+          price: e.price,
+          created_by: getSession()?.user?.id,
+        }));
+
+        const { dbUpsert } = await import('../../js/supabase-client.js');
+        try {
+          await dbUpsert('market_prices', rows);
+          toast('Imported ' + rows.length + ' prices', 'success');
+        } catch (err) {
+          // Fall back to individual inserts if bulk fails
+          let imported = 0;
+          let skipped = 0;
+          let lastError = null;
+          for (const row of rows) {
+            try {
+              await dbInsert('market_prices', row);
+              imported++;
+            } catch (e) {
+              lastError = e.message;
+              skipped++;
+            }
           }
+          if (imported === 0) throw new Error('All inserts failed. Last error: ' + lastError);
+          toast('Imported ' + imported + ' prices' + (skipped ? ', ' + skipped + ' skipped' : ''), 'success');
         }
 
-        toast(`Imported ${imported} prices${skipped ? `, ${skipped} skipped (duplicate dates)` : ''}`, 'success');
         await _loadData();
         _renderTable();
         _renderChart();
