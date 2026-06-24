@@ -14,7 +14,7 @@ const _state = {
 const _listeners = new Map();
 
 export function getState() { return { ..._state }; }
-
+export function getSession() { return _state.session; }
 export function getActiveFarm() { return _state.activeFarm; }
 
 export function getRole() {
