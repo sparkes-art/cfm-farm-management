@@ -2,7 +2,7 @@
 // Manual market price entry + Excel import (col A: date, col B: price)
 // Price history chart per commodity
 
-import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js';
+import { dbSelect, dbInsert, dbDelete, dbUpsert } from '../../js/supabase-client.js';
 import { getSession, canWrite } from '../../js/app-state.js';
 import { loadCommodities, getCommodities, commodityOptions } from '../../js/commodities.js';
 import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js';
@@ -384,7 +384,6 @@ async function _importExcel(file) {
           created_by: getSession()?.user?.id,
         }));
 
-        const { dbUpsert } = await import('../../js/supabase-client.js');
         try {
           await dbUpsert('market_prices', rows);
           toast('Imported ' + rows.length + ' prices', 'success');

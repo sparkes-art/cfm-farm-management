@@ -85,7 +85,7 @@ export async function dbUpsert(table, rows) {
     method: 'POST',
     headers: {
       ..._headers(),
-      'Prefer': 'resolution=merge-duplicates,return=minimal',
+      'Prefer': 'resolution=merge-duplicates return=minimal',
     },
     body: JSON.stringify(rows),
   });
