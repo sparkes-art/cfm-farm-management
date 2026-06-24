@@ -411,56 +411,19 @@ async function _extractFromPDF(overlay) {
 
     statusEl.textContent = 'Extracting contract details with AI…';
 
-    // Call Claude API
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    // Call via Netlify function (API key stays server-side)
+    const response = await fetch('/api/extract-contract', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: { type: 'base64', media_type: 'application/pdf', data: base64 }
-            },
-            {
-              type: 'text',
-              text: `Extract the following fields from this agricultural forward contract PDF and return ONLY a JSON object with no other text or markdown:
-{
-  "contract_number": "the contract or reference number",
-  "counterparty": "the buyer or trading company name",
-  "grade_spec": "the grade, specification or variety",
-  "sale_date": "YYYY-MM-DD format, the date the contract was signed or executed",
-  "quantity": numeric value only,
-  "unit": "tonne, bale, kg, or head",
-  "price_per_unit": numeric value only,
-  "delivery_start": "YYYY-MM-DD format or null",
-  "delivery_end": "YYYY-MM-DD format or null",
-  "commodity": "cotton, grain, pulse, or other",
-  "notes": "any important terms, conditions or notes worth capturing"
-}
-If a field cannot be found, use null. Return only the JSON object.`
-            }
-          ]
-        }]
-      })
+      body: JSON.stringify({ pdf_base64: base64 }),
     });
 
-    if (!response.ok) throw new Error(`API error: ${response.status}`);
-
-    const data = await response.json();
-    const text = data.content?.map(b => b.text || '').join('') || '';
-
-    // Parse the JSON response
-    let extracted;
-    try {
-      const clean = text.replace(/```json|```/g, '').trim();
-      extracted = JSON.parse(clean);
-    } catch {
-      throw new Error('Could not parse AI response — please fill in the fields manually.');
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || `Server error ${response.status}`);
     }
+
+    const extracted = await response.json();
 
     // Populate the form fields
     const set = (id, val) => {
