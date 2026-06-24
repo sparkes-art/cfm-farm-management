@@ -1,6 +1,5 @@
 // modules/outputs/outputs.js
-// Outputs module — invoice management, commodity-first flow
-// Cotton / grain / pulse / livestock + forward contract auto-fill
+// Outputs module — tabbed: Contracts + Invoices
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
@@ -8,10 +7,12 @@ import {
   toast, openModal, formatCurrency, formatDate,
   commodityBadge, statusBadge, qs, setContent, currentSeason
 } from '../../js/ui.js';
+import { mountContracts, unmountContracts } from './contracts.js';
 
 let _invoices = [];
 let _contracts = [];
 let _unsub = null;
+let _activeTab = 'contracts';
 
 // ── Entry point ───────────────────────────────────────────────
 export async function mountOutputs(container) {
@@ -19,22 +20,70 @@ export async function mountOutputs(container) {
     <div class="page-header">
       <div>
         <h1>Outputs</h1>
-        <p class="page-subtitle">Sales invoices and commodity income</p>
+        <p class="page-subtitle">Sales contracts and invoices</p>
       </div>
-      <div class="flex gap-2">
-        <select id="out-season-filter" class="form-select" style="width:120px">
-          <option value="">All seasons</option>
-        </select>
-        <select id="out-commodity-filter" class="form-select" style="width:130px">
-          <option value="">All commodities</option>
-          <option value="cotton">Cotton</option>
-          <option value="grain">Grain</option>
-          <option value="pulse">Pulse</option>
-          <option value="livestock">Livestock</option>
-          <option value="other">Other</option>
-        </select>
-        ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New Invoice</button>' : ''}
-      </div>
+    </div>
+
+    <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid var(--rule)">
+      <button class="tab-btn" data-tab="contracts" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid var(--earth);margin-bottom:-2px;font-size:var(--text-sm);font-weight:600;color:var(--earth);cursor:pointer">
+        Contracts
+      </button>
+      <button class="tab-btn" data-tab="invoices" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:var(--text-sm);font-weight:500;color:var(--muted);cursor:pointer">
+        Invoices
+      </button>
+    </div>
+
+    <div id="tab-content"></div>
+  `;
+
+  container.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _activeTab = btn.dataset.tab;
+      container.querySelectorAll('.tab-btn').forEach(b => {
+        const active = b.dataset.tab === _activeTab;
+        b.style.borderBottomColor = active ? 'var(--earth)' : 'transparent';
+        b.style.color = active ? 'var(--earth)' : 'var(--muted)';
+        b.style.fontWeight = active ? '600' : '500';
+        b.classList.toggle('active', active);
+      });
+      _loadTab();
+    });
+  });
+
+  _loadTab();
+}
+
+export function unmountOutputs() {
+  unmountContracts();
+  if (_unsub) { _unsub(); _unsub = null; }
+}
+
+async function _loadTab() {
+  const content = qs('#tab-content');
+  if (!content) return;
+  if (_activeTab === 'contracts') {
+    await mountContracts(content);
+  } else {
+    await _mountInvoices(content);
+  }
+}
+
+// ── Invoices tab ──────────────────────────────────────────────
+async function _mountInvoices(container) {
+  container.innerHTML = `
+    <div class="flex gap-2" style="margin-bottom:16px">
+      <select id="out-season-filter" class="form-select" style="width:120px">
+        <option value="">All seasons</option>
+      </select>
+      <select id="out-commodity-filter" class="form-select" style="width:130px">
+        <option value="">All commodities</option>
+        <option value="cotton">Cotton</option>
+        <option value="grain">Grain</option>
+        <option value="pulse">Pulse</option>
+        <option value="livestock">Livestock</option>
+        <option value="other">Other</option>
+      </select>
+      ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New Invoice</button>' : ''}
     </div>
 
     <div class="stats-strip" id="out-stats"></div>
@@ -64,10 +113,6 @@ export async function mountOutputs(container) {
   }
 }
 
-export function unmountOutputs() {
-  if (_unsub) { _unsub(); _unsub = null; }
-}
-
 // ── Data loading ──────────────────────────────────────────────
 async function _loadData() {
   const farm = getActiveFarm();
@@ -85,6 +130,7 @@ function _populateSeasonFilter() {
   const sel = qs('#out-season-filter');
   if (!sel) return;
   const seasons = [...new Set(_invoices.map(i => i.season).filter(Boolean))].sort().reverse();
+  while (sel.options.length > 1) sel.remove(1);
   seasons.forEach(s => {
     const opt = document.createElement('option');
     opt.value = s; opt.textContent = s;
@@ -198,7 +244,6 @@ function _renderTable() {
     </table>
   `;
 
-  // Row click → view detail
   wrap.querySelectorAll('tbody tr').forEach(row => {
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('edit-btn')) return;
@@ -207,7 +252,6 @@ function _renderTable() {
     });
   });
 
-  // Edit buttons
   wrap.querySelectorAll('.edit-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -285,8 +329,6 @@ export function openInvoiceModal(existing = null) {
         </div>
       </div>
 
-      <hr class="divider">
-
       <div id="contract-section" class="${existing?.commodity_type === 'livestock' ? 'hidden' : ''}">
         <div class="form-group">
           <label class="form-label">Forward contract <span class="text-muted" style="font-weight:400;text-transform:none">(optional)</span></label>
@@ -324,28 +366,29 @@ export function openInvoiceModal(existing = null) {
         <div id="f-gross-display" class="font-mono" style="font-size: var(--text-xl); color: var(--earth); padding: 4px 0;">—</div>
       </div>
 
-      <div class="form-group">
-        <label class="form-label">Sale type</label>
-        <select class="form-select" id="f-sale-type">
-          <option value="cash"     ${(existing?.sale_type || 'cash') === 'cash'     ? 'selected' : ''}>Cash sale</option>
-          <option value="contract" ${existing?.sale_type === 'contract' ? 'selected' : ''}>Contract</option>
-          <option value="pool"     ${existing?.sale_type === 'pool'     ? 'selected' : ''}>Pool</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Status</label>
-        <select class="form-select" id="f-status">
-          <option value="draft"  ${(existing?.status || 'draft')  === 'draft'  ? 'selected' : ''}>Draft</option>
-          <option value="issued" ${existing?.status === 'issued' ? 'selected' : ''}>Issued</option>
-          <option value="paid"   ${existing?.status === 'paid'   ? 'selected' : ''}>Paid</option>
-          <option value="void"   ${existing?.status === 'void'   ? 'selected' : ''}>Void</option>
-        </select>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Sale type</label>
+          <select class="form-select" id="f-sale-type">
+            <option value="cash"     ${(existing?.sale_type || 'cash') === 'cash'     ? 'selected' : ''}>Cash sale</option>
+            <option value="contract" ${existing?.sale_type === 'contract' ? 'selected' : ''}>Contract</option>
+            <option value="pool"     ${existing?.sale_type === 'pool'     ? 'selected' : ''}>Pool</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-select" id="f-status">
+            <option value="draft"  ${(existing?.status || 'draft')  === 'draft'  ? 'selected' : ''}>Draft</option>
+            <option value="issued" ${existing?.status === 'issued' ? 'selected' : ''}>Issued</option>
+            <option value="paid"   ${existing?.status === 'paid'   ? 'selected' : ''}>Paid</option>
+            <option value="void"   ${existing?.status === 'void'   ? 'selected' : ''}>Void</option>
+          </select>
+        </div>
       </div>
     `,
     onConfirm: async (modal) => {
       const row = _gatherForm(modal, farm, existing);
-      if (!row) return; // validation failed
+      if (!row) return;
 
       if (isEdit) {
         await dbUpdate('invoices', existing.id, row);
@@ -354,12 +397,10 @@ export function openInvoiceModal(existing = null) {
         await dbInsert('invoices', row);
         toast('Invoice created', 'success');
       }
-      // Realtime will update the list; if not connected, reload
       await _loadData(); _renderStats(); _renderTable();
     },
   });
 
-  // Live gross calculation
   const qty = qs('#f-quantity', overlay);
   const price = qs('#f-price', overlay);
   const grossDisplay = qs('#f-gross-display', overlay);
@@ -372,14 +413,12 @@ export function openInvoiceModal(existing = null) {
   price?.addEventListener('input', updateGross);
   updateGross();
 
-  // Contract auto-fill price
   qs('#f-contract', overlay)?.addEventListener('change', (e) => {
     const opt = e.target.options[e.target.selectedIndex];
     const p = opt.dataset.price;
     if (p) { price.value = p; updateGross(); }
   });
 
-  // Hide contract section for livestock
   qs('#f-commodity-type', overlay)?.addEventListener('change', (e) => {
     const isLivestock = e.target.value === 'livestock';
     qs('#contract-section', overlay)?.classList.toggle('hidden', isLivestock);
@@ -429,13 +468,12 @@ function _gatherForm(modal, farm, existing) {
     net_amount: gross - totalDeductions,
     deductions: deductions,
     sale_type: val('f-sale-type'),
-    cotton_region: commodityType === 'cotton' ? (farm.settings?.cottonRegion || null) : null,
+    cotton_region: commodityType === 'cotton' ? (getActiveFarm().settings?.cottonRegion || null) : null,
     status: val('f-status'),
     created_by: getSession()?.user?.id,
   };
 }
 
-// ── Invoice detail view ───────────────────────────────────────
 function openInvoiceDetail(inv) {
   const contract = inv.forward_contract_id
     ? _contracts.find(c => c.id === inv.forward_contract_id)
@@ -449,64 +487,50 @@ function openInvoiceDetail(inv) {
     bodyHTML: `
       <div class="form-row">
         <div>
-          <p class="text-xs text-muted" style="margin-bottom:2px">Farm</p>
-          <p><strong>${getActiveFarm()?.name}</strong></p>
-        </div>
-        <div>
-          <p class="text-xs text-muted" style="margin-bottom:2px">Status</p>
+          <p class="text-xs text-muted">Status</p>
           <p>${statusBadge(inv.status)}</p>
         </div>
         <div>
-          <p class="text-xs text-muted" style="margin-bottom:2px">Date</p>
+          <p class="text-xs text-muted">Date</p>
           <p>${formatDate(inv.invoice_date)}</p>
         </div>
-      </div>
-      <hr class="divider">
-      <div class="form-row mt-2">
         <div>
-          <p class="text-xs text-muted" style="margin-bottom:2px">Commodity</p>
-          <p>${commodityBadge(inv.commodity_type)} ${inv.commodity_detail || ''}</p>
-        </div>
-        <div>
-          <p class="text-xs text-muted" style="margin-bottom:2px">Buyer</p>
-          <p><strong>${inv.buyer}</strong>${inv.buyer_abn ? `<span class="text-xs text-muted"> ABN ${inv.buyer_abn}</span>` : ''}</p>
-        </div>
-        <div>
-          <p class="text-xs text-muted" style="margin-bottom:2px">Season</p>
+          <p class="text-xs text-muted">Season</p>
           <p>${inv.season || '—'}</p>
         </div>
       </div>
       <hr class="divider">
       <div class="form-row mt-2">
         <div>
-          <p class="text-xs text-muted" style="margin-bottom:2px">Quantity</p>
+          <p class="text-xs text-muted">Commodity</p>
+          <p>${commodityBadge(inv.commodity_type)} ${inv.commodity_detail || ''}</p>
+        </div>
+        <div>
+          <p class="text-xs text-muted">Buyer</p>
+          <p><strong>${inv.buyer}</strong>${inv.buyer_abn ? `<span class="text-xs text-muted"> ABN ${inv.buyer_abn}</span>` : ''}</p>
+        </div>
+      </div>
+      <hr class="divider">
+      <div class="form-row mt-2">
+        <div>
+          <p class="text-xs text-muted">Quantity</p>
           <p class="font-mono">${inv.quantity} ${inv.unit}</p>
         </div>
         <div>
-          <p class="text-xs text-muted" style="margin-bottom:2px">Price per ${inv.unit}</p>
+          <p class="text-xs text-muted">Price per ${inv.unit}</p>
           <p class="font-mono">${formatCurrency(inv.price_per_unit, 4)}</p>
         </div>
         <div>
-          <p class="text-xs text-muted" style="margin-bottom:2px">Gross</p>
-          <p class="font-mono"><strong>${formatCurrency(inv.gross_amount)}</strong></p>
+          <p class="text-xs text-muted">Net amount</p>
+          <p class="font-mono" style="font-size:var(--text-xl);color:var(--earth)"><strong>${formatCurrency(inv.net_amount ?? inv.gross_amount)}</strong></p>
         </div>
       </div>
-      ${inv.net_amount !== inv.gross_amount ? `
-        <div class="mt-2">
-          <p class="text-xs text-muted">Net (after deductions)</p>
-          <p class="font-mono" style="font-size:var(--text-xl);color:var(--earth)"><strong>${formatCurrency(inv.net_amount)}</strong></p>
-        </div>
-      ` : ''}
       ${contract ? `
         <hr class="divider">
         <div class="mt-2">
-          <p class="text-xs text-muted" style="margin-bottom:4px">Forward contract</p>
-          <p>${contract.contract_number || 'Contract'} with ${contract.counterparty || '—'} @ ${formatCurrency(contract.price_per_unit, 4)}/${contract.unit}</p>
+          <p class="text-xs text-muted">Forward contract</p>
+          <p>${contract.contract_number || 'Contract'} — ${formatCurrency(contract.price_per_unit, 4)}/${contract.unit}</p>
         </div>
-      ` : ''}
-      ${inv.xero_invoice_id ? `
-        <hr class="divider">
-        <div class="mt-2 text-xs text-muted">Xero ID: ${inv.xero_invoice_id}</div>
       ` : ''}
     `,
   });
