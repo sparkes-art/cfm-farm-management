@@ -4,7 +4,7 @@
 import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
 import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js';
-import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock } from '../../js/commodities.js';
+import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js';
 
 let _contracts = [];
 let _unsub = null;
@@ -361,6 +361,11 @@ export function openContractModal(existing = null) {
       }
       await _loadData(); _renderStats(); _renderTable();
     },
+  });
+
+  // Init inline commodity select
+  initCommoditySelect('f-commodity', (commodityId, commodity) => {
+    // Could update UI based on commodity type here if needed
   });
 
   // Live total calculation

@@ -3,7 +3,7 @@
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
 import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
-import { loadCommodities, getCommodities, getCropTypes, commodityOptions, cropTypeOptions } from '../../js/commodities.js';
+import { loadCommodities, getCommodities, getCropTypes, commodityOptions, cropTypeOptions, commoditySelectHTML, initCommoditySelect, cropTypeSelectHTML, initCropTypeSelect, refreshCropTypeSelect } from '../../js/commodities.js';
 import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, setContent, currentSeason } from '../../js/ui.js';
 
 let _budgets = [];
@@ -280,17 +280,11 @@ function _budgetModal(container, existing = null) {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Commodity</label>
-          <select class="form-select" id="b-commodity">
-            <option value="">Select commodity…</option>
-            ${commodityOptions(existing?.commodity_id)}
-          </select>
+          ${commoditySelectHTML('b-commodity', existing?.commodity_id)}
         </div>
         <div class="form-group">
           <label class="form-label">Crop type</label>
-          <select class="form-select" id="b-crop-type">
-            <option value="">Select crop type…</option>
-            ${existing?.commodity_id ? cropTypeOptions(existing.commodity_id, existing.crop_type_id) : ''}
-          </select>
+          ${cropTypeSelectHTML('b-crop-type', existing?.commodity_id, existing?.crop_type_id)}
         </div>
       </div>
       <div class="form-row">
@@ -345,14 +339,15 @@ function _budgetModal(container, existing = null) {
     },
   });
 
-  // Crop type cascade
-  qs('#b-commodity', overlay)?.addEventListener('change', (e) => {
-    selectedCommodityId = e.target.value;
-    const ctSel = qs('#b-crop-type', overlay);
-    if (ctSel) {
-      ctSel.innerHTML = `<option value="">Select crop type…</option>${cropTypeOptions(selectedCommodityId)}`;
-    }
+  // Init commodity select with inline add
+  initCommoditySelect('b-commodity', (commodityId) => {
+    selectedCommodityId = commodityId;
+    refreshCropTypeSelect('b-crop-type', commodityId);
+    initCropTypeSelect('b-crop-type', () => selectedCommodityId);
   });
+
+  // Init crop type select with inline add
+  initCropTypeSelect('b-crop-type', () => selectedCommodityId);
 
   // Live production calc
   const updateProd = () => {
