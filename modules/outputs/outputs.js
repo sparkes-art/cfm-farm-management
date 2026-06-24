@@ -8,7 +8,6 @@ import {
   commodityBadge, statusBadge, qs, setContent, currentSeason
 } from '../../js/ui.js';
 import { mountContracts, unmountContracts } from './contracts.js';
-import { mountBudget } from './budget.js';
 import { mountMarketPrices } from './market-prices.js';
 
 let _invoices = [];
@@ -30,10 +29,7 @@ export async function mountOutputs(container) {
       <button class="tab-btn" data-tab="contracts" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid var(--earth);margin-bottom:-2px;font-size:var(--text-sm);font-weight:600;color:var(--earth);cursor:pointer">
         Contracts
       </button>
-      <button class="tab-btn" data-tab="budget" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:var(--text-sm);font-weight:500;color:var(--muted);cursor:pointer">
-        Budget
-      </button>
-      <button class="tab-btn" data-tab="prices" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:var(--text-sm);font-weight:500;color:var(--muted);cursor:pointer">
+<button class="tab-btn" data-tab="prices" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:var(--text-sm);font-weight:500;color:var(--muted);cursor:pointer">
         Market Prices
       </button>
       <button class="tab-btn" data-tab="invoices" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:var(--text-sm);font-weight:500;color:var(--muted);cursor:pointer">
@@ -71,8 +67,6 @@ async function _loadTab() {
   if (!content) return;
   if (_activeTab === 'contracts') {
     await mountContracts(content);
-  } else if (_activeTab === 'budget') {
-    await mountBudget(content);
   } else if (_activeTab === 'prices') {
     await mountMarketPrices(content);
   } else {

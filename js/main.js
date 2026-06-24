@@ -28,6 +28,10 @@ const MODULE_LOADERS = {
     const m = await import('../modules/weather/weather.js');
     return { mount: m.mountWeather };
   },
+  budget: async () => {
+    const m = await import('../modules/budget/budget.js');
+    return { mount: m.mountBudget };
+  },
   settings: async () => {
     const m = await import('../modules/settings/commodities-settings.js');
     return { mount: m.mountCommoditySettings };
