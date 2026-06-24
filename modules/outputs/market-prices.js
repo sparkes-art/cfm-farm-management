@@ -3,12 +3,15 @@
 // Price history chart per commodity
  
 import { dbSelect, dbInsert, dbDelete, dbUpsert } from '../../js/supabase-client.js';
+import { getActiveFarm } from '../../js/app-state.js';
 import { getSession, canWrite } from '../../js/app-state.js';
 import { loadCommodities, getCommodities, commodityOptions } from '../../js/commodities.js';
 import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js';
  
 let _prices = [];
+let _contracts = [];
 let _selectedCommodityId = null;
+let _chartRange = 12; // months
  
 export async function mountMarketPrices(container) {
   await loadCommodities();
@@ -50,10 +53,29 @@ export async function mountMarketPrices(container) {
       <div class="card">
         <div class="card-header">
           <h2>Price history</h2>
-          <span id="mp-count" class="text-muted text-sm"></span>
+          <div class="flex items-center gap-2">
+            <span id="mp-count" class="text-muted text-sm"></span>
+            <div style="display:flex;gap:4px">
+              <button class="chart-range-btn active" data-months="6" style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--border);background:var(--blue);color:white;cursor:pointer">6m</button>
+              <button class="chart-range-btn" data-months="12" style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--border);background:var(--white);color:var(--muted);cursor:pointer">12m</button>
+              <button class="chart-range-btn" data-months="24" style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--border);background:var(--white);color:var(--muted);cursor:pointer">24m</button>
+              <button class="chart-range-btn" data-months="999" style="padding:3px 10px;font-size:11px;border-radius:4px;border:1px solid var(--border);background:var(--white);color:var(--muted);cursor:pointer">All</button>
+            </div>
+          </div>
         </div>
-        <div style="padding:16px">
-          <canvas id="price-chart" height="280"></canvas>
+        <div style="padding:8px 16px 4px;display:flex;gap:14px;align-items:center">
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)">
+            <div style="width:20px;height:2px;background:var(--blue)"></div> Market price
+          </div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)">
+            <div style="width:8px;height:8px;border-radius:50%;background:#1a7a4a;border:2px solid #1a7a4a"></div> Forward sale
+          </div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)">
+            <div style="width:20px;height:0;border-top:2px dashed #b86e00"></div> Avg fwd price
+          </div>
+        </div>
+        <div style="padding:8px 16px 16px">
+          <canvas id="price-chart" height="260"></canvas>
         </div>
       </div>
  
@@ -102,6 +124,19 @@ export async function mountMarketPrices(container) {
     });
   }
  
+  // Chart range buttons
+  container.querySelectorAll('.chart-range-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _chartRange = parseInt(btn.dataset.months);
+      container.querySelectorAll('.chart-range-btn').forEach(b => {
+        const active = b.dataset.months === btn.dataset.months;
+        b.style.background = active ? 'var(--blue)' : 'var(--white)';
+        b.style.color = active ? 'white' : 'var(--muted)';
+      });
+      _renderChart();
+    });
+  });
+ 
   await _loadData();
   _renderTable();
   _renderChart();
@@ -109,9 +144,30 @@ export async function mountMarketPrices(container) {
  
 async function _loadData() {
   if (!_selectedCommodityId) return;
-  _prices = await dbSelect('market_prices',
-    `commodity_id=eq.${_selectedCommodityId}&select=*&order=price_date.desc&limit=365`
-  );
+  const farm = getActiveFarm();
+ 
+  // Load up to 3 years of prices
+  const cutoff = new Date();
+  cutoff.setFullYear(cutoff.getFullYear() - 3);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+ 
+  const queries = [
+    dbSelect('market_prices',
+      'commodity_id=eq.' + _selectedCommodityId + '&price_date=gte.' + cutoffStr + '&select=*&order=price_date.asc'
+    ),
+  ];
+ 
+  if (farm) {
+    queries.push(
+      dbSelect('forward_contracts',
+        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&select=*'
+      ).catch(() => [])
+    );
+  }
+ 
+  const results = await Promise.all(queries);
+  _prices = results[0] || [];
+  _contracts = results[1] || [];
 }
  
 function _renderTable() {
@@ -153,7 +209,6 @@ function _renderChart() {
   const canvas = qs('#price-chart');
   if (!canvas) return;
  
-  // Destroy existing chart
   if (window.__cfmPriceChart) {
     window.__cfmPriceChart.destroy();
     window.__cfmPriceChart = null;
@@ -161,41 +216,106 @@ function _renderChart() {
  
   if (!_prices.length) return;
  
-  const sorted = [..._prices].sort((a, b) => new Date(a.price_date) - new Date(b.price_date));
-  const labels = sorted.map(p => formatDate(p.price_date));
+  // Filter by selected range
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - _chartRange);
+  const sorted = _prices
+    .filter(p => _chartRange >= 999 || new Date(p.price_date) >= cutoff)
+    .sort((a, b) => new Date(a.price_date) - new Date(b.price_date));
+ 
+  if (!sorted.length) return;
+ 
+  const labels = sorted.map(p => p.price_date);
   const data = sorted.map(p => parseFloat(p.price_per_unit));
  
-  // Load Chart.js if not already loaded
+  // Build forward sale scatter points — match contract sale_date to nearest price date
+  const saleDates = new Set(sorted.map(p => p.price_date));
+  const salePoints = _contracts
+    .filter(c => c.sale_date && c.price_per_unit)
+    .map(c => {
+      // Find closest price date to sale date
+      const saleDate = c.sale_date.slice(0, 10);
+      // Find index in labels
+      let idx = labels.indexOf(saleDate);
+      if (idx === -1) {
+        // Find nearest date
+        const target = new Date(saleDate).getTime();
+        let minDiff = Infinity;
+        labels.forEach((l, i) => {
+          const diff = Math.abs(new Date(l).getTime() - target);
+          if (diff < minDiff) { minDiff = diff; idx = i; }
+        });
+      }
+      if (idx === -1) return null;
+      return { x: labels[idx], y: parseFloat(c.price_per_unit), label: c.contract_number || 'Contract', qty: c.quantity, unit: c.unit };
+    })
+    .filter(Boolean);
+ 
   if (!window.Chart) {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
-    script.onload = () => _drawChart(canvas, labels, data);
+    script.onload = () => _drawChart(canvas, labels, data, salePoints);
     document.head.appendChild(script);
   } else {
-    _drawChart(canvas, labels, data);
+    _drawChart(canvas, labels, data, salePoints);
   }
 }
  
-function _drawChart(canvas, labels, data) {
+function _drawChart(canvas, labels, data, salePoints = []) {
   const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  const textColor = isDark ? '#9A9894' : '#8C8680';
-  const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+  const textColor = isDark ? '#9A9894' : '#6b7280';
+  const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+ 
+  const datasets = [
+    {
+      label: 'Market price',
+      data,
+      borderColor: '#1e6fa8',
+      backgroundColor: 'rgba(30,111,168,0.06)',
+      borderWidth: 1.5,
+      pointRadius: data.length > 120 ? 0 : 2,
+      pointHoverRadius: 4,
+      fill: true,
+      tension: 0.2,
+      order: 2,
+    },
+  ];
+ 
+  // Average price line — avg of all forward contracts for this commodity
+  if (salePoints.length) {
+    const avgPrice = salePoints.reduce((s, p) => s + p.y, 0) / salePoints.length;
+    const avgData = labels.map(() => parseFloat(avgPrice.toFixed(2)));
+ 
+    datasets.push({
+      label: 'Avg fwd price',
+      data: avgData,
+      borderColor: '#b86e00',
+      borderWidth: 1.5,
+      borderDash: [6, 4],
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      fill: false,
+      tension: 0,
+      order: 3,
+    });
+ 
+    datasets.push({
+      label: 'Forward sale',
+      data: salePoints.map(s => ({ x: s.x, y: s.y })),
+      type: 'scatter',
+      backgroundColor: '#1a7a4a',
+      borderColor: '#ffffff',
+      borderWidth: 2,
+      pointRadius: 7,
+      pointHoverRadius: 9,
+      pointStyle: 'circle',
+      order: 1,
+    });
+  }
  
   window.__cfmPriceChart = new window.Chart(canvas, {
     type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        data,
-        borderColor: '#2C5282',
-        backgroundColor: 'rgba(44,82,130,0.08)',
-        borderWidth: 1.5,
-        pointRadius: data.length > 60 ? 0 : 3,
-        pointHoverRadius: 5,
-        fill: true,
-        tension: 0.2,
-      }]
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -203,7 +323,18 @@ function _drawChart(canvas, labels, data) {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: ctx => '$' + ctx.parsed.y.toFixed(2)
+            label: ctx => {
+              if (ctx.dataset.label === 'Forward sale') {
+                const pt = salePoints[ctx.dataIndex];
+                return pt
+                  ? pt.label + ': $' + ctx.parsed.y.toFixed(2) + (pt.qty ? ' — ' + pt.qty + ' ' + (pt.unit || '') : '')
+                  : '$' + ctx.parsed.y.toFixed(2);
+              }
+              if (ctx.dataset.label === 'Avg fwd price') {
+                return 'Avg fwd: $' + ctx.parsed.y.toFixed(2);
+              }
+              return '$' + ctx.parsed.y.toFixed(2);
+            }
           }
         }
       },
