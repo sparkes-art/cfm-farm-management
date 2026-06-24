@@ -1,15 +1,14 @@
 // modules/outputs/outputs.js
-// Outputs module — tabbed: Contracts + Invoices
+// Outputs module — Dashboard, Contracts, Market Prices, Invoices
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
 import {
   toast, openModal, formatCurrency, formatDate,
-  commodityBadge, statusBadge, qs, setContent, currentSeason
+  commodityBadge, statusBadge, qs, setContent, currentSeason, formatNumber
 } from '../../js/ui.js';
 import { mountContracts, unmountContracts } from './contracts.js';
 import { mountMarketPrices } from './market-prices.js';
-import { mountCottonPrices } from './cotton-prices.js';
 import { buildCommodityCards, drawMiniCharts } from './commodity-card.js';
 
 let _invoices = [];
@@ -19,28 +18,35 @@ let _activeTab = 'overview';
 
 // ── Entry point ───────────────────────────────────────────────
 export async function mountOutputs(container) {
+  const farm = getActiveFarm();
+
   container.innerHTML = `
     <div class="page-header">
       <div>
         <h1>Outputs</h1>
-        <p class="page-subtitle">Sales contracts and invoices</p>
+        <p class="page-subtitle">${farm?.name || ''}</p>
+      </div>
+      <div class="flex gap-2">
+        <select id="out-season-select" class="form-select" style="width:110px">
+          ${_seasonOptions()}
+        </select>
       </div>
     </div>
 
-    <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid var(--rule)">
-      <button class="tab-btn" data-tab="contracts" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid var(--earth);margin-bottom:-2px;font-size:var(--text-sm);font-weight:600;color:var(--earth);cursor:pointer">
-        Contracts
-      </button>
-<button class="tab-btn" data-tab="prices" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:var(--text-sm);font-weight:500;color:var(--muted);cursor:pointer">
-        Market Prices
-      </button>
-      <button class="tab-btn" data-tab="invoices" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:var(--text-sm);font-weight:500;color:var(--muted);cursor:pointer">
-        Invoices
-      </button>
+    <div class="tab-strip">
+      <button class="tab-btn" data-tab="overview" style="font-weight:600">Dashboard</button>
+      <button class="tab-btn" data-tab="contracts">Contracts</button>
+      <button class="tab-btn" data-tab="prices">Market prices</button>
+      <button class="tab-btn" data-tab="invoices">Invoices</button>
     </div>
 
     <div id="tab-content"></div>
   `;
+
+  // Set initial active tab
+  container.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === _activeTab);
+  });
 
   container.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -52,9 +58,8 @@ export async function mountOutputs(container) {
     });
   });
 
-  // Set initial active state
-  container.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.tab === _activeTab);
+  qs('#out-season-select', container)?.addEventListener('change', () => {
+    if (_activeTab === 'overview') _loadTab();
   });
 
   _loadTab();
@@ -67,9 +72,19 @@ export function unmountOutputs() {
   _contracts = [];
 }
 
+function _seasonOptions() {
+  const current = currentSeason();
+  const [y] = current.split('-').map(Number);
+  return Array.from({ length: 5 }, (_, i) => {
+    const s = `${y + 1 - i}-${String(y + 2 - i).slice(2)}`;
+    return `<option value="${s}" ${s === current ? 'selected' : ''}>${s}</option>`;
+  }).join('');
+}
+
 async function _loadTab() {
   const content = qs('#tab-content');
   if (!content) return;
+  unmountContracts();
   if (_activeTab === 'overview') {
     await _mountOverview(content);
   } else if (_activeTab === 'contracts') {
@@ -81,10 +96,15 @@ async function _loadTab() {
   }
 }
 
+// ── Dashboard / Overview ──────────────────────────────────────
 async function _mountOverview(container) {
   const farm = getActiveFarm();
-  const season = qs('#out-season-select')?.value || currentSeason();
+  if (!farm) {
+    container.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span><p style="margin-top:12px">Loading farm data…</p></div>';
+    return;
+  }
 
+  const season = qs('#out-season-select')?.value || currentSeason();
   container.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>';
 
   try {
@@ -96,99 +116,59 @@ async function _mountOverview(container) {
     const totalContractValue = contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
     const totalInvoiced = invoices.reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
     const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
-    const contractCount = contracts.length;
 
-    // Get farm gate cotton price for this farm's region
+    // Cotton farm gate price
     const cottonRegion = farm.settings?.cottonRegion || null;
     let farmGateCotton = null;
     if (cottonRegion) {
       try {
-        const today = new Date().toISOString().slice(0, 10);
-        const cottonPrices = await dbSelect('cotton_prices',
-          'region=eq.' + encodeURIComponent(cottonRegion) + '&order=price_date.desc&limit=2&select=*'
-        );
-        farmGateCotton = cottonPrices[0] || null;
+        const cp = await dbSelect('cotton_prices', 'region=eq.' + encodeURIComponent(cottonRegion) + '&order=price_date.desc&limit=1&select=*');
+        farmGateCotton = cp[0] || null;
       } catch { farmGateCotton = null; }
     }
 
-    const byCommodity = {};
-    contracts.forEach(c => {
-      const key = c.commodity || 'Other';
-      if (!byCommodity[key]) byCommodity[key] = { contracts: 0, quantity: 0, value: 0, unit: c.unit || 'tonne' };
-      byCommodity[key].contracts++;
-      byCommodity[key].quantity += parseFloat(c.quantity) || 0;
-      byCommodity[key].value += (parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0);
-    });
-
-    const cottonStatLabel = cottonRegion ? 'Cotton — ' + cottonRegion : 'Cotton price';
     const cottonStatValue = farmGateCotton ? '$' + parseFloat(farmGateCotton.price_aud).toFixed(0) + '/bale' : '—';
-    const gridCols = cottonRegion ? 'repeat(5,1fr)' : 'repeat(4,1fr)';
+    const cols = cottonRegion ? 'repeat(5,1fr)' : 'repeat(4,1fr)';
 
-    let html = '<div class="stats-strip" style="grid-template-columns:' + gridCols + '">';
-    html += '<div class="stat-card"><div class="stat-label">Forward contracts</div><div class="stat-value">' + contractCount + '</div></div>';
+    let html = '<div class="stats-strip" style="grid-template-columns:' + cols + ';margin-bottom:20px">';
+    html += '<div class="stat-card"><div class="stat-label">Contracts</div><div class="stat-value">' + contracts.length + '</div></div>';
     html += '<div class="stat-card"><div class="stat-label">Contract value</div><div class="stat-value blue">' + formatCurrency(totalContractValue, 0) + '</div></div>';
     html += '<div class="stat-card"><div class="stat-label">Total invoiced</div><div class="stat-value">' + formatCurrency(totalInvoiced, 0) + '</div></div>';
     html += '<div class="stat-card"><div class="stat-label">Paid to date</div><div class="stat-value green">' + formatCurrency(totalPaid, 0) + '</div></div>';
     if (cottonRegion) {
-      html += '<div class="stat-card" style="cursor:pointer" id="cotton-price-stat">';
-      html += '<div class="stat-label">' + cottonStatLabel + '</div>';
+      html += '<div class="stat-card" id="cotton-stat" style="cursor:pointer;border-left:3px solid var(--blue)">';
+      html += '<div class="stat-label">Cotton — ' + cottonRegion + '</div>';
       html += '<div class="stat-value blue">' + cottonStatValue + '</div></div>';
     }
     html += '</div>';
 
-    if (Object.keys(byCommodity).length) {
-      html += '<div class="card" style="margin-bottom:16px">';
-      html += '<div class="card-header"><h2>Commodity position \u2014 ' + season + '</h2><span class="text-hint text-sm">Full hedging position cards coming soon</span></div>';
-      html += '<table class="data-table"><thead><tr>';
-      html += '<th>Commodity</th><th class="num">Contracts</th><th class="num">Units contracted</th><th class="num">Contract value</th><th class="num">Avg price</th>';
-      html += '</tr></thead><tbody>';
-      Object.entries(byCommodity).forEach(([name, data]) => {
-        html += '<tr>';
-        html += '<td><strong>' + name + '</strong></td>';
-        html += '<td class="num">' + data.contracts + '</td>';
-        html += '<td class="num">' + formatNumber(data.quantity, 0) + ' ' + data.unit + '</td>';
-        html += '<td class="num"><strong>' + formatCurrency(data.value, 0) + '</strong></td>';
-        html += '<td class="num">' + (data.quantity ? formatCurrency(data.value / data.quantity, 2) : '\u2014') + '</td>';
-        html += '</tr>';
-      });
-      html += '</tbody></table></div>';
-    } else {
-      html += '<div class="card"><div class="card-body"><div class="empty-state">';
-      html += '<div class="empty-icon">\ud83d\udce6</div>';
-      html += '<p>No contracts recorded for ' + season + ' yet.</p>';
-      html += '<p>Switch to the Contracts tab to add your first forward contract.</p>';
-      html += '</div></div></div>';
-    }
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">';
+    html += '<h2 style="font-size:var(--text-md);font-weight:600">Commodity position — ' + season + '</h2>';
+    html += '</div>';
 
-    if (invoices.length) {
-      html += '<div class="card"><div class="card-header"><h2>Recent invoices</h2>';
-      html += '<button class="btn btn-ghost btn-sm" onclick="document.querySelector(\'[data-tab=invoices]\')?.click()">View all \u2192</button></div>';
-      html += '<table class="data-table"><thead><tr>';
-      html += '<th>Invoice #</th><th>Commodity</th><th>Buyer</th><th>Date</th><th class="num">Amount</th><th>Status</th>';
-      html += '</tr></thead><tbody>';
-      invoices.slice(0, 5).forEach(inv => {
-        html += '<tr>';
-        html += '<td><strong>' + inv.invoice_number + '</strong></td>';
-        html += '<td>' + commodityBadge(inv.commodity_type) + '</td>';
-        html += '<td class="muted">' + (inv.buyer || '\u2014') + '</td>';
-        html += '<td class="muted">' + formatDate(inv.invoice_date) + '</td>';
-        html += '<td class="num"><strong>' + formatCurrency(inv.net_amount ?? inv.gross_amount) + '</strong></td>';
-        html += '<td>' + statusBadge(inv.status) + '</td>';
-        html += '</tr>';
-      });
-      html += '</tbody></table></div>';
-    }
+    // Commodity cards
+    html += await buildCommodityCards(season);
 
     container.innerHTML = html;
-    qs('#cotton-price-stat')?.addEventListener('click', () => {
-      document.querySelector('[data-tab=cotton]')?.click();
+
+    qs('#cotton-stat')?.addEventListener('click', () => {
+      document.querySelector('[data-tab=prices]')?.click();
     });
 
+    // Build commodity map for mini charts
+    const commodityMap = {};
+    contracts.forEach(c => {
+      const key = c.commodity_id || c.commodity || 'other';
+      if (!commodityMap[key]) commodityMap[key] = { id: c.commodity_id, name: c.commodity, contracts: [] };
+      commodityMap[key].contracts.push(c);
+    });
+    await drawMiniCharts(commodityMap, season);
+
   } catch (err) {
-    container.innerHTML = '<div class="empty-state"><p>Failed to load overview: ' + err.message + '</p></div>';
+    container.innerHTML = '<div class="empty-state"><p>Failed to load dashboard: ' + err.message + '</p></div>';
+    console.error(err);
   }
 }
-
 
 // ── Invoices tab ──────────────────────────────────────────────
 async function _mountInvoices(container) {
@@ -205,7 +185,7 @@ async function _mountInvoices(container) {
         <option value="livestock">Livestock</option>
         <option value="other">Other</option>
       </select>
-      ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New Invoice</button>' : ''}
+      ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New invoice</button>' : ''}
     </div>
 
     <div class="stats-strip" id="out-stats"></div>
@@ -216,10 +196,7 @@ async function _mountInvoices(container) {
         <span id="out-count" class="text-muted text-sm"></span>
       </div>
       <div id="out-table-wrap">
-        <div class="empty-state">
-          <div class="empty-icon">📄</div>
-          <p>Loading invoices…</p>
-        </div>
+        <div class="empty-state"><span class="loading-spinner"></span></div>
       </div>
     </div>
   `;
@@ -235,14 +212,13 @@ async function _mountInvoices(container) {
   }
 }
 
-// ── Data loading ──────────────────────────────────────────────
 async function _loadData() {
   const farm = getActiveFarm();
   if (!farm) { _invoices = []; _contracts = []; return; }
 
   [_invoices, _contracts] = await Promise.all([
-    dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.desc`),
-    dbSelect('forward_contracts', `farm_id=eq.${farm.id}&select=*`),
+    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
+    dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&select=*'),
   ]);
 
   _populateSeasonFilter();
@@ -269,13 +245,12 @@ function _filtered() {
   );
 }
 
-// ── Realtime ──────────────────────────────────────────────────
 function _subscribeRealtime() {
   const farm = getActiveFarm();
   if (!farm) return;
   _unsub = subscribeTable('invoices', farm.id, async (event, payload) => {
     if (event === 'INSERT') {
-      _invoices.unshift(payload.record);
+      if (!_invoices.find(i => i.id === payload.record.id)) _invoices.unshift(payload.record);
     } else if (event === 'UPDATE') {
       const idx = _invoices.findIndex(i => i.id === payload.record.id);
       if (idx >= 0) _invoices[idx] = payload.record;
@@ -287,7 +262,6 @@ function _subscribeRealtime() {
   });
 }
 
-// ── Render ────────────────────────────────────────────────────
 function _renderStats() {
   const filtered = _filtered();
   const total = filtered.reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount) || 0), 0);
@@ -296,22 +270,10 @@ function _renderStats() {
   const issued = filtered.filter(i => i.status === 'issued').length;
 
   setContent('#out-stats', `
-    <div class="stat-card">
-      <div class="stat-label">Total invoiced</div>
-      <div class="stat-value earth">${formatCurrency(total, 0)}</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Paid</div>
-      <div class="stat-value grass">${formatCurrency(paid, 0)}</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Issued (unpaid)</div>
-      <div class="stat-value">${formatCurrency(total - paid, 0)}</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Draft / Issued</div>
-      <div class="stat-value">${draft} / ${issued}</div>
-    </div>
+    <div class="stat-card"><div class="stat-label">Total invoiced</div><div class="stat-value blue">${formatCurrency(total, 0)}</div></div>
+    <div class="stat-card"><div class="stat-label">Paid</div><div class="stat-value green">${formatCurrency(paid, 0)}</div></div>
+    <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value">${formatCurrency(total - paid, 0)}</div></div>
+    <div class="stat-card"><div class="stat-label">Draft / Issued</div><div class="stat-value">${draft} / ${issued}</div></div>
   `);
 }
 
@@ -320,14 +282,10 @@ function _renderTable() {
   const wrap = qs('#out-table-wrap');
   if (!wrap) return;
 
-  setContent('#out-count', `${rows.length} invoice${rows.length !== 1 ? 's' : ''}`);
+  setContent('#out-count', rows.length + ' invoice' + (rows.length !== 1 ? 's' : ''));
 
   if (!rows.length) {
-    wrap.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">🌾</div>
-        <p>No invoices yet. Create your first invoice to get started.</p>
-      </div>`;
+    wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">📄</div><p>No invoices yet.</p></div>';
     return;
   }
 
@@ -335,15 +293,9 @@ function _renderTable() {
     <table class="data-table">
       <thead>
         <tr>
-          <th>Invoice #</th>
-          <th>Date</th>
-          <th>Season</th>
-          <th>Commodity</th>
-          <th>Buyer</th>
-          <th class="num">Qty</th>
-          <th class="num">Price / unit</th>
-          <th class="num">Net amount</th>
-          <th>Status</th>
+          <th>Invoice #</th><th>Date</th><th>Season</th><th>Commodity</th>
+          <th>Buyer</th><th class="num">Qty</th><th class="num">Price</th>
+          <th class="num">Net amount</th><th>Status</th>
           ${canWrite() ? '<th></th>' : ''}
         </tr>
       </thead>
@@ -353,13 +305,13 @@ function _renderTable() {
             <td><strong>${inv.invoice_number}</strong></td>
             <td class="muted">${formatDate(inv.invoice_date)}</td>
             <td class="muted">${inv.season || '—'}</td>
-            <td>${commodityBadge(inv.commodity_type)}${inv.commodity_detail ? `<span class="text-xs text-muted" style="margin-left:4px">${inv.commodity_detail}</span>` : ''}</td>
+            <td>${commodityBadge(inv.commodity_type)}${inv.commodity_detail ? '<span class="text-xs text-muted" style="margin-left:4px">' + inv.commodity_detail + '</span>' : ''}</td>
             <td>${inv.buyer}</td>
             <td class="num">${inv.quantity} ${inv.unit}</td>
             <td class="num">${formatCurrency(inv.price_per_unit, 4)}</td>
             <td class="num"><strong>${formatCurrency(inv.net_amount ?? inv.gross_amount)}</strong></td>
             <td>${statusBadge(inv.status)}</td>
-            ${canWrite() ? `<td><button class="btn btn-ghost btn-sm edit-btn" data-id="${inv.id}">Edit</button></td>` : ''}
+            ${canWrite() ? '<td><button class="btn btn-ghost btn-sm edit-btn" data-id="' + inv.id + '">Edit</button></td>' : ''}
           </tr>
         `).join('')}
       </tbody>
@@ -370,7 +322,7 @@ function _renderTable() {
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('edit-btn')) return;
       const inv = _invoices.find(i => i.id === row.dataset.id);
-      if (inv) openInvoiceDetail(inv);
+      if (inv) _openInvoiceDetail(inv);
     });
   });
 
@@ -385,132 +337,150 @@ function _renderTable() {
 
 function _bindFilters(container) {
   ['#out-season-filter', '#out-commodity-filter'].forEach(sel => {
-    qs(sel, container)?.addEventListener('change', () => {
-      _renderStats();
-      _renderTable();
-    });
+    qs(sel, container)?.addEventListener('change', () => { _renderStats(); _renderTable(); });
   });
 }
 
-// ── Invoice Modal (New / Edit) ────────────────────────────────
+// ── Invoice Modal ─────────────────────────────────────────────
 export function openInvoiceModal(existing = null) {
   const farm = getActiveFarm();
   const isEdit = !!existing;
 
-  const contractOptions = _contracts
-    .map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" ${existing?.forward_contract_id === c.id ? 'selected' : ''}>
-      ${c.contract_number || 'Contract'} — ${c.commodity} @ ${formatCurrency(c.price_per_unit, 4)}/${c.unit}
-    </option>`)
-    .join('');
+  const contractOptions = _contracts.map(c =>
+    '<option value="' + c.id + '" data-price="' + c.price_per_unit + '" ' + (existing?.forward_contract_id === c.id ? 'selected' : '') + '>' +
+    (c.contract_number || 'Contract') + ' — ' + (c.commodity || '') + ' @ ' + formatCurrency(c.price_per_unit, 4) + '/' + (c.unit || '') +
+    '</option>'
+  ).join('');
 
   const { overlay } = openModal({
-    title: isEdit ? `Edit Invoice ${existing.invoice_number}` : 'New Invoice',
+    title: isEdit ? 'Edit Invoice ' + existing.invoice_number : 'New Invoice',
     confirmLabel: isEdit ? 'Save changes' : 'Create invoice',
     bodyHTML: `
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Commodity type <span class="required">*</span></label>
-          <select class="form-select" id="f-commodity-type" required>
-            <option value="">Select commodity…</option>
-            <option value="cotton"    ${existing?.commodity_type === 'cotton'    ? 'selected' : ''}>Cotton</option>
-            <option value="grain"     ${existing?.commodity_type === 'grain'     ? 'selected' : ''}>Grain</option>
-            <option value="pulse"     ${existing?.commodity_type === 'pulse'     ? 'selected' : ''}>Pulse</option>
+          <label class="form-label">Commodity type</label>
+          <select class="form-select" id="f-commodity-type">
+            <option value="">Select…</option>
+            <option value="cotton" ${existing?.commodity_type === 'cotton' ? 'selected' : ''}>Cotton</option>
+            <option value="grain" ${existing?.commodity_type === 'grain' ? 'selected' : ''}>Grain</option>
+            <option value="pulse" ${existing?.commodity_type === 'pulse' ? 'selected' : ''}>Pulse</option>
             <option value="livestock" ${existing?.commodity_type === 'livestock' ? 'selected' : ''}>Livestock</option>
-            <option value="other"     ${existing?.commodity_type === 'other'     ? 'selected' : ''}>Other</option>
+            <option value="other" ${existing?.commodity_type === 'other' ? 'selected' : ''}>Other</option>
           </select>
         </div>
         <div class="form-group">
           <label class="form-label">Variety / Grade / Breed</label>
-          <input class="form-input" id="f-commodity-detail" type="text" value="${existing?.commodity_detail || ''}" placeholder="e.g. SJ458 / Feed Wheat / Angus">
+          <input class="form-input" id="f-commodity-detail" type="text" value="${existing?.commodity_detail || ''}">
         </div>
       </div>
-
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Invoice number <span class="required">*</span></label>
-          <input class="form-input" id="f-invoice-number" type="text" value="${existing?.invoice_number || ''}" placeholder="INV-2024-001" required>
+          <label class="form-label">Invoice number</label>
+          <input class="form-input" id="f-invoice-number" type="text" value="${existing?.invoice_number || ''}">
         </div>
         <div class="form-group">
-          <label class="form-label">Invoice date <span class="required">*</span></label>
-          <input class="form-input" id="f-invoice-date" type="date" value="${existing?.invoice_date || ''}" required>
+          <label class="form-label">Invoice date</label>
+          <input class="form-input" id="f-invoice-date" type="date" value="${existing?.invoice_date || ''}">
         </div>
         <div class="form-group">
           <label class="form-label">Season</label>
-          <input class="form-input" id="f-season" type="text" value="${existing?.season || currentSeason()}" placeholder="2024-25">
+          <input class="form-input" id="f-season" type="text" value="${existing?.season || currentSeason()}">
         </div>
       </div>
-
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Buyer <span class="required">*</span></label>
-          <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer || ''}" required>
+          <label class="form-label">Buyer</label>
+          <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer || ''}">
         </div>
         <div class="form-group">
           <label class="form-label">Buyer ABN</label>
           <input class="form-input" id="f-buyer-abn" type="text" value="${existing?.buyer_abn || ''}">
         </div>
       </div>
-
-      <div id="contract-section" class="${existing?.commodity_type === 'livestock' ? 'hidden' : ''}">
+      <div id="contract-section" ${existing?.commodity_type === 'livestock' ? 'class="hidden"' : ''}>
         <div class="form-group">
-          <label class="form-label">Forward contract <span class="text-muted" style="font-weight:400;text-transform:none">(optional)</span></label>
+          <label class="form-label">Forward contract (optional)</label>
           <select class="form-select" id="f-contract">
             <option value="">Cash sale — no contract</option>
             ${contractOptions}
           </select>
-          <p class="form-helper">Selecting a contract auto-fills the price but it can be overridden below.</p>
         </div>
       </div>
-
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Quantity <span class="required">*</span></label>
-          <input class="form-input num" id="f-quantity" type="number" step="0.001" value="${existing?.quantity || ''}" required>
+          <label class="form-label">Quantity</label>
+          <input class="form-input num" id="f-quantity" type="number" step="0.001" value="${existing?.quantity || ''}">
         </div>
         <div class="form-group">
           <label class="form-label">Unit</label>
           <select class="form-select" id="f-unit">
-            <option value="tonne"  ${(existing?.unit || 'tonne') === 'tonne'  ? 'selected' : ''}>tonne</option>
-            <option value="kg"     ${existing?.unit === 'kg'     ? 'selected' : ''}>kg</option>
-            <option value="bale"   ${existing?.unit === 'bale'   ? 'selected' : ''}>bale</option>
-            <option value="head"   ${existing?.unit === 'head'   ? 'selected' : ''}>head</option>
-            <option value="each"   ${existing?.unit === 'each'   ? 'selected' : ''}>each</option>
+            <option value="tonne" ${(existing?.unit || 'tonne') === 'tonne' ? 'selected' : ''}>tonne</option>
+            <option value="kg" ${existing?.unit === 'kg' ? 'selected' : ''}>kg</option>
+            <option value="bale" ${existing?.unit === 'bale' ? 'selected' : ''}>bale</option>
+            <option value="head" ${existing?.unit === 'head' ? 'selected' : ''}>head</option>
+            <option value="each" ${existing?.unit === 'each' ? 'selected' : ''}>each</option>
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Price per unit <span class="required">*</span></label>
-          <input class="form-input num" id="f-price" type="number" step="0.0001" value="${existing?.price_per_unit || ''}" required>
+          <label class="form-label">Price per unit</label>
+          <input class="form-input num" id="f-price" type="number" step="0.0001" value="${existing?.price_per_unit || ''}">
         </div>
       </div>
-
       <div class="form-group">
         <label class="form-label">Gross amount</label>
-        <div id="f-gross-display" class="font-mono" style="font-size: var(--text-xl); color: var(--earth); padding: 4px 0;">—</div>
+        <div id="f-gross-display" class="font-mono" style="font-size:var(--text-xl);color:var(--blue);padding:4px 0">—</div>
       </div>
-
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Sale type</label>
           <select class="form-select" id="f-sale-type">
-            <option value="cash"     ${(existing?.sale_type || 'cash') === 'cash'     ? 'selected' : ''}>Cash sale</option>
+            <option value="cash" ${(existing?.sale_type || 'cash') === 'cash' ? 'selected' : ''}>Cash sale</option>
             <option value="contract" ${existing?.sale_type === 'contract' ? 'selected' : ''}>Contract</option>
-            <option value="pool"     ${existing?.sale_type === 'pool'     ? 'selected' : ''}>Pool</option>
+            <option value="pool" ${existing?.sale_type === 'pool' ? 'selected' : ''}>Pool</option>
           </select>
         </div>
         <div class="form-group">
           <label class="form-label">Status</label>
           <select class="form-select" id="f-status">
-            <option value="draft"  ${(existing?.status || 'draft')  === 'draft'  ? 'selected' : ''}>Draft</option>
+            <option value="draft" ${(existing?.status || 'draft') === 'draft' ? 'selected' : ''}>Draft</option>
             <option value="issued" ${existing?.status === 'issued' ? 'selected' : ''}>Issued</option>
-            <option value="paid"   ${existing?.status === 'paid'   ? 'selected' : ''}>Paid</option>
-            <option value="void"   ${existing?.status === 'void'   ? 'selected' : ''}>Void</option>
+            <option value="paid" ${existing?.status === 'paid' ? 'selected' : ''}>Paid</option>
+            <option value="void" ${existing?.status === 'void' ? 'selected' : ''}>Void</option>
           </select>
         </div>
       </div>
     `,
     onConfirm: async (modal) => {
-      const row = _gatherForm(modal, farm, existing);
-      if (!row) return;
+      const val = (id) => qs('#' + id, modal)?.value?.trim() || '';
+      const num = (id) => parseFloat(qs('#' + id, modal)?.value || 0);
+      const quantity = num('f-quantity');
+      const pricePerUnit = num('f-price');
+      const contractId = val('f-contract') || null;
+      const contract = contractId ? _contracts.find(c => c.id === contractId) : null;
+      const gross = quantity * pricePerUnit;
+      const deductions = existing?.deductions || [];
+      const totalDeductions = deductions.reduce((s, d) => s + (d.amount || 0), 0);
+
+      const row = {
+        farm_id: farm.id,
+        invoice_number: val('f-invoice-number'),
+        invoice_date: val('f-invoice-date'),
+        season: val('f-season') || currentSeason(),
+        commodity_type: val('f-commodity-type'),
+        commodity_detail: val('f-commodity-detail') || null,
+        buyer: val('f-buyer'),
+        buyer_abn: val('f-buyer-abn') || null,
+        forward_contract_id: contractId,
+        contract_price: contract?.price_per_unit || null,
+        price_per_unit: pricePerUnit,
+        unit: val('f-unit'),
+        quantity,
+        net_amount: gross - totalDeductions,
+        deductions,
+        sale_type: val('f-sale-type'),
+        status: val('f-status'),
+        created_by: getSession()?.user?.id,
+      };
 
       if (isEdit) {
         await dbUpdate('invoices', existing.id, row);
@@ -525,11 +495,10 @@ export function openInvoiceModal(existing = null) {
 
   const qty = qs('#f-quantity', overlay);
   const price = qs('#f-price', overlay);
-  const grossDisplay = qs('#f-gross-display', overlay);
-
+  const gross = qs('#f-gross-display', overlay);
   const updateGross = () => {
     const g = parseFloat(qty?.value || 0) * parseFloat(price?.value || 0);
-    grossDisplay.textContent = isNaN(g) || g === 0 ? '—' : formatCurrency(g);
+    gross.textContent = isNaN(g) || g === 0 ? '—' : formatCurrency(g);
   };
   qty?.addEventListener('input', updateGross);
   price?.addEventListener('input', updateGross);
@@ -537,123 +506,40 @@ export function openInvoiceModal(existing = null) {
 
   qs('#f-contract', overlay)?.addEventListener('change', (e) => {
     const opt = e.target.options[e.target.selectedIndex];
-    const p = opt.dataset.price;
-    if (p) { price.value = p; updateGross(); }
+    if (opt.dataset.price) { price.value = opt.dataset.price; updateGross(); }
   });
 
   qs('#f-commodity-type', overlay)?.addEventListener('change', (e) => {
     const isLivestock = e.target.value === 'livestock';
     qs('#contract-section', overlay)?.classList.toggle('hidden', isLivestock);
-    if (isLivestock) {
-      qs('#f-sale-type', overlay).value = 'cash';
-      qs('#f-contract', overlay).value = '';
-    }
   });
 }
 
-function _gatherForm(modal, farm, existing) {
-  const val = (id) => qs(`#${id}`, modal)?.value?.trim() || '';
-  const num = (id) => parseFloat(qs(`#${id}`, modal)?.value || 0);
-
-  const commodityType = val('f-commodity-type');
-  const invoiceNumber = val('f-invoice-number');
-  const invoiceDate = val('f-invoice-date');
-  const buyer = val('f-buyer');
-  const quantity = num('f-quantity');
-  const pricePerUnit = num('f-price');
-
-  if (!commodityType || !invoiceNumber || !invoiceDate || !buyer || !quantity || !pricePerUnit) {
-    toast('Please fill in all required fields', 'error');
-    return null;
-  }
-
-  const contractId = val('f-contract') || null;
-  const contract = contractId ? _contracts.find(c => c.id === contractId) : null;
-  const gross = quantity * pricePerUnit;
-  const deductions = existing?.deductions || [];
-  const totalDeductions = deductions.reduce((s, d) => s + (d.amount || 0), 0);
-
-  return {
-    farm_id: farm.id,
-    invoice_number: invoiceNumber,
-    invoice_date: invoiceDate,
-    season: val('f-season') || currentSeason(),
-    commodity_type: commodityType,
-    commodity_detail: val('f-commodity-detail') || null,
-    buyer: buyer,
-    buyer_abn: val('f-buyer-abn') || null,
-    forward_contract_id: contractId,
-    contract_price: contract?.price_per_unit || null,
-    price_per_unit: pricePerUnit,
-    unit: val('f-unit'),
-    quantity: quantity,
-    net_amount: gross - totalDeductions,
-    deductions: deductions,
-    sale_type: val('f-sale-type'),
-    cotton_region: commodityType === 'cotton' ? (getActiveFarm().settings?.cottonRegion || null) : null,
-    status: val('f-status'),
-    created_by: getSession()?.user?.id,
-  };
-}
-
-function openInvoiceDetail(inv) {
-  const contract = inv.forward_contract_id
-    ? _contracts.find(c => c.id === inv.forward_contract_id)
-    : null;
-
+function _openInvoiceDetail(inv) {
+  const contract = inv.forward_contract_id ? _contracts.find(c => c.id === inv.forward_contract_id) : null;
   openModal({
-    title: `Invoice ${inv.invoice_number}`,
-    confirmLabel: canWrite() ? 'Edit invoice' : null,
-    onConfirm: canWrite() ? async () => { openInvoiceModal(inv); } : null,
+    title: 'Invoice ' + inv.invoice_number,
+    confirmLabel: canWrite() ? 'Edit' : null,
+    onConfirm: canWrite() ? async () => openInvoiceModal(inv) : null,
     confirmClass: 'btn-secondary',
     bodyHTML: `
       <div class="form-row">
-        <div>
-          <p class="text-xs text-muted">Status</p>
-          <p>${statusBadge(inv.status)}</p>
-        </div>
-        <div>
-          <p class="text-xs text-muted">Date</p>
-          <p>${formatDate(inv.invoice_date)}</p>
-        </div>
-        <div>
-          <p class="text-xs text-muted">Season</p>
-          <p>${inv.season || '—'}</p>
-        </div>
+        <div><p class="text-xs text-muted">Status</p><p>${statusBadge(inv.status)}</p></div>
+        <div><p class="text-xs text-muted">Date</p><p>${formatDate(inv.invoice_date)}</p></div>
+        <div><p class="text-xs text-muted">Season</p><p>${inv.season || '—'}</p></div>
       </div>
       <hr class="divider">
       <div class="form-row mt-2">
-        <div>
-          <p class="text-xs text-muted">Commodity</p>
-          <p>${commodityBadge(inv.commodity_type)} ${inv.commodity_detail || ''}</p>
-        </div>
-        <div>
-          <p class="text-xs text-muted">Buyer</p>
-          <p><strong>${inv.buyer}</strong>${inv.buyer_abn ? `<span class="text-xs text-muted"> ABN ${inv.buyer_abn}</span>` : ''}</p>
-        </div>
+        <div><p class="text-xs text-muted">Commodity</p><p>${commodityBadge(inv.commodity_type)} ${inv.commodity_detail || ''}</p></div>
+        <div><p class="text-xs text-muted">Buyer</p><p><strong>${inv.buyer}</strong></p></div>
       </div>
       <hr class="divider">
       <div class="form-row mt-2">
-        <div>
-          <p class="text-xs text-muted">Quantity</p>
-          <p class="font-mono">${inv.quantity} ${inv.unit}</p>
-        </div>
-        <div>
-          <p class="text-xs text-muted">Price per ${inv.unit}</p>
-          <p class="font-mono">${formatCurrency(inv.price_per_unit, 4)}</p>
-        </div>
-        <div>
-          <p class="text-xs text-muted">Net amount</p>
-          <p class="font-mono" style="font-size:var(--text-xl);color:var(--earth)"><strong>${formatCurrency(inv.net_amount ?? inv.gross_amount)}</strong></p>
-        </div>
+        <div><p class="text-xs text-muted">Quantity</p><p class="font-mono">${inv.quantity} ${inv.unit}</p></div>
+        <div><p class="text-xs text-muted">Price / ${inv.unit}</p><p class="font-mono">${formatCurrency(inv.price_per_unit, 4)}</p></div>
+        <div><p class="text-xs text-muted">Net amount</p><p class="font-mono" style="font-size:var(--text-xl);color:var(--blue)"><strong>${formatCurrency(inv.net_amount ?? inv.gross_amount)}</strong></p></div>
       </div>
-      ${contract ? `
-        <hr class="divider">
-        <div class="mt-2">
-          <p class="text-xs text-muted">Forward contract</p>
-          <p>${contract.contract_number || 'Contract'} — ${formatCurrency(contract.price_per_unit, 4)}/${contract.unit}</p>
-        </div>
-      ` : ''}
+      ${contract ? '<hr class="divider"><div class="mt-2"><p class="text-xs text-muted">Forward contract</p><p>' + (contract.contract_number || 'Contract') + ' — ' + formatCurrency(contract.price_per_unit, 4) + '/' + contract.unit + '</p></div>' : ''}
     `,
   });
 }

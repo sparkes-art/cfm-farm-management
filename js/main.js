@@ -3,7 +3,7 @@
 // No localStorage. No caching. Pure Supabase.
 
 import { login, logout, onSessionChange } from './supabase-client.js';
-import { on, setActiveFarm, setActiveModule, getFarms, getState } from './app-state.js';
+import { on, setActiveFarm, setActiveModule, getFarms, getState, getActiveFarm } from './app-state.js';
 import { toast, show, hide, qs } from './ui.js';
 
 // Module loaders (lazy — only imported when navigated to)
@@ -128,9 +128,7 @@ document.getElementById('sidebar')?.querySelectorAll('a[data-module]').forEach(l
   });
 });
 
-// Wait until a farm is available (handles startup race condition)
 async function _waitForFarm(timeout = 5000) {
-  const { getActiveFarm } = await import('./app-state.js');
   if (getActiveFarm()) return getActiveFarm();
   return new Promise((resolve) => {
     const start = Date.now();
