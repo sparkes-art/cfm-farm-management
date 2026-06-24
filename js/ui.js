@@ -1,7 +1,7 @@
 // js/ui.js
-// Shared UI helpers: toast, modal, confirm, formatters
+// Shared UI helpers — toast, modal, formatters, DOM utilities
 
-// ── Toast ────────────────────────────────────────────────────
+// ── Toast ─────────────────────────────────────────────────────
 let _toastContainer;
 function _getToastContainer() {
   if (!_toastContainer) {
@@ -24,7 +24,7 @@ export function toast(message, type = 'default', duration = 3500) {
   }, duration);
 }
 
-// ── Modal ────────────────────────────────────────────────────
+// ── Modal ─────────────────────────────────────────────────────
 export function openModal({ title, bodyHTML, onConfirm, confirmLabel = 'Save', confirmClass = 'btn-primary', showCancel = true }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -65,13 +65,11 @@ export function openModal({ title, bodyHTML, onConfirm, confirmLabel = 'Save', c
     });
   }
 
-  // Focus first input
   setTimeout(() => overlay.querySelector('input, select, textarea')?.focus(), 50);
-
   return { overlay, close };
 }
 
-// ── Formatters ───────────────────────────────────────────────
+// ── Formatters ────────────────────────────────────────────────
 export function formatCurrency(value, decimals = 2) {
   if (value == null || isNaN(value)) return '—';
   return new Intl.NumberFormat('en-AU', {
@@ -102,7 +100,7 @@ export function commodityBadge(type) {
     cotton: 'Cotton', grain: 'Grain', pulse: 'Pulse',
     livestock: 'Livestock', other: 'Other'
   };
-  return `<span class="badge badge-${type}">${labels[type] || type}</span>`;
+  return `<span class="badge badge-${type || 'other'}">${labels[type] || type || 'Other'}</span>`;
 }
 
 export function statusBadge(status) {
@@ -110,7 +108,7 @@ export function statusBadge(status) {
   return `<span class="badge badge-${status}">${labels[status] || status}</span>`;
 }
 
-// ── DOM helpers ──────────────────────────────────────────────
+// ── DOM helpers ───────────────────────────────────────────────
 export function qs(selector, root = document) { return root.querySelector(selector); }
 export function qsa(selector, root = document) { return [...root.querySelectorAll(selector)]; }
 
@@ -133,8 +131,7 @@ export function hide(el) {
 export function currentSeason() {
   const now = new Date();
   const year = now.getFullYear();
-  const month = now.getMonth() + 1; // 1-based
-  // Australian ag season: roughly May–April
+  const month = now.getMonth() + 1;
   return month >= 5
     ? `${year}-${String(year + 1).slice(2)}`
     : `${year - 1}-${String(year).slice(2)}`;

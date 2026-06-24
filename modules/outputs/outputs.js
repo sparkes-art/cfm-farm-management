@@ -44,11 +44,7 @@ export async function mountOutputs(container) {
     btn.addEventListener('click', () => {
       _activeTab = btn.dataset.tab;
       container.querySelectorAll('.tab-btn').forEach(b => {
-        const active = b.dataset.tab === _activeTab;
-        b.style.borderBottomColor = active ? 'var(--earth)' : 'transparent';
-        b.style.color = active ? 'var(--earth)' : 'var(--muted)';
-        b.style.fontWeight = active ? '600' : '500';
-        b.classList.toggle('active', active);
+        b.classList.toggle('active', b.dataset.tab === _activeTab);
       });
       _loadTab();
     });
