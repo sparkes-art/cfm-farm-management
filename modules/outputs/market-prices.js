@@ -286,8 +286,8 @@ async function _importExcel(file) {
             const mon = parts[1].padStart(2, '0');
             let yr = parts[2];
             if (yr.length === 2) yr = parseInt(yr) > 50 ? '19' + yr : '20' + yr;
-            const d = new Date(\`\${yr}-\${mon}-\${day}\`);
-            if (!isNaN(d)) dateStr = \`\${yr}-\${mon}-\${day}\`;
+            const d = new Date(yr + '-' + mon + '-' + day);
+            if (!isNaN(d)) dateStr = yr + '-' + mon + '-' + day;
           }
         } else if (s.includes('-')) {
           // YYYY-MM-DD or DD-MM-YYYY
@@ -298,11 +298,11 @@ async function _importExcel(file) {
             const day = parts[0].padStart(2, '0');
             const mon = parts[1].padStart(2, '0');
             const yr = parts[2].length === 2 ? '20' + parts[2] : parts[2];
-            dateStr = \`\${yr}-\${mon}-\${day}\`;
+            dateStr = yr + '-' + mon + '-' + day;
           }
         } else if (s.length === 8 && !isNaN(s)) {
           // YYYYMMDD
-          dateStr = \`\${s.slice(0,4)}-\${s.slice(4,6)}-\${s.slice(6,8)}\`;
+          dateStr = s.slice(0,4) + '-' + s.slice(4,6) + '-' + s.slice(6,8);
         }
       }
  
