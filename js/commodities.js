@@ -1,13 +1,13 @@
 // js/commodities.js
 // Shared commodity and crop type data layer
 // Loads once per session, provides dynamic lists to all modules
- 
+
 import { dbSelect, dbInsert, dbDelete } from './supabase-client.js';
- 
+
 let _commodities = [];
 let _cropTypes = [];
 let _loaded = false;
- 
+
 // ── Load once ─────────────────────────────────────────────────
 export async function loadCommodities() {
   if (_loaded) return;
@@ -17,28 +17,28 @@ export async function loadCommodities() {
   ]);
   _loaded = true;
 }
- 
+
 export function getCommodities() { return _commodities; }
 export function getCropTypes(commodityId = null) {
   if (!commodityId) return _cropTypes;
   return _cropTypes.filter(ct => ct.commodity_id === commodityId);
 }
- 
+
 export function getCommodityById(id) {
   return _commodities.find(c => c.id === id) || null;
 }
- 
+
 export function getCommodityByName(name) {
   return _commodities.find(c => c.name.toLowerCase() === name.toLowerCase()) || null;
 }
- 
+
 export function isLivestock(commodityId) {
   return _commodities.find(c => c.id === commodityId)?.is_livestock || false;
 }
- 
+
 // Force reload (after add/delete)
 export function invalidateCache() { _loaded = false; }
- 
+
 // ── Add commodity ─────────────────────────────────────────────
 export async function addCommodity(name, isLivestock = false) {
   const row = await dbInsert('commodities', { name, is_livestock: isLivestock });
@@ -46,7 +46,7 @@ export async function addCommodity(name, isLivestock = false) {
   _commodities.sort((a, b) => a.name.localeCompare(b.name));
   return row;
 }
- 
+
 // ── Add crop type ─────────────────────────────────────────────
 export async function addCropType(commodityId, name) {
   const row = await dbInsert('crop_types', { commodity_id: commodityId, name });
@@ -54,19 +54,19 @@ export async function addCropType(commodityId, name) {
   _cropTypes.sort((a, b) => a.name.localeCompare(b.name));
   return row;
 }
- 
+
 // ── Delete ────────────────────────────────────────────────────
 export async function deleteCommodity(id) {
   await dbDelete('commodities', id);
   _commodities = _commodities.filter(c => c.id !== id);
   _cropTypes = _cropTypes.filter(ct => ct.commodity_id !== id);
 }
- 
+
 export async function deleteCropType(id) {
   await dbDelete('crop_types', id);
   _cropTypes = _cropTypes.filter(ct => ct.id !== id);
 }
- 
+
 // ── Commodity select HTML helper ──────────────────────────────
 // Returns <option> tags for a commodity dropdown
 export function commodityOptions(selectedId = null) {
@@ -74,7 +74,7 @@ export function commodityOptions(selectedId = null) {
     `<option value="${c.id}" data-livestock="${c.is_livestock}" ${c.id === selectedId ? 'selected' : ''}>${c.name}</option>`
   ).join('');
 }
- 
+
 // ── Crop type select HTML helper ──────────────────────────────
 // Returns <option> tags filtered by commodity
 export function cropTypeOptions(commodityId = null, selectedId = null) {
@@ -86,11 +86,11 @@ export function cropTypeOptions(commodityId = null, selectedId = null) {
     `<option value="${ct.id}" ${ct.id === selectedId ? 'selected' : ''}>${ct.name}</option>`
   ).join('');
 }
- 
+
 // ── Inline add select widgets ─────────────────────────────────
 // Renders a commodity <select> with an inline "Add new" flow.
 // Usage: insert the returned HTML, then call initCommoditySelect(selectEl)
- 
+
 export function commoditySelectHTML(id, selectedId = null) {
   return `
     <select class="form-select" id="${id}">
@@ -110,7 +110,7 @@ export function commoditySelectHTML(id, selectedId = null) {
     </div>
   `;
 }
- 
+
 // Call after inserting commoditySelectHTML into the DOM
 // onSelect(commodityId, commodityObject) called when selection changes or new added
 export function initCommoditySelect(containerId, onSelect = null) {
@@ -120,9 +120,9 @@ export function initCommoditySelect(containerId, onSelect = null) {
   const addLivestock = document.getElementById(`${containerId}-add-livestock`);
   const addBtn = document.getElementById(`${containerId}-add-btn`);
   const cancelBtn = document.getElementById(`${containerId}-cancel-btn`);
- 
+
   if (!sel) return;
- 
+
   sel.addEventListener('change', () => {
     if (sel.value === '__add__') {
       addRow.style.display = 'block';
@@ -134,7 +134,7 @@ export function initCommoditySelect(containerId, onSelect = null) {
       if (onSelect) onSelect(sel.value, commodity);
     }
   });
- 
+
   addBtn?.addEventListener('click', async () => {
     const name = addName.value.trim();
     if (!name) { addName.focus(); return; }
@@ -162,19 +162,19 @@ export function initCommoditySelect(containerId, onSelect = null) {
       addBtn.textContent = 'Add';
     }
   });
- 
+
   addName?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') addBtn?.click();
     if (e.key === 'Escape') cancelBtn?.click();
   });
- 
+
   cancelBtn?.addEventListener('click', () => {
     addRow.style.display = 'none';
     addName.value = '';
     sel.value = '';
   });
 }
- 
+
 // ── Crop type select with inline add ─────────────────────────
 export function cropTypeSelectHTML(id, commodityId = null, selectedId = null) {
   const types = commodityId
@@ -195,7 +195,7 @@ export function cropTypeSelectHTML(id, commodityId = null, selectedId = null) {
     </div>
   `;
 }
- 
+
 // Refresh crop type options inside select (keeps the add-row intact)
 export function refreshCropTypeSelect(selectId, commodityId) {
   const sel = document.getElementById(selectId);
@@ -210,21 +210,21 @@ export function refreshCropTypeSelect(selectId, commodityId) {
   const addRow = document.getElementById(`${selectId}-add-row`);
   if (addRow) addRow.style.display = 'none';
 }
- 
+
 export function initCropTypeSelect(selectId, getCommodityId, onSelect = null) {
   // Prevent duplicate listener attachment using data attribute
   const existing = document.getElementById(selectId);
   if (!existing || existing.dataset.cfmInit === '1') return;
   existing.dataset.cfmInit = '1';
- 
+
   const sel = document.getElementById(selectId);
   const addRow = document.getElementById(`${selectId}-add-row`);
   const addName = document.getElementById(`${selectId}-add-name`);
   const addBtn = document.getElementById(`${selectId}-add-btn`);
   const cancelBtn = document.getElementById(`${selectId}-cancel-btn`);
- 
+
   if (!sel) return;
- 
+
   sel.addEventListener('change', () => {
     if (sel.value === '__add__') {
       if (addRow) addRow.style.display = 'block';
@@ -235,7 +235,7 @@ export function initCropTypeSelect(selectId, getCommodityId, onSelect = null) {
       if (onSelect) onSelect(sel.value);
     }
   });
- 
+
   addBtn?.addEventListener('click', async () => {
     const name = addName?.value.trim();
     const commodityId = getCommodityId();
@@ -261,15 +261,16 @@ export function initCropTypeSelect(selectId, getCommodityId, onSelect = null) {
       addBtn.textContent = 'Add';
     }
   });
- 
+
   addName?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') addBtn?.click();
     if (e.key === 'Escape') cancelBtn?.click();
   });
- 
+
   cancelBtn?.addEventListener('click', () => {
     if (addRow) addRow.style.display = 'none';
     if (addName) addName.value = '';
     sel.value = '';
   });
 }
+

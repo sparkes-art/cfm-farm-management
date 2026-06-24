@@ -4,7 +4,10 @@
 import { dbUpdate } from '../../js/supabase-client.js';
 import { getActiveFarm, getFarms, setActiveFarm } from '../../js/app-state.js';
 import { toast, qs, formatDate } from '../../js/ui.js';
-import { COTTON_REGIONS } from '../outputs/cotton-prices.js';
+const COTTON_REGIONS = [
+  'Central QLD', 'Darling Downs', 'MacIntyre', 'Gwydir', 'LDC Moree',
+  'Mungindi/St George', 'Namoi Valley', 'Macquarie Valley', 'Lachlan/Sth NSW', 'NT / WA'
+];
 
 export async function mountFarmSettings(container, onSave) {
   const farm = getActiveFarm();

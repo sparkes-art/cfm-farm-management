@@ -117,18 +117,20 @@ async function _mountOverview(container) {
     const totalInvoiced = invoices.reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
     const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
 
-    // Cotton farm gate price
+    // Farm gate cotton price from cotton_prices table (Power Automate feed)
     const cottonRegion = farm.settings?.cottonRegion || null;
     let farmGateCotton = null;
     if (cottonRegion) {
       try {
-        const cp = await dbSelect('cotton_prices', 'region=eq.' + encodeURIComponent(cottonRegion) + '&order=price_date.desc&limit=1&select=*');
+        const cp = await dbSelect('cotton_prices',
+          'region=eq.' + encodeURIComponent(cottonRegion) + '&order=price_date.desc&limit=1&select=*'
+        );
         farmGateCotton = cp[0] || null;
       } catch { farmGateCotton = null; }
     }
 
-    const cottonStatValue = farmGateCotton ? '$' + parseFloat(farmGateCotton.price_aud).toFixed(0) + '/bale' : '—';
     const cols = cottonRegion ? 'repeat(5,1fr)' : 'repeat(4,1fr)';
+    const cottonStatValue = farmGateCotton ? '$' + parseFloat(farmGateCotton.price_aud).toFixed(0) + '/bale' : '—';
 
     let html = '<div class="stats-strip" style="grid-template-columns:' + cols + ';margin-bottom:20px">';
     html += '<div class="stat-card"><div class="stat-label">Contracts</div><div class="stat-value">' + contracts.length + '</div></div>';
