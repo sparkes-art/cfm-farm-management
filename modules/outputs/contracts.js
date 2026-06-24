@@ -94,7 +94,9 @@ function _subscribeRealtime() {
   const farm = getActiveFarm();
   if (!farm) return;
   _unsub = subscribeTable('forward_contracts', farm.id, async (event, payload) => {
-    if (event === 'INSERT') _contracts.unshift(payload.record);
+    if (event === 'INSERT') {
+      if (!_contracts.find(c => c.id === payload.record.id)) _contracts.unshift(payload.record);
+    }
     else if (event === 'UPDATE') {
       const i = _contracts.findIndex(c => c.id === payload.record.id);
       if (i >= 0) _contracts[i] = payload.record;

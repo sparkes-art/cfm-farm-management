@@ -1,6 +1,6 @@
 // modules/outputs/outputs.js
 // Outputs module — tabbed: Contracts + Invoices
- 
+
 import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
 import {
@@ -9,12 +9,13 @@ import {
 } from '../../js/ui.js';
 import { mountContracts, unmountContracts } from './contracts.js';
 import { mountMarketPrices } from './market-prices.js';
- 
+import { mountCottonPrices } from './cotton-prices.js';
+
 let _invoices = [];
 let _contracts = [];
 let _unsub = null;
 let _activeTab = 'overview';
- 
+
 // ── Entry point ───────────────────────────────────────────────
 export async function mountOutputs(container) {
   container.innerHTML = `
@@ -24,7 +25,7 @@ export async function mountOutputs(container) {
         <p class="page-subtitle">Sales contracts and invoices</p>
       </div>
     </div>
- 
+
     <div style="display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid var(--rule)">
       <button class="tab-btn" data-tab="contracts" style="padding:8px 20px;background:none;border:none;border-bottom:2px solid var(--earth);margin-bottom:-2px;font-size:var(--text-sm);font-weight:600;color:var(--earth);cursor:pointer">
         Contracts
@@ -36,10 +37,10 @@ export async function mountOutputs(container) {
         Invoices
       </button>
     </div>
- 
+
     <div id="tab-content"></div>
   `;
- 
+
   container.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       _activeTab = btn.dataset.tab;
@@ -49,15 +50,15 @@ export async function mountOutputs(container) {
       _loadTab();
     });
   });
- 
+
   _loadTab();
 }
- 
+
 export function unmountOutputs() {
   unmountContracts();
   if (_unsub) { _unsub(); _unsub = null; }
 }
- 
+
 async function _loadTab() {
   const content = qs('#tab-content');
   if (!content) return;
@@ -65,30 +66,45 @@ async function _loadTab() {
     await _mountOverview(content);
   } else if (_activeTab === 'contracts') {
     await mountContracts(content);
+  } else if (_activeTab === 'cotton') {
+    await mountCottonPrices(content);
   } else if (_activeTab === 'prices') {
     await mountMarketPrices(content);
   } else {
     await _mountInvoices(content);
   }
 }
- 
+
 async function _mountOverview(container) {
   const farm = getActiveFarm();
   const season = qs('#out-season-select')?.value || currentSeason();
- 
+
   container.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>';
- 
+
   try {
     const [contracts, invoices] = await Promise.all([
       dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     ]);
- 
+
     const totalContractValue = contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
     const totalInvoiced = invoices.reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
     const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
     const contractCount = contracts.length;
- 
+
+    // Get farm gate cotton price for this farm's region
+    const cottonRegion = farm.settings?.cottonRegion || null;
+    let farmGateCotton = null;
+    if (cottonRegion) {
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const cottonPrices = await dbSelect('cotton_prices',
+          'region=eq.' + encodeURIComponent(cottonRegion) + '&order=price_date.desc&limit=2&select=*'
+        );
+        farmGateCotton = cottonPrices[0] || null;
+      } catch { farmGateCotton = null; }
+    }
+
     const byCommodity = {};
     contracts.forEach(c => {
       const key = c.commodity || 'Other';
@@ -97,14 +113,23 @@ async function _mountOverview(container) {
       byCommodity[key].quantity += parseFloat(c.quantity) || 0;
       byCommodity[key].value += (parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0);
     });
- 
-    let html = '<div class="stats-strip" style="grid-template-columns:repeat(4,1fr)">';
+
+    const cottonStatLabel = cottonRegion ? 'Cotton — ' + cottonRegion : 'Cotton price';
+    const cottonStatValue = farmGateCotton ? '$' + parseFloat(farmGateCotton.price_aud).toFixed(0) + '/bale' : '—';
+    const gridCols = cottonRegion ? 'repeat(5,1fr)' : 'repeat(4,1fr)';
+
+    let html = '<div class="stats-strip" style="grid-template-columns:' + gridCols + '">';
     html += '<div class="stat-card"><div class="stat-label">Forward contracts</div><div class="stat-value">' + contractCount + '</div></div>';
     html += '<div class="stat-card"><div class="stat-label">Contract value</div><div class="stat-value blue">' + formatCurrency(totalContractValue, 0) + '</div></div>';
     html += '<div class="stat-card"><div class="stat-label">Total invoiced</div><div class="stat-value">' + formatCurrency(totalInvoiced, 0) + '</div></div>';
     html += '<div class="stat-card"><div class="stat-label">Paid to date</div><div class="stat-value green">' + formatCurrency(totalPaid, 0) + '</div></div>';
+    if (cottonRegion) {
+      html += '<div class="stat-card" style="cursor:pointer" id="cotton-price-stat">';
+      html += '<div class="stat-label">' + cottonStatLabel + '</div>';
+      html += '<div class="stat-value blue">' + cottonStatValue + '</div></div>';
+    }
     html += '</div>';
- 
+
     if (Object.keys(byCommodity).length) {
       html += '<div class="card" style="margin-bottom:16px">';
       html += '<div class="card-header"><h2>Commodity position \u2014 ' + season + '</h2><span class="text-hint text-sm">Full hedging position cards coming soon</span></div>';
@@ -128,7 +153,7 @@ async function _mountOverview(container) {
       html += '<p>Switch to the Contracts tab to add your first forward contract.</p>';
       html += '</div></div></div>';
     }
- 
+
     if (invoices.length) {
       html += '<div class="card"><div class="card-header"><h2>Recent invoices</h2>';
       html += '<button class="btn btn-ghost btn-sm" onclick="document.querySelector(\'[data-tab=invoices]\')?.click()">View all \u2192</button></div>';
@@ -147,15 +172,18 @@ async function _mountOverview(container) {
       });
       html += '</tbody></table></div>';
     }
- 
+
     container.innerHTML = html;
- 
+    qs('#cotton-price-stat')?.addEventListener('click', () => {
+      document.querySelector('[data-tab=cotton]')?.click();
+    });
+
   } catch (err) {
     container.innerHTML = '<div class="empty-state"><p>Failed to load overview: ' + err.message + '</p></div>';
   }
 }
- 
- 
+
+
 // ── Invoices tab ──────────────────────────────────────────────
 async function _mountInvoices(container) {
   container.innerHTML = `
@@ -173,9 +201,9 @@ async function _mountInvoices(container) {
       </select>
       ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New Invoice</button>' : ''}
     </div>
- 
+
     <div class="stats-strip" id="out-stats"></div>
- 
+
     <div class="card">
       <div class="card-header">
         <h2>Invoices</h2>
@@ -189,31 +217,31 @@ async function _mountInvoices(container) {
       </div>
     </div>
   `;
- 
+
   await _loadData();
   _renderStats();
   _renderTable();
   _bindFilters(container);
   _subscribeRealtime();
- 
+
   if (canWrite()) {
     qs('#btn-new-invoice', container)?.addEventListener('click', () => openInvoiceModal());
   }
 }
- 
+
 // ── Data loading ──────────────────────────────────────────────
 async function _loadData() {
   const farm = getActiveFarm();
   if (!farm) return;
- 
+
   [_invoices, _contracts] = await Promise.all([
     dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.desc`),
     dbSelect('forward_contracts', `farm_id=eq.${farm.id}&select=*`),
   ]);
- 
+
   _populateSeasonFilter();
 }
- 
+
 function _populateSeasonFilter() {
   const sel = qs('#out-season-filter');
   if (!sel) return;
@@ -225,7 +253,7 @@ function _populateSeasonFilter() {
     sel.appendChild(opt);
   });
 }
- 
+
 function _filtered() {
   const season = qs('#out-season-filter')?.value || '';
   const commodity = qs('#out-commodity-filter')?.value || '';
@@ -234,7 +262,7 @@ function _filtered() {
     (!commodity || inv.commodity_type === commodity)
   );
 }
- 
+
 // ── Realtime ──────────────────────────────────────────────────
 function _subscribeRealtime() {
   const farm = getActiveFarm();
@@ -252,7 +280,7 @@ function _subscribeRealtime() {
     _renderTable();
   });
 }
- 
+
 // ── Render ────────────────────────────────────────────────────
 function _renderStats() {
   const filtered = _filtered();
@@ -260,7 +288,7 @@ function _renderStats() {
   const paid  = filtered.filter(i => i.status === 'paid').reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount) || 0), 0);
   const draft = filtered.filter(i => i.status === 'draft').length;
   const issued = filtered.filter(i => i.status === 'issued').length;
- 
+
   setContent('#out-stats', `
     <div class="stat-card">
       <div class="stat-label">Total invoiced</div>
@@ -280,14 +308,14 @@ function _renderStats() {
     </div>
   `);
 }
- 
+
 function _renderTable() {
   const rows = _filtered();
   const wrap = qs('#out-table-wrap');
   if (!wrap) return;
- 
+
   setContent('#out-count', `${rows.length} invoice${rows.length !== 1 ? 's' : ''}`);
- 
+
   if (!rows.length) {
     wrap.innerHTML = `
       <div class="empty-state">
@@ -296,7 +324,7 @@ function _renderTable() {
       </div>`;
     return;
   }
- 
+
   wrap.innerHTML = `
     <table class="data-table">
       <thead>
@@ -331,7 +359,7 @@ function _renderTable() {
       </tbody>
     </table>
   `;
- 
+
   wrap.querySelectorAll('tbody tr').forEach(row => {
     row.addEventListener('click', (e) => {
       if (e.target.classList.contains('edit-btn')) return;
@@ -339,7 +367,7 @@ function _renderTable() {
       if (inv) openInvoiceDetail(inv);
     });
   });
- 
+
   wrap.querySelectorAll('.edit-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -348,7 +376,7 @@ function _renderTable() {
     });
   });
 }
- 
+
 function _bindFilters(container) {
   ['#out-season-filter', '#out-commodity-filter'].forEach(sel => {
     qs(sel, container)?.addEventListener('change', () => {
@@ -357,18 +385,18 @@ function _bindFilters(container) {
     });
   });
 }
- 
+
 // ── Invoice Modal (New / Edit) ────────────────────────────────
 export function openInvoiceModal(existing = null) {
   const farm = getActiveFarm();
   const isEdit = !!existing;
- 
+
   const contractOptions = _contracts
     .map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" ${existing?.forward_contract_id === c.id ? 'selected' : ''}>
       ${c.contract_number || 'Contract'} — ${c.commodity} @ ${formatCurrency(c.price_per_unit, 4)}/${c.unit}
     </option>`)
     .join('');
- 
+
   const { overlay } = openModal({
     title: isEdit ? `Edit Invoice ${existing.invoice_number}` : 'New Invoice',
     confirmLabel: isEdit ? 'Save changes' : 'Create invoice',
@@ -390,7 +418,7 @@ export function openInvoiceModal(existing = null) {
           <input class="form-input" id="f-commodity-detail" type="text" value="${existing?.commodity_detail || ''}" placeholder="e.g. SJ458 / Feed Wheat / Angus">
         </div>
       </div>
- 
+
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Invoice number <span class="required">*</span></label>
@@ -405,7 +433,7 @@ export function openInvoiceModal(existing = null) {
           <input class="form-input" id="f-season" type="text" value="${existing?.season || currentSeason()}" placeholder="2024-25">
         </div>
       </div>
- 
+
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Buyer <span class="required">*</span></label>
@@ -416,7 +444,7 @@ export function openInvoiceModal(existing = null) {
           <input class="form-input" id="f-buyer-abn" type="text" value="${existing?.buyer_abn || ''}">
         </div>
       </div>
- 
+
       <div id="contract-section" class="${existing?.commodity_type === 'livestock' ? 'hidden' : ''}">
         <div class="form-group">
           <label class="form-label">Forward contract <span class="text-muted" style="font-weight:400;text-transform:none">(optional)</span></label>
@@ -427,7 +455,7 @@ export function openInvoiceModal(existing = null) {
           <p class="form-helper">Selecting a contract auto-fills the price but it can be overridden below.</p>
         </div>
       </div>
- 
+
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Quantity <span class="required">*</span></label>
@@ -448,12 +476,12 @@ export function openInvoiceModal(existing = null) {
           <input class="form-input num" id="f-price" type="number" step="0.0001" value="${existing?.price_per_unit || ''}" required>
         </div>
       </div>
- 
+
       <div class="form-group">
         <label class="form-label">Gross amount</label>
         <div id="f-gross-display" class="font-mono" style="font-size: var(--text-xl); color: var(--earth); padding: 4px 0;">—</div>
       </div>
- 
+
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Sale type</label>
@@ -477,7 +505,7 @@ export function openInvoiceModal(existing = null) {
     onConfirm: async (modal) => {
       const row = _gatherForm(modal, farm, existing);
       if (!row) return;
- 
+
       if (isEdit) {
         await dbUpdate('invoices', existing.id, row);
         toast('Invoice updated', 'success');
@@ -488,11 +516,11 @@ export function openInvoiceModal(existing = null) {
       await _loadData(); _renderStats(); _renderTable();
     },
   });
- 
+
   const qty = qs('#f-quantity', overlay);
   const price = qs('#f-price', overlay);
   const grossDisplay = qs('#f-gross-display', overlay);
- 
+
   const updateGross = () => {
     const g = parseFloat(qty?.value || 0) * parseFloat(price?.value || 0);
     grossDisplay.textContent = isNaN(g) || g === 0 ? '—' : formatCurrency(g);
@@ -500,13 +528,13 @@ export function openInvoiceModal(existing = null) {
   qty?.addEventListener('input', updateGross);
   price?.addEventListener('input', updateGross);
   updateGross();
- 
+
   qs('#f-contract', overlay)?.addEventListener('change', (e) => {
     const opt = e.target.options[e.target.selectedIndex];
     const p = opt.dataset.price;
     if (p) { price.value = p; updateGross(); }
   });
- 
+
   qs('#f-commodity-type', overlay)?.addEventListener('change', (e) => {
     const isLivestock = e.target.value === 'livestock';
     qs('#contract-section', overlay)?.classList.toggle('hidden', isLivestock);
@@ -516,29 +544,29 @@ export function openInvoiceModal(existing = null) {
     }
   });
 }
- 
+
 function _gatherForm(modal, farm, existing) {
   const val = (id) => qs(`#${id}`, modal)?.value?.trim() || '';
   const num = (id) => parseFloat(qs(`#${id}`, modal)?.value || 0);
- 
+
   const commodityType = val('f-commodity-type');
   const invoiceNumber = val('f-invoice-number');
   const invoiceDate = val('f-invoice-date');
   const buyer = val('f-buyer');
   const quantity = num('f-quantity');
   const pricePerUnit = num('f-price');
- 
+
   if (!commodityType || !invoiceNumber || !invoiceDate || !buyer || !quantity || !pricePerUnit) {
     toast('Please fill in all required fields', 'error');
     return null;
   }
- 
+
   const contractId = val('f-contract') || null;
   const contract = contractId ? _contracts.find(c => c.id === contractId) : null;
   const gross = quantity * pricePerUnit;
   const deductions = existing?.deductions || [];
   const totalDeductions = deductions.reduce((s, d) => s + (d.amount || 0), 0);
- 
+
   return {
     farm_id: farm.id,
     invoice_number: invoiceNumber,
@@ -561,12 +589,12 @@ function _gatherForm(modal, farm, existing) {
     created_by: getSession()?.user?.id,
   };
 }
- 
+
 function openInvoiceDetail(inv) {
   const contract = inv.forward_contract_id
     ? _contracts.find(c => c.id === inv.forward_contract_id)
     : null;
- 
+
   openModal({
     title: `Invoice ${inv.invoice_number}`,
     confirmLabel: canWrite() ? 'Edit invoice' : null,

@@ -74,7 +74,9 @@ function _subscribeRealtime() {
   const farm = getActiveFarm();
   if (!farm) return;
   _unsub = subscribeTable('input_purchases', farm.id, async (event, payload) => {
-    if (event === 'INSERT') _inputs.unshift(payload.record);
+    if (event === 'INSERT') {
+      if (!_inputs.find(r => r.id === payload.record.id)) _inputs.unshift(payload.record);
+    }
     else if (event === 'UPDATE') {
       const i = _inputs.findIndex(r => r.id === payload.record.id);
       if (i >= 0) _inputs[i] = payload.record;
