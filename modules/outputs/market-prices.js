@@ -1,23 +1,23 @@
 // modules/outputs/market-prices.js
 // Manual market price entry + Excel import (col A: date, col B: price)
 // Price history chart per commodity
-
+ 
 import { dbSelect, dbInsert, dbDelete, dbUpsert } from '../../js/supabase-client.js';
 import { getSession, canWrite } from '../../js/app-state.js';
 import { loadCommodities, getCommodities, commodityOptions } from '../../js/commodities.js';
 import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js';
-
+ 
 let _prices = [];
 let _selectedCommodityId = null;
-
+ 
 export async function mountMarketPrices(container) {
   await loadCommodities();
   const commodities = getCommodities().filter(c => !c.is_livestock);
-
+ 
   if (commodities.length) _selectedCommodityId = commodities[0].id;
-
+ 
   const activeCommodity = commodities.find(c => c.id === _selectedCommodityId);
-
+ 
   container.innerHTML = `
     <div class="page-header">
       <div>
@@ -31,7 +31,7 @@ export async function mountMarketPrices(container) {
         ` : ''}
       </div>
     </div>
-
+ 
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)">
       ${commodities.map(c => `
         <button class="commodity-pill ${c.id === _selectedCommodityId ? 'active' : ''}" data-id="${c.id}"
@@ -40,12 +40,12 @@ export async function mountMarketPrices(container) {
         </button>
       `).join('')}
     </div>
-
+ 
     <div id="mp-commodity-heading" style="margin-bottom:16px">
       <h2 style="font-size:var(--text-lg);font-weight:600;color:var(--ink)">${activeCommodity?.name || ''}</h2>
       <p class="page-subtitle">Price history</p>
     </div>
-
+ 
     <div style="display:grid;grid-template-columns:1fr 320px;gap:20px">
       <div class="card">
         <div class="card-header">
@@ -56,7 +56,7 @@ export async function mountMarketPrices(container) {
           <canvas id="price-chart" height="280"></canvas>
         </div>
       </div>
-
+ 
       <div class="card">
         <div class="card-header"><h2>Recent prices</h2></div>
         <div id="mp-table-wrap">
@@ -64,11 +64,11 @@ export async function mountMarketPrices(container) {
         </div>
       </div>
     </div>
-
+ 
     <!-- Hidden file input for Excel import -->
     <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" style="display:none">
   `;
-
+ 
   container.querySelectorAll('.commodity-pill').forEach(btn => {
     btn.addEventListener('click', async () => {
       _selectedCommodityId = btn.dataset.id;
@@ -89,7 +89,7 @@ export async function mountMarketPrices(container) {
       _renderChart();
     });
   });
-
+ 
   if (canWrite()) {
     qs('#btn-add-price', container)?.addEventListener('click', () => _addPriceModal());
     qs('#btn-import-excel', container)?.addEventListener('click', () => {
@@ -101,30 +101,30 @@ export async function mountMarketPrices(container) {
       e.target.value = '';
     });
   }
-
+ 
   await _loadData();
   _renderTable();
   _renderChart();
 }
-
+ 
 async function _loadData() {
   if (!_selectedCommodityId) return;
   _prices = await dbSelect('market_prices',
     `commodity_id=eq.${_selectedCommodityId}&select=*&order=price_date.desc&limit=365`
   );
 }
-
+ 
 function _renderTable() {
   const wrap = qs('#mp-table-wrap');
   if (!wrap) return;
-
+ 
   setContent('#mp-count', `${_prices.length} entries`);
-
+ 
   if (!_prices.length) {
     wrap.innerHTML = `<div class="empty-state"><p>No prices yet.</p></div>`;
     return;
   }
-
+ 
   wrap.innerHTML = `
     <div style="max-height:400px;overflow-y:auto">
       <table class="data-table">
@@ -139,7 +139,7 @@ function _renderTable() {
           ${_prices.slice(0, 50).map(p => `
             <tr>
               <td class="muted">${formatDate(p.price_date)}</td>
-              <td class="num"><strong>${formatCurrency(p.price, 2)}</strong></td>
+              <td class="num"><strong>${formatCurrency(p.price_per_unit, 2)}</strong></td>
               ${canWrite() ? `<td><button class="btn btn-ghost btn-sm" style="color:#DC2626" onclick="window.__cfmDeletePrice('${p.id}')">✕</button></td>` : ''}
             </tr>
           `).join('')}
@@ -148,23 +148,23 @@ function _renderTable() {
     </div>
   `;
 }
-
+ 
 function _renderChart() {
   const canvas = qs('#price-chart');
   if (!canvas) return;
-
+ 
   // Destroy existing chart
   if (window.__cfmPriceChart) {
     window.__cfmPriceChart.destroy();
     window.__cfmPriceChart = null;
   }
-
+ 
   if (!_prices.length) return;
-
+ 
   const sorted = [..._prices].sort((a, b) => new Date(a.price_date) - new Date(b.price_date));
   const labels = sorted.map(p => formatDate(p.price_date));
-  const data = sorted.map(p => parseFloat(p.price));
-
+  const data = sorted.map(p => parseFloat(p.price_per_unit));
+ 
   // Load Chart.js if not already loaded
   if (!window.Chart) {
     const script = document.createElement('script');
@@ -175,12 +175,12 @@ function _renderChart() {
     _drawChart(canvas, labels, data);
   }
 }
-
+ 
 function _drawChart(canvas, labels, data) {
   const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
   const textColor = isDark ? '#9A9894' : '#8C8680';
   const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
-
+ 
   window.__cfmPriceChart = new window.Chart(canvas, {
     type: 'line',
     data: {
@@ -203,7 +203,7 @@ function _drawChart(canvas, labels, data) {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: ctx => `$${ctx.parsed.y.toFixed(2)}`
+            label: ctx => '$' + ctx.parsed.y.toFixed(2)
           }
         }
       },
@@ -228,7 +228,7 @@ function _drawChart(canvas, labels, data) {
     }
   });
 }
-
+ 
 // ── Add price modal ───────────────────────────────────────────
 function _addPriceModal() {
   openModal({
@@ -250,11 +250,11 @@ function _addPriceModal() {
       const date = qs('#mp-date', modal)?.value;
       const price = parseFloat(qs('#mp-price', modal)?.value || 0);
       if (!date || !price) throw new Error('Please enter a date and price');
-
+ 
       await dbInsert('market_prices', {
         commodity_id: _selectedCommodityId,
         price_date: date,
-        price,
+        price_per_unit: price,
         created_by: getSession()?.user?.id,
       });
       toast('Price saved', 'success');
@@ -264,11 +264,11 @@ function _addPriceModal() {
     },
   });
 }
-
+ 
 // ── Excel import ──────────────────────────────────────────────
 async function _importExcel(file) {
   toast('Reading file…');
-
+ 
   try {
     // Load SheetJS
     if (!window.XLSX) {
@@ -280,24 +280,24 @@ async function _importExcel(file) {
         document.head.appendChild(script);
       });
     }
-
+ 
     const buffer = await file.arrayBuffer();
     // Read with raw numbers (dates come as Excel serial numbers)
     const workbook = window.XLSX.read(buffer, { type: 'array', cellDates: false });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     // Get raw values
     const rows = window.XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
-
+ 
     // Parse rows — col A: date, col B: price
     const entries = [];
     for (const row of rows) {
       if (row[0] === undefined || row[0] === null || row[0] === '') continue;
       if (row[1] === undefined || row[1] === null || row[1] === '') continue;
-
+ 
       // Parse date — handles Excel serial, DD/MM/YYYY, YYYY-MM-DD, D/M/YY
       let dateStr = null;
       const rawDate = row[0];
-
+ 
       if (typeof rawDate === 'number') {
         // Excel date serial number
         const excelEpoch = new Date(1899, 11, 30);
@@ -332,7 +332,7 @@ async function _importExcel(file) {
           dateStr = s.slice(0,4) + '-' + s.slice(4,6) + '-' + s.slice(6,8);
         }
       }
-
+ 
       // Validate date
       if (dateStr) {
         const check = new Date(dateStr);
@@ -340,21 +340,21 @@ async function _importExcel(file) {
           dateStr = null;
         }
       }
-
+ 
       // Parse price — strip currency symbols, commas etc
       const priceRaw = typeof row[1] === 'number' ? row[1] : parseFloat(String(row[1]).replace(/[^0-9.]/g, ''));
       const price = parseFloat(priceRaw);
-
+ 
       if (dateStr && !isNaN(price) && price > 0) {
         entries.push({ date: dateStr, price });
       }
     }
-
+ 
     if (!entries.length) {
       toast('No valid rows found. Check column A = date, column B = price.', 'error');
       return;
     }
-
+ 
     // Show preview modal
     openModal({
       title: `Import ${entries.length} price entries`,
@@ -375,15 +375,15 @@ async function _importExcel(file) {
       `,
       onConfirm: async () => {
         if (!_selectedCommodityId) throw new Error('No commodity selected — please select a commodity from the dropdown first');
-
+ 
         // Bulk upsert all rows at once
         const rows = entries.map(e => ({
           commodity_id: _selectedCommodityId,
           price_date: e.date,
-          price: e.price,
+          price_per_unit: e.price,
           created_by: getSession()?.user?.id,
         }));
-
+ 
         try {
           await dbUpsert('market_prices', rows);
           toast('Imported ' + rows.length + ' prices', 'success');
@@ -404,19 +404,19 @@ async function _importExcel(file) {
           if (imported === 0) throw new Error('All inserts failed. Last error: ' + lastError);
           toast('Imported ' + imported + ' prices' + (skipped ? ', ' + skipped + ' skipped' : ''), 'success');
         }
-
+ 
         await _loadData();
         _renderTable();
         _renderChart();
       },
     });
-
+ 
   } catch (err) {
     console.error('Excel import error:', err);
     toast(`Import failed: ${err.message}`, 'error');
   }
 }
-
+ 
 // ── Delete ────────────────────────────────────────────────────
 window.__cfmDeletePrice = async (id) => {
   await dbDelete('market_prices', id);
