@@ -4,6 +4,7 @@
 import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
 import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js';
+import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock } from '../../js/commodities.js';
 
 let _contracts = [];
 let _unsub = null;
@@ -22,10 +23,7 @@ export async function mountContracts(container) {
         </select>
         <select id="con-commodity-filter" class="form-select" style="width:130px">
           <option value="">All commodities</option>
-          <option value="cotton">Cotton</option>
-          <option value="grain">Grain</option>
-          <option value="pulse">Pulse</option>
-          <option value="other">Other</option>
+          ${getCommodities().map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
         </select>
         ${canWrite() ? '<button class="btn btn-primary" id="btn-new-contract">＋ New contract</button>' : ''}
       </div>
@@ -44,6 +42,7 @@ export async function mountContracts(container) {
     </div>
   `;
 
+  await loadCommodities();
   await _loadData();
   _renderStats();
   _renderTable();
@@ -275,10 +274,7 @@ export function openContractModal(existing = null) {
           <label class="form-label">Commodity <span class="required">*</span></label>
           <select class="form-select" id="f-commodity" required>
             <option value="">Select…</option>
-            <option value="cotton"  ${existing?.commodity === 'cotton'  ? 'selected' : ''}>Cotton</option>
-            <option value="grain"   ${existing?.commodity === 'grain'   ? 'selected' : ''}>Grain</option>
-            <option value="pulse"   ${existing?.commodity === 'pulse'   ? 'selected' : ''}>Pulse</option>
-            <option value="other"   ${existing?.commodity === 'other'   ? 'selected' : ''}>Other</option>
+            ${commodityOptions(existing?.commodity_id)}
           </select>
         </div>
       </div>
@@ -473,14 +469,18 @@ function _gatherForm(farm, existing) {
   const n = (id) => parseFloat(qs(`#${id}`)?.value || 0) || null;
 
   const cropYear = v('f-crop-year');
-  const commodity = v('f-commodity');
+  const commodityId = v('f-commodity');
   const contractNumber = v('f-contract-number');
   const buyer = v('f-buyer');
   const saleDate = v('f-sale-date');
   const quantity = n('f-quantity');
   const price = n('f-price');
 
-  if (!cropYear || !commodity || !contractNumber || !buyer || !saleDate || !quantity || !price) {
+  // Get commodity name for display
+  const commodities = getCommodities();
+  const commodity = commodities.find(c => c.id === commodityId);
+
+  if (!cropYear || !commodityId || !contractNumber || !buyer || !saleDate || !quantity || !price) {
     toast('Please fill in all required fields', 'error');
     return null;
   }
@@ -488,7 +488,8 @@ function _gatherForm(farm, existing) {
   return {
     farm_id: farm.id,
     crop_year: cropYear,
-    commodity: commodity,
+    commodity_id: commodityId,
+    commodity: commodity?.name || null,
     contract_number: contractNumber,
     counterparty: buyer,
     grade_spec: v('f-grade') || null,
