@@ -61,6 +61,7 @@ export async function mountInputs(container) {
 
 export function unmountInputs() {
   if (_unsub) { _unsub(); _unsub = null; }
+  _inputs = [];
 }
 
 async function _loadData() {

@@ -58,6 +58,8 @@ export async function mountOutputs(container) {
 export function unmountOutputs() {
   unmountContracts();
   if (_unsub) { _unsub(); _unsub = null; }
+  _invoices = [];
+  _contracts = [];
 }
 
 async function _loadTab() {

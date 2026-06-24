@@ -11,6 +11,12 @@ let _forecasts = [];
 let _harvests = [];
 let _season = currentSeason();
 
+export function unmountBudget() {
+  _budgets = [];
+  _forecasts = [];
+  _harvests = [];
+}
+
 export async function mountBudget(container) {
   await loadCommodities();
 

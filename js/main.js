@@ -30,7 +30,7 @@ const MODULE_LOADERS = {
   },
   budget: async () => {
     const m = await import('../modules/budget/budget.js');
-    return { mount: m.mountBudget };
+    return { mount: m.mountBudget, unmount: m.unmountBudget };
   },
   settings: async () => {
     const m = await import('../modules/settings/settings.js');
@@ -99,7 +99,11 @@ document.getElementById('btn-farm-settings')?.addEventListener('click', () => {
 // ── Farm selector ─────────────────────────────────────────────
 on('farms', (farms) => _populateFarmSelector(farms));
 on('activeFarm', () => {
-  // Re-mount the active module when farm changes
+  // Unmount current module to clear its cached data, then remount for new farm
+  if (_activeModuleInstance?.unmount) {
+    _activeModuleInstance.unmount();
+    _activeModuleInstance = null;
+  }
   const state = getState();
   if (state.activeModule) _navigateTo(state.activeModule);
 });

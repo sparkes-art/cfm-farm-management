@@ -56,6 +56,7 @@ export async function mountContracts(container) {
 
 export function unmountContracts() {
   if (_unsub) { _unsub(); _unsub = null; }
+  _contracts = [];
 }
 
 // ── Data ──────────────────────────────────────────────────────
