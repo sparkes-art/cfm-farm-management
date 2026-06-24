@@ -192,7 +192,7 @@ function _renderTable() {
           </tr>
         </thead>
         <tbody>
-          ${_prices.slice(0, 50).map(p => `
+          ${[..._prices].reverse().slice(0, 50).map(p => `
             <tr>
               <td class="muted">${formatDate(p.price_date)}</td>
               <td class="num"><strong>${formatCurrency(p.price_per_unit, 2)}</strong></td>
