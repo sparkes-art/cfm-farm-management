@@ -1,0 +1,16 @@
+{
+  "name": "cfm-farm-management",
+  "version": "1.0.0",
+  "description": "Customised Farm Management — multi-farm management system",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "npx netlify dev",
+    "build": "echo 'Static build — no build step required'"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
+  }
+}
