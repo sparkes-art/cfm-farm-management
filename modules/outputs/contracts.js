@@ -267,12 +267,12 @@ export function openContractModal(existing = null) {
 
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Crop year <span class="required">*</span></label>
-          <input class="form-input" id="f-crop-year" type="text" value="${existing?.crop_year || currentSeason()}" placeholder="2024-25" required>
+          <label class="form-label">Crop year </label>
+          <input class="form-input" id="f-crop-year" type="text" value="${existing?.crop_year || currentSeason()}" placeholder="2024-25">
         </div>
         <div class="form-group">
-          <label class="form-label">Commodity <span class="required">*</span></label>
-          <select class="form-select" id="f-commodity" required>
+          <label class="form-label">Commodity </label>
+          <select class="form-select" id="f-commodity">
             <option value="">Select…</option>
             ${commodityOptions(existing?.commodity_id)}
           </select>
@@ -281,12 +281,12 @@ export function openContractModal(existing = null) {
 
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Contract number <span class="required">*</span></label>
-          <input class="form-input" id="f-contract-number" type="text" value="${existing?.contract_number || ''}" placeholder="e.g. AWB-2024-0042" required>
+          <label class="form-label">Contract number </label>
+          <input class="form-input" id="f-contract-number" type="text" value="${existing?.contract_number || ''}" placeholder="e.g. AWB-2024-0042">
         </div>
         <div class="form-group">
-          <label class="form-label">Buyer <span class="required">*</span></label>
-          <input class="form-input" id="f-buyer" type="text" value="${existing?.counterparty || ''}" placeholder="e.g. Olam Agri, AWB" required>
+          <label class="form-label">Buyer </label>
+          <input class="form-input" id="f-buyer" type="text" value="${existing?.counterparty || ''}" placeholder="e.g. Olam Agri, AWB">
         </div>
       </div>
 
@@ -296,15 +296,15 @@ export function openContractModal(existing = null) {
           <input class="form-input" id="f-grade" type="text" value="${existing?.grade_spec || ''}" placeholder="e.g. SJ458, APW, Feed">
         </div>
         <div class="form-group">
-          <label class="form-label">Sale date <span class="required">*</span></label>
-          <input class="form-input" id="f-sale-date" type="date" value="${existing?.sale_date || ''}" required>
+          <label class="form-label">Sale date </label>
+          <input class="form-input" id="f-sale-date" type="date" value="${existing?.sale_date || ''}">
         </div>
       </div>
 
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Units sold <span class="required">*</span></label>
-          <input class="form-input num" id="f-quantity" type="number" step="0.001" value="${existing?.quantity || ''}" required>
+          <label class="form-label">Units sold </label>
+          <input class="form-input num" id="f-quantity" type="number" step="0.001" value="${existing?.quantity || ''}">
         </div>
         <div class="form-group">
           <label class="form-label">Unit</label>
@@ -316,8 +316,8 @@ export function openContractModal(existing = null) {
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Price per unit <span class="required">*</span></label>
-          <input class="form-input num" id="f-price" type="number" step="0.0001" value="${existing?.price_per_unit || ''}" required>
+          <label class="form-label">Price per unit </label>
+          <input class="form-input num" id="f-price" type="number" step="0.0001" value="${existing?.price_per_unit || ''}">
         </div>
       </div>
 
@@ -480,10 +480,7 @@ function _gatherForm(farm, existing) {
   const commodities = getCommodities();
   const commodity = commodities.find(c => c.id === commodityId);
 
-  if (!cropYear || !commodityId || !contractNumber || !buyer || !saleDate || !quantity || !price) {
-    toast('Please fill in all required fields', 'error');
-    return null;
-  }
+  // No required fields — contracts can be entered with partial information
 
   return {
     farm_id: farm.id,
