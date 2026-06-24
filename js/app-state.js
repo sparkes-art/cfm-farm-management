@@ -1,9 +1,9 @@
- JS
 // js/app-state.js
 // Central in-memory state for the running session.
 // Nothing is persisted to localStorage. State rebuilds from Supabase on each load.
  
-import { onSessionChange, dbSelect, closeAllSubscriptions } from './supabase-client.js';
+import { getSession, onSessionChange, dbSelect, closeAllSubscriptions } from './supabase-client.js';
+export { getSession };
  
 const _state = {
   session: null,
@@ -15,8 +15,6 @@ const _state = {
 const _listeners = new Map();
  
 export function getState() { return { ..._state }; }
- 
-export function getSession() { return _state.session; }
  
 export function getActiveFarm() { return _state.activeFarm; }
  
@@ -96,4 +94,3 @@ export function setActiveModule(module) {
 }
  
 export function getFarms() { return _state.farms; }
- 
