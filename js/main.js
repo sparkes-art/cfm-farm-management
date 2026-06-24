@@ -128,6 +128,22 @@ document.getElementById('sidebar')?.querySelectorAll('a[data-module]').forEach(l
   });
 });
 
+// Wait until a farm is available (handles startup race condition)
+async function _waitForFarm(timeout = 5000) {
+  const { getActiveFarm } = await import('./app-state.js');
+  if (getActiveFarm()) return getActiveFarm();
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const check = setInterval(() => {
+      const farm = getActiveFarm();
+      if (farm || Date.now() - start > timeout) {
+        clearInterval(check);
+        resolve(farm);
+      }
+    }, 50);
+  });
+}
+
 async function _navigateTo(moduleKey) {
   // Unmount previous
   if (_activeModuleInstance?.unmount) {
@@ -156,6 +172,9 @@ async function _navigateTo(moduleKey) {
       _main().innerHTML = `<div class="empty-state"><p>Module "${moduleKey}" not yet available.</p></div>`;
       return;
     }
+
+    // Wait for farm to be loaded before mounting (fixes startup blank screen)
+    await _waitForFarm();
 
     const moduleExports = await loader();
     _activeModuleInstance = moduleExports;

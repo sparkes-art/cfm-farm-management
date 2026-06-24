@@ -62,7 +62,7 @@ export function unmountContracts() {
 // ── Data ──────────────────────────────────────────────────────
 async function _loadData() {
   const farm = getActiveFarm();
-  if (!farm) return;
+  if (!farm) { _contracts = []; return; }
   _contracts = await dbSelect('forward_contracts',
     `farm_id=eq.${farm.id}&select=*&order=sale_date.desc`);
   _populateYearFilter();

@@ -52,6 +52,11 @@ export async function mountOutputs(container) {
     });
   });
 
+  // Set initial active state
+  container.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === _activeTab);
+  });
+
   _loadTab();
 }
 
@@ -69,8 +74,6 @@ async function _loadTab() {
     await _mountOverview(content);
   } else if (_activeTab === 'contracts') {
     await mountContracts(content);
-  } else if (_activeTab === 'cotton') {
-    await mountCottonPrices(content);
   } else if (_activeTab === 'prices') {
     await mountMarketPrices(content);
   } else {
@@ -235,7 +238,7 @@ async function _mountInvoices(container) {
 // ── Data loading ──────────────────────────────────────────────
 async function _loadData() {
   const farm = getActiveFarm();
-  if (!farm) return;
+  if (!farm) { _invoices = []; _contracts = []; return; }
 
   [_invoices, _contracts] = await Promise.all([
     dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.desc`),
