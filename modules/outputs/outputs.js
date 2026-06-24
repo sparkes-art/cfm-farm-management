@@ -10,6 +10,7 @@ import {
 import { mountContracts, unmountContracts } from './contracts.js';
 import { mountMarketPrices } from './market-prices.js';
 import { mountCottonPrices } from './cotton-prices.js';
+import { buildCommodityCards, drawMiniCharts } from './commodity-card.js';
 
 let _invoices = [];
 let _contracts = [];
