@@ -1,6 +1,6 @@
 // js/ui.js
 // Shared UI helpers — toast, modal, formatters, DOM utilities
-
+ 
 // ── Toast ─────────────────────────────────────────────────────
 let _toastContainer;
 function _getToastContainer() {
@@ -11,7 +11,7 @@ function _getToastContainer() {
   }
   return _toastContainer;
 }
-
+ 
 export function toast(message, type = 'default', duration = 3500) {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
@@ -23,7 +23,7 @@ export function toast(message, type = 'default', duration = 3500) {
     setTimeout(() => el.remove(), 220);
   }, duration);
 }
-
+ 
 // ── Modal ─────────────────────────────────────────────────────
 export function openModal({ title, bodyHTML, onConfirm, confirmLabel = 'Save', confirmClass = 'btn-primary', showCancel = true }) {
   const overlay = document.createElement('div');
@@ -41,14 +41,14 @@ export function openModal({ title, bodyHTML, onConfirm, confirmLabel = 'Save', c
       </div>
     </div>
   `;
-
+ 
   document.body.appendChild(overlay);
-
+ 
   const close = () => overlay.remove();
   overlay.querySelector('.modal-close')?.addEventListener('click', close);
   overlay.querySelector('.modal-cancel')?.addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-
+ 
   const confirmBtn = overlay.querySelector('.modal-confirm');
   if (confirmBtn && onConfirm) {
     confirmBtn.addEventListener('click', async () => {
@@ -64,11 +64,11 @@ export function openModal({ title, bodyHTML, onConfirm, confirmLabel = 'Save', c
       }
     });
   }
-
+ 
   setTimeout(() => overlay.querySelector('input, select, textarea')?.focus(), 50);
   return { overlay, close };
 }
-
+ 
 // ── Formatters ────────────────────────────────────────────────
 export function formatCurrency(value, decimals = 2) {
   if (value == null || isNaN(value)) return '—';
@@ -79,7 +79,7 @@ export function formatCurrency(value, decimals = 2) {
     maximumFractionDigits: decimals,
   }).format(value);
 }
-
+ 
 export function formatNumber(value, decimals = 3) {
   if (value == null || isNaN(value)) return '—';
   return new Intl.NumberFormat('en-AU', {
@@ -87,14 +87,19 @@ export function formatNumber(value, decimals = 3) {
     maximumFractionDigits: decimals,
   }).format(value);
 }
-
+ 
 export function formatDate(dateStr) {
   if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString('en-AU', {
+  // Parse YYYY-MM-DD without timezone conversion by splitting manually
+  const s = String(dateStr).slice(0, 10);
+  const [year, month, day] = s.split('-').map(Number);
+  if (!year || !month || !day) return '—';
+  const d = new Date(year, month - 1, day);
+  return d.toLocaleDateString('en-AU', {
     day: '2-digit', month: 'short', year: 'numeric'
   });
 }
-
+ 
 export function commodityBadge(type) {
   const labels = {
     cotton: 'Cotton', grain: 'Grain', pulse: 'Pulse',
@@ -102,31 +107,31 @@ export function commodityBadge(type) {
   };
   return `<span class="badge badge-${type || 'other'}">${labels[type] || type || 'Other'}</span>`;
 }
-
+ 
 export function statusBadge(status) {
   const labels = { draft: 'Draft', issued: 'Issued', paid: 'Paid', void: 'Void' };
   return `<span class="badge badge-${status}">${labels[status] || status}</span>`;
 }
-
+ 
 // ── DOM helpers ───────────────────────────────────────────────
 export function qs(selector, root = document) { return root.querySelector(selector); }
 export function qsa(selector, root = document) { return [...root.querySelectorAll(selector)]; }
-
+ 
 export function setContent(selector, html, root = document) {
   const el = root.querySelector(selector);
   if (el) el.innerHTML = html;
 }
-
+ 
 export function show(el) {
   const node = typeof el === 'string' ? document.querySelector(el) : el;
   node?.classList.remove('hidden');
 }
-
+ 
 export function hide(el) {
   const node = typeof el === 'string' ? document.querySelector(el) : el;
   node?.classList.add('hidden');
 }
-
+ 
 // ── Season helper ─────────────────────────────────────────────
 export function currentSeason() {
   const now = new Date();
