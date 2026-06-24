@@ -12,7 +12,7 @@ export async function buildCommodityCards(season) {
 
   // Load all data in parallel
   const [contracts, invoices, budgets, forecasts, harvests] = await Promise.all([
-    dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
+    dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
     dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.asc'),
@@ -124,8 +124,8 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   const marketVsBudget = marketPrice && budgetPrice ? ((marketPrice - budgetPrice) / budgetPrice * 100) : null;
   const fwdVsBudget = avgFwdPrice && budgetPrice ? ((avgFwdPrice - budgetPrice) / budgetPrice * 100) : null;
 
-  // Status
-  const status = isHarvested ? 'harvested' : 'growing';
+  // Status — budget only if no forecast or harvest yet
+  const status = isHarvested ? 'harvested' : latestForecast ? 'growing' : 'budget';
 
   // Production bar width
   const budgetBarW = 100;
@@ -142,7 +142,7 @@ function _buildCard(com, allForecasts, allHarvests, season) {
       <!-- Card top bar -->
       <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border-light);background:#fafbfc;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
         <span style="font-size:var(--text-md);font-weight:600;color:var(--ink)">${name}</span>
-        <span class="badge badge-${status}">${status === 'harvested' ? 'Harvested' : 'Growing'}</span>
+        <span class="badge badge-${status === 'budget' ? 'draft' : status === 'harvested' ? 'paid' : 'issued'}">${status === 'harvested' ? 'Harvested' : status === 'budget' ? 'Budget' : 'Growing'}</span>
 
         ${denominator ? `
           <div style="flex:1;margin:0 12px">
@@ -259,14 +259,23 @@ function _buildCard(com, allForecasts, allHarvests, season) {
           </div>
         </div>
 
-        <!-- Right panel: price chart placeholder -->
-        <div style="padding:16px;display:flex;flex-direction:column;gap:8px">
+        <!-- Right panel: price chart -->
+        <div style="padding:16px;display:flex;flex-direction:column;gap:6px">
           <div style="display:flex;align-items:center;justify-content:space-between">
-            <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint)">Price history</p>
-            <button class="btn btn-ghost btn-sm" onclick="document.querySelector('[data-tab=prices]')?.click()"
-              style="font-size:11px">View full chart →</button>
+            <div style="display:flex;gap:3px">
+              <button class="mini-range-btn active" data-months="6" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:var(--blue);color:white;cursor:pointer">6m</button>
+              <button class="mini-range-btn" data-months="12" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:var(--white);color:var(--muted);cursor:pointer">12m</button>
+              <button class="mini-range-btn" data-months="24" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:var(--white);color:var(--muted);cursor:pointer">24m</button>
+              <button class="mini-range-btn" data-months="999" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:var(--white);color:var(--muted);cursor:pointer">All</button>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="document.querySelector('[data-tab=prices]')?.click()" style="font-size:11px">Full chart →</button>
           </div>
-          <div id="card-chart-${com.id || name.replace(/\s/g,'-')}" style="flex:1;min-height:160px;display:flex;align-items:center;justify-content:center">
+          <div style="display:flex;gap:10px;align-items:center">
+            <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:2px;background:var(--blue)"></div>Market</div>
+            ${avgFwdPrice ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:0;border-top:2px dashed #b86e00"></div>Fwd avg</div>' : ''}
+            ${contracts.length ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:8px;height:8px;border-radius:50%;background:var(--green)"></div>Fwd sale</div>' : ''}
+          </div>
+          <div id="card-chart-${com.id || name.replace(/\s/g,'-')}" style="flex:1;min-height:150px;display:flex;align-items:center;justify-content:center">
             <p style="font-size:12px;color:var(--hint)">Price chart loading…</p>
           </div>
         </div>
@@ -286,90 +295,201 @@ export async function drawMiniCharts(commodityMap, season) {
     });
   }
 
+  // Store all prices per commodity for range switching
+  const allPrices = {};
+
   for (const [key, com] of Object.entries(commodityMap)) {
     if (!com.id) continue;
-    const canvasContainer = document.getElementById('card-chart-' + (com.id || key.replace(/\s/g, '-')));
+    const canvasContainer = document.getElementById('card-chart-' + com.id);
     if (!canvasContainer) continue;
 
     try {
-      const sixMonths = new Date();
-      sixMonths.setMonth(sixMonths.getMonth() - 6);
-      const cutoff = sixMonths.toISOString().slice(0, 10);
+      // Load 3 years of prices
+      const cutoff = new Date();
+      cutoff.setFullYear(cutoff.getFullYear() - 3);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
 
       const prices = await dbSelect('market_prices',
-        'commodity_id=eq.' + com.id + '&price_date=gte.' + cutoff + '&select=price_date,price_per_unit&order=price_date.asc'
+        'commodity_id=eq.' + com.id + '&price_date=gte.' + cutoffStr + '&select=price_date,price_per_unit&order=price_date.asc'
       );
+
+      allPrices[com.id] = prices;
 
       if (!prices.length) {
         canvasContainer.innerHTML = '<p style="font-size:12px;color:var(--hint)">No price data available</p>';
         continue;
       }
 
-      canvasContainer.innerHTML = '<canvas></canvas>';
-      const canvas = canvasContainer.querySelector('canvas');
-
-      // Avg fwd price for this commodity
       const contracts = com.contracts || [];
       const totalContracted = contracts.reduce((s, c) => s + (parseFloat(c.quantity)||0), 0);
       const totalValue = contracts.reduce((s, c) => s + (parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0), 0);
       const avgFwd = totalContracted ? totalValue / totalContracted : null;
 
-      const labels = prices.map(p => p.price_date);
-      const data = prices.map(p => parseFloat(p.price_per_unit));
+      _drawMiniChart(canvasContainer, prices, contracts, avgFwd, 6);
 
-      const datasets = [{
-        data,
-        borderColor: '#1e6fa8',
-        backgroundColor: 'rgba(30,111,168,0.06)',
-        borderWidth: 1.5,
-        pointRadius: 0,
-        fill: true,
-        tension: 0.2,
-      }];
+      // Wire range buttons for this commodity
+      document.querySelectorAll('.mini-range-btn[data-chart="' + com.id + '"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const months = parseInt(btn.dataset.months);
+          document.querySelectorAll('.mini-range-btn[data-chart="' + com.id + '"]').forEach(b => {
+            const active = b.dataset.months === btn.dataset.months;
+            b.style.background = active ? 'var(--blue)' : 'var(--white)';
+            b.style.color = active ? 'white' : 'var(--muted)';
+          });
+          _drawMiniChart(canvasContainer, allPrices[com.id] || [], contracts, avgFwd, months);
+        });
+      });
 
-      if (avgFwd) {
-        datasets.push({
-          data: labels.map(() => avgFwd),
-          borderColor: '#b86e00',
-          borderWidth: 1.5,
-          borderDash: [5, 4],
-          pointRadius: 0,
-          fill: false,
+    } catch (e) {
+      canvasContainer.innerHTML = '<p style="font-size:11px;color:var(--hint)">Chart unavailable</p>';
+      console.error('Mini chart error:', e);
+    }
+  }
+}
+
+function _drawMiniChart(container, allPrices, contracts, avgFwd, months) {
+  // Destroy existing chart
+  if (container._chart) { container._chart.destroy(); container._chart = null; }
+
+  // Filter by range
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - months);
+  const filtered = months >= 999 ? allPrices : allPrices.filter(p => new Date(p.price_date) >= cutoff);
+
+  if (!filtered.length) {
+    container.innerHTML = '<p style="font-size:12px;color:var(--hint)">No data for this period</p>';
+    return;
+  }
+
+  container.innerHTML = '<canvas></canvas>';
+  const canvas = container.querySelector('canvas');
+
+  const labels = filtered.map(p => p.price_date);
+  const data = filtered.map(p => parseFloat(p.price_per_unit));
+
+  const datasets = [{
+    label: 'Market',
+    data,
+    borderColor: '#1e6fa8',
+    backgroundColor: 'rgba(30,111,168,0.06)',
+    borderWidth: 1.5,
+    pointRadius: 0,
+    pointHoverRadius: 3,
+    fill: true,
+    tension: 0.2,
+    order: 2,
+  }];
+
+  // Avg fwd price dashed line
+  if (avgFwd) {
+    datasets.push({
+      label: 'Avg fwd',
+      data: labels.map(() => avgFwd),
+      borderColor: '#b86e00',
+      borderWidth: 1.5,
+      borderDash: [5, 4],
+      pointRadius: 0,
+      fill: false,
+      order: 3,
+    });
+  }
+
+  // Forward sale scatter dots
+  const salePoints = contracts
+    .filter(c => c.sale_date && c.price_per_unit)
+    .map(c => {
+      const saleDate = c.sale_date.slice(0, 10);
+      let idx = labels.indexOf(saleDate);
+      if (idx === -1) {
+        const target = new Date(saleDate).getTime();
+        let minDiff = Infinity;
+        labels.forEach((l, i) => {
+          const diff = Math.abs(new Date(l).getTime() - target);
+          if (diff < minDiff) { minDiff = diff; idx = i; }
         });
       }
+      if (idx === -1 || new Date(saleDate) < cutoff) return null;
+      return { x: labels[idx], y: parseFloat(c.price_per_unit), label: c.contract_number || 'Contract' };
+    })
+    .filter(Boolean);
 
-      new window.Chart(canvas, {
-        type: 'line',
-        data: { labels, datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: { legend: { display: false }, tooltip: { enabled: false } },
-          scales: {
-            x: {
-              ticks: {
-                font: { size: 10 },
-                color: '#9ca3af',
-                maxTicksLimit: 5,
-                callback: function(val) {
-                  const l = this.getLabelForValue(val);
-                  if (!l) return '';
-                  const [yr, mo] = l.split('-');
-                  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                  return months[parseInt(mo)-1] + ' ' + yr.slice(2);
-                }
-              },
-              grid: { color: 'rgba(0,0,0,0.04)' }
-            },
-            y: {
-              ticks: { font: { size: 10 }, color: '#9ca3af', callback: v => '$' + Math.round(v) },
-              grid: { color: 'rgba(0,0,0,0.04)' }
+  if (salePoints.length) {
+    datasets.push({
+      label: 'Fwd sale',
+      data: salePoints.map(s => ({ x: s.x, y: s.y })),
+      type: 'scatter',
+      backgroundColor: '#1a7a4a',
+      borderColor: '#ffffff',
+      borderWidth: 1.5,
+      pointRadius: 6,
+      pointHoverRadius: 8,
+      order: 1,
+    });
+  }
+
+  // Avg price end label plugin
+  const avgLabelPlugin = {
+    id: 'avgLabel',
+    afterDatasetsDraw(chart) {
+      const avgDs = chart.data.datasets.find(d => d.label === 'Avg fwd');
+      if (!avgDs || !avgDs.data.length) return;
+      const { ctx, chartArea, scales } = chart;
+      const y = scales.y.getPixelForValue(avgDs.data[0]);
+      ctx.save();
+      ctx.fillStyle = '#b86e00';
+      ctx.font = '500 10px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('$' + Math.round(avgDs.data[0]), chartArea.right + 3, y);
+      ctx.restore();
+    }
+  };
+
+  const months_label = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  container._chart = new window.Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets },
+    plugins: avgFwd ? [avgLabelPlugin] : [],
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { right: avgFwd ? 40 : 8 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.dataset.label === 'Fwd sale') {
+                const pt = salePoints[ctx.dataIndex];
+                return pt ? pt.label + ': $' + ctx.parsed.y.toFixed(0) : '$' + ctx.parsed.y.toFixed(0);
+              }
+              if (ctx.dataset.label === 'Avg fwd') return 'Avg fwd: $' + ctx.parsed.y.toFixed(0);
+              return '$' + ctx.parsed.y.toFixed(0);
             }
           }
         }
-      });
-    } catch (e) {
-      canvasContainer.innerHTML = '<p style="font-size:11px;color:var(--hint)">Chart unavailable</p>';
+      },
+      scales: {
+        x: {
+          ticks: {
+            font: { size: 10 },
+            color: '#9ca3af',
+            maxTicksLimit: 5,
+            callback: function(val) {
+              const l = this.getLabelForValue(val);
+              if (!l) return '';
+              const [yr, mo] = l.split('-');
+              return months_label[parseInt(mo)-1] + ' ' + yr.slice(2);
+            }
+          },
+          grid: { color: 'rgba(0,0,0,0.04)' }
+        },
+        y: {
+          ticks: { font: { size: 10 }, color: '#9ca3af', callback: v => '$' + Math.round(v) },
+          grid: { color: 'rgba(0,0,0,0.04)' }
+        }
+      }
     }
-  }
+  });
 }
