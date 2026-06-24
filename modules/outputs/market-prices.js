@@ -73,6 +73,9 @@ export async function mountMarketPrices(container) {
           <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)">
             <div style="width:20px;height:0;border-top:2px dashed #b86e00"></div> Avg fwd price
           </div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)">
+            <div style="width:20px;height:0;border-top:2px dashed #0f766e"></div> Budget
+          </div>
         </div>
         <div style="padding:8px 16px 16px">
           <canvas id="price-chart" height="260"></canvas>
@@ -142,14 +145,16 @@ export async function mountMarketPrices(container) {
   _renderChart();
 }
 
+let _budgetPrice = null;
+
 async function _loadData() {
   if (!_selectedCommodityId) return;
   const farm = getActiveFarm();
 
-  // Load up to 3 years of prices
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - 3);
   const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const season = currentSeason();
 
   const queries = [
     dbSelect('market_prices',
@@ -163,11 +168,21 @@ async function _loadData() {
         'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&select=*'
       ).catch(() => [])
     );
+    queries.push(
+      dbSelect('budgets',
+        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&season=eq.' + season + '&select=price'
+      ).catch(() => [])
+    );
   }
 
   const results = await Promise.all(queries);
   _prices = results[0] || [];
   _contracts = results[1] || [];
+  const budgets = results[2] || [];
+  const budgetsWithPrice = budgets.filter(b => b.price);
+  _budgetPrice = budgetsWithPrice.length
+    ? budgetsWithPrice.reduce((s, b) => s + parseFloat(b.price), 0) / budgetsWithPrice.length
+    : null;
 }
 
 function _renderTable() {
@@ -333,10 +348,48 @@ function _drawChart(canvas, labels, data, salePoints = []) {
     }
   };
 
+  // Budget price line
+  if (_budgetPrice) {
+    datasets.push({
+      label: 'Budget',
+      data: labels.map(() => _budgetPrice),
+      borderColor: '#0f766e',
+      borderWidth: 1.5,
+      borderDash: [3, 3],
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      fill: false,
+      order: 4,
+    });
+  }
+
+  // Combined end-label plugin for avg fwd AND budget
+  const endLabelPlugin = {
+    id: 'endLabels',
+    afterDatasetsDraw(chart) {
+      const { ctx, chartArea, scales } = chart;
+      [
+        { label: 'Avg fwd price', color: '#b86e00' },
+        { label: 'Budget', color: '#0f766e' },
+      ].forEach(({ label, color }) => {
+        const ds = chart.data.datasets.find(d => d.label === label);
+        if (!ds || !ds.data.length) return;
+        const y = scales.y.getPixelForValue(ds.data[0]);
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.font = '500 11px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('$' + Math.round(ds.data[0]), chartArea.right + 4, y);
+        ctx.restore();
+      });
+    }
+  };
+
   window.__cfmPriceChart = new window.Chart(canvas, {
     type: 'line',
     data: { labels, datasets },
-    plugins: [avgLabelPlugin],
+    plugins: [endLabelPlugin],
     options: {
       layout: { padding: { right: 48 } },
       responsive: true,
@@ -352,9 +405,8 @@ function _drawChart(canvas, labels, data, salePoints = []) {
                   ? pt.label + ': $' + ctx.parsed.y.toFixed(2) + (pt.qty ? ' — ' + pt.qty + ' ' + (pt.unit || '') : '')
                   : '$' + ctx.parsed.y.toFixed(2);
               }
-              if (ctx.dataset.label === 'Avg fwd price') {
-                return 'Avg fwd: $' + ctx.parsed.y.toFixed(2);
-              }
+              if (ctx.dataset.label === 'Avg fwd price') return 'Avg fwd: $' + ctx.parsed.y.toFixed(2);
+              if (ctx.dataset.label === 'Budget') return 'Budget: $' + ctx.parsed.y.toFixed(2);
               return '$' + ctx.parsed.y.toFixed(2);
             }
           }

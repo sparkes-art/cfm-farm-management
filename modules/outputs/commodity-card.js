@@ -55,6 +55,15 @@ export async function buildCommodityCards(season) {
   forecasts.forEach(f => { addCommodity(f.commodity_id, f.commodity); });
   harvests.forEach(h => { addCommodity(h.commodity_id, null); });
 
+  // Store budget price on each commodity entry
+  Object.values(commodityMap).forEach(com => {
+    const budgets = com.budgets || [];
+    const pricesWithVal = budgets.filter(b => b.price);
+    com.budgetPrice = pricesWithVal.length
+      ? pricesWithVal.reduce((s, b) => s + parseFloat(b.price), 0) / pricesWithVal.length
+      : null;
+  });
+
   // Also get latest market price for each commodity
   const pricePromises = Object.entries(commodityMap).map(async ([key, com]) => {
     if (!com.id) return;
@@ -273,6 +282,7 @@ function _buildCard(com, allForecasts, allHarvests, season) {
           <div style="display:flex;gap:10px;align-items:center">
             <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:2px;background:var(--blue)"></div>Market</div>
             ${avgFwdPrice ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:0;border-top:2px dashed #b86e00"></div>Fwd avg</div>' : ''}
+            ${budgetPrice ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:0;border-top:2px dashed #0f766e"></div>Budget</div>' : ''}
             ${contracts.length ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:8px;height:8px;border-radius:50%;background:var(--green)"></div>Fwd sale</div>' : ''}
           </div>
           <div id="card-chart-${com.id || name.replace(/\s/g,'-')}" style="flex:1;min-height:150px;display:flex;align-items:center;justify-content:center">
@@ -325,7 +335,7 @@ export async function drawMiniCharts(commodityMap, season) {
       const totalValue = contracts.reduce((s, c) => s + (parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0), 0);
       const avgFwd = totalContracted ? totalValue / totalContracted : null;
 
-      _drawMiniChart(canvasContainer, prices, contracts, avgFwd, 6);
+      _drawMiniChart(canvasContainer, prices, contracts, avgFwd, com.budgetPrice || null, 6);
 
       // Wire range buttons for this commodity
       document.querySelectorAll('.mini-range-btn[data-chart="' + com.id + '"]').forEach(btn => {
@@ -336,7 +346,7 @@ export async function drawMiniCharts(commodityMap, season) {
             b.style.background = active ? 'var(--blue)' : 'var(--white)';
             b.style.color = active ? 'white' : 'var(--muted)';
           });
-          _drawMiniChart(canvasContainer, allPrices[com.id] || [], contracts, avgFwd, months);
+          _drawMiniChart(canvasContainer, allPrices[com.id] || [], contracts, avgFwd, com.budgetPrice || null, months);
         });
       });
 
@@ -347,7 +357,7 @@ export async function drawMiniCharts(commodityMap, season) {
   }
 }
 
-function _drawMiniChart(container, allPrices, contracts, avgFwd, months) {
+function _drawMiniChart(container, allPrices, contracts, avgFwd, budgetPrice, months) {
   // Destroy existing chart
   if (container._chart) { container._chart.destroy(); container._chart = null; }
 
@@ -391,6 +401,20 @@ function _drawMiniChart(container, allPrices, contracts, avgFwd, months) {
       pointRadius: 0,
       fill: false,
       order: 3,
+    });
+  }
+
+  // Budget price dashed line
+  if (budgetPrice) {
+    datasets.push({
+      label: 'Budget',
+      data: labels.map(() => budgetPrice),
+      borderColor: '#0f766e',
+      borderWidth: 1.5,
+      borderDash: [3, 3],
+      pointRadius: 0,
+      fill: false,
+      order: 4,
     });
   }
 
@@ -442,6 +466,19 @@ function _drawMiniChart(container, allPrices, contracts, avgFwd, months) {
       ctx.textBaseline = 'middle';
       ctx.fillText('$' + Math.round(avgDs.data[0]), chartArea.right + 3, y);
       ctx.restore();
+
+      // Budget price label
+      const budDs = chart.data.datasets.find(d => d.label === 'Budget');
+      if (budDs && budDs.data.length) {
+        const yb = scales.y.getPixelForValue(budDs.data[0]);
+        ctx.save();
+        ctx.fillStyle = '#0f766e';
+        ctx.font = '500 10px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('$' + Math.round(budDs.data[0]), chartArea.right + 3, yb);
+        ctx.restore();
+      }
     }
   };
 
@@ -450,11 +487,11 @@ function _drawMiniChart(container, allPrices, contracts, avgFwd, months) {
   container._chart = new window.Chart(canvas, {
     type: 'line',
     data: { labels, datasets },
-    plugins: avgFwd ? [avgLabelPlugin] : [],
+    plugins: (avgFwd || budgetPrice) ? [avgLabelPlugin] : [],
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      layout: { padding: { right: avgFwd ? 40 : 8 } },
+      layout: { padding: { right: (avgFwd || budgetPrice) ? 40 : 8 } },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -465,6 +502,7 @@ function _drawMiniChart(container, allPrices, contracts, avgFwd, months) {
                 return pt ? pt.label + ': $' + ctx.parsed.y.toFixed(0) : '$' + ctx.parsed.y.toFixed(0);
               }
               if (ctx.dataset.label === 'Avg fwd') return 'Avg fwd: $' + ctx.parsed.y.toFixed(0);
+              if (ctx.dataset.label === 'Budget') return 'Budget: $' + ctx.parsed.y.toFixed(0);
               return '$' + ctx.parsed.y.toFixed(0);
             }
           }

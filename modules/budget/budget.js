@@ -96,7 +96,7 @@ function _render(container) {
       const harvests = _harvests.filter(h => h.commodity_id === b.commodity_id && h.crop_type_id === b.crop_type_id);
       const latestForecast = forecasts[forecasts.length - 1];
       const totalHarvest = harvests.reduce((s, h) => s + (parseFloat(h.actual_production) || 0), 0);
-      const budgetedProd = parseFloat(b.budgeted_production) || 0;
+      const budgetedProd = parseFloat(b.budgeted_production) || ((parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0));
       const forecastProd = parseFloat(latestForecast?.forecast_production) || budgetedProd;
       const vsbudgetPct = budgetedProd ? Math.round((forecastProd / budgetedProd) * 100) : null;
 
@@ -309,7 +309,7 @@ function _budgetModal(container, existing = null) {
       </div>
       <div class="form-group">
         <label class="form-label">Budgeted production</label>
-        <div id="b-production" class="font-mono" style="font-size:var(--text-xl);color:var(--earth);padding:4px 0">—</div>
+        <div id="b-production" class="font-mono" style="font-size:var(--text-xl);color:var(--blue);padding:4px 0">—</div>
       </div>
     `,
     onConfirm: async () => {
