@@ -9,6 +9,21 @@ const COTTON_REGIONS = [
   'Mungindi/St George', 'Namoi Valley', 'Macquarie Valley', 'Lachlan/Sth NSW', 'NT / WA'
 ];
 
+// LDC Grains SE sites (from PDF)
+const GRAIN_SITES = [
+  'ARDLETHAN LDC', 'COOLAMON LDC', 'ELMORE LDC', 'GOOLGOWI LDC', 'KYALITE LDC',
+  'NULLAWIL LDC', 'TELFORD LDC', 'THE ROCK LDC', 'WOORINEN LDC',
+  'AG STORE BURRABOI', 'AG STORE LACELLES', 'AG STORE MARNOO',
+  'BAKER GRAIN HOWLONG', 'BARELLAN', 'BARNES CROSSING', 'Berrigan - McNaughts',
+  'BIRCHIP (AWBGF)', 'BOORT Co-Op', 'BOORT ST', 'BOREE CREEK', 'CHARLTON',
+  'CHARLTON (AWBGF)', 'COLEAMBALLY', 'DENILIQUIN', 'DIMBOOLA (AWBGF)', 'DONALD UCM',
+  'DOOKIE ST', 'DUNOLLY', 'ELMORE', 'HENTY WEST', 'HORSHAM - SHANNON BROS',
+  'JUNEE (HANLONS PRIVATE)', 'JUNEE S/T', 'LAHARUM BULK HANDLING',
+  'Lawson Logistics (Brocklesby)', 'Lawson Logistics (Rand)',
+].sort();
+
+const GRAIN_COMMODITIES = ['Wheat', 'Barley', 'Canola', 'Faba Beans', 'Lentils'];
+
 export async function mountFarmSettings(container, onSave) {
   const farm = getActiveFarm();
   if (!farm) {
@@ -66,6 +81,22 @@ export async function mountFarmSettings(container, onSave) {
           <p class="form-helper">Used to show the farm gate cotton price from the LDC daily price feed.</p>
         </div>
 
+        <hr class="divider">
+
+        <div class="form-group">
+          <label class="form-label">Grain delivery sites</label>
+          <p class="form-helper" style="margin-bottom:12px">Select the delivery site for each grain commodity — used to show relevant site prices from the LDC daily grain price feed.</p>
+          ${GRAIN_COMMODITIES.map(com => `
+            <div style="display:grid;grid-template-columns:120px 1fr;align-items:center;gap:12px;margin-bottom:10px">
+              <label style="font-size:var(--text-sm);font-weight:500;color:var(--ink-mid)">${com}</label>
+              <select class="form-select grain-site-select" data-commodity="${com}" id="fs-grain-${com.replace(/\s/g, '-')}">
+                <option value="">Not grown / not applicable</option>
+                ${GRAIN_SITES.map(s => `<option value="${s}" ${settings.grainSites?.[com] === s ? 'selected' : ''}>${s}</option>`).join('')}
+              </select>
+            </div>
+          `).join('')}
+        </div>
+
         <div style="display:flex;gap:10px;margin-top:20px">
           <button class="btn btn-primary" id="fs-save">Save changes</button>
           <button class="btn btn-secondary" id="fs-cancel">Cancel</button>
@@ -93,6 +124,13 @@ export async function mountFarmSettings(container, onSave) {
       const newSettings = { ...settings };
       if (cottonRegion) newSettings.cottonRegion = cottonRegion;
       else delete newSettings.cottonRegion;
+
+      // Save grain delivery sites
+      const grainSites = {};
+      document.querySelectorAll('.grain-site-select').forEach(sel => {
+        if (sel.value) grainSites[sel.dataset.commodity] = sel.value;
+      });
+      newSettings.grainSites = grainSites;
 
       await dbUpdate('farms', farm.id, {
         name,

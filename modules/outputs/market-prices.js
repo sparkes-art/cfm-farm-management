@@ -45,8 +45,11 @@ export async function mountMarketPrices(container) {
     </div>
 
     <div id="mp-commodity-heading" style="margin-bottom:16px">
-      <h2 style="font-size:var(--text-lg);font-weight:600;color:var(--ink)">${activeCommodity?.name || ''}</h2>
-      <p class="page-subtitle">Price history</p>
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <h2 style="font-size:var(--text-lg);font-weight:600;color:var(--ink)">${activeCommodity?.name || ''}</h2>
+        <span id="mp-site-label" class="text-sm text-muted"></span>
+      </div>
+      <p class="page-subtitle" id="mp-grade-label">Price history</p>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 320px;gap:20px">
@@ -156,10 +159,26 @@ async function _loadData() {
   const cutoffStr = cutoff.toISOString().slice(0, 10);
   const season = currentSeason();
 
+  // Get commodity name to find farm's grain site
+  const commodities = getCommodities();
+  const commodity = commodities.find(c => c.id === _selectedCommodityId);
+  const grainSite = farm?.settings?.grainSites?.[commodity?.name] || null;
+
+  // Update site/grade labels in UI
+  const siteLabel = document.getElementById('mp-site-label');
+  const gradeLabel = document.getElementById('mp-grade-label');
+  const gradeMap = { Wheat: 'APW1', Barley: 'BAR1', Canola: 'CAN1', 'Faba Beans': 'FAB2', Lentils: 'NIPT1' };
+  const grade = gradeMap[commodity?.name] || null;
+
+  if (siteLabel) siteLabel.textContent = grainSite ? '· ' + grainSite : '';
+  if (gradeLabel) gradeLabel.textContent = grade ? 'Grade: ' + grade + ' · Price history' : 'Price history';
+
+  // Build query — filter by farm's grain site if available, otherwise show all
+  let priceQuery = 'commodity_id=eq.' + _selectedCommodityId + '&price_date=gte.' + cutoffStr + '&select=*&order=price_date.asc';
+  if (grainSite) priceQuery += '&region=eq.' + encodeURIComponent(grainSite);
+
   const queries = [
-    dbSelect('market_prices',
-      'commodity_id=eq.' + _selectedCommodityId + '&price_date=gte.' + cutoffStr + '&select=*&order=price_date.asc'
-    ),
+    dbSelect('market_prices', priceQuery),
   ];
 
   if (farm) {

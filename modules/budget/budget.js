@@ -1,19 +1,19 @@
 // modules/budget/budget.js
 // Budget & Forecast — inline editable table per crop type per season
- 
+
 import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
 import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
 import { loadCommodities, getCommodities, getCropTypes, commoditySelectHTML, initCommoditySelect, cropTypeSelectHTML, initCropTypeSelect, refreshCropTypeSelect } from '../../js/commodities.js';
 import { toast, openModal, formatNumber, formatCurrency, qs, currentSeason } from '../../js/ui.js';
- 
+
 let _budgets = [];
 let _forecasts = [];
 let _harvests = [];
 let _season = currentSeason();
- 
+
 export async function mountBudget(container) {
   await loadCommodities();
- 
+
   container.innerHTML = `
     <div class="page-header">
       <div>
@@ -28,13 +28,13 @@ export async function mountBudget(container) {
         ${canWrite() ? '<button class="btn btn-secondary" id="btn-add-row">＋ Add crop type</button>' : ''}
       </div>
     </div>
- 
+
     <div class="card">
       <div id="budget-table-wrap">
         <div class="empty-state"><span class="loading-spinner"></span></div>
       </div>
     </div>
- 
+
     <!-- Harvest section -->
     <div style="margin-top:20px">
       <div class="page-header" style="margin-bottom:12px">
@@ -48,30 +48,30 @@ export async function mountBudget(container) {
       </div>
     </div>
   `;
- 
+
   qs('#bud-season', container)?.addEventListener('change', async (e) => {
     _season = e.target.value;
     await _loadData();
     _renderTable(container);
     _renderHarvest(container);
   });
- 
+
   if (canWrite()) {
     qs('#btn-add-row', container)?.addEventListener('click', () => _addRowModal(container));
     qs('#btn-add-harvest', container)?.addEventListener('click', () => _harvestModal(container));
   }
- 
+
   await _loadData();
   _renderTable(container);
   _renderHarvest(container);
 }
- 
+
 export function unmountBudget() {
   _budgets = [];
   _forecasts = [];
   _harvests = [];
 }
- 
+
 function _seasonOptions() {
   const current = currentSeason();
   const [y] = current.split('-').map(Number);
@@ -80,7 +80,7 @@ function _seasonOptions() {
     return `<option value="${s}" ${s === _season ? 'selected' : ''}>${s}</option>`;
   }).join('');
 }
- 
+
 async function _loadData() {
   const farm = getActiveFarm();
   if (!farm) return;
@@ -90,15 +90,15 @@ async function _loadData() {
     dbSelect('harvest_entries', `farm_id=eq.${farm.id}&season=eq.${_season}&select=*&order=created_at.asc`),
   ]);
 }
- 
+
 // ── Budget table ──────────────────────────────────────────────
 function _renderTable(container) {
   const wrap = qs('#budget-table-wrap', container);
   if (!wrap) return;
- 
+
   const commodities = getCommodities();
   const cropTypes = getCropTypes();
- 
+
   if (!_budgets.length) {
     wrap.innerHTML = `
       <div class="empty-state">
@@ -108,7 +108,7 @@ function _renderTable(container) {
       </div>`;
     return;
   }
- 
+
   wrap.innerHTML = `
     <div style="overflow-x:auto">
       <table class="data-table" style="min-width:900px">
@@ -132,12 +132,12 @@ function _renderTable(container) {
             const commodity = commodities.find(c => c.id === b.commodity_id);
             const cropType = cropTypes.find(ct => ct.id === b.crop_type_id);
             const budProd = (parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0);
- 
+
             // Latest forecast for this budget
             const forecasts = _forecasts.filter(f => f.budget_id === b.id);
             const latestF = forecasts[forecasts.length - 1] || null;
             const fcastProd = latestF ? (parseFloat(latestF.forecast_production) || (parseFloat(latestF.area_ha)||0) * (parseFloat(latestF.yield_per_ha)||0)) : null;
- 
+
             return `
               <tr data-budget-id="${b.id}">
                 <td><strong>${cropType?.name || b.crop_type || '—'}</strong></td>
@@ -186,7 +186,7 @@ function _renderTable(container) {
       </table>
     </div>
   `;
- 
+
   // Inline input styling on focus
   wrap.querySelectorAll('.budget-inline-input, .forecast-inline-input').forEach(input => {
     input.addEventListener('focus', () => {
@@ -200,7 +200,7 @@ function _renderTable(container) {
       input.style.boxShadow = 'none';
     });
   });
- 
+
   // Budget inline save on blur
   wrap.querySelectorAll('.budget-inline-input').forEach(input => {
     input.addEventListener('change', async () => {
@@ -209,17 +209,17 @@ function _renderTable(container) {
       const value = parseFloat(input.value) || null;
       const budget = _budgets.find(b => b.id === id);
       if (!budget) return;
- 
+
       // Update local
       budget[field] = value;
- 
+
       // Recalculate and show budget production
       const area = parseFloat(budget.area_ha) || 0;
       const yld = parseFloat(budget.yield_per_ha) || 0;
       const prod = area * yld;
       const prodDisplay = wrap.querySelector('.bud-prod-display[data-id="' + id + '"]');
       if (prodDisplay) prodDisplay.textContent = prod ? formatNumber(prod, 0) : '—';
- 
+
       try {
         await dbUpdate('budgets', id, { [field]: value });
         input.style.background = '#f0fdf4';
@@ -229,7 +229,7 @@ function _renderTable(container) {
       }
     });
   });
- 
+
   // Forecast inline save on blur
   wrap.querySelectorAll('.forecast-inline-input').forEach(input => {
     input.addEventListener('change', async () => {
@@ -238,27 +238,24 @@ function _renderTable(container) {
       const value = parseFloat(input.value) || null;
       const budget = _budgets.find(b => b.id === budgetId);
       if (!budget) return;
- 
+
       // Find or create forecast for today
       let forecast = _forecasts.filter(f => f.budget_id === budgetId).slice(-1)[0];
       const farm = getActiveFarm();
- 
+
       // Get all forecast inputs for this row to save together
       const rowInputs = wrap.querySelectorAll('.forecast-inline-input[data-budget-id="' + budgetId + '"]');
       const area = parseFloat(rowInputs[0]?.value || forecast?.area_ha || 0) || null;
       const yld = parseFloat(rowInputs[1]?.value || forecast?.yield_per_ha || 0) || null;
       const fcastProd = area && yld ? area * yld : null;
- 
+
       // Update fcast prod display
       const prodDisplay = wrap.querySelector('.fcast-prod-display[data-id="' + budgetId + '"]');
       if (prodDisplay) prodDisplay.textContent = fcastProd ? formatNumber(fcastProd, 0) : '—';
- 
+
       try {
         if (forecast) {
-          await dbUpdate('forecasts', forecast.id, {
-            [field]: value,
-            forecast_production: fcastProd,
-          });
+          await dbUpdate('forecasts', forecast.id, { [field]: value });
           forecast[field] = value;
           forecast.forecast_production = fcastProd;
         } else {
@@ -273,7 +270,7 @@ function _renderTable(container) {
             forecast_date: new Date().toISOString().slice(0, 10),
             area_ha: area,
             yield_per_ha: yld,
-            forecast_production: fcastProd,
+
             created_by: getSession()?.user?.id,
           });
           _forecasts.push(newF);
@@ -285,7 +282,7 @@ function _renderTable(container) {
       }
     });
   });
- 
+
   // Delete budget row
   wrap.querySelectorAll('.delete-budget-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -305,12 +302,12 @@ function _renderTable(container) {
     });
   });
 }
- 
+
 // ── Add row modal ─────────────────────────────────────────────
 function _addRowModal(container) {
   const farm = getActiveFarm();
   let selectedCommodityId = '';
- 
+
   openModal({
     title: 'Add crop type to budget',
     confirmLabel: 'Add row',
@@ -362,7 +359,7 @@ function _addRowModal(container) {
       const price = parseFloat(qs('#br-price', modal)?.value || 0) || null;
       const commodities = getCommodities();
       const commodity = commodities.find(c => c.id === commodityId);
- 
+
       const row = await dbInsert('budgets', {
         farm_id: farm.id,
         season: _season,
@@ -375,13 +372,13 @@ function _addRowModal(container) {
         price,
         created_by: getSession()?.user?.id,
       });
- 
+
       _budgets.push(row);
       toast('Crop type added', 'success');
       _renderTable(container);
     },
   });
- 
+
   // Init selects
   setTimeout(() => {
     initCommoditySelect('br-commodity', (id) => {
@@ -390,7 +387,7 @@ function _addRowModal(container) {
       initCropTypeSelect('br-crop-type', () => selectedCommodityId);
     });
     initCropTypeSelect('br-crop-type', () => selectedCommodityId);
- 
+
     // Live production calc
     const updateProd = () => {
       const a = parseFloat(qs('#br-area')?.value || 0);
@@ -402,22 +399,22 @@ function _addRowModal(container) {
     qs('#br-yield')?.addEventListener('input', updateProd);
   }, 100);
 }
- 
+
 // ── Harvest table ─────────────────────────────────────────────
 function _renderHarvest(container) {
   const wrap = qs('#harvest-table-wrap', container);
   if (!wrap) return;
- 
+
   const commodities = getCommodities();
   const cropTypes = getCropTypes();
- 
+
   if (!_harvests.length) {
     wrap.innerHTML = `<div class="empty-state"><p>No harvest entries for ${_season} yet.</p></div>`;
     return;
   }
- 
+
   const total = _harvests.reduce((s, h) => s + (parseFloat(h.actual_production) || 0), 0);
- 
+
   wrap.innerHTML = `
     <table class="data-table">
       <thead>
@@ -455,7 +452,7 @@ function _renderHarvest(container) {
       </tbody>
     </table>
   `;
- 
+
   wrap.querySelectorAll('.delete-harvest-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       openModal({
@@ -473,12 +470,12 @@ function _renderHarvest(container) {
     });
   });
 }
- 
+
 // ── Harvest modal ─────────────────────────────────────────────
 function _harvestModal(container) {
   const farm = getActiveFarm();
   let selectedCommodityId = '';
- 
+
   openModal({
     title: 'Add harvest entry',
     confirmLabel: 'Save harvest',
@@ -544,7 +541,7 @@ function _harvestModal(container) {
       _renderHarvest(container);
     },
   });
- 
+
   setTimeout(() => {
     initCommoditySelect('hv-commodity', (id) => {
       selectedCommodityId = id;
