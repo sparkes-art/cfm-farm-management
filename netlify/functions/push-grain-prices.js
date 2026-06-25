@@ -41,7 +41,10 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 
-  const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
+  // Netlify lowercases all headers, check multiple variants
+  const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'] || event.headers['X-API-Key'] || event.headers['authorization'];
+  console.log('Received headers:', JSON.stringify(Object.keys(event.headers)));
+  console.log('API key check:', apiKey ? 'key present' : 'no key found', '| env set:', !!GRAIN_PRICES_API_KEY);
   if (!GRAIN_PRICES_API_KEY || apiKey !== GRAIN_PRICES_API_KEY) {
     return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorised' }) };
   }
