@@ -32,6 +32,7 @@ exports.handler = async (event) => {
     if (!email || !password) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing email or password' }) };
 
     // Create auth user via admin API
+    console.log('Creating user:', email);
     const authRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
       method: 'POST',
       headers: serviceHeaders,
@@ -39,6 +40,7 @@ exports.handler = async (event) => {
     });
 
     const authData = await authRes.json();
+    console.log('Auth response status:', authRes.status, 'data:', JSON.stringify(authData).slice(0, 200));
     if (!authRes.ok) {
       return { statusCode: authRes.status, headers, body: JSON.stringify({ error: authData.message || 'Failed to create user' }) };
     }
