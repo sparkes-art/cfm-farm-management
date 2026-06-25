@@ -9,17 +9,18 @@ const COTTON_REGIONS = [
   'Mungindi/St George', 'Namoi Valley', 'Macquarie Valley', 'Lachlan/Sth NSW', 'NT / WA'
 ];
 
-// LDC Grains SE sites (from PDF)
+// LDC Grains SE sites — full names matching CSV site code lookup
 const GRAIN_SITES = [
-  'ARDLETHAN LDC', 'COOLAMON LDC', 'ELMORE LDC', 'GOOLGOWI LDC', 'KYALITE LDC',
-  'NULLAWIL LDC', 'TELFORD LDC', 'THE ROCK LDC', 'WOORINEN LDC',
-  'AG STORE BURRABOI', 'AG STORE LACELLES', 'AG STORE MARNOO',
-  'BAKER GRAIN HOWLONG', 'BARELLAN', 'BARNES CROSSING', 'Berrigan - McNaughts',
-  'BIRCHIP (AWBGF)', 'BOORT Co-Op', 'BOORT ST', 'BOREE CREEK', 'CHARLTON',
-  'CHARLTON (AWBGF)', 'COLEAMBALLY', 'DENILIQUIN', 'DIMBOOLA (AWBGF)', 'DONALD UCM',
-  'DOOKIE ST', 'DUNOLLY', 'ELMORE', 'HENTY WEST', 'HORSHAM - SHANNON BROS',
-  'JUNEE (HANLONS PRIVATE)', 'JUNEE S/T', 'LAHARUM BULK HANDLING',
-  'Lawson Logistics (Brocklesby)', 'Lawson Logistics (Rand)',
+  'ARDLETHAN LDC',
+  'COOLAMON LDC',
+  'ELMORE LDC',
+  'GOOLGOWI LDC',
+  'KYALITE LDC',
+  'MOREE LDC',
+  'NULLAWIL LDC',
+  'TELFORD LDC',
+  'THE ROCK LDC',
+  'WOORINEN LDC',
 ].sort();
 
 const GRAIN_COMMODITIES = ['Wheat', 'Barley', 'Canola', 'Faba Beans', 'Lentils'];
