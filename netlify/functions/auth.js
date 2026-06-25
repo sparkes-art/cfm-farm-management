@@ -63,7 +63,18 @@ exports.handler = async (event) => {
         }
       );
       const profiles = await profileRes.json();
-      data.profile = profiles[0] || null;
+      const profile = profiles[0] || null;
+
+      // Check if user is deactivated
+      if (profile && profile.is_active === false) {
+        return {
+          statusCode: 403,
+          headers,
+          body: JSON.stringify({ error: 'Your account has been deactivated. Please contact your administrator.' }),
+        };
+      }
+
+      data.profile = profile;
     }
 
     return { statusCode: 200, headers, body: JSON.stringify(data) };
