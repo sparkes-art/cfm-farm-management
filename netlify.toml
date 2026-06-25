@@ -1,9 +1,6 @@
 [build]
   functions = "netlify/functions"
 
-[functions]
-  node_bundler = "esbuild"
-
 [functions.push-grain-prices]
   timeout = 30
 

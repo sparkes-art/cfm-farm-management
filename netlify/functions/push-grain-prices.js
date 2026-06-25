@@ -74,6 +74,7 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ error: 'CSV format not recognised — expected Site,Grade,Type,Cash Price,Commodity columns' }) };
     }
 
+    const _t0 = Date.now();
     // Fetch commodity IDs from Supabase
     const commRes = await fetch(`${SUPABASE_URL}/rest/v1/commodities?select=id,name`, {
       headers: {
@@ -156,6 +157,7 @@ exports.handler = async (event) => {
       ? rows.filter(r => configuredSites.has(r.region))
       : rows;
 
+    console.log('Filtered rows:', filteredRows.length, '| Sites configured:', [...configuredSites]);
     console.log('Sites configured:', [...configuredSites], 'Rows before filter:', rows.length, 'After:', filteredRows.length);
 
     if (!filteredRows.length) {
@@ -179,6 +181,7 @@ exports.handler = async (event) => {
       throw new Error(`Supabase upsert error: ${err}`);
     }
 
+    console.log('Total processing time:', Date.now() - _t0, 'ms');
     console.log(`Grain prices updated: ${date} — ${rows.length} site/commodity rows`);
 
     return {
