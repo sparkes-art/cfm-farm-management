@@ -172,6 +172,8 @@ function _buildCard(com, allForecasts, allHarvests, season) {
 
   // Unit
   const unit = contracts[0]?.unit || budgets[0]?.unit || 'bale';
+  // Harvest area
+  const totalHarvestArea = com.harvests?.reduce((s, h) => s + (parseFloat(h.area_ha)||0), 0) || 0;
 
   return `
     <div class="card" style="margin-bottom:16px">
@@ -196,108 +198,87 @@ function _buildCard(com, allForecasts, allHarvests, season) {
       </div>
 
       <!-- Card body: left data + right (future chart placeholder) -->
-      <div style="display:grid;grid-template-columns:340px 1fr;min-height:220px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 240px;min-height:200px">
 
-        <!-- Left panel -->
-        <div style="padding:16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:16px">
-
-          <!-- Yield -->
-          ${totalBudgetArea || forecastArea ? `
+        <!-- Col 1: Yield -->
+        <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:12px">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0">Yield</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
             <div>
-              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin-bottom:8px">Yield</p>
-              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
-                <div>
-                  <p style="font-size:10px;color:var(--hint);margin-bottom:2px">Budget</p>
-                  <p style="font-size:15px;font-weight:600;font-variant-numeric:tabular-nums">${budgetYield ? formatNumber(budgetYield, 2) : '—'}</p>
-                  <p style="font-size:11px;color:var(--hint)">${totalBudgetArea ? formatNumber(totalBudgetArea, 0) + ' ha' : ''}</p>
-                </div>
-                <div>
-                  <p style="font-size:10px;color:var(--hint);margin-bottom:2px">Forecast</p>
-                  ${latestForecast
-                    ? '<p style="font-size:15px;font-weight:600;color:var(--blue);font-variant-numeric:tabular-nums">' + (forecastYield ? formatNumber(forecastYield, 2) : '—') + '</p><p style="font-size:11px;color:var(--hint)">' + (forecastArea ? formatNumber(forecastArea, 0) + ' ha' : '') + '</p>'
-                    : '<p style="font-size:13px;color:var(--hint)">None entered</p>'
-                  }
-                </div>
-                <div>
-                  <p style="font-size:10px;color:var(--hint);margin-bottom:2px">Actual</p>
-                  <p style="font-size:15px;font-weight:600;color:var(--green);font-variant-numeric:tabular-nums">${isHarvested && totalBudgetArea ? formatNumber(totalHarvest / totalBudgetArea, 2) : '—'}</p>
-                </div>
-                <div>
-                  <p style="font-size:10px;color:var(--hint);margin-bottom:2px">vs budget</p>
-                  ${forecastVsBudget !== null ? `
-                    <p style="font-size:12px;font-weight:600;color:${forecastVsBudget >= 100 ? 'var(--green)' : 'var(--red)'}">
-                      ${forecastVsBudget >= 100 ? '▲' : '▼'}${Math.abs(100 - forecastVsBudget)}%
-                    </p>
-                    <p style="font-size:10px;color:var(--hint)">fcast</p>
-                  ` : '<p style="color:var(--hint)">—</p>'}
-                </div>
-              </div>
+              <p style="font-size:10px;color:var(--hint);margin:0 0 3px">Budget</p>
+              <p style="font-size:16px;font-weight:600;color:var(--ink);margin:0;line-height:1.2">${budgetYield ? formatNumber(budgetYield, 2) : '—'}</p>
+              <p style="font-size:10px;color:var(--hint);margin:2px 0 0">${totalBudgetArea ? formatNumber(totalBudgetArea, 0) + ' ha' : ''}</p>
             </div>
-          ` : ''}
-
-          <!-- Production bars -->
-          ${totalBudgetProd || forecastProd ? `
             <div>
-              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin-bottom:8px">Production</p>
-              <div style="display:flex;flex-direction:column;gap:6px">
-                <div style="display:flex;align-items:center;gap:8px">
-                  <span style="font-size:11px;color:var(--muted);width:58px;flex-shrink:0">Budget</span>
-                  <div style="flex:1;height:7px;background:var(--border);border-radius:4px"><div style="height:100%;width:100%;background:var(--blue);border-radius:4px"></div></div>
-                  <span style="font-size:11px;font-variant-numeric:tabular-nums;width:80px;text-align:right">${formatNumber(totalBudgetProd, 0)} ${unit}</span>
-                </div>
-                ${latestForecast ? '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--muted);width:58px;flex-shrink:0">Forecast</span><div style="flex:1;height:7px;background:var(--border);border-radius:4px"><div style="height:100%;width:' + forecastBarW + '%;background:' + (forecastBarW < 80 ? 'var(--red)' : 'var(--blue)') + ';border-radius:4px"></div></div><span style="font-size:11px;font-variant-numeric:tabular-nums;width:80px;text-align:right">' + formatNumber(forecastProd, 0) + (forecastVsBudget && forecastVsBudget < 100 ? ' <span style="font-size:10px;color:var(--red)">▼' + Math.abs(100-forecastVsBudget) + '%</span>' : '') + '</span></div>' : ''}
-                ${isHarvested ? `
-                  <div style="display:flex;align-items:center;gap:8px">
-                    <span style="font-size:11px;color:var(--muted);width:58px;flex-shrink:0">Actual</span>
-                    <div style="flex:1;height:7px;background:var(--border);border-radius:4px"><div style="height:100%;width:${harvestBarW}%;background:var(--green);border-radius:4px"></div></div>
-                    <span style="font-size:11px;font-variant-numeric:tabular-nums;width:80px;text-align:right">${formatNumber(totalHarvest, 0)} ${unit}</span>
-                  </div>
-                ` : ''}
-              </div>
+              <p style="font-size:10px;color:var(--hint);margin:0 0 3px">Forecast</p>
+              ${latestForecast
+                ? '<p style="font-size:16px;font-weight:600;color:var(--blue);margin:0;line-height:1.2">' + (forecastYield ? formatNumber(forecastYield, 2) : '—') + '</p><p style="font-size:10px;color:var(--hint);margin:2px 0 0">' + (forecastArea ? formatNumber(forecastArea, 0) + ' ha' : '') + '</p>'
+                : '<p style="font-size:13px;color:var(--hint);margin:0">—</p><p style="font-size:10px;color:var(--hint);margin:2px 0 0">none entered</p>'
+              }
             </div>
-          ` : ''}
-
-          <!-- Prices -->
-          <div>
-            <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin-bottom:8px">Prices</p>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;background:var(--page-bg);border-radius:var(--radius-md);padding:10px">
-              <div>
-                <p style="font-size:10px;color:var(--hint);margin-bottom:2px">Paid avg</p>
-                <p style="font-size:13px;font-weight:600">${paidAvg ? formatCurrency(paidAvg, 0) : '—'}</p>
-              </div>
-              <div>
-                <p style="font-size:10px;color:var(--hint);margin-bottom:2px">Fwd avg</p>
-                <p style="font-size:13px;font-weight:600;color:var(--blue)">${avgFwdPrice ? formatCurrency(avgFwdPrice, 0) : '—'}</p>
-                ${fwdVsBudget !== null ? `<p style="font-size:10px;color:${fwdVsBudget >= 0 ? 'var(--green)' : 'var(--red)'}">
-                  ${fwdVsBudget >= 0 ? '▲' : '▼'}${Math.abs(fwdVsBudget).toFixed(1)}%
-                </p>` : ''}
-              </div>
-              <div>
-                <p style="font-size:10px;color:var(--hint);margin-bottom:2px">Budget</p>
-                <p style="font-size:13px;font-weight:600">${budgetPrice ? formatCurrency(budgetPrice, 0) : '—'}</p>
-                <p style="font-size:10px;color:var(--hint)">budget</p>
-              </div>
-              <div>
-                <p style="font-size:10px;color:var(--hint);margin-bottom:2px">Market</p>
-                <p style="font-size:13px;font-weight:600">${marketPrice ? formatCurrency(marketPrice, 0) : '—'}</p>
-                ${marketVsBudget !== null ? `<p style="font-size:10px;color:${marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)'}">
-                  ${marketVsBudget >= 0 ? '▲' : '▼'}${Math.abs(marketVsBudget).toFixed(1)}%
-                </p>` : ''}
-              </div>
+            <div>
+              <p style="font-size:10px;color:var(--hint);margin:0 0 3px">Actual</p>
+              <p style="font-size:16px;font-weight:600;color:var(--green);margin:0;line-height:1.2">${isHarvested ? formatNumber(totalHarvest / totalHarvestArea, 2) : '—'}</p>
+              <p style="font-size:10px;color:var(--hint);margin:2px 0 0">${isHarvested && totalHarvestArea ? formatNumber(totalHarvestArea, 0) + ' ha' : ''}</p>
             </div>
-            ${totalContractValue ? `
-              <div style="margin-top:8px;display:flex;gap:8px;font-size:11px">
-                ${fwdVsBudget !== null ? `<span style="background:${fwdVsBudget >= 0 ? 'var(--green-light)' : 'var(--red-light)'};color:${fwdVsBudget >= 0 ? 'var(--green-text)' : 'var(--red-text)'};padding:2px 7px;border-radius:4px">
-                  ${fwdVsBudget >= 0 ? '▲' : '▼'}${Math.abs(fwdVsBudget).toFixed(1)}% vs budget
-                </span>` : ''}
-                <span style="color:var(--hint)">· ${formatCurrency(totalContractValue, 0)} contracted</span>
-              </div>
-            ` : ''}
           </div>
         </div>
 
-        <!-- Right panel: price chart -->
-        <div style="padding:16px;display:flex;flex-direction:column;gap:6px">
+        <!-- Col 2: Production -->
+        <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:10px">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0">Production</p>
+          <div>
+            <p style="font-size:10px;color:var(--hint);margin:0 0 2px">Budget</p>
+            <p style="font-size:20px;font-weight:600;color:var(--ink);margin:0;line-height:1.1">${totalBudgetProd ? formatNumber(totalBudgetProd, 0) : '—'} <span style="font-size:11px;font-weight:400;color:var(--hint)">${unit}</span></p>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid var(--border-light);padding-top:10px">
+            <div>
+              <p style="font-size:10px;color:var(--hint);margin:0 0 2px">Forecast</p>
+              ${latestForecast && forecastProd
+                ? '<p style="font-size:14px;font-weight:600;color:var(--blue);margin:0">' + formatNumber(forecastProd, 0) + '</p>' +
+                  (forecastVsBudget !== null ? '<p style="font-size:10px;color:' + (forecastVsBudget >= 100 ? 'var(--green)' : 'var(--red)') + ';margin:2px 0 0">' + (forecastVsBudget >= 100 ? '▲' : '▼') + Math.abs(100 - forecastVsBudget) + '% vs bud</p>' : '')
+                : '<p style="font-size:13px;color:var(--hint);margin:0">—</p>'
+              }
+            </div>
+            <div>
+              <p style="font-size:10px;color:var(--hint);margin:0 0 2px">Actual</p>
+              ${isHarvested
+                ? '<p style="font-size:14px;font-weight:600;color:var(--green);margin:0">' + formatNumber(totalHarvest, 0) + '</p>' +
+                  (totalBudgetProd ? '<p style="font-size:10px;color:' + (totalHarvest >= totalBudgetProd ? 'var(--green)' : 'var(--red)') + ';margin:2px 0 0">' + (totalHarvest >= totalBudgetProd ? '▲' : '▼') + Math.abs(Math.round((totalHarvest/totalBudgetProd - 1)*100)) + '% vs bud</p>' : '')
+                : '<p style="font-size:13px;color:var(--hint);margin:0">—</p>'
+              }
+            </div>
+          </div>
+        </div>
+
+        <!-- Col 3: Prices -->
+        <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:8px">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0">Prices</p>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:10px;color:var(--hint)">Paid avg</span>
+              <span style="font-size:12px;font-weight:600;color:var(--ink)">${paidAvg ? formatCurrency(paidAvg, 0) : '—'}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:10px;color:var(--hint)">Fwd avg</span>
+              <span style="font-size:12px;font-weight:600;color:var(--blue)">${avgFwdPrice ? formatCurrency(avgFwdPrice, 0) : '—'}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:10px;color:var(--hint)">Budget</span>
+              <span style="font-size:12px;font-weight:600;color:var(--ink)">${budgetPrice ? formatCurrency(budgetPrice, 0) : '—'}</span>
+            </div>
+            <div style="border-top:1px solid var(--border-light);padding-top:6px;display:flex;justify-content:space-between;align-items:baseline">
+              <span style="font-size:10px;color:var(--hint)">Market</span>
+              <div style="text-align:right">
+                <span style="font-size:12px;font-weight:600;color:${marketVsBudget !== null ? (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)'}">${marketPrice ? formatCurrency(marketPrice, 0) : '—'}</span>
+                ${marketVsBudget !== null ? '<span style="font-size:10px;color:' + (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') + ';margin-left:4px">' + (marketVsBudget >= 0 ? '▲' : '▼') + Math.abs(marketVsBudget).toFixed(1) + '%</span>' : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Col 4: Chart -->
+        <div style="padding:14px 16px;display:flex;flex-direction:column;gap:6px">
           <div style="display:flex;align-items:center;justify-content:space-between">
             <div style="display:flex;gap:3px">
               <button class="mini-range-btn active" data-months="6" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:var(--blue);color:white;cursor:pointer">6m</button>

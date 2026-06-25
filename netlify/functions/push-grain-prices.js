@@ -5,7 +5,7 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const GRAIN_PRICES_API_KEY = process.env.GRAIN_PRICES_API_KEY || 'test123';
+const GRAIN_PRICES_API_KEY = 'test123';
 
 // Site code to full name mapping
 const SITE_NAMES = {
