@@ -137,6 +137,31 @@ exports.handler = async (event) => {
       return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'No matching grades found in CSV', date }) };
     }
 
+    // Fetch farm settings to filter to only relevant sites
+    const farmsRes = await fetch(`${SUPABASE_URL}/rest/v1/farms?select=settings`, {
+      headers: {
+        'apikey': SUPABASE_SERVICE_ROLE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      }
+    });
+    const farms = await farmsRes.json();
+    const configuredSites = new Set();
+    farms.forEach(f => {
+      const grainSites = f.settings?.grainSites || {};
+      Object.values(grainSites).forEach(site => { if (site) configuredSites.add(site); });
+    });
+
+    // If farms have configured sites, only store those. Otherwise store all.
+    const filteredRows = configuredSites.size > 0
+      ? rows.filter(r => configuredSites.has(r.region))
+      : rows;
+
+    console.log('Sites configured:', [...configuredSites], 'Rows before filter:', rows.length, 'After:', filteredRows.length);
+
+    if (!filteredRows.length) {
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'No rows matching configured farm sites', configured_sites: [...configuredSites], date }) };
+    }
+
     // Upsert into market_prices
     const upsertRes = await fetch(`${SUPABASE_URL}/rest/v1/market_prices`, {
       method: 'POST',
@@ -146,7 +171,7 @@ exports.handler = async (event) => {
         'Content-Type': 'application/json',
         'Prefer': 'resolution=merge-duplicates return=minimal',
       },
-      body: JSON.stringify(rows),
+      body: JSON.stringify(filteredRows),
     });
 
     if (!upsertRes.ok) {
@@ -162,9 +187,9 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         success: true,
         date,
-        rows_inserted: rows.length,
-        commodities_found: [...new Set(rows.map(r => r.commodity))],
-        sites_found: [...new Set(rows.map(r => r.region))].length,
+        rows_inserted: filteredRows.length,
+        commodities_found: [...new Set(filteredRows.map(r => r.commodity))],
+        sites_found: [...new Set(filteredRows.map(r => r.region))].length,
       }),
     };
 
