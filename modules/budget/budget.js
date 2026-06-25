@@ -114,17 +114,17 @@ function _renderTable(container) {
       <table class="data-table" style="min-width:900px">
         <thead>
           <tr>
-            <th style="width:140px">Crop type</th>
-            <th style="width:120px">Commodity</th>
-            <th style="width:60px">Unit</th>
-            <th style="border-left:2px solid var(--blue-light)" class="num" style="width:90px">Bud area</th>
-            <th class="num" style="width:90px">Bud yld/ha</th>
-            <th class="num" style="width:90px;color:var(--blue)">Bud prod</th>
-            <th class="num" style="width:90px">Bud price</th>
-            <th style="border-left:2px solid #0f766e22" class="num" style="width:90px">Fcast area</th>
-            <th class="num" style="width:90px">Fcast yld/ha</th>
-            <th class="num" style="width:90px;color:#0f766e">Fcast prod</th>
-            ${canWrite() ? '<th style="width:80px"></th>' : ''}
+            <th style="min-width:120px">Crop type</th>
+            <th style="min-width:110px">Commodity</th>
+            <th style="min-width:55px">Unit</th>
+            <th class="num" style="min-width:80px;border-left:2px solid var(--blue-light)">Bud area (ha)</th>
+            <th class="num" style="min-width:90px">Bud yld/ha</th>
+            <th class="num" style="min-width:80px;color:var(--blue)">Bud prod</th>
+            <th class="num" style="min-width:80px">Bud price</th>
+            <th class="num" style="min-width:80px;border-left:2px solid #0f766e33">Fcast area (ha)</th>
+            <th class="num" style="min-width:90px">Fcast yld/ha</th>
+            <th class="num" style="min-width:80px;color:#0f766e">Fcast prod</th>
+            ${canWrite() ? '<th style="min-width:60px"></th>' : ''}
           </tr>
         </thead>
         <tbody>
@@ -419,11 +419,13 @@ function _renderHarvest(container) {
     <table class="data-table">
       <thead>
         <tr>
-          <th>Paddock</th>
+          <th>Paddock / block</th>
           <th>Commodity</th>
           <th>Crop type</th>
           <th>Harvest date</th>
+          <th class="num">Area (ha)</th>
           <th class="num">Production</th>
+          <th class="num">Yield/ha</th>
           <th>Notes</th>
           ${canWrite() ? '<th></th>' : ''}
         </tr>
@@ -438,7 +440,9 @@ function _renderHarvest(container) {
               <td>${commodity?.name || '—'}</td>
               <td class="muted">${cropType?.name || '—'}</td>
               <td class="muted">${h.harvest_date ? new Date(h.harvest_date).toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
+              <td class="num">${h.area_ha ? formatNumber(h.area_ha, 1) : '—'}</td>
               <td class="num"><strong>${formatNumber(h.actual_production, 0)} ${h.unit || ''}</strong></td>
+              <td class="num">${h.area_ha && h.actual_production ? formatNumber(parseFloat(h.actual_production) / parseFloat(h.area_ha), 2) : '—'}</td>
               <td class="muted text-sm">${h.notes || ''}</td>
               ${canWrite() ? `<td><button class="btn btn-ghost btn-sm delete-harvest-btn" data-id="${h.id}" style="color:var(--red)">✕</button></td>` : ''}
             </tr>
@@ -446,7 +450,9 @@ function _renderHarvest(container) {
         }).join('')}
         <tr style="font-weight:600;border-top:2px solid var(--border)">
           <td colspan="4">Total</td>
+          <td class="num">${formatNumber(_harvests.reduce((s,h) => s + (parseFloat(h.area_ha)||0), 0), 1)} ha</td>
           <td class="num">${formatNumber(total, 0)}</td>
+          <td class="num">${(() => { const ta = _harvests.reduce((s,h)=>s+(parseFloat(h.area_ha)||0),0); return ta ? formatNumber(total/ta,2) : '—'; })()}</td>
           <td colspan="${canWrite() ? 2 : 1}"></td>
         </tr>
       </tbody>
@@ -476,50 +482,56 @@ function _harvestModal(container) {
   const farm = getActiveFarm();
   let selectedCommodityId = '';
 
+  const harvestBodyHTML = [
+    '<div class="form-row">',
+      '<div class="form-group">',
+        '<label class="form-label">Commodity</label>',
+        commoditySelectHTML('hv-commodity'),
+      '</div>',
+      '<div class="form-group">',
+        '<label class="form-label">Crop type</label>',
+        cropTypeSelectHTML('hv-crop-type'),
+      '</div>',
+    '</div>',
+    '<div class="form-row">',
+      '<div class="form-group">',
+        '<label class="form-label">Paddock / block name</label>',
+        '<input class="form-input" id="hv-paddock" type="text" placeholder="e.g. North paddock">',
+      '</div>',
+      '<div class="form-group">',
+        '<label class="form-label">Harvest date</label>',
+        '<input class="form-input" id="hv-date" type="date">',
+      '</div>',
+    '</div>',
+    '<div class="form-row">',
+      '<div class="form-group">',
+        '<label class="form-label">Area harvested (ha)</label>',
+        '<input class="form-input num" id="hv-area" type="number" step="0.1" placeholder="e.g. 450">',
+      '</div>',
+      '<div class="form-group">',
+        '<label class="form-label">Production</label>',
+        '<input class="form-input num" id="hv-production" type="number" step="0.1">',
+      '</div>',
+      '<div class="form-group">',
+        '<label class="form-label">Unit</label>',
+        '<select class="form-select" id="hv-unit">',
+          '<option value="bale">bale</option>',
+          '<option value="t">tonne</option>',
+          '<option value="kg">kg</option>',
+          '<option value="head">head</option>',
+        '</select>',
+      '</div>',
+    '</div>',
+    '<div class="form-group">',
+      '<label class="form-label">Notes</label>',
+      '<textarea class="form-textarea" id="hv-notes" rows="2"></textarea>',
+    '</div>',
+  ].join('');
+
   openModal({
     title: 'Add harvest entry',
     confirmLabel: 'Save harvest',
-    bodyHTML: `
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Commodity</label>
-          ${commoditySelectHTML('hv-commodity')}
-        </div>
-        <div class="form-group">
-          <label class="form-label">Crop type</label>
-          ${cropTypeSelectHTML('hv-crop-type')}
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Paddock name</label>
-          <input class="form-input" id="hv-paddock" type="text" placeholder="e.g. North paddock">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Harvest date</label>
-          <input class="form-input" id="hv-date" type="date">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Production</label>
-          <input class="form-input num" id="hv-production" type="number" step="0.1">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Unit</label>
-          <select class="form-select" id="hv-unit">
-            <option value="bale">bale</option>
-            <option value="t">tonne</option>
-            <option value="kg">kg</option>
-            <option value="head">head</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Notes</label>
-        <textarea class="form-textarea" id="hv-notes" rows="2"></textarea>
-      </div>
-    `,
+    bodyHTML: harvestBodyHTML,
     onConfirm: async (modal) => {
       const production = parseFloat(qs('#hv-production', modal)?.value || 0);
       if (!production) throw new Error('Please enter a production quantity');
@@ -530,6 +542,7 @@ function _harvestModal(container) {
         commodity_id: commodityId || null,
         crop_type_id: qs('#hv-crop-type', modal)?.value || null,
         paddock_name: qs('#hv-paddock', modal)?.value?.trim() || null,
+        area_ha: parseFloat(qs('#hv-area', modal)?.value || 0) || null,
         harvest_date: qs('#hv-date', modal)?.value || null,
         actual_production: production,
         unit: qs('#hv-unit', modal)?.value || 'bale',
