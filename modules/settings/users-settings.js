@@ -1,7 +1,7 @@
 // modules/settings/users-settings.js
 // User management — list, add, edit, deactivate
 
-import { dbSelect, dbInsert, dbUpdate } from '../../js/supabase-client.js';
+import { dbSelect, dbUpdate } from '../../js/supabase-client.js';
 import { getActiveFarm, getFarms } from '../../js/app-state.js';
 import { toast, openModal, qs, formatDate } from '../../js/ui.js';
 
@@ -202,23 +202,21 @@ function _addUserModal(container) {
 
       if (!name || !email) throw new Error('Please enter a name and email address');
 
-      // Create user via auth function
-      const res = await fetch('/api/auth', {
+      // Create user + profile via admin function (bypasses RLS)
+      const res = await fetch('/api/auth-admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'signup', email, password: tempPassword }),
+        body: JSON.stringify({
+          action: 'create_user',
+          email,
+          password: tempPassword,
+          full_name: name,
+          role,
+          farm_access: farmAccess,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create user');
-
-      // Create profile
-      await dbInsert('user_profiles', {
-        id: data.user?.id || data.id,
-        full_name: name,
-        role,
-        farm_access: farmAccess,
-        is_active: true,
-      });
 
       toast(`${name} added successfully`, 'success');
       await _renderUsers(container);
