@@ -5,7 +5,7 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const GRAIN_PRICES_API_KEY = process.env.GRAIN_PRICES_API_KEY;
+const GRAIN_PRICES_API_KEY = process.env.GRAIN_PRICES_API_KEY || 'test123';
 
 // Site code to full name mapping
 const SITE_NAMES = {
@@ -41,26 +41,9 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 
-  // Log everything for debugging
-  console.log('Received headers:', JSON.stringify(Object.keys(event.headers)));
-  console.log('ENV GRAIN_PRICES_API_KEY:', process.env.GRAIN_PRICES_API_KEY ? 'SET' : 'NOT SET');
-  console.log('All env keys:', Object.keys(process.env).filter(k => k.includes('GRAIN') || k.includes('API')));
-  
-  // Check all possible header formats
-  const allHeaders = event.headers;
-  const apiKey = allHeaders['x-api-key'] 
-    || allHeaders['X-Api-Key'] 
-    || allHeaders['X-API-Key']
-    || (allHeaders['authorization'] || '').replace('Bearer ', '');
-  
-  console.log('API key found:', apiKey || 'NONE');
-  console.log('Expected key:', process.env.GRAIN_PRICES_API_KEY || 'NOT SET');
-  // TEMP: log but don't block for debugging
-  if (!GRAIN_PRICES_API_KEY) {
-    console.log('WARNING: GRAIN_PRICES_API_KEY env var not set - bypassing auth for debug');
-  } else if (apiKey !== GRAIN_PRICES_API_KEY) {
-    console.log('AUTH FAILED: received key does not match env var');
-    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorised', debug: 'key mismatch' }) };
+  const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
+  if (!GRAIN_PRICES_API_KEY || apiKey !== GRAIN_PRICES_API_KEY) {
+    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorised' }) };
   }
 
   let body;
