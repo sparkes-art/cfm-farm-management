@@ -562,3 +562,5 @@ function _harvestModal(container) {
     initCropTypeSelect('hv-crop-type', () => selectedCommodityId);
   }, 100);
 }
+
+

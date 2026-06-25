@@ -119,32 +119,7 @@ async function _mountOverview(container) {
     const totalInvoiced = invoices.reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
     const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
 
-    // Farm gate cotton price from cotton_prices table (Power Automate feed)
-    const cottonRegion = farm.settings?.cottonRegion || null;
-    let farmGateCotton = null;
-    if (cottonRegion) {
-      try {
-        const cp = await dbSelect('cotton_prices',
-          'region=eq.' + encodeURIComponent(cottonRegion) + '&order=price_date.desc&limit=1&select=*'
-        );
-        farmGateCotton = cp[0] || null;
-      } catch { farmGateCotton = null; }
-    }
-
-    const cols = cottonRegion ? 'repeat(5,1fr)' : 'repeat(4,1fr)';
-    const cottonStatValue = farmGateCotton ? '$' + parseFloat(farmGateCotton.price_aud).toFixed(0) + '/bale' : '—';
-
-    let html = '<div class="stats-strip" style="grid-template-columns:' + cols + ';margin-bottom:20px">';
-    html += '<div class="stat-card"><div class="stat-label">Contracts</div><div class="stat-value">' + contracts.length + '</div></div>';
-    html += '<div class="stat-card"><div class="stat-label">Contract value</div><div class="stat-value blue">' + formatCurrency(totalContractValue, 0) + '</div></div>';
-    html += '<div class="stat-card"><div class="stat-label">Total invoiced</div><div class="stat-value">' + formatCurrency(totalInvoiced, 0) + '</div></div>';
-    html += '<div class="stat-card"><div class="stat-label">Paid to date</div><div class="stat-value green">' + formatCurrency(totalPaid, 0) + '</div></div>';
-    if (cottonRegion) {
-      html += '<div class="stat-card" id="cotton-stat" style="cursor:pointer;border-left:3px solid var(--blue)">';
-      html += '<div class="stat-label">Cotton — ' + cottonRegion + '</div>';
-      html += '<div class="stat-value blue">' + cottonStatValue + '</div></div>';
-    }
-    html += '</div>';
+    let html = '';
 
     html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">';
     html += '<h2 style="font-size:var(--text-md);font-weight:600">Commodity position — ' + season + '</h2>';
@@ -156,9 +131,7 @@ async function _mountOverview(container) {
 
     container.innerHTML = html;
 
-    qs('#cotton-stat')?.addEventListener('click', () => {
-      document.querySelector('[data-tab=prices]')?.click();
-    });
+
 
     await drawMiniCharts(commodityMap, season);
 
