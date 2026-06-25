@@ -8,7 +8,7 @@ import {
   commodityBadge, statusBadge, qs, setContent, currentSeason, formatNumber
 } from '../../js/ui.js';
 import { mountContracts, unmountContracts } from './contracts.js';
-import { mountMarketPrices } from './market-prices.js';
+import { mountMarketPrices, unmountMarketPrices } from './market-prices.js';
 import { buildCommodityCards, drawMiniCharts } from './commodity-card.js';
 
 let _invoices = [];
@@ -67,6 +67,7 @@ export async function mountOutputs(container) {
 
 export function unmountOutputs() {
   unmountContracts();
+  unmountMarketPrices();
   if (_unsub) { _unsub(); _unsub = null; }
   _invoices = [];
   _contracts = [];
@@ -85,6 +86,7 @@ async function _loadTab() {
   const content = qs('#tab-content');
   if (!content) return;
   unmountContracts();
+  unmountMarketPrices();
   if (_activeTab === 'overview') {
     await _mountOverview(content);
   } else if (_activeTab === 'contracts') {

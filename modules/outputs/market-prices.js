@@ -13,6 +13,17 @@ let _contracts = [];
 let _selectedCommodityId = null;
 let _chartRange = 12; // months
 
+export function unmountMarketPrices() {
+  _prices = [];
+  _contracts = [];
+  _selectedCommodityId = null;
+  _budgetPrice = null;
+  if (window.__cfmPriceChart) {
+    window.__cfmPriceChart.destroy();
+    window.__cfmPriceChart = null;
+  }
+}
+
 export async function mountMarketPrices(container) {
   await loadCommodities();
   const allCommodities = getCommodities().filter(c => !c.is_livestock);
@@ -21,8 +32,17 @@ export async function mountMarketPrices(container) {
   const farm = getActiveFarm();
   const season = currentSeason();
 
+  const farmSettings = farm?.settings || {};
+  const grainSites = farmSettings.grainSites || {};
+  const grainGrades = { Wheat: 'APW1', Barley: 'BAR1', Canola: 'CAN1', 'Faba Beans': 'FAB2', Lentils: 'NIPT1' };
+
   const commodityChecks = await Promise.all(allCommodities.map(async c => {
     try {
+      // Grain commodity with no delivery site = farm doesn't grow it, hide completely
+      if (grainGrades[c.name] && !grainSites[c.name]) {
+        return { commodity: c, hasData: false };
+      }
+
       const [prices, budgets] = await Promise.all([
         dbSelect('market_prices', 'commodity_id=eq.' + c.id + '&select=id&limit=1'),
         farm ? dbSelect('budgets', 'farm_id=eq.' + farm.id + '&commodity_id=eq.' + c.id + '&season=eq.' + season + '&select=id&limit=1').catch(() => []) : Promise.resolve([]),
