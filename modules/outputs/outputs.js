@@ -24,7 +24,7 @@ export async function mountOutputs(container) {
     <div class="page-header">
       <div>
         <h1>Outputs</h1>
-        <p class="page-subtitle">${farm?.name || ''}</p>
+        <p class="page-subtitle" style="font-size:var(--text-base);font-weight:600;color:var(--ink-mid);margin-top:3px">${farm?.name || ''}</p>
       </div>
       <div class="flex gap-2">
         <select id="out-season-select" class="form-select" style="width:110px">

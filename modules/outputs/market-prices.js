@@ -15,7 +15,28 @@ let _chartRange = 12; // months
 
 export async function mountMarketPrices(container) {
   await loadCommodities();
-  const commodities = getCommodities().filter(c => !c.is_livestock);
+  const allCommodities = getCommodities().filter(c => !c.is_livestock);
+
+  // Filter to only commodities that have price data or a budget
+  const farm = getActiveFarm();
+  const season = currentSeason();
+
+  const commodityChecks = await Promise.all(allCommodities.map(async c => {
+    try {
+      const [prices, budgets] = await Promise.all([
+        dbSelect('market_prices', 'commodity_id=eq.' + c.id + '&select=id&limit=1'),
+        farm ? dbSelect('budgets', 'farm_id=eq.' + farm.id + '&commodity_id=eq.' + c.id + '&season=eq.' + season + '&select=id&limit=1').catch(() => []) : Promise.resolve([]),
+      ]);
+      return { commodity: c, hasData: prices.length > 0 || budgets.length > 0 };
+    } catch { return { commodity: c, hasData: false }; }
+  }));
+
+  const commodities = commodityChecks.filter(x => x.hasData).map(x => x.commodity);
+
+  if (!commodities.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">📈</div><p>No market price data yet.</p><p>Import prices via Excel or set up the Power Automate flow.</p></div>';
+    return;
+  }
 
   if (commodities.length) _selectedCommodityId = commodities[0].id;
 

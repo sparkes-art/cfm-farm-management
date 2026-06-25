@@ -5,6 +5,7 @@
 import { dbSelect } from '../../js/supabase-client.js';
 import { getActiveFarm } from '../../js/app-state.js';
 import { formatCurrency, formatNumber, formatDate } from '../../js/ui.js';
+import { getCommodities } from '../../js/commodities.js';
 
 export async function buildCommodityCards(season) {
   const farm = getActiveFarm();
@@ -65,12 +66,24 @@ export async function buildCommodityCards(season) {
   });
 
   // Also get latest market price for each commodity
+  // Get farm's grain site settings for price filtering
+  const farmSettings = farm.settings || {};
+  const grainSites = farmSettings.grainSites || {};
+  const commodityList = getCommodities();
+
   const pricePromises = Object.entries(commodityMap).map(async ([key, com]) => {
     if (!com.id) return;
     try {
-      const prices = await dbSelect('market_prices',
-        'commodity_id=eq.' + com.id + '&select=price_per_unit,price_date&order=price_date.desc&limit=1'
-      );
+      // Find this commodity's name to look up its delivery site
+      const commodityObj = commodityList.find(c => c.id === com.id);
+      const commodityName = commodityObj?.name || com.name || '';
+      const deliverySite = grainSites[commodityName] || null;
+
+      // Build query — filter by delivery site if configured
+      let query = 'commodity_id=eq.' + com.id + '&select=price_per_unit,price_date&order=price_date.desc&limit=1';
+      if (deliverySite) query += '&region=eq.' + encodeURIComponent(deliverySite);
+
+      const prices = await dbSelect('market_prices', query);
       com.latestPrice = prices[0] || null;
     } catch { com.latestPrice = null; }
   });
@@ -100,13 +113,28 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   const budgetYield = totalBudgetArea ? totalBudgetProd / totalBudgetArea : null;
   const budgetPrice = budgets.length ? budgets.reduce((s, b) => s + (parseFloat(b.price) || 0), 0) / budgets.filter(b => b.price).length : null;
 
-  // Latest forecast — only use if one actually exists
+  // Forecasts — sum across ALL crop types for this commodity
+  // Get the latest forecast per budget_id (one forecast per crop type row)
   const comForecasts = allForecasts.filter(f => f.commodity_id === com.id || f.commodity?.toLowerCase() === com.name?.toLowerCase());
-  const latestForecast = comForecasts[comForecasts.length - 1] || null;
-  const forecastProd = latestForecast
-    ? (parseFloat(latestForecast.forecast_production) || (parseFloat(latestForecast.area_ha)||0) * (parseFloat(latestForecast.yield_per_ha)||0))
-    : null; // null = no forecast entered yet
-  const forecastArea = latestForecast ? parseFloat(latestForecast.area_ha) : null;
+  
+  // Group by budget_id and take the latest per group
+  const latestPerBudget = {};
+  comForecasts.forEach(f => {
+    const key = f.budget_id || f.crop_type_id || 'default';
+    if (!latestPerBudget[key] || f.forecast_date > latestPerBudget[key].forecast_date) {
+      latestPerBudget[key] = f;
+    }
+  });
+  const latestForecasts = Object.values(latestPerBudget);
+  const latestForecast = latestForecasts.length > 0 ? latestForecasts[0] : null; // for status check
+
+  // Sum production and area across all crop type forecasts
+  const forecastProd = latestForecasts.length > 0
+    ? latestForecasts.reduce((s, f) => s + (parseFloat(f.forecast_production) || (parseFloat(f.area_ha)||0) * (parseFloat(f.yield_per_ha)||0)), 0)
+    : null;
+  const forecastArea = latestForecasts.length > 0
+    ? latestForecasts.reduce((s, f) => s + (parseFloat(f.area_ha) || 0), 0)
+    : null;
   const forecastYield = forecastArea ? forecastProd / forecastArea : null;
 
   // Harvest
@@ -319,9 +347,17 @@ export async function drawMiniCharts(commodityMap, season) {
       cutoff.setFullYear(cutoff.getFullYear() - 3);
       const cutoffStr = cutoff.toISOString().slice(0, 10);
 
-      const prices = await dbSelect('market_prices',
-        'commodity_id=eq.' + com.id + '&price_date=gte.' + cutoffStr + '&select=price_date,price_per_unit&order=price_date.asc'
-      );
+      // Filter by farm's delivery site if configured
+      const farm = getActiveFarm();
+      const farmSettings = farm?.settings || {};
+      const grainSites = farmSettings.grainSites || {};
+      const commodityObj = getCommodities().find(c => c.id === com.id);
+      const deliverySite = grainSites[commodityObj?.name || com.name || ''] || null;
+
+      let priceQuery = 'commodity_id=eq.' + com.id + '&price_date=gte.' + cutoffStr + '&select=price_date,price_per_unit&order=price_date.asc';
+      if (deliverySite) priceQuery += '&region=eq.' + encodeURIComponent(deliverySite);
+
+      const prices = await dbSelect('market_prices', priceQuery);
 
       allPrices[com.id] = prices;
 
