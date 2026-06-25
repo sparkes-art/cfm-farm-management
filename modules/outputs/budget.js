@@ -482,54 +482,56 @@ function _harvestModal(container) {
   const farm = getActiveFarm();
   let selectedCommodityId = '';
 
+  const harvestBodyHTML = [
+    '<div class="form-row">',
+      '<div class="form-group">',
+        '<label class="form-label">Commodity</label>',
+        commoditySelectHTML('hv-commodity'),
+      '</div>',
+      '<div class="form-group">',
+        '<label class="form-label">Crop type</label>',
+        cropTypeSelectHTML('hv-crop-type'),
+      '</div>',
+    '</div>',
+    '<div class="form-row">',
+      '<div class="form-group">',
+        '<label class="form-label">Paddock / block name</label>',
+        '<input class="form-input" id="hv-paddock" type="text" placeholder="e.g. North paddock">',
+      '</div>',
+      '<div class="form-group">',
+        '<label class="form-label">Harvest date</label>',
+        '<input class="form-input" id="hv-date" type="date">',
+      '</div>',
+    '</div>',
+    '<div class="form-row">',
+      '<div class="form-group">',
+        '<label class="form-label">Area harvested (ha)</label>',
+        '<input class="form-input num" id="hv-area" type="number" step="0.1" placeholder="e.g. 450">',
+      '</div>',
+      '<div class="form-group">',
+        '<label class="form-label">Production</label>',
+        '<input class="form-input num" id="hv-production" type="number" step="0.1">',
+      '</div>',
+      '<div class="form-group">',
+        '<label class="form-label">Unit</label>',
+        '<select class="form-select" id="hv-unit">',
+          '<option value="bale">bale</option>',
+          '<option value="t">tonne</option>',
+          '<option value="kg">kg</option>',
+          '<option value="head">head</option>',
+        '</select>',
+      '</div>',
+    '</div>',
+    '<div class="form-group">',
+      '<label class="form-label">Notes</label>',
+      '<textarea class="form-textarea" id="hv-notes" rows="2"></textarea>',
+    '</div>',
+  ].join('');
+
   openModal({
     title: 'Add harvest entry',
     confirmLabel: 'Save harvest',
-    bodyHTML: `
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Commodity</label>
-          ${commoditySelectHTML('hv-commodity')}
-        </div>
-        <div class="form-group">
-          <label class="form-label">Crop type</label>
-          ${cropTypeSelectHTML('hv-crop-type')}
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Paddock name</label>
-          <input class="form-input" id="hv-paddock" type="text" placeholder="e.g. North paddock">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Harvest date</label>
-          <input class="form-input" id="hv-date" type="date">
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Area harvested (ha)</label>
-          <input class="form-input num" id="hv-area" type="number" step="0.1" placeholder="e.g. 450">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Production</label>
-          <input class="form-input num" id="hv-production" type="number" step="0.1">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Unit</label>
-          <select class="form-select" id="hv-unit">
-            <option value="bale">bale</option>
-            <option value="t">tonne</option>
-            <option value="kg">kg</option>
-            <option value="head">head</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Notes</label>
-        <textarea class="form-textarea" id="hv-notes" rows="2"></textarea>
-      </div>
-    `,
+    bodyHTML: harvestBodyHTML,
     onConfirm: async (modal) => {
       const production = parseFloat(qs('#hv-production', modal)?.value || 0);
       if (!production) throw new Error('Please enter a production quantity');
@@ -562,5 +564,3 @@ function _harvestModal(container) {
     initCropTypeSelect('hv-crop-type', () => selectedCommodityId);
   }, 100);
 }
-
-
