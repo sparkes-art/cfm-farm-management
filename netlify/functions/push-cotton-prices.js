@@ -4,7 +4,7 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const COTTON_PRICES_API_KEY = process.env.COTTON_PRICES_API_KEY;
+const COTTON_PRICES_API_KEY = process.env.COTTON_PRICES_API_KEY || 'cfm-ldc-cotton-2026-xxxx';
 
 exports.handler = async (event) => {
   const headers = {
