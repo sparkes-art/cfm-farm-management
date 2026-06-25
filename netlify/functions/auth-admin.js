@@ -41,11 +41,27 @@ exports.handler = async (event) => {
 
     const authData = await authRes.json();
     console.log('Auth response status:', authRes.status, 'data:', JSON.stringify(authData).slice(0, 200));
-    if (!authRes.ok) {
-      return { statusCode: authRes.status, headers, body: JSON.stringify({ error: authData.message || 'Failed to create user' }) };
-    }
 
-    const userId = authData.id;
+    let userId;
+    if (!authRes.ok) {
+      if (authData.error_code === 'email_exists') {
+        // User already exists in auth — find their ID
+        const listRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(email)}`, {
+          headers: serviceHeaders,
+        });
+        const listData = await listRes.json();
+        const existingUser = listData.users?.[0];
+        if (!existingUser) {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'User already exists but could not retrieve their ID' }) };
+        }
+        userId = existingUser.id;
+        console.log('Found existing user:', userId);
+      } else {
+        return { statusCode: authRes.status, headers, body: JSON.stringify({ error: authData.msg || authData.message || 'Failed to create user' }) };
+      }
+    } else {
+      userId = authData.id;
+    }
 
     // Create profile using service role (bypasses RLS)
     const profileRes = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles`, {
