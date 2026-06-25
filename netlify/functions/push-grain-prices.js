@@ -41,10 +41,9 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 
-  const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'];
-  console.log('GRAIN AUTH - received key:', apiKey, '| expected:', GRAIN_PRICES_API_KEY, '| match:', apiKey === GRAIN_PRICES_API_KEY);
+  const apiKey = event.headers['x-api-key'] || event.headers['X-Api-Key'] || event.headers['authorization'] || event.headers['Authorization'];
   if (!GRAIN_PRICES_API_KEY || apiKey !== GRAIN_PRICES_API_KEY) {
-    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorised', received: apiKey, expected: GRAIN_PRICES_API_KEY }) };
+    return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorised' }) };
   }
 
   let body;
