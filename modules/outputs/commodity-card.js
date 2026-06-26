@@ -14,7 +14,7 @@ export async function buildCommodityCards(season) {
   // Load all data in parallel
   const [contracts, invoices, budgets, forecasts, harvests] = await Promise.all([
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
-    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
+    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
     dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.asc'),
     dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
@@ -110,8 +110,9 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   // Budget totals (sum across crop types)
   const totalBudgetProd = budgets.reduce((s, b) => s + (parseFloat(b.budgeted_production) || ((parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0))), 0);
   const totalBudgetArea = budgets.reduce((s, b) => s + (parseFloat(b.area_ha) || 0), 0);
-  const budgetYield = totalBudgetArea ? totalBudgetProd / totalBudgetArea : null;
-  const budgetPrice = budgets.length ? budgets.reduce((s, b) => s + (parseFloat(b.price) || 0), 0) / budgets.filter(b => b.price).length : null;
+  const budgetYield = (totalBudgetArea > 0 && totalBudgetProd > 0) ? totalBudgetProd / totalBudgetArea : null;
+  const budgetsWithPrice = budgets.filter(b => b.price);
+  const budgetPrice = budgetsWithPrice.length ? budgetsWithPrice.reduce((s, b) => s + parseFloat(b.price), 0) / budgetsWithPrice.length : null;
 
   // Forecasts — sum across ALL crop types for this commodity
   // Get the latest forecast per budget_id (one forecast per crop type row)
@@ -135,7 +136,7 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   const forecastArea = latestForecasts.length > 0
     ? latestForecasts.reduce((s, f) => s + (parseFloat(f.area_ha) || 0), 0)
     : null;
-  const forecastYield = forecastArea ? forecastProd / forecastArea : null;
+  const forecastYield = (forecastArea > 0 && forecastProd) ? forecastProd / forecastArea : null;
 
   // Harvest
   const comHarvests = allHarvests.filter(h => h.commodity_id === com.id);
@@ -150,11 +151,19 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   const pctHedged = denominator && totalContracted ? Math.round((totalContracted / denominator) * 100) : 0;
   const unhedged = Math.max(0, (denominator || 0) - totalContracted);
 
-  // Invoices / paid
-  const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount) || 0), 0);
-  const paidAvg = invoices.filter(i => i.status === 'paid').length
-    ? invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (parseFloat(i.price_per_unit) || 0), 0) / invoices.filter(i => i.status === 'paid').length
-    : null;
+  // Paid average — gross amount + quality adj (not selling costs) divided by qty
+  // This gives the effective commodity price before deductions
+  const completeInvoices = invoices.filter(i => i.status === 'complete' || i.status === 'paid');
+  const totalPaidQty = completeInvoices.reduce((s, i) => {
+    const lines = i.line_items || [];
+    return s + lines.reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0);
+  }, 0);
+  const totalPaidValue = completeInvoices.reduce((s, i) => {
+    // gross_amount + quality_adj = price before selling costs
+    return s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
+  }, 0);
+  const paidAvg = (totalPaidQty && totalPaidValue) ? totalPaidValue / totalPaidQty : null;
+  const totalPaid = completeInvoices.reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
 
   // Market price
   const marketPrice = com.latestPrice ? parseFloat(com.latestPrice.price_per_unit) : null;
@@ -173,7 +182,7 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   // Unit
   const unit = contracts[0]?.unit || budgets[0]?.unit || 'bale';
   // Harvest area
-  const totalHarvestArea = com.harvests?.reduce((s, h) => s + (parseFloat(h.area_ha)||0), 0) || 0;
+  const totalHarvestArea = comHarvests.reduce((s, h) => s + (parseFloat(h.area_ha)||0), 0);
 
   return `
     <div class="card" style="margin-bottom:16px">
@@ -198,7 +207,7 @@ function _buildCard(com, allForecasts, allHarvests, season) {
       </div>
 
       <!-- Card body: left data + right (future chart placeholder) -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 240px;min-height:200px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr minmax(0,1fr);min-height:220px">
 
         <!-- Col 1: Yield -->
         <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:12px">
@@ -218,7 +227,7 @@ function _buildCard(com, allForecasts, allHarvests, season) {
             </div>
             <div>
               <p style="font-size:10px;color:var(--hint);margin:0 0 3px">Actual</p>
-              <p style="font-size:16px;font-weight:600;color:var(--green);margin:0;line-height:1.2">${isHarvested ? formatNumber(totalHarvest / totalHarvestArea, 2) : '—'}</p>
+              <p style="font-size:16px;font-weight:600;color:var(--green);margin:0;line-height:1.2">${(isHarvested && totalHarvestArea > 0) ? formatNumber(totalHarvest / totalHarvestArea, 2) : (isHarvested ? formatNumber(totalHarvest, 0) : '—')}</p>
               <p style="font-size:10px;color:var(--hint);margin:2px 0 0">${isHarvested && totalHarvestArea ? formatNumber(totalHarvestArea, 0) + ' ha' : ''}</p>
             </div>
           </div>
@@ -294,7 +303,7 @@ function _buildCard(com, allForecasts, allHarvests, season) {
             ${budgetPrice ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:0;border-top:2px dashed #0f766e"></div>Budget</div>' : ''}
             ${contracts.length ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:8px;height:8px;border-radius:50%;background:var(--green)"></div>Fwd sale</div>' : ''}
           </div>
-          <div id="card-chart-${com.id || name.replace(/\s/g,'-')}" style="flex:1;min-height:150px;display:flex;align-items:center;justify-content:center">
+          <div id="card-chart-${com.id || name.replace(/\s/g,'-')}" style="flex:1;min-height:180px;display:flex;align-items:center;justify-content:center">
             <p style="font-size:12px;color:var(--hint)">Price chart loading…</p>
           </div>
         </div>
