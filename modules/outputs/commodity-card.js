@@ -14,7 +14,7 @@ export async function buildCommodityCards(season) {
   // Load all data in parallel
   const [contracts, invoices, budgets, forecasts, harvests] = await Promise.all([
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
-    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
+    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=invoice_date.desc').catch(() => dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc&limit=100')),
     dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.asc'),
     dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
