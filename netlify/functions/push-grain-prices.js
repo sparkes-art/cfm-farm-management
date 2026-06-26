@@ -1,13 +1,19 @@
 // netlify/functions/push-grain-prices.js
 // Receives daily LDC Grains CSV from Power Automate
 // Parses CSV directly — no AI needed
-// POST body: { csv: "<csv string>", date: "2026-06-25" }
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const GRAIN_PRICES_API_KEY = 'test123';
 
-// Site code to full name mapping
+const PRIMARY_GRADES = {
+  'Wheat': 'APW1',
+  'Barley': 'BAR1',
+  'Canola': 'CAN1',
+  'Faba Beans': 'FAB2',
+  'Lentils': 'NIPT1',
+};
+
 const SITE_NAMES = {
   'ELM':  'ELMORE LDC',
   'COL':  'COOLAMON LDC',
@@ -20,16 +26,6 @@ const SITE_NAMES = {
   'TEL':  'TELFORD LDC',
   'MOR':  'MOREE LDC',
   'MBL':  'MERBEIN LDC',
-};
-
-// Primary grades to store per commodity
-const PRIMARY_GRADES = {
-  'Wheat': 'APW1',
-  'Barley': 'BAR1',
-  'Canola': 'CAN1',
-  'Faba Beans': 'FAB2',
-  'Lentils': 'NIPT1',
-  'Chick Peas': 'CHKP',
 };
 
 exports.handler = async (event) => {
@@ -61,21 +57,19 @@ exports.handler = async (event) => {
   try {
     // Parse CSV
     const lines = csv.trim().split('\n');
-    const headers_csv = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+    const csvHeaders = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
 
-    // Expected: Site,Grade,Type,Cash Price,Payment Terms,Season,Commodity,Buyer
-    const siteIdx      = headers_csv.indexOf('Site');
-    const gradeIdx     = headers_csv.indexOf('Grade');
-    const priceIdx     = headers_csv.indexOf('Cash Price');
-    const commodityIdx = headers_csv.indexOf('Commodity');
-    const typeIdx      = headers_csv.indexOf('Type');
+    const siteIdx      = csvHeaders.indexOf('Site');
+    const gradeIdx     = csvHeaders.indexOf('Grade');
+    const priceIdx     = csvHeaders.indexOf('Cash Price');
+    const commodityIdx = csvHeaders.indexOf('Commodity');
+    const typeIdx      = csvHeaders.indexOf('Type');
 
     if (siteIdx === -1 || gradeIdx === -1 || priceIdx === -1 || commodityIdx === -1) {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: 'CSV format not recognised — expected Site,Grade,Type,Cash Price,Commodity columns' }) };
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'CSV format not recognised' }) };
     }
 
-    const _t0 = Date.now();
-    // Fetch commodity IDs from Supabase
+    // Fetch commodity IDs — single fast query
     const commRes = await fetch(`${SUPABASE_URL}/rest/v1/commodities?select=id,name`, {
       headers: {
         'apikey': SUPABASE_SERVICE_ROLE_KEY,
@@ -86,9 +80,9 @@ exports.handler = async (event) => {
     const commMap = {};
     commodities.forEach(c => { commMap[c.name.toLowerCase()] = c.id; });
 
-    // Parse rows — only store primary grade (DC type preferred over SC)
+    // Parse rows
     const rows = [];
-    const seen = new Set(); // deduplicate site+commodity
+    const seen = new Set();
 
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
@@ -103,16 +97,14 @@ exports.handler = async (event) => {
 
       if (!site || !grade || isNaN(price) || !commodity) continue;
 
-      // Only store primary grade per commodity
       const primaryGrade = PRIMARY_GRADES[commodity];
       if (!primaryGrade || grade !== primaryGrade) continue;
 
-      // Prefer DC (direct cash) over SC (sustainable cash)
       const siteName = SITE_NAMES[site] || site;
-      const key = `${siteName}:${commodity}`;
+      const key = siteName + ':' + commodity;
+
       if (seen.has(key) && type !== 'DC') continue;
       if (seen.has(key)) {
-        // Replace if this is DC and previous was SC
         const existingIdx = rows.findIndex(r => r.region === siteName && r.commodity === commodity);
         if (existingIdx >= 0 && type === 'DC') rows.splice(existingIdx, 1);
         else continue;
@@ -129,42 +121,16 @@ exports.handler = async (event) => {
         price_per_unit: price,
         unit: 't',
         source: 'LDC Grains SE',
-        region: SITE_NAMES[site] || site,
+        region: siteName,
         grade,
       });
     }
 
     if (!rows.length) {
-      return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'No matching grades found in CSV', date }) };
+      return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'No matching grades found', date }) };
     }
 
-    // Fetch farm settings to filter to only relevant sites
-    const farmsRes = await fetch(`${SUPABASE_URL}/rest/v1/farms?select=settings`, {
-      headers: {
-        'apikey': SUPABASE_SERVICE_ROLE_KEY,
-        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      }
-    });
-    const farms = await farmsRes.json();
-    const configuredSites = new Set();
-    farms.forEach(f => {
-      const grainSites = f.settings?.grainSites || {};
-      Object.values(grainSites).forEach(site => { if (site) configuredSites.add(site); });
-    });
-
-    // If farms have configured sites, only store those. Otherwise store all.
-    const filteredRows = configuredSites.size > 0
-      ? rows.filter(r => configuredSites.has(r.region))
-      : rows;
-
-    console.log('Filtered rows:', filteredRows.length, '| Sites configured:', [...configuredSites]);
-    console.log('Sites configured:', [...configuredSites], 'Rows before filter:', rows.length, 'After:', filteredRows.length);
-
-    if (!filteredRows.length) {
-      return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'No rows matching configured farm sites', configured_sites: [...configuredSites], date }) };
-    }
-
-    // Upsert into market_prices
+    // Single bulk upsert
     const upsertRes = await fetch(`${SUPABASE_URL}/rest/v1/market_prices`, {
       method: 'POST',
       headers: {
@@ -173,26 +139,24 @@ exports.handler = async (event) => {
         'Content-Type': 'application/json',
         'Prefer': 'resolution=merge-duplicates return=minimal',
       },
-      body: JSON.stringify(filteredRows),
+      body: JSON.stringify(rows),
     });
 
     if (!upsertRes.ok) {
       const err = await upsertRes.text();
-      throw new Error(`Supabase upsert error: ${err}`);
+      throw new Error('Supabase error: ' + err);
     }
 
-    console.log('Total processing time:', Date.now() - _t0, 'ms');
-    console.log(`Grain prices updated: ${date} — ${rows.length} site/commodity rows`);
-
+    console.log('Grain prices updated:', date, rows.length, 'rows');
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
         date,
-        rows_inserted: filteredRows.length,
-        commodities_found: [...new Set(filteredRows.map(r => r.commodity))],
-        sites_found: [...new Set(filteredRows.map(r => r.region))].length,
+        rows_inserted: rows.length,
+        commodities: [...new Set(rows.map(r => r.commodity))],
+        sites: [...new Set(rows.map(r => r.region))].length,
       }),
     };
 
