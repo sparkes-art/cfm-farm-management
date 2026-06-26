@@ -263,21 +263,6 @@ function _buildCard(com, allForecasts, allHarvests, season) {
             <p style="font-size:10px;color:var(--hint);margin:0 0 2px">Budget</p>
             <p style="font-size:20px;font-weight:600;color:var(--ink);margin:0;line-height:1.1">${totalBudgetProd ? formatNumber(totalBudgetProd, 0) : '—'} <span style="font-size:11px;font-weight:400;color:var(--hint)">${unit}</span></p>
           </div>
-          <!-- Sales vs production bar -->
-          ${totalPaidQty > 0 || denominator > 0 ? `
-          <div style="border-top:1px solid var(--border-light);padding-top:10px;margin-top:4px">
-            <p style="font-size:10px;color:var(--hint);margin:0 0 6px">Sales vs ${isHarvested ? 'harvest' : latestForecast ? 'forecast' : 'budget'}</p>
-            <div style="display:flex;align-items:center;gap:8px">
-              <div style="flex:1;height:6px;background:var(--border-light);border-radius:3px;overflow:hidden">
-                <div style="height:100%;width:${Math.min(100, denominator ? Math.round((totalPaidQty/denominator)*100) : 0)}%;background:var(--green);border-radius:3px;transition:width .3s"></div>
-              </div>
-              <span style="font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--green);font-weight:600">${formatNumber(totalPaidQty,0)} ${unit}</span>
-              <span style="font-size:10px;color:var(--hint)">${denominator ? Math.round((totalPaidQty/denominator)*100) + '%' : ''}</span>
-            </div>
-            <p style="font-size:10px;color:var(--hint);margin-top:3px">of ${formatNumber(denominator,0)} ${unit} ${isHarvested ? 'harvested' : latestForecast ? 'forecast' : 'budgeted'}</p>
-          </div>
-          ` : ''}
-
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid var(--border-light);padding-top:10px">
             <div>
               <p style="font-size:10px;color:var(--hint);margin:0 0 2px">Forecast</p>
@@ -296,6 +281,21 @@ function _buildCard(com, allForecasts, allHarvests, season) {
               }
             </div>
           </div>
+
+          <!-- Sales vs production bar -->
+          ${totalPaidQty > 0 ? `
+          <div style="border-top:1px solid var(--border-light);padding-top:10px;margin-top:4px">
+            <p style="font-size:10px;color:var(--hint);margin:0 0 6px">Sold vs ${isHarvested ? 'harvest' : latestForecast ? 'forecast' : 'budget'}</p>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="flex:1;height:6px;background:var(--border-light);border-radius:3px;overflow:hidden">
+                <div style="height:100%;width:${Math.min(100, denominator ? Math.round((totalPaidQty/denominator)*100) : 0)}%;background:var(--green);border-radius:3px;transition:width .3s"></div>
+              </div>
+              <span style="font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--green);font-weight:600">${formatNumber(totalPaidQty,0)} ${unit}</span>
+              <span style="font-size:10px;color:var(--hint)">${denominator ? Math.round((totalPaidQty/denominator)*100) + '%' : ''}</span>
+            </div>
+            <p style="font-size:10px;color:var(--hint);margin-top:3px">of ${formatNumber(denominator,0)} ${unit} ${isHarvested ? 'harvested' : latestForecast ? 'forecast' : 'budgeted'}</p>
+          </div>
+          ` : ''}
         </div>
 
         <!-- Col 3: Prices -->

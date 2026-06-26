@@ -147,7 +147,10 @@ function _renderTable(container) {
           return `
             <tr style="cursor:pointer" data-id="${inv.id}">
               <td class="muted">${formatDate(inv.invoice_date)}</td>
-              <td class="muted">${inv.season || '—'}</td>
+              <td class="muted">${(() => {
+                const seasons = [...new Set((inv.line_items||[]).map(l=>l.season).filter(Boolean))];
+                return seasons.length ? seasons.join(', ') : (inv.season || '—');
+              })()}</td>
               <td><span class="badge ${inv.sale_type === 'contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'contract' ? 'Contract' : 'Cash'}</span></td>
               <td><strong>${inv.buyer || '—'}</strong></td>
               <td class="muted text-sm">${commodities}</td>
