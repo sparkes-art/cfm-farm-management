@@ -4,6 +4,7 @@
 import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
 import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js';
+import { getCommodities, loadCommodities } from '../../js/commodities.js';
 
 let _invoices = [];
 let _contracts = [];
@@ -12,6 +13,7 @@ let _unsub = null;
 export async function mountInvoices(container) {
   const farm = getActiveFarm();
   if (!farm) return;
+  await loadCommodities();
 
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
@@ -299,14 +301,10 @@ export function openInvoiceForm(container, existing = null) {
       </div>
 
       <!-- Header fields -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Date</label>
           <input class="form-input" id="f-date" type="date" value="${existing?.invoice_date || new Date().toISOString().slice(0,10)}">
-        </div>
-        <div class="form-group" style="margin:0">
-          <label class="form-label">Season</label>
-          <input class="form-input" id="f-season" type="text" value="${existing?.season || currentSeason()}" placeholder="2026-27">
         </div>
         <div class="form-group" style="margin:0">
           <label class="form-label">Buyer</label>
@@ -379,7 +377,7 @@ export function openInvoiceForm(container, existing = null) {
                 <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light)">Description</th>
                 <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:65px">Type</th>
                 <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Rate / amount</th>
-                <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Value</th>
+                <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Deduction value ($)</th>
                 <th style="border-bottom:1px solid var(--border-light);width:30px"></th>
               </tr>
             </thead>
@@ -507,19 +505,15 @@ export function openInvoiceForm(container, existing = null) {
     const tdStyle = 'padding:4px 6px;vertical-align:middle;';
     const inStyle = 'border:0.5px solid transparent;border-radius:4px;padding:4px 6px;background:transparent;color:var(--ink);font-size:var(--text-sm);width:100%';
     const numStyle = inStyle + ';text-align:right;font-family:var(--font-data)';
+    const commOptions = '<option value="">— select —</option>' + getCommodities().map(c => `<option value="${c.name}" ${c.name===(data.commodity||'')?'selected':''}>${c.name}</option>`).join('');
     tr.innerHTML = `
-      <td style="${tdStyle}min-width:110px"><select class="f-line-comm" style="${inStyle}">
-        <option>Cotton Lint</option><option>Cottonseed</option><option>Wheat</option><option>Barley</option><option>Canola</option><option>Faba Beans</option><option>Lentils</option><option>Livestock</option><option>Hay</option><option>Other</option>
-      </select></td>
+      <td style="${tdStyle}min-width:110px"><select class="f-line-comm" style="${inStyle}">${commOptions}</select></td>
       <td style="${tdStyle}min-width:85px"><input type="text" class="f-line-docket" style="${inStyle}" placeholder="D-1042" value="${data.docket||''}"></td>
-      <td style="${tdStyle}min-width:70px"><select class="f-line-year" style="${inStyle}">
-        <option>2024-25</option><option selected>2025-26</option><option>2026-27</option>
-      </select></td>
       <td style="${tdStyle}min-width:65px"><input type="number" class="f-line-qty" style="${numStyle}" placeholder="0" value="${data.qty||''}" step="0.001"></td>
       <td style="${tdStyle}min-width:50px"><select class="f-line-unit" style="${inStyle}">
         ${['bale','t','kg','head','each'].map(u=>`<option${u===(data.unit||'t')?' selected':''}>${u}</option>`).join('')}
       </select></td>
-      <td style="${tdStyle}min-width:80px"><input type="number" class="f-line-price" style="${numStyle}" placeholder="0.0000" value="${data.price||''}" step="0.0001"></td>
+      <td style="${tdStyle}min-width:80px"><input type="number" class="f-line-price" style="${numStyle}" placeholder="0.00" value="${data.price||''}" step="0.01"></td>
       <td class="f-qa-cell" style="${tdStyle}min-width:90px;${saleType!=='contract'?'display:none':''}"><input type="number" class="f-line-qa" style="${numStyle};color:var(--red)" placeholder="0.00" value="${data.quality_adj||''}" step="0.01"></td>
       <td style="${tdStyle}min-width:90px"><input type="number" class="f-line-total" style="${numStyle};background:var(--blue-light);color:var(--blue-text)" placeholder="0.00" value="${data.total||''}" step="0.01"></td>
       <td class="f-eff-cell" style="${tdStyle}min-width:90px;${saleType!=='contract'?'display:none':''}"><input type="text" class="f-line-eff" readonly style="${numStyle};background:var(--page-bg);color:var(--blue);border:none;cursor:default" value="${data.eff||''}"></td>
@@ -549,12 +543,17 @@ export function openInvoiceForm(container, existing = null) {
       updateEff(); recalc();
     });
 
+    totalInp.addEventListener('blur', () => {
+      const v = parseFloat(totalInp.value);
+      if (!isNaN(v)) totalInp.value = v.toFixed(2);
+    });
+
     totalInp.addEventListener('input', () => {
       lastEdited[id] = 'total';
       const qty = parseFloat(qtyInp.value)||0;
       const total = parseFloat(totalInp.value)||0;
       const qa = parseFloat(qaInp?.value)||0;
-      if (qty) priceInp.value = ((total - qa) / qty).toFixed(4);
+      if (qty) priceInp.value = ((total - qa) / qty).toFixed(2);
       updateEff(); recalc();
     });
 
@@ -566,7 +565,7 @@ export function openInvoiceForm(container, existing = null) {
         if (qty) totalInp.value = (qty * price + qa).toFixed(2);
       } else {
         const total = parseFloat(totalInp.value)||0;
-        if (qty) priceInp.value = ((total - qa) / qty).toFixed(4);
+        if (qty) priceInp.value = ((total - qa) / qty).toFixed(2);
       }
       updateEff(); recalc();
     });
@@ -603,13 +602,33 @@ export function openInvoiceForm(container, existing = null) {
     tr.innerHTML = `
       <td style="${tdStyle}"><input type="text" class="f-ded-desc" style="${inStyle}" placeholder="e.g. Selling commission" value="${data.description||''}"></td>
       <td style="${tdStyle}min-width:65px"><select class="f-ded-type" style="${inStyle}"><option value="pct" ${data.type==='pct'?'selected':''}>%</option><option value="flat" ${data.type==='flat'?'selected':''}>$</option></select></td>
-      <td style="${tdStyle}min-width:90px"><input type="number" class="f-ded-rate" style="${inStyle};text-align:right;font-family:var(--font-data)" placeholder="0" value="${data.rate||''}" step="0.01"></td>
-      <td style="${tdStyle}min-width:90px;text-align:right;font-family:var(--font-data);font-size:12px;color:var(--red)" class="f-ded-val">${data.value ? '-'+formatCurrency(data.value,2) : '—'}</td>
+      <td style="${tdStyle}min-width:80px"><input type="number" class="f-ded-rate" style="${inStyle};text-align:right;font-family:var(--font-data)" placeholder="0" value="${data.rate||''}" step="0.01"></td>
+      <td style="${tdStyle}min-width:90px"><input type="number" class="f-ded-value" style="${inStyle};text-align:right;font-family:var(--font-data);color:var(--red)" placeholder="0.00" value="${data.value||''}" step="0.01"></td>
       <td style="padding:4px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:16px;padding:2px 4px" class="del-ded">✕</button></td>
     `;
     tbody.appendChild(tr);
-    tr.querySelector('.f-ded-rate').addEventListener('input', recalc);
-    tr.querySelector('.f-ded-type').addEventListener('change', recalc);
+
+    const dedType = tr.querySelector('.f-ded-type');
+    const dedRate = tr.querySelector('.f-ded-rate');
+    const dedValue = tr.querySelector('.f-ded-value');
+
+    dedRate.addEventListener('input', () => {
+      const gross = [...modal.querySelectorAll('#f-lines-body tr')].reduce((s,r) => s + (parseFloat(r.querySelector('.f-line-total')?.value)||0), 0);
+      const type = dedType.value;
+      const rate = parseFloat(dedRate.value)||0;
+      if (type === 'pct' && gross) dedValue.value = (gross * rate / 100).toFixed(2);
+      recalc();
+    });
+
+    dedValue.addEventListener('input', () => {
+      const gross = [...modal.querySelectorAll('#f-lines-body tr')].reduce((s,r) => s + (parseFloat(r.querySelector('.f-line-total')?.value)||0), 0);
+      const type = dedType.value;
+      const value = parseFloat(dedValue.value)||0;
+      if (type === 'pct' && gross) dedRate.value = (value / gross * 100).toFixed(4);
+      recalc();
+    });
+
+    dedType.addEventListener('change', recalc);
     tr.querySelector('.del-ded').addEventListener('click', () => { tr.remove(); recalc(); });
   }
 
@@ -628,12 +647,8 @@ export function openInvoiceForm(container, existing = null) {
     const grossPlusQA = gross + totalQA;
     let totalDed = 0;
     modal.querySelectorAll('#f-ded-body tr').forEach(tr => {
-      const type = tr.querySelector('.f-ded-type')?.value;
-      const rate = parseFloat(tr.querySelector('.f-ded-rate')?.value)||0;
-      const val = type==='pct' ? grossPlusQA * rate / 100 : rate;
+      const val = parseFloat(tr.querySelector('.f-ded-value')?.value)||0;
       totalDed += val;
-      const valEl = tr.querySelector('.f-ded-val');
-      if (valEl) valEl.textContent = val ? '-' + formatCurrency(val, 2) : '—';
     });
 
     const net = grossPlusQA - totalDed;
@@ -706,7 +721,7 @@ export function openInvoiceForm(container, existing = null) {
       const lineRows = [...modal.querySelectorAll('#f-lines-body tr')].map(tr => ({
         commodity: tr.querySelector('.f-line-comm')?.value || '',
         docket: tr.querySelector('.f-line-docket')?.value || '',
-        crop_year: tr.querySelector('.f-line-year')?.value || '',
+
         qty: parseFloat(tr.querySelector('.f-line-qty')?.value)||0,
         unit: tr.querySelector('.f-line-unit')?.value || 't',
         price: parseFloat(tr.querySelector('.f-line-price')?.value)||0,
@@ -719,7 +734,7 @@ export function openInvoiceForm(container, existing = null) {
         const type = tr.querySelector('.f-ded-type')?.value;
         const rate = parseFloat(tr.querySelector('.f-ded-rate')?.value)||0;
         const grossPlusQA = lineRows.reduce((s,l) => s + (l.total||0), 0);
-        const value = type === 'pct' ? grossPlusQA * rate / 100 : rate;
+        const value = parseFloat(tr.querySelector('.f-ded-value')?.value)||0;
         return { description: tr.querySelector('.f-ded-desc')?.value || '', type, rate, value };
       }).filter(d => d.rate > 0);
 
@@ -738,7 +753,7 @@ export function openInvoiceForm(container, existing = null) {
       const row = {
         farm_id: farm.id,
         invoice_date: modal.querySelector('#f-date')?.value,
-        season: modal.querySelector('#f-season')?.value || currentSeason(),
+        season: existing?.season || currentSeason(),
         buyer: modal.querySelector('#f-buyer')?.value?.trim() || '',
         sale_type: saleType,
         forward_contract_id: saleType === 'contract' ? contractId : null,
