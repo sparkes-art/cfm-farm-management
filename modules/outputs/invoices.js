@@ -61,7 +61,13 @@ async function _loadData() {
   // Populate season filter
   const sel = qs('#inv-filter-season');
   if (sel) {
-    const seasons = [...new Set(_invoices.map(i => i.season).filter(Boolean))].sort().reverse();
+    // Seasons from line items since season is stored at line item level
+  const allSeasons = new Set();
+  _invoices.forEach(i => {
+    if (i.season) allSeasons.add(i.season);
+    (i.line_items || []).forEach(l => { if (l.season) allSeasons.add(l.season); });
+  });
+  const seasons = [...allSeasons].sort().reverse();
     while (sel.options.length > 1) sel.remove(1);
     seasons.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
   }
@@ -70,7 +76,13 @@ async function _loadData() {
 function _filtered() {
   const season = qs('#inv-filter-season')?.value || '';
   const status = qs('#inv-filter-status')?.value || '';
-  return _invoices.filter(i => (!season || i.season === season) && (!status || i.status === status));
+  return _invoices.filter(i => {
+    const statusMatch = !status || i.status === status;
+    if (!season) return statusMatch;
+    // Check invoice season or any line item season
+    const seasonMatch = i.season === season || (i.line_items || []).some(l => l.season === season);
+    return seasonMatch && statusMatch;
+  });
 }
 
 function _subscribeRealtime() {
@@ -757,7 +769,7 @@ export function openInvoiceForm(container, existing = null) {
       const row = {
         farm_id: farm.id,
         invoice_date: modal.querySelector('#f-date')?.value,
-        season: existing?.season || currentSeason(),
+        season: null, // Season is at line item level
         buyer: modal.querySelector('#f-buyer')?.value?.trim() || '',
         sale_type: saleType,
         forward_contract_id: saleType === 'contract' ? contractId : null,

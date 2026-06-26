@@ -14,7 +14,7 @@ export async function buildCommodityCards(season) {
   // Load all data in parallel
   const [contracts, invoices, budgets, forecasts, harvests] = await Promise.all([
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
-    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=invoice_date.desc').catch(() => dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc&limit=100')),
+    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
     dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.asc'),
     dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
@@ -50,21 +50,23 @@ export async function buildCommodityCards(season) {
     if (key) commodityMap[key].budgets.push(b);
   });
   invoices.forEach(i => {
-    // New invoice format: match by line item commodity names
     const lines = i.line_items || [];
     if (lines.length) {
-      // Add invoice to each unique commodity in line items
+      // Filter lines to those matching the selected season
+      const seasonLines = lines.filter(l => !l.season || l.season === season);
       const seen = new Set();
-      lines.forEach(l => {
+      seasonLines.forEach(l => {
         if (!l.commodity) return;
         const k = addCommodity(null, l.commodity);
         if (k && !seen.has(k)) {
-          commodityMap[k].invoices.push(i);
+          // Store a season-filtered version of the invoice
+          const filteredInvoice = { ...i, line_items: seasonLines };
+          commodityMap[k].invoices.push(filteredInvoice);
           seen.add(k);
         }
       });
-    } else if (i.commodity_type) {
-      // Old format fallback
+    } else if (i.commodity_type && (!i.season || i.season === season)) {
+      // Old format fallback — filter by invoice season
       const key = addCommodity(null, i.commodity_type);
       if (key) commodityMap[key].invoices.push(i);
     }
