@@ -1,0 +1,781 @@
+// modules/outputs/invoices.js
+// Full invoice management — contract sales, cash sales, line items, deductions
+
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
+import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
+import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js';
+
+let _invoices = [];
+let _contracts = [];
+let _unsub = null;
+
+export async function mountInvoices(container) {
+  const farm = getActiveFarm();
+  if (!farm) return;
+
+  container.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="display:flex;gap:8px">
+        <select id="inv-filter-season" class="form-select" style="width:120px">
+          <option value="">All seasons</option>
+        </select>
+        <select id="inv-filter-status" class="form-select" style="width:130px">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="complete">Complete</option>
+        </select>
+      </div>
+      ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New invoice</button>' : ''}
+    </div>
+
+    <div class="card" id="inv-table-wrap">
+      <div class="empty-state"><span class="loading-spinner"></span></div>
+    </div>
+  `;
+
+  await _loadData();
+  _renderTable(container);
+  _subscribeRealtime();
+
+  qs('#btn-new-invoice', container)?.addEventListener('click', () => openInvoiceForm(container));
+  ['#inv-filter-season', '#inv-filter-status'].forEach(sel => {
+    qs(sel, container)?.addEventListener('change', () => _renderTable(container));
+  });
+}
+
+export function unmountInvoices() {
+  if (_unsub) { _unsub(); _unsub = null; }
+  _invoices = [];
+  _contracts = [];
+}
+
+async function _loadData() {
+  const farm = getActiveFarm();
+  if (!farm) return;
+  [_invoices, _contracts] = await Promise.all([
+    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
+    dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&select=*&order=sale_date.desc'),
+  ]);
+  // Populate season filter
+  const sel = qs('#inv-filter-season');
+  if (sel) {
+    const seasons = [...new Set(_invoices.map(i => i.season).filter(Boolean))].sort().reverse();
+    while (sel.options.length > 1) sel.remove(1);
+    seasons.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
+  }
+}
+
+function _filtered() {
+  const season = qs('#inv-filter-season')?.value || '';
+  const status = qs('#inv-filter-status')?.value || '';
+  return _invoices.filter(i => (!season || i.season === season) && (!status || i.status === status));
+}
+
+function _subscribeRealtime() {
+  const farm = getActiveFarm();
+  if (!farm) return;
+  _unsub = subscribeTable('invoices', farm.id, async (event, payload) => {
+    if (event === 'INSERT') { if (!_invoices.find(i => i.id === payload.record.id)) _invoices.unshift(payload.record); }
+    else if (event === 'UPDATE') { const idx = _invoices.findIndex(i => i.id === payload.record.id); if (idx >= 0) _invoices[idx] = payload.record; }
+    else if (event === 'DELETE') { _invoices = _invoices.filter(i => i.id !== payload.old_record.id); }
+    _renderTable(document.getElementById('inv-table-wrap')?.closest('[id]'));
+  });
+}
+
+function _renderTable(container) {
+  const wrap = qs('#inv-table-wrap', container || document);
+  if (!wrap) return;
+  const rows = _filtered();
+
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">📄</div><p>No invoices yet.</p><p>Click "＋ New invoice" to record your first sale.</p></div>';
+    return;
+  }
+
+  const totalNet = rows.reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
+  const totalPending = rows.filter(i => i.status === 'pending').reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
+  const totalComplete = rows.filter(i => i.status === 'complete').reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
+
+  wrap.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-bottom:1px solid var(--border-light)">
+      <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total invoiced</div>
+        <div style="font-size:20px;font-weight:600;color:var(--ink)">${formatCurrency(totalNet, 0)}</div>
+      </div>
+      <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Pending</div>
+        <div style="font-size:20px;font-weight:600;color:var(--amber)">${formatCurrency(totalPending, 0)}</div>
+      </div>
+      <div style="padding:12px 16px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Complete</div>
+        <div style="font-size:20px;font-weight:600;color:var(--green)">${formatCurrency(totalComplete, 0)}</div>
+      </div>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Season</th>
+          <th>Type</th>
+          <th>Buyer</th>
+          <th>Commodities</th>
+          <th class="num">Gross</th>
+          <th class="num">Net amount</th>
+          <th>Xero ref</th>
+          <th>Status</th>
+          ${canWrite() ? '<th></th>' : ''}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(inv => {
+          const lines = inv.line_items || [];
+          const commodities = [...new Set(lines.map(l => l.commodity))].join(', ') || inv.commodity_type || '—';
+          return `
+            <tr style="cursor:pointer" data-id="${inv.id}">
+              <td class="muted">${formatDate(inv.invoice_date)}</td>
+              <td class="muted">${inv.season || '—'}</td>
+              <td><span class="badge ${inv.sale_type === 'contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'contract' ? 'Contract' : 'Cash'}</span></td>
+              <td><strong>${inv.buyer || '—'}</strong></td>
+              <td class="muted text-sm">${commodities}</td>
+              <td class="num">${formatCurrency(inv.gross_amount, 0)}</td>
+              <td class="num"><strong>${formatCurrency(inv.net_amount, 0)}</strong></td>
+              <td class="muted text-sm">${inv.xero_invoice_number || '—'}</td>
+              <td>
+                <span class="badge ${inv.status === 'complete' ? 'badge-paid' : 'badge-amber'}" style="${inv.status !== 'complete' ? 'background:var(--amber-light);color:var(--amber-text)' : ''}">
+                  ${inv.status === 'complete' ? 'Complete' : 'Pending'}
+                </span>
+              </td>
+              ${canWrite() ? `
+                <td>
+                  <div class="flex gap-2">
+                    <button class="btn btn-ghost btn-sm edit-inv-btn" data-id="${inv.id}">Edit</button>
+                    ${inv.status === 'pending' && !inv.xero_invoice_number ? `<button class="btn btn-ghost btn-sm xero-btn" data-id="${inv.id}" style="color:var(--blue)">+ Xero ref</button>` : ''}
+                  </div>
+                </td>
+              ` : ''}
+            </tr>
+          `;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+
+  // Row click → detail view
+  wrap.querySelectorAll('tbody tr').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      const inv = _invoices.find(i => i.id === row.dataset.id);
+      if (inv) _openDetail(inv, container);
+    });
+  });
+
+  // Edit button
+  wrap.querySelectorAll('.edit-inv-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const inv = _invoices.find(i => i.id === btn.dataset.id);
+      if (inv) openInvoiceForm(container, inv);
+    });
+  });
+
+  // Xero ref button
+  wrap.querySelectorAll('.xero-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const inv = _invoices.find(i => i.id === btn.dataset.id);
+      if (inv) _xeroRefModal(inv, container);
+    });
+  });
+}
+
+function _openDetail(inv, container) {
+  const lines = inv.line_items || [];
+  const deductions = inv.deductions || [];
+  const contract = inv.forward_contract_id ? _contracts.find(c => c.id === inv.forward_contract_id) : null;
+
+  openModal({
+    title: (inv.sale_type === 'contract' ? 'Contract sale' : 'Cash sale') + ' — ' + (inv.buyer || ''),
+    confirmLabel: canWrite() ? 'Edit' : null,
+    confirmClass: 'btn-secondary',
+    onConfirm: canWrite() ? async () => { openInvoiceForm(container, inv); } : null,
+    bodyHTML: `
+      <div class="form-row" style="margin-bottom:12px">
+        <div><p class="text-xs text-muted">Date</p><p>${formatDate(inv.invoice_date)}</p></div>
+        <div><p class="text-xs text-muted">Season</p><p>${inv.season || '—'}</p></div>
+        <div><p class="text-xs text-muted">Buyer</p><p><strong>${inv.buyer || '—'}</strong></p></div>
+        <div><p class="text-xs text-muted">GST</p><p>${inv.gst_type === 'inc' ? 'Inc-GST' : 'Ex-GST'}</p></div>
+      </div>
+      ${contract ? `<div style="background:var(--blue-light);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:12px;font-size:var(--text-sm)">
+        <strong>Contract:</strong> ${contract.contract_number || 'Contract'} — ${contract.commodity || ''} @ ${formatCurrency(contract.price_per_unit, 2)}/${contract.unit || ''}
+      </div>` : ''}
+      <table class="data-table" style="margin-bottom:12px">
+        <thead><tr><th>Commodity</th><th>Docket</th><th class="num">Qty</th><th>Unit</th><th class="num">Price/unit</th><th class="num">Quality adj</th><th class="num">Line total</th></tr></thead>
+        <tbody>
+          ${lines.map(l => `<tr>
+            <td>${l.commodity || '—'}</td>
+            <td class="muted">${l.docket || '—'}</td>
+            <td class="num">${formatNumber(l.qty, 0)}</td>
+            <td class="muted">${l.unit || '—'}</td>
+            <td class="num">${formatCurrency(l.price, 4)}</td>
+            <td class="num">${l.quality_adj ? formatCurrency(l.quality_adj, 2) : '—'}</td>
+            <td class="num"><strong>${formatCurrency(l.total, 2)}</strong></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      ${deductions.length ? `
+        <table class="data-table" style="margin-bottom:12px">
+          <thead><tr><th>Deduction</th><th>Type</th><th class="num">Rate</th><th class="num">Value</th></tr></thead>
+          <tbody>${deductions.map(d => `<tr><td>${d.description}</td><td>${d.type === 'pct' ? '%' : '$'}</td><td class="num">${d.rate}${d.type === 'pct' ? '%' : ''}</td><td class="num" style="color:var(--red)">-${formatCurrency(d.value, 2)}</td></tr>`).join('')}</tbody>
+        </table>
+      ` : ''}
+      <div style="display:flex;flex-direction:column;gap:4px;background:var(--page-bg);border-radius:var(--radius-sm);padding:10px 12px">
+        <div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">Gross</span><span>${formatCurrency(inv.gross_amount, 2)}</span></div>
+        ${inv.total_quality_adj ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">Quality adj</span><span style="color:${inv.total_quality_adj < 0 ? 'var(--red)' : 'var(--green)'}">${formatCurrency(inv.total_quality_adj, 2)}</span></div>` : ''}
+        ${inv.total_deductions ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">Deductions</span><span style="color:var(--red)">-${formatCurrency(inv.total_deductions, 2)}</span></div>` : ''}
+        <div style="display:flex;justify-content:space-between;font-weight:600;border-top:1px solid var(--border-light);padding-top:6px;margin-top:4px"><span>Net amount</span><span style="color:var(--blue)">${formatCurrency(inv.net_amount, 2)}</span></div>
+        ${inv.gst_amount ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">GST</span><span>${formatCurrency(inv.gst_amount, 2)}</span></div>` : ''}
+        <div style="display:flex;justify-content:space-between;font-weight:600;font-size:var(--text-md)"><span>Total payable</span><span style="color:var(--blue)">${formatCurrency(inv.total_payable, 2)}</span></div>
+      </div>
+      ${inv.notes ? `<div style="margin-top:12px"><p class="text-xs text-muted" style="margin-bottom:4px">Notes</p><p style="font-size:var(--text-sm)">${inv.notes}</p></div>` : ''}
+      ${inv.xero_invoice_number ? `<div style="margin-top:8px;font-size:var(--text-sm);color:var(--muted)">Xero ref: <strong>${inv.xero_invoice_number}</strong></div>` : ''}
+    `,
+  });
+}
+
+function _xeroRefModal(inv, container) {
+  openModal({
+    title: 'Enter Xero invoice number',
+    confirmLabel: 'Save & mark complete',
+    bodyHTML: `
+      <p style="font-size:var(--text-sm);color:var(--muted);margin-bottom:12px">Once you enter the Xero invoice number the sale will be marked as complete.</p>
+      <div class="form-group">
+        <label class="form-label">Xero invoice number</label>
+        <input class="form-input" id="xero-ref" type="text" placeholder="e.g. INV-0042" autofocus>
+      </div>
+    `,
+    onConfirm: async (modal) => {
+      const ref = qs('#xero-ref', modal)?.value?.trim();
+      if (!ref) throw new Error('Please enter the Xero invoice number');
+      await dbUpdate('invoices', inv.id, { xero_invoice_number: ref, status: 'complete' });
+      const idx = _invoices.findIndex(i => i.id === inv.id);
+      if (idx >= 0) { _invoices[idx].xero_invoice_number = ref; _invoices[idx].status = 'complete'; }
+      toast('Invoice marked complete', 'success');
+      _renderTable(container);
+    },
+  });
+}
+
+// ── Invoice form ──────────────────────────────────────────────
+export function openInvoiceForm(container, existing = null) {
+  const farm = getActiveFarm();
+  const isEdit = !!existing;
+  let saleType = existing?.sale_type || 'contract';
+  let lines = existing?.line_items ? JSON.parse(JSON.stringify(existing.line_items)) : [];
+  let deductions = existing?.deductions ? JSON.parse(JSON.stringify(existing.deductions)) : [];
+  let lastEdited = {}; // per line: 'price' or 'total'
+  let attachments = [];
+
+  const formEl = document.createElement('div');
+  formEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:500;overflow-y:auto;padding:20px';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--white);border-radius:var(--radius-xl);max-width:900px;margin:0 auto;display:flex;flex-direction:column;overflow:hidden';
+
+  modal.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border-light);background:#fafbfc">
+      <h2 style="font-size:var(--text-md);font-weight:600">${isEdit ? 'Edit invoice' : 'New invoice'}</h2>
+      <button id="inv-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--hint);padding:2px 6px;border-radius:4px">✕</button>
+    </div>
+    <div style="padding:20px;overflow-y:auto;flex:1" id="inv-form-body">
+
+      <!-- Sale type -->
+      <div style="display:flex;gap:10px;margin-bottom:16px">
+        <div id="inv-opt-contract" style="flex:1;border:2px solid var(--blue);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer;background:var(--blue-light)">
+          <p style="font-size:var(--text-sm);font-weight:600;color:var(--blue-text)">Contract sale</p>
+          <p style="font-size:var(--text-xs);color:var(--blue);margin-top:2px">Against a forward contract</p>
+        </div>
+        <div id="inv-opt-cash" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer">
+          <p style="font-size:var(--text-sm);font-weight:600;color:var(--ink-mid)">Cash sale</p>
+          <p style="font-size:var(--text-xs);color:var(--muted);margin-top:2px">Price set at time of sale</p>
+        </div>
+      </div>
+
+      <!-- Header fields -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Date</label>
+          <input class="form-input" id="f-date" type="date" value="${existing?.invoice_date || new Date().toISOString().slice(0,10)}">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Season</label>
+          <input class="form-input" id="f-season" type="text" value="${existing?.season || currentSeason()}" placeholder="2026-27">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Buyer</label>
+          <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer || ''}" placeholder="Buyer name">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">GST</label>
+          <select class="form-select" id="f-gst">
+            <option value="ex" ${(existing?.gst_type||'ex')==='ex'?'selected':''}>Ex-GST</option>
+            <option value="inc" ${existing?.gst_type==='inc'?'selected':''}>Inc-GST (10%)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Contract selector -->
+      <div id="f-contract-section" style="margin-bottom:16px">
+        <div class="form-group" style="margin-bottom:10px">
+          <label class="form-label">Forward contract</label>
+          <select class="form-select" id="f-contract" style="max-width:420px">
+            <option value="">— select a contract —</option>
+            ${_contracts.map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" ${existing?.forward_contract_id===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}</option>`).join('')}
+          </select>
+        </div>
+        <div id="f-contract-summary" style="display:none;grid-template-columns:repeat(4,1fr);gap:10px;background:var(--blue-light);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px">
+          <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Contract qty</p><p id="cs-qty" style="font-weight:600;color:var(--blue-text)">—</p></div>
+          <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Already invoiced</p><p id="cs-invoiced" style="font-weight:600;color:var(--blue-text)">—</p></div>
+          <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Remaining</p><p id="cs-remaining" style="font-weight:600;color:var(--blue)">—</p></div>
+          <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Avg price to date</p><p id="cs-avg" style="font-weight:600;color:var(--blue-text)">—</p></div>
+        </div>
+      </div>
+
+      <!-- Line items -->
+      <div style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <p style="font-size:var(--text-sm);font-weight:600">Line items</p>
+          <button class="btn btn-secondary btn-sm" id="f-add-line">＋ Add line</button>
+        </div>
+        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-md)">
+          <table style="width:100%;border-collapse:collapse;min-width:700px" id="f-lines-table">
+            <thead style="background:#fafbfc">
+              <tr>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:110px">Commodity</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:85px">Docket / ID</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:70px">Crop year</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:65px">Qty</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:50px">Unit</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:80px">Price/unit</th>
+                <th id="th-qa" style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Quality adj ($)</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Line total ($)</th>
+                <th id="th-eff" style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Eff. $/unit</th>
+                <th style="border-bottom:1px solid var(--border-light);width:30px"></th>
+              </tr>
+            </thead>
+            <tbody id="f-lines-body"></tbody>
+          </table>
+          <p style="font-size:11px;color:var(--hint);padding:6px 10px">Enter price/unit OR line total — the other updates automatically</p>
+        </div>
+      </div>
+
+      <!-- Deductions -->
+      <div style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <p style="font-size:var(--text-sm);font-weight:600">Deductions</p>
+          <button class="btn btn-secondary btn-sm" id="f-add-ded">＋ Add deduction</button>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden">
+          <table style="width:100%;border-collapse:collapse" id="f-ded-table">
+            <thead style="background:#fafbfc">
+              <tr>
+                <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light)">Description</th>
+                <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:65px">Type</th>
+                <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Rate / amount</th>
+                <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Value</th>
+                <th style="border-bottom:1px solid var(--border-light);width:30px"></th>
+              </tr>
+            </thead>
+            <tbody id="f-ded-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Totals + price comparison -->
+      <div style="display:grid;grid-template-columns:1fr 260px;gap:14px;margin-bottom:16px">
+        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px" id="f-price-compare">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Price comparison</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Budget price</p><p id="pc-budget" style="font-size:17px;font-weight:600">—</p></div>
+            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Contract price</p><p id="pc-contract" style="font-size:17px;font-weight:600;color:var(--blue)">—</p><p id="pc-contract-vs" style="font-size:10px;color:var(--blue)"></p></div>
+            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Net effective</p><p id="pc-net" style="font-size:17px;font-weight:600">—</p><p id="pc-net-vs" style="font-size:10px"></p></div>
+          </div>
+        </div>
+        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px">
+          <div style="display:flex;flex-direction:column;gap:5px">
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Gross</span><span id="t-gross" style="font-family:var(--font-data)">$0.00</span></div>
+            <div id="t-qa-row" style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Quality adj</span><span id="t-qa" style="font-family:var(--font-data)">—</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Deductions</span><span id="t-ded" style="font-family:var(--font-data);color:var(--red)">—</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);font-weight:600;color:var(--ink);border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px"><span>Net amount</span><span id="t-net" style="font-family:var(--font-data)">$0.00</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>GST</span><span id="t-gst" style="font-family:var(--font-data)">—</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-md);font-weight:600;color:var(--blue)"><span>Total payable</span><span id="t-total" style="font-family:var(--font-data)">$0.00</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Attachments -->
+      <div style="margin-bottom:16px">
+        <p style="font-size:var(--text-sm);font-weight:600;margin-bottom:8px">Attachments</p>
+        <div id="f-drop-zone" style="border:1.5px dashed var(--border);border-radius:var(--radius-md);padding:18px;text-align:center;cursor:pointer;background:var(--page-bg)">
+          <p style="color:var(--muted);font-size:var(--text-sm)">Drop dockets, remittances or PDFs here, or click to browse</p>
+        </div>
+        <input type="file" id="f-file-input" multiple accept=".pdf,image/*" style="display:none">
+        <div id="f-file-list" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+
+      <!-- Notes -->
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <textarea class="form-textarea" id="f-notes" rows="3" placeholder="Internal notes, gin reference, pool details, delivery information…">${existing?.notes || ''}</textarea>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid var(--border-light);background:#fafbfc">
+      <button class="btn btn-secondary" id="f-cancel">Cancel</button>
+      <button class="btn btn-primary" id="f-save"><i style="margin-right:4px">✓</i> Save — pending</button>
+    </div>
+  `;
+
+  formEl.appendChild(modal);
+  document.body.appendChild(formEl);
+
+  // ── Wire up interactions ───────────────────────────────────
+
+  // Close
+  const close = () => formEl.remove();
+  modal.querySelector('#inv-close')?.addEventListener('click', close);
+  modal.querySelector('#f-cancel')?.addEventListener('click', close);
+  formEl.addEventListener('click', e => { if (e.target === formEl) close(); });
+
+  // Sale type toggle
+  function setSaleType(t) {
+    saleType = t;
+    const con = modal.querySelector('#inv-opt-contract');
+    const cas = modal.querySelector('#inv-opt-cash');
+    con.style.border = t==='contract' ? '2px solid var(--blue)' : '1px solid var(--border)';
+    con.style.background = t==='contract' ? 'var(--blue-light)' : '';
+    con.querySelector('p').style.color = t==='contract' ? 'var(--blue-text)' : 'var(--ink-mid)';
+    cas.style.border = t==='cash' ? '2px solid var(--blue)' : '1px solid var(--border)';
+    cas.style.background = t==='cash' ? 'var(--blue-light)' : '';
+    cas.querySelector('p').style.color = t==='cash' ? 'var(--blue-text)' : 'var(--ink-mid)';
+    modal.querySelector('#f-contract-section').style.display = t==='contract' ? 'block' : 'none';
+    modal.querySelector('#th-qa').style.display = t==='contract' ? '' : 'none';
+    modal.querySelector('#th-eff').style.display = t==='contract' ? '' : 'none';
+    modal.querySelector('#t-qa-row').style.display = t==='contract' ? '' : 'none';
+    modal.querySelectorAll('.f-qa-cell,.f-eff-cell').forEach(c => c.style.display = t==='contract' ? '' : 'none');
+    recalc();
+  }
+  modal.querySelector('#inv-opt-contract').addEventListener('click', () => setSaleType('contract'));
+  modal.querySelector('#inv-opt-cash').addEventListener('click', () => setSaleType('cash'));
+
+  // Contract selector
+  async function updateContractSummary() {
+    const sel = modal.querySelector('#f-contract');
+    const opt = sel.options[sel.selectedIndex];
+    const sum = modal.querySelector('#f-contract-summary');
+    if (!opt.value) { sum.style.display='none'; return; }
+    sum.style.display='grid';
+    const price = parseFloat(opt.dataset.price)||0;
+    const qty = parseFloat(opt.dataset.qty)||0;
+    const unit = opt.dataset.unit || 't';
+
+    // Fetch already invoiced against this contract
+    try {
+      const existing_invs = await dbSelect('invoices', 'forward_contract_id=eq.' + opt.value + '&select=net_amount,line_items');
+      const invoicedQty = existing_invs.reduce((s, i) => s + (i.line_items||[]).reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0), 0);
+      const invoicedVal = existing_invs.reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
+      modal.querySelector('#cs-qty').textContent = formatNumber(qty, 0) + ' ' + unit;
+      modal.querySelector('#cs-invoiced').textContent = formatNumber(invoicedQty, 0) + ' ' + unit;
+      modal.querySelector('#cs-remaining').textContent = formatNumber(qty - invoicedQty, 0) + ' ' + unit;
+      modal.querySelector('#cs-avg').textContent = invoicedQty ? formatCurrency(invoicedVal / invoicedQty, 2) : '—';
+    } catch { modal.querySelector('#cs-qty').textContent = formatNumber(qty,0)+' '+unit; }
+
+    modal.querySelector('#pc-contract').textContent = formatCurrency(price, 2);
+    // Set price on all lines
+    modal.querySelectorAll('.f-line-price').forEach(inp => { inp.value = price.toFixed(4); });
+    recalc();
+  }
+  modal.querySelector('#f-contract')?.addEventListener('change', updateContractSummary);
+
+  // Add line
+  function addLine(data = {}) {
+    const tbody = modal.querySelector('#f-lines-body');
+    const id = 'line-' + Date.now();
+    lastEdited[id] = data.lastEdited || 'price';
+    const tr = document.createElement('tr');
+    tr.dataset.id = id;
+    tr.style.borderBottom = '1px solid var(--border-light)';
+    const tdStyle = 'padding:4px 6px;vertical-align:middle;';
+    const inStyle = 'border:0.5px solid transparent;border-radius:4px;padding:4px 6px;background:transparent;color:var(--ink);font-size:var(--text-sm);width:100%';
+    const numStyle = inStyle + ';text-align:right;font-family:var(--font-data)';
+    tr.innerHTML = `
+      <td style="${tdStyle}min-width:110px"><select class="f-line-comm" style="${inStyle}">
+        <option>Cotton Lint</option><option>Cottonseed</option><option>Wheat</option><option>Barley</option><option>Canola</option><option>Faba Beans</option><option>Lentils</option><option>Livestock</option><option>Hay</option><option>Other</option>
+      </select></td>
+      <td style="${tdStyle}min-width:85px"><input type="text" class="f-line-docket" style="${inStyle}" placeholder="D-1042" value="${data.docket||''}"></td>
+      <td style="${tdStyle}min-width:70px"><select class="f-line-year" style="${inStyle}">
+        <option>2024-25</option><option selected>2025-26</option><option>2026-27</option>
+      </select></td>
+      <td style="${tdStyle}min-width:65px"><input type="number" class="f-line-qty" style="${numStyle}" placeholder="0" value="${data.qty||''}" step="0.001"></td>
+      <td style="${tdStyle}min-width:50px"><select class="f-line-unit" style="${inStyle}">
+        ${['bale','t','kg','head','each'].map(u=>`<option${u===(data.unit||'t')?' selected':''}>${u}</option>`).join('')}
+      </select></td>
+      <td style="${tdStyle}min-width:80px"><input type="number" class="f-line-price" style="${numStyle}" placeholder="0.0000" value="${data.price||''}" step="0.0001"></td>
+      <td class="f-qa-cell" style="${tdStyle}min-width:90px;${saleType!=='contract'?'display:none':''}"><input type="number" class="f-line-qa" style="${numStyle};color:var(--red)" placeholder="0.00" value="${data.quality_adj||''}" step="0.01"></td>
+      <td style="${tdStyle}min-width:90px"><input type="number" class="f-line-total" style="${numStyle};background:var(--blue-light);color:var(--blue-text)" placeholder="0.00" value="${data.total||''}" step="0.01"></td>
+      <td class="f-eff-cell" style="${tdStyle}min-width:90px;${saleType!=='contract'?'display:none':''}"><input type="text" class="f-line-eff" readonly style="${numStyle};background:var(--page-bg);color:var(--blue);border:none;cursor:default" value="${data.eff||''}"></td>
+      <td style="padding:4px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:16px;padding:2px 4px" class="del-line">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+
+    // Wire inputs
+    const qtyInp = tr.querySelector('.f-line-qty');
+    const priceInp = tr.querySelector('.f-line-price');
+    const qaInp = tr.querySelector('.f-line-qa');
+    const totalInp = tr.querySelector('.f-line-total');
+    const effInp = tr.querySelector('.f-line-eff');
+
+    const updateEff = () => {
+      const qty = parseFloat(qtyInp.value)||0;
+      const total = parseFloat(totalInp.value)||0;
+      if (effInp) effInp.value = qty && total ? formatCurrency(total/qty, 2) : '';
+    };
+
+    priceInp.addEventListener('input', () => {
+      lastEdited[id] = 'price';
+      const qty = parseFloat(qtyInp.value)||0;
+      const price = parseFloat(priceInp.value)||0;
+      const qa = parseFloat(qaInp?.value)||0;
+      if (qty) totalInp.value = (qty * price + qa).toFixed(2);
+      updateEff(); recalc();
+    });
+
+    totalInp.addEventListener('input', () => {
+      lastEdited[id] = 'total';
+      const qty = parseFloat(qtyInp.value)||0;
+      const total = parseFloat(totalInp.value)||0;
+      const qa = parseFloat(qaInp?.value)||0;
+      if (qty) priceInp.value = ((total - qa) / qty).toFixed(4);
+      updateEff(); recalc();
+    });
+
+    qtyInp.addEventListener('input', () => {
+      const qty = parseFloat(qtyInp.value)||0;
+      const qa = parseFloat(qaInp?.value)||0;
+      if (lastEdited[id] === 'price') {
+        const price = parseFloat(priceInp.value)||0;
+        if (qty) totalInp.value = (qty * price + qa).toFixed(2);
+      } else {
+        const total = parseFloat(totalInp.value)||0;
+        if (qty) priceInp.value = ((total - qa) / qty).toFixed(4);
+      }
+      updateEff(); recalc();
+    });
+
+    if (qaInp) qaInp.addEventListener('input', () => {
+      const qty = parseFloat(qtyInp.value)||0;
+      const price = parseFloat(priceInp.value)||0;
+      const qa = parseFloat(qaInp.value)||0;
+      if (qty && lastEdited[id] === 'price') totalInp.value = (qty * price + qa).toFixed(2);
+      updateEff(); recalc();
+    });
+
+    tr.querySelector('.del-line').addEventListener('click', () => { tr.remove(); recalc(); });
+
+    // Focus style
+    [qtyInp, priceInp, totalInp, qaInp].filter(Boolean).forEach(inp => {
+      inp.addEventListener('focus', () => { inp.style.border='0.5px solid var(--blue)'; inp.style.background='var(--white)'; inp.style.boxShadow='0 0 0 2px rgba(30,111,168,.1)'; });
+      inp.addEventListener('blur', () => { inp.style.border='0.5px solid transparent'; inp.style.background='transparent'; inp.style.boxShadow='none'; });
+    });
+
+    updateEff();
+    if (data.commodity) tr.querySelector('.f-line-comm').value = data.commodity;
+    if (data.crop_year) tr.querySelector('.f-line-year').value = data.crop_year;
+    recalc();
+  }
+
+  // Add deduction
+  function addDeduction(data = {}) {
+    const tbody = modal.querySelector('#f-ded-body');
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid var(--border-light)';
+    const tdStyle = 'padding:5px 8px;vertical-align:middle;';
+    const inStyle = 'border:0.5px solid transparent;border-radius:4px;padding:4px 6px;background:transparent;color:var(--ink);font-size:var(--text-sm);width:100%';
+    tr.innerHTML = `
+      <td style="${tdStyle}"><input type="text" class="f-ded-desc" style="${inStyle}" placeholder="e.g. Selling commission" value="${data.description||''}"></td>
+      <td style="${tdStyle}min-width:65px"><select class="f-ded-type" style="${inStyle}"><option value="pct" ${data.type==='pct'?'selected':''}>%</option><option value="flat" ${data.type==='flat'?'selected':''}>$</option></select></td>
+      <td style="${tdStyle}min-width:90px"><input type="number" class="f-ded-rate" style="${inStyle};text-align:right;font-family:var(--font-data)" placeholder="0" value="${data.rate||''}" step="0.01"></td>
+      <td style="${tdStyle}min-width:90px;text-align:right;font-family:var(--font-data);font-size:12px;color:var(--red)" class="f-ded-val">${data.value ? '-'+formatCurrency(data.value,2) : '—'}</td>
+      <td style="padding:4px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:16px;padding:2px 4px" class="del-ded">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+    tr.querySelector('.f-ded-rate').addEventListener('input', recalc);
+    tr.querySelector('.f-ded-type').addEventListener('change', recalc);
+    tr.querySelector('.del-ded').addEventListener('click', () => { tr.remove(); recalc(); });
+  }
+
+  // Recalc totals
+  function recalc() {
+    let gross = 0, totalQA = 0, totalQty = 0;
+    modal.querySelectorAll('#f-lines-body tr').forEach(tr => {
+      const qty = parseFloat(tr.querySelector('.f-line-qty')?.value)||0;
+      const total = parseFloat(tr.querySelector('.f-line-total')?.value)||0;
+      const qa = saleType==='contract' ? (parseFloat(tr.querySelector('.f-line-qa')?.value)||0) : 0;
+      gross += total ? total - qa : 0;
+      totalQA += qa;
+      totalQty += qty;
+    });
+
+    const grossPlusQA = gross + totalQA;
+    let totalDed = 0;
+    modal.querySelectorAll('#f-ded-body tr').forEach(tr => {
+      const type = tr.querySelector('.f-ded-type')?.value;
+      const rate = parseFloat(tr.querySelector('.f-ded-rate')?.value)||0;
+      const val = type==='pct' ? grossPlusQA * rate / 100 : rate;
+      totalDed += val;
+      const valEl = tr.querySelector('.f-ded-val');
+      if (valEl) valEl.textContent = val ? '-' + formatCurrency(val, 2) : '—';
+    });
+
+    const net = grossPlusQA - totalDed;
+    const gstType = modal.querySelector('#f-gst')?.value;
+    const gstAmt = gstType==='inc' ? net * 0.1 : 0;
+    const total = net + gstAmt;
+
+    const fmt = n => formatCurrency(n, 2);
+    modal.querySelector('#t-gross').textContent = fmt(gross);
+    modal.querySelector('#t-qa').textContent = totalQA ? (totalQA < 0 ? '-' : '+') + fmt(Math.abs(totalQA)) : '—';
+    modal.querySelector('#t-qa').style.color = totalQA < 0 ? 'var(--red)' : 'var(--green)';
+    modal.querySelector('#t-ded').textContent = totalDed ? '-' + fmt(totalDed) : '—';
+    modal.querySelector('#t-net').textContent = fmt(net);
+    modal.querySelector('#t-gst').textContent = gstAmt ? fmt(gstAmt) : '—';
+    modal.querySelector('#t-total').textContent = fmt(total);
+
+    // Price comparison
+    const netEff = totalQty ? net / totalQty : 0;
+    if (netEff) {
+      modal.querySelector('#pc-net').textContent = formatCurrency(netEff, 2);
+    }
+  }
+
+  // File attachment
+  const dropZone = modal.querySelector('#f-drop-zone');
+  const fileInput = modal.querySelector('#f-file-input');
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = 'var(--blue)'; });
+  dropZone.addEventListener('dragleave', () => dropZone.style.borderColor = '');
+  dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.style.borderColor = ''; addFiles(e.dataTransfer.files); });
+  fileInput.addEventListener('change', () => addFiles(fileInput.files));
+
+  function addFiles(fileList) {
+    [...fileList].forEach(f => {
+      attachments.push(f);
+      const pill = document.createElement('span');
+      pill.style.cssText = 'display:inline-flex;align-items:center;gap:5px;background:var(--blue-light);border:1px solid var(--blue);border-radius:20px;padding:3px 10px;font-size:11px;color:var(--blue-text)';
+      pill.innerHTML = `📎 ${f.name} <span style="cursor:pointer;font-size:13px;margin-left:2px" onclick="this.closest('span').remove()">×</span>`;
+      modal.querySelector('#f-file-list').appendChild(pill);
+    });
+  }
+
+  // GST change
+  modal.querySelector('#f-gst')?.addEventListener('change', recalc);
+
+  // Add/del buttons
+  modal.querySelector('#f-add-line').addEventListener('click', () => addLine());
+  modal.querySelector('#f-add-ded').addEventListener('click', () => addDeduction());
+
+  // Load existing data
+  setSaleType(saleType);
+  if (existing?.line_items?.length) {
+    existing.line_items.forEach(l => addLine(l));
+  } else {
+    addLine();
+  }
+  if (existing?.deductions?.length) {
+    existing.deductions.forEach(d => addDeduction(d));
+  }
+  if (existing?.forward_contract_id) {
+    setTimeout(() => updateContractSummary(), 100);
+  }
+
+  // Save
+  modal.querySelector('#f-save').addEventListener('click', async () => {
+    const btn = modal.querySelector('#f-save');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    try {
+      const lineRows = [...modal.querySelectorAll('#f-lines-body tr')].map(tr => ({
+        commodity: tr.querySelector('.f-line-comm')?.value || '',
+        docket: tr.querySelector('.f-line-docket')?.value || '',
+        crop_year: tr.querySelector('.f-line-year')?.value || '',
+        qty: parseFloat(tr.querySelector('.f-line-qty')?.value)||0,
+        unit: tr.querySelector('.f-line-unit')?.value || 't',
+        price: parseFloat(tr.querySelector('.f-line-price')?.value)||0,
+        quality_adj: parseFloat(tr.querySelector('.f-line-qa')?.value)||0,
+        total: parseFloat(tr.querySelector('.f-line-total')?.value)||0,
+        eff: tr.querySelector('.f-line-eff')?.value || '',
+      })).filter(l => l.qty > 0 || l.total > 0);
+
+      const dedRows = [...modal.querySelectorAll('#f-ded-body tr')].map(tr => {
+        const type = tr.querySelector('.f-ded-type')?.value;
+        const rate = parseFloat(tr.querySelector('.f-ded-rate')?.value)||0;
+        const grossPlusQA = lineRows.reduce((s,l) => s + (l.total||0), 0);
+        const value = type === 'pct' ? grossPlusQA * rate / 100 : rate;
+        return { description: tr.querySelector('.f-ded-desc')?.value || '', type, rate, value };
+      }).filter(d => d.rate > 0);
+
+      const gross = lineRows.reduce((s,l) => s + ((l.total||0) - (saleType==='contract' ? (l.quality_adj||0) : 0)), 0);
+      const totalQA = saleType==='contract' ? lineRows.reduce((s,l) => s + (l.quality_adj||0), 0) : 0;
+      const grossPlusQA = gross + totalQA;
+      const totalDed = dedRows.reduce((s,d) => s + (d.value||0), 0);
+      const net = grossPlusQA - totalDed;
+      const gstType = modal.querySelector('#f-gst')?.value;
+      const gstAmt = gstType === 'inc' ? net * 0.1 : 0;
+      const total = net + gstAmt;
+      const totalQty = lineRows.reduce((s,l) => s + (l.qty||0), 0);
+      const contractSel = modal.querySelector('#f-contract');
+      const contractId = contractSel?.value || null;
+
+      const row = {
+        farm_id: farm.id,
+        invoice_date: modal.querySelector('#f-date')?.value,
+        season: modal.querySelector('#f-season')?.value || currentSeason(),
+        buyer: modal.querySelector('#f-buyer')?.value?.trim() || '',
+        sale_type: saleType,
+        forward_contract_id: saleType === 'contract' ? contractId : null,
+        line_items: lineRows,
+        deductions: dedRows,
+        gross_amount: gross,
+        total_quality_adj: totalQA,
+        total_deductions: totalDed,
+        net_amount: net,
+        gst_type: gstType,
+        gst_amount: gstAmt,
+        total_payable: total,
+        total_qty: totalQty,
+        notes: modal.querySelector('#f-notes')?.value?.trim() || null,
+        status: existing?.status || 'pending',
+        created_by: getSession()?.user?.id,
+      };
+
+      if (isEdit) {
+        await dbUpdate('invoices', existing.id, row);
+        const idx = _invoices.findIndex(i => i.id === existing.id);
+        if (idx >= 0) _invoices[idx] = { ..._invoices[idx], ...row };
+        toast('Invoice updated', 'success');
+      } else {
+        const saved = await dbInsert('invoices', row);
+        if (!_invoices.find(i => i.id === saved.id)) _invoices.unshift(saved);
+        toast('Invoice saved — pending', 'success');
+      }
+
+      close();
+      _renderTable(container);
+    } catch (err) {
+      toast(err.message || 'Failed to save', 'error');
+      btn.disabled = false;
+      btn.textContent = '✓ Save — pending';
+    }
+  });
+
+  recalc();
+}
