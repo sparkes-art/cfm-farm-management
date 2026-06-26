@@ -50,8 +50,24 @@ export async function buildCommodityCards(season) {
     if (key) commodityMap[key].budgets.push(b);
   });
   invoices.forEach(i => {
-    const key = addCommodity(null, i.commodity_type);
-    if (key) commodityMap[key].invoices.push(i);
+    // New invoice format: match by line item commodity names
+    const lines = i.line_items || [];
+    if (lines.length) {
+      // Add invoice to each unique commodity in line items
+      const seen = new Set();
+      lines.forEach(l => {
+        if (!l.commodity) return;
+        const k = addCommodity(null, l.commodity);
+        if (k && !seen.has(k)) {
+          commodityMap[k].invoices.push(i);
+          seen.add(k);
+        }
+      });
+    } else if (i.commodity_type) {
+      // Old format fallback
+      const key = addCommodity(null, i.commodity_type);
+      if (key) commodityMap[key].invoices.push(i);
+    }
   });
   forecasts.forEach(f => { addCommodity(f.commodity_id, f.commodity); });
   harvests.forEach(h => { addCommodity(h.commodity_id, null); });
@@ -155,11 +171,16 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   // This gives the effective commodity price before deductions
   const completeInvoices = invoices.filter(i => i.status === 'complete' || i.status === 'paid');
   const totalPaidQty = completeInvoices.reduce((s, i) => {
-    const lines = i.line_items || [];
-    return s + lines.reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0);
+    const lines = (i.line_items || []).filter(l => !l.commodity || l.commodity === com.name);
+    // If line items exist use qty from them, otherwise fall back to total_qty
+    return s + (lines.length ? lines.reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0) : (parseFloat(i.total_qty)||0));
   }, 0);
   const totalPaidValue = completeInvoices.reduce((s, i) => {
-    // gross_amount + quality_adj = price before selling costs
+    const lines = (i.line_items || []).filter(l => !l.commodity || l.commodity === com.name);
+    if (lines.length) {
+      // Sum line totals + quality adj per line
+      return s + lines.reduce((ss, l) => ss + (parseFloat(l.total)||0), 0);
+    }
     return s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
   }, 0);
   const paidAvg = (totalPaidQty && totalPaidValue) ? totalPaidValue / totalPaidQty : null;
@@ -240,6 +261,21 @@ function _buildCard(com, allForecasts, allHarvests, season) {
             <p style="font-size:10px;color:var(--hint);margin:0 0 2px">Budget</p>
             <p style="font-size:20px;font-weight:600;color:var(--ink);margin:0;line-height:1.1">${totalBudgetProd ? formatNumber(totalBudgetProd, 0) : '—'} <span style="font-size:11px;font-weight:400;color:var(--hint)">${unit}</span></p>
           </div>
+          <!-- Sales vs production bar -->
+          ${totalPaidQty > 0 || denominator > 0 ? `
+          <div style="border-top:1px solid var(--border-light);padding-top:10px;margin-top:4px">
+            <p style="font-size:10px;color:var(--hint);margin:0 0 6px">Sales vs ${isHarvested ? 'harvest' : latestForecast ? 'forecast' : 'budget'}</p>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="flex:1;height:6px;background:var(--border-light);border-radius:3px;overflow:hidden">
+                <div style="height:100%;width:${Math.min(100, denominator ? Math.round((totalPaidQty/denominator)*100) : 0)}%;background:var(--green);border-radius:3px;transition:width .3s"></div>
+              </div>
+              <span style="font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--green);font-weight:600">${formatNumber(totalPaidQty,0)} ${unit}</span>
+              <span style="font-size:10px;color:var(--hint)">${denominator ? Math.round((totalPaidQty/denominator)*100) + '%' : ''}</span>
+            </div>
+            <p style="font-size:10px;color:var(--hint);margin-top:3px">of ${formatNumber(denominator,0)} ${unit} ${isHarvested ? 'harvested' : latestForecast ? 'forecast' : 'budgeted'}</p>
+          </div>
+          ` : ''}
+
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;border-top:1px solid var(--border-light);padding-top:10px">
             <div>
               <p style="font-size:10px;color:var(--hint);margin:0 0 2px">Forecast</p>
