@@ -79,6 +79,8 @@ exports.handler = async (event) => {
     const commodities = await commRes.json();
     const commMap = {};
     commodities.forEach(c => { commMap[c.name.toLowerCase()] = c.id; });
+    console.log('Commodities found:', commodities.length, 'Keys:', Object.keys(commMap));
+    console.log('CSV rows to process:', lines.length - 1);
 
     // Parse rows
     const rows = [];
