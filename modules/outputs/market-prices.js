@@ -228,9 +228,10 @@ async function _loadData() {
         'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&select=*'
       ).catch(() => [])
     );
+    // Try current season first, fall back to any season with a price for this commodity
     queries.push(
       dbSelect('budgets',
-        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&season=eq.' + season + '&select=price'
+        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&price=not.is.null&select=price,season&order=season.desc&limit=5'
       ).catch(() => [])
     );
   }
