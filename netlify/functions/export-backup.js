@@ -8,7 +8,7 @@ const ExcelJS = require('exceljs');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const BACKUP_API_KEY = 'cfm-backup-2026';
+const BACKUP_API_KEY = process.env.BACKUP_API_KEY || 'cfm-backup-2026';
 
 const sb = async (path) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
