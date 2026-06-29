@@ -154,12 +154,19 @@ async function _mountOverview(container) {
         const status = btn.dataset.status;
         if (!commodityId) return;
         try {
-          await dbUpsert('commodity_status', [{
-            farm_id: farm.id,
-            commodity_id: commodityId,
-            season: s,
-            status,
-          }], 'farm_id,commodity_id,season');
+          // Try update first, then insert if no existing record
+          try {
+            const existing = await dbSelect('commodity_status',
+              'farm_id=eq.' + farm.id + '&commodity_id=eq.' + commodityId + '&season=eq.' + s + '&select=id'
+            );
+            if (existing.length) {
+              await dbUpdate('commodity_status', existing[0].id, { status });
+            } else {
+              await dbInsert('commodity_status', { farm_id: farm.id, commodity_id: commodityId, season: s, status });
+            }
+          } catch (e) {
+            throw e;
+          }
           await _mountOverview(container);
         } catch (err) {
           toast('Failed to save status: ' + err.message, 'error');
