@@ -492,6 +492,7 @@ function _renderHarvest(container) {
 // ── Harvest modal ─────────────────────────────────────────────
 function _harvestModal(container, existing = null) {
   const isEdit = !!existing;
+  const farm = getActiveFarm();
   let selectedCommodityId = existing?.commodity_id || null;
 
   const harvestBodyHTML = [
@@ -586,15 +587,19 @@ function _harvestModal(container, existing = null) {
 
     // Pre-fill commodity and crop type for edit
     if (isEdit && existing.commodity_id) {
-      const commSel = document.querySelector('#hv-commodity select');
+      // Set commodity directly on the select after init rebuilds it
+      const commSel = document.querySelector('#hv-commodity select, #hv-commodity');
       if (commSel) {
         commSel.value = existing.commodity_id;
-        commSel.dispatchEvent(new Event('change'));
+        selectedCommodityId = existing.commodity_id;
+        // Manually trigger crop type refresh
+        refreshCropTypeSelect('hv-crop-type', existing.commodity_id);
+        initCropTypeSelect('hv-crop-type', () => selectedCommodityId);
         setTimeout(() => {
-          const ctSel = document.querySelector('#hv-crop-type select');
+          const ctSel = document.querySelector('#hv-crop-type select, #hv-crop-type');
           if (ctSel && existing.crop_type_id) ctSel.value = existing.crop_type_id;
         }, 200);
       }
     }
-  }, 100);
+  }, 150);
 }
