@@ -110,26 +110,55 @@ exports.handler = async (event) => {
   const apiKey = event.headers['x-api-key'] || event.headers['authorization'];
   if (apiKey !== BACKUP_API_KEY) return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorised' }) };
 
-  const farmId = event.queryStringParameters?.farm_id;
-  if (!farmId) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing farm_id' }) };
-
-  const season = event.queryStringParameters?.season || currentSeason();
+  const farmId = event.queryStringParameters?.farm_id; // optional — if omitted, backs up all farms
 
   try {
-    const [farm, invoices, contracts, budgets, forecasts, harvests, prices] = await Promise.all([
-      sb(`farms?id=eq.${farmId}&select=*`).then(r => r[0]),
-      sb(`invoices?farm_id=eq.${farmId}&select=*&order=invoice_date.desc`),
-      sb(`forward_contracts?farm_id=eq.${farmId}&select=*&order=sale_date.desc`),
-      sb(`budgets?farm_id=eq.${farmId}&season=eq.${season}&select=*&order=commodity.asc`),
-      sb(`forecasts?farm_id=eq.${farmId}&season=eq.${season}&select=*&order=forecast_date.asc`),
-      sb(`harvest_entries?farm_id=eq.${farmId}&season=eq.${season}&select=*&order=harvest_date.asc`),
-      sb(`market_prices?select=commodity,price_date,price_per_unit,grade,region,source&order=price_date.desc&limit=500`),
-    ]);
+    // Load all farms (or just the requested one)
+    const farmsQuery = farmId ? `farms?id=eq.${farmId}&select=*` : `farms?select=*&order=name.asc`;
+    const farms = await sb(farmsQuery);
 
-    const farmName = farm?.name || farmId;
-    const exportDate = new Date().toLocaleDateString('en-AU') + ', ' + new Date().toLocaleTimeString('en-AU');
+    if (!farms.length) return { statusCode: 404, headers, body: JSON.stringify({ error: 'No farms found' }) };
 
-    const wb = new ExcelJS.Workbook();
+    const results = [];
+
+    for (const farm of farms) {
+      const farmName = farm.name || farm.id;
+      const fid = farm.id;
+
+      // Get all seasons that have data for this farm
+      const [budgetSeasons, harvestSeasons] = await Promise.all([
+        sb(`budgets?farm_id=eq.${fid}&select=season&order=season.desc`),
+        sb(`harvest_entries?farm_id=eq.${fid}&select=season&order=season.desc`),
+      ]);
+      const allSeasons = [...new Set([
+        ...budgetSeasons.map(b => b.season),
+        ...harvestSeasons.map(h => h.season),
+        currentSeason(),
+      ].filter(Boolean))].sort().reverse();
+
+      // Load all data without season filter, prices once
+      const [invoices, contracts, prices] = await Promise.all([
+        sb(`invoices?farm_id=eq.${fid}&select=*&order=invoice_date.desc`),
+        sb(`forward_contracts?farm_id=eq.${fid}&select=*&order=sale_date.desc`),
+        sb(`market_prices?select=commodity,price_date,price_per_unit,grade,region,source&order=price_date.desc&limit=500`),
+      ]);
+
+      // Load season-specific data for ALL seasons
+      let budgets = [], forecasts = [], harvests = [];
+      for (const season of allSeasons) {
+        const [b, f, h] = await Promise.all([
+          sb(`budgets?farm_id=eq.${fid}&season=eq.${season}&select=*&order=commodity.asc`),
+          sb(`forecasts?farm_id=eq.${fid}&season=eq.${season}&select=*&order=forecast_date.asc`),
+          sb(`harvest_entries?farm_id=eq.${fid}&season=eq.${season}&select=*&order=harvest_date.asc`),
+        ]);
+        budgets = [...budgets, ...b];
+        forecasts = [...forecasts, ...f];
+        harvests = [...harvests, ...h];
+      }
+
+      const season = allSeasons[0] || currentSeason(); // most recent for title
+      const exportDate = new Date().toLocaleDateString('en-AU') + ', ' + new Date().toLocaleTimeString('en-AU');
+      const wb = new ExcelJS.Workbook();
     wb.creator = 'CFM Farm Management';
     wb.created = new Date();
 
@@ -210,7 +239,7 @@ exports.handler = async (event) => {
 
     const totalNet = saleRows.reduce((s, r) => s + (r[12] || 0), 0);
 
-    addSheet(wb, 'Crop Sales', `Crop Sales — RCTIs  |  ${season}`, [
+    addSheet(wb, 'Crop Sales', `Crop Sales — RCTIs  |  All seasons`, [
       { header: 'Xero Ref', width: 12 },
       { header: 'Date', width: 13, date: true },
       { header: 'Buyer', width: 22 },
@@ -254,7 +283,7 @@ exports.handler = async (event) => {
     ]));
 
     // ── Budget & Forecast sheet ────────────────────────────────
-    addSheet(wb, 'Budget & Forecast', `Budget & Forecast  |  ${season}`, [
+    addSheet(wb, 'Budget & Forecast', `Budget & Forecast  |  All seasons`, [
       { header: 'Season', width: 10 },
       { header: 'Commodity', width: 16 },
       { header: 'Crop Type', width: 14 },
@@ -286,7 +315,7 @@ exports.handler = async (event) => {
     }));
 
     // ── Harvest Records sheet ──────────────────────────────────
-    addSheet(wb, 'Harvest Records', `Harvest Records  |  ${season}`, [
+    addSheet(wb, 'Harvest Records', `Harvest Records  |  All seasons`, [
       { header: 'Date', width: 13 },
       { header: 'Commodity', width: 16 },
       { header: 'Paddock', width: 20 },
@@ -323,23 +352,21 @@ exports.handler = async (event) => {
       p.source || '',
     ]));
 
-    // Generate buffer
-    const buffer = await wb.xlsx.writeBuffer();
-    const base64 = Buffer.from(buffer).toString('base64');
+      // Generate buffer for this farm
+      const buffer = await wb.xlsx.writeBuffer();
+      const base64 = Buffer.from(buffer).toString('base64');
+      const filename = `CFM_${farmName.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
 
-    const filename = `CFM_${farmName.replace(/\s+/g, '_')}_${season}_${new Date().toISOString().slice(0,10)}.xlsx`;
+      results.push({ filename, content: base64, farm: farmName });
+    } // end farm loop
 
     return {
       statusCode: 200,
       headers: { ...headers },
       body: JSON.stringify({
         success: true,
-        filename,
-        content: base64,
-        farm: farmName,
         season,
-        exported: exportDate,
-        sheets: ['Summary', 'Crop Sales', 'Forward Contracts', 'Budget & Forecast', 'Harvest Records', 'Market Prices'],
+        files: results, // array of { filename, content, farm }
       }),
     };
 
