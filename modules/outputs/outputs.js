@@ -29,7 +29,7 @@ export async function mountOutputs(container) {
       </div>
       <div class="flex gap-2">
         <select id="out-season-select" class="form-select" style="width:110px">
-          ${_seasonOptions()}
+          ${_seasonOptions(defaultSeason)}
         </select>
       </div>
     </div>
@@ -75,12 +75,14 @@ export function unmountOutputs() {
   _contracts = [];
 }
 
-function _seasonOptions() {
+function _seasonOptions(selected = null) {
   const current = currentSeason();
   const [y] = current.split('-').map(Number);
+  // Use selected season if provided, otherwise current
+  const active = selected || current;
   return Array.from({ length: 5 }, (_, i) => {
     const s = `${y + 1 - i}-${String(y + 2 - i).slice(2)}`;
-    return `<option value="${s}" ${s === current ? 'selected' : ''}>${s}</option>`;
+    return `<option value="${s}" ${s === active ? 'selected' : ''}>${s}</option>`;
   }).join('');
 }
 

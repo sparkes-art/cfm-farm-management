@@ -12,6 +12,13 @@ export async function buildCommodityCards(season) {
   if (!farm) return '<div class="empty-state"><p>No farm selected.</p></div>';
 
   // Load all data in parallel
+  // Load commodity statuses (manual override: budget/growing/harvesting/harvested)
+  let commodityStatuses = {};
+  try {
+    const statuses = await dbSelect('commodity_status', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*');
+    statuses.forEach(s => { commodityStatuses[s.commodity_id] = s.status; });
+  } catch { /* table may not exist yet */ }
+
   const [contracts, invoices, budgets, forecasts, harvests] = await Promise.all([
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
     dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
@@ -117,12 +124,12 @@ export async function buildCommodityCards(season) {
   };
 
   return {
-    html: cards.map(com => _buildCard(com, forecasts, harvests, season)).join(''),
+    html: cards.map(com => _buildCard(com, forecasts, harvests, season, commodityStatuses)).join(''),
     commodityMap
   };
 }
 
-function _buildCard(com, allForecasts, allHarvests, season) {
+function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = {}) {
   const name = com.name || 'Unknown';
   const contracts = com.contracts || [];
   const invoices = com.invoices || [];
@@ -198,8 +205,10 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   const marketVsBudget = marketPrice && budgetPrice ? ((marketPrice - budgetPrice) / budgetPrice * 100) : null;
   const fwdVsBudget = avgFwdPrice && budgetPrice ? ((avgFwdPrice - budgetPrice) / budgetPrice * 100) : null;
 
-  // Status — budget only if no forecast or harvest yet
-  const status = isHarvested ? 'harvested' : latestForecast ? 'growing' : 'budget';
+  // Status — use manual override if set, otherwise auto-detect
+  const manualStatus = com.id ? commodityStatuses[com.id] : null;
+  const autoStatus = isHarvested ? 'harvested' : latestForecast ? 'growing' : 'budget';
+  const status = manualStatus || autoStatus;
 
   // Production bar width
   const budgetBarW = 100;
@@ -218,7 +227,17 @@ function _buildCard(com, allForecasts, allHarvests, season) {
       <!-- Card top bar -->
       <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border-light);background:#fafbfc;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
         <span style="font-size:var(--text-md);font-weight:600;color:var(--ink)">${name}</span>
-        <span class="badge badge-${status === 'budget' ? 'draft' : status === 'harvested' ? 'paid' : 'issued'}">${status === 'harvested' ? 'Harvested' : status === 'budget' ? 'Budget' : 'Growing'}</span>
+        <div class="status-toggle" style="display:flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;font-size:10px">
+          ${['budget','growing','harvesting','harvested'].map(s => `
+            <button class="status-opt-btn" data-commodity="${com.id}" data-season="${season}" data-status="${s}"
+              style="padding:3px 8px;border:none;cursor:pointer;font-size:10px;font-weight:${status===s?'600':'400'};
+              background:${status===s ? (s==='harvested'?'var(--green)':s==='harvesting'?'var(--amber)':s==='growing'?'var(--blue)':'var(--border)') : 'transparent'};
+              color:${status===s ? (s==='budget'?'var(--ink)':'white') : 'var(--hint)'};
+              transition:all .15s">
+              ${s.charAt(0).toUpperCase()+s.slice(1)}
+            </button>
+          `).join('')}
+        </div>
 
         ${denominator ? `
           <div style="flex:1;margin:0 12px">
