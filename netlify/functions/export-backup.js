@@ -84,91 +84,34 @@ function buildXlsx(sheets) {
 
 // Minimal zip builder — no external deps
 function zipFiles(files) {
-  const crc32Table = (() => {
-    const t = new Uint32Array(256);
-    for (let i = 0; i < 256; i++) {
-      let c = i;
-      for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
-      t[i] = c;
-    }
-    return t;
-  })();
-
-  const crc32 = (buf) => {
-    let c = 0xFFFFFFFF;
-    for (let i = 0; i < buf.length; i++) c = crc32Table[(c ^ (Buffer.isBuffer(buf) ? buf[i] : buf[i])) & 0xFF] ^ (c >>> 8);
-    return (c ^ 0xFFFFFFFF) >>> 0;
-  };
-
-  const te = new TextEncoder();
-  const parts = [];
-  const centralDir = [];
+  const enc = s => Buffer.from(s, 'utf8');
+  const parts = [], centralDir = [];
   let offset = 0;
-
-  for (const [name, content] of Object.entries(files)) {
-    const nameBuf = te.encode(name);
-    const dataBuf = te.encode(content);
-    const crc = crc32(dataBuf);
-    const size = dataBuf.length;
-
-    const local = new Uint8Array(30 + nameBuf.length + size);
-    const v = new DataView(local.buffer);
-    v.setUint32(0, 0x04034b50, true); // signature
-    v.setUint16(4, 20, true); // version needed
-    v.setUint16(6, 0, true);  // flags
-    v.setUint16(8, 0, true);  // compression (stored)
-    v.setUint16(10, 0, true); v.setUint16(12, 0, true); // mod time/date
-    v.setUint32(14, crc, true);
-    v.setUint32(18, size, true); // compressed
-    v.setUint32(22, size, true); // uncompressed
-    v.setUint16(26, nameBuf.length, true);
-    v.setUint16(28, 0, true);
-    local.set(nameBuf, 30);
-    local.set(dataBuf, 30 + nameBuf.length);
+  for (const [name, data] of Object.entries(files)) {
+    const nameBuf = enc(name), dataBuf = enc(data);
+    const crc = crc32(dataBuf), size = dataBuf.length;
+    const local = Buffer.alloc(30 + nameBuf.length + size);
+    local.writeUInt32LE(0x04034b50,0); local.writeUInt16LE(20,4); local.writeUInt16LE(0,6);
+    local.writeUInt16LE(0,8); local.writeUInt16LE(0,10); local.writeUInt16LE(0,12);
+    local.writeUInt32LE(crc,14); local.writeUInt32LE(size,18); local.writeUInt32LE(size,22);
+    local.writeUInt16LE(nameBuf.length,26); local.writeUInt16LE(0,28);
+    nameBuf.copy(local,30); dataBuf.copy(local,30+nameBuf.length);
     parts.push(local);
-
-    const cd = new Uint8Array(46 + nameBuf.length);
-    const cv = new DataView(cd.buffer);
-    cv.setUint32(0, 0x02014b50, true);
-    cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0, true); cv.setUint16(10, 0, true);
-    cv.setUint16(12, 0, true); cv.setUint16(14, 0, true);
-    cv.setUint32(16, crc, true);
-    cv.setUint32(20, size, true);
-    cv.setUint32(24, size, true);
-    cv.setUint16(28, nameBuf.length, true);
-    cv.setUint16(30, 0, true); cv.setUint16(32, 0, true);
-    cv.setUint16(34, 0, true); cv.setUint16(36, 0, true);
-    cv.setUint32(38, 0, true);
-    cv.setUint32(42, offset, true);
-    cd.set(nameBuf, 46);
-    centralDir.push(cd);
-
+    const cd = Buffer.alloc(46 + nameBuf.length);
+    cd.writeUInt32LE(0x02014b50,0); cd.writeUInt16LE(20,4); cd.writeUInt16LE(20,6);
+    cd.writeUInt16LE(0,8); cd.writeUInt16LE(0,10); cd.writeUInt16LE(0,12); cd.writeUInt16LE(0,14);
+    cd.writeUInt32LE(crc,16); cd.writeUInt32LE(size,20); cd.writeUInt32LE(size,24);
+    cd.writeUInt16LE(nameBuf.length,28); cd.writeUInt16LE(0,30); cd.writeUInt16LE(0,32);
+    cd.writeUInt16LE(0,34); cd.writeUInt16LE(0,36); cd.writeUInt32LE(0,38); cd.writeUInt32LE(offset,42);
+    nameBuf.copy(cd,46); centralDir.push(cd);
     offset += local.length;
   }
-
-  const cdBuf = new Uint8Array(centralDir.reduce((s, c) => s + c.length, 0));
-  let cdOff = 0;
-  centralDir.forEach(c => { cdBuf.set(c, cdOff); cdOff += c.length; });
-
-  const eocd = new Uint8Array(22);
-  const ev = new DataView(eocd.buffer);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(4, 0, true); ev.setUint16(6, 0, true);
-  ev.setUint16(8, centralDir.length, true);
-  ev.setUint16(10, centralDir.length, true);
-  ev.setUint32(12, cdBuf.length, true);
-  ev.setUint32(16, offset, true);
-  ev.setUint16(20, 0, true);
-
-  const total = parts.reduce((s, p) => s + p.length, 0) + cdBuf.length + eocd.length;
-  const out = new Uint8Array(total);
-  let pos = 0;
-  parts.forEach(p => { out.set(p, pos); pos += p.length; });
-  out.set(cdBuf, pos); pos += cdBuf.length;
-  out.set(eocd, pos);
-
-  return Buffer.from(out);
+  const cdBuf = Buffer.concat(centralDir);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50,0); eocd.writeUInt16LE(0,4); eocd.writeUInt16LE(0,6);
+  eocd.writeUInt16LE(centralDir.length,8); eocd.writeUInt16LE(centralDir.length,10);
+  eocd.writeUInt32LE(cdBuf.length,12); eocd.writeUInt32LE(offset,16); eocd.writeUInt16LE(0,20);
+  return Buffer.concat([...parts, cdBuf, eocd]);
 }
 
 exports.handler = async (event) => {
