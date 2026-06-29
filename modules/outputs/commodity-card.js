@@ -25,19 +25,22 @@ export async function buildCommodityCards(season) {
   const commodityMap = {};
   const nameToKey = {}; // map commodity name -> key for merging
 
+  // Build a lookup from commodity ID to name using the master list
+  const masterCommodities = getCommodities();
+  const idToName = {};
+  masterCommodities.forEach(c => { idToName[c.id] = c.name; });
+
   const addCommodity = (id, name) => {
     if (!id && !name) return null;
-    // If we have an id, use it as the key
-    // If we only have a name, check if we've seen this name already under an id
-    let key = id || nameToKey[name?.toLowerCase()] || name;
+    // Resolve name from master list if we only have an id
+    const resolvedName = name || (id ? idToName[id] : null);
+    let key = id || nameToKey[resolvedName?.toLowerCase()] || resolvedName;
     if (!commodityMap[key]) {
-      commodityMap[key] = { id: id || null, name: name || key, contracts: [], invoices: [], budgets: [], forecasts: [], harvests: [] };
+      commodityMap[key] = { id: id || null, name: resolvedName || key, contracts: [], invoices: [], budgets: [], forecasts: [], harvests: [] };
     }
-    // Record name->key mapping so name-only entries can find id-based entries
-    if (name && id) nameToKey[name.toLowerCase()] = key;
-    // Update id if we now have one
+    if (resolvedName && id) nameToKey[resolvedName.toLowerCase()] = key;
     if (id && !commodityMap[key].id) commodityMap[key].id = id;
-    if (name && !commodityMap[key].name) commodityMap[key].name = name;
+    if (resolvedName && !commodityMap[key].name) commodityMap[key].name = resolvedName;
     return key;
   };
 

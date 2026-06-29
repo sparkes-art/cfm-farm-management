@@ -504,11 +504,23 @@ function _drawChart(canvas, labels, data, salePoints = []) {
 
 // ── Add price modal ───────────────────────────────────────────
 function _addPriceModal() {
+  const commodities = getCommodities();
+  const commOptions = commodities.map(c =>
+    `<option value="${c.id}" ${c.id === _selectedCommodityId ? 'selected' : ''}>${c.name}</option>`
+  ).join('');
+
   openModal({
     title: 'Add market price',
     confirmLabel: 'Save',
     bodyHTML: `
       <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Commodity</label>
+          <select class="form-select" id="mp-commodity">
+            <option value="">— select —</option>
+            ${commOptions}
+          </select>
+        </div>
         <div class="form-group">
           <label class="form-label">Date</label>
           <input class="form-input" id="mp-date" type="date" value="${new Date().toISOString().slice(0,10)}">
@@ -518,18 +530,36 @@ function _addPriceModal() {
           <input class="form-input num" id="mp-price" type="number" step="0.01" placeholder="0.00">
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Source <span class="text-muted">(optional)</span></label>
+          <input class="form-input" id="mp-source" type="text" placeholder="e.g. Manual, LDC" value="Manual">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Grade <span class="text-muted">(optional)</span></label>
+          <input class="form-input" id="mp-grade" type="text" placeholder="e.g. APW1">
+        </div>
+      </div>
     `,
     onConfirm: async (modal) => {
+      const commodityId = qs('#mp-commodity', modal)?.value;
       const date = qs('#mp-date', modal)?.value;
       const price = parseFloat(qs('#mp-price', modal)?.value || 0);
+      if (!commodityId) throw new Error('Please select a commodity');
       if (!date || !price) throw new Error('Please enter a date and price');
 
       await dbInsert('market_prices', {
-        commodity_id: _selectedCommodityId,
+        commodity_id: commodityId,
         price_date: date,
         price_per_unit: price,
+        source: qs('#mp-source', modal)?.value?.trim() || 'Manual',
+        grade: qs('#mp-grade', modal)?.value?.trim() || null,
         created_by: getSession()?.user?.id,
       });
+
+      // Switch to the newly added commodity
+      _selectedCommodityId = commodityId;
+
       toast('Price saved', 'success');
       await _loadData();
       _renderTable();
