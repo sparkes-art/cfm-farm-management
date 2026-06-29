@@ -25,7 +25,7 @@ export function toast(message, type = 'default', duration = 3500) {
 }
 
 // ── Modal ─────────────────────────────────────────────────────
-export function openModal({ title, bodyHTML, onConfirm, confirmLabel = 'Save', confirmClass = 'btn-primary', showCancel = true }) {
+export function openModal({ title, bodyHTML, onConfirm, onMounted, confirmLabel = 'Save', confirmClass = 'btn-primary', showCancel = true }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `

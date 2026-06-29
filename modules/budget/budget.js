@@ -444,7 +444,12 @@ function _renderHarvest(container) {
               <td class="num"><strong>${formatNumber(h.actual_production, 0)} ${h.unit || ''}</strong></td>
               <td class="num">${h.area_ha && h.actual_production ? formatNumber(parseFloat(h.actual_production) / parseFloat(h.area_ha), 2) : '—'}</td>
               <td class="muted text-sm">${h.notes || ''}</td>
-              ${canWrite() ? `<td><button class="btn btn-ghost btn-sm delete-harvest-btn" data-id="${h.id}" style="color:var(--red)">✕</button></td>` : ''}
+              ${canWrite() ? `<td>
+                <div class="flex gap-1">
+                  <button class="btn btn-ghost btn-sm edit-harvest-btn" data-id="${h.id}">Edit</button>
+                  <button class="btn btn-ghost btn-sm delete-harvest-btn" data-id="${h.id}" style="color:var(--red)">✕</button>
+                </div>
+              </td>` : ''}
             </tr>
           `;
         }).join('')}
@@ -458,6 +463,13 @@ function _renderHarvest(container) {
       </tbody>
     </table>
   `;
+
+  wrap.querySelectorAll('.edit-harvest-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const harvest = _harvests.find(h => h.id === btn.dataset.id);
+      if (harvest) _harvestModal(container, harvest);
+    });
+  });
 
   wrap.querySelectorAll('.delete-harvest-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -478,7 +490,8 @@ function _renderHarvest(container) {
 }
 
 // ── Harvest modal ─────────────────────────────────────────────
-function _harvestModal(container) {
+function _harvestModal(container, existing = null) {
+  const isEdit = !!existing;
   const farm = getActiveFarm();
   let selectedCommodityId = '';
 
@@ -529,8 +542,8 @@ function _harvestModal(container) {
   ].join('');
 
   openModal({
-    title: 'Add harvest entry',
-    confirmLabel: 'Save harvest',
+    title: isEdit ? 'Edit harvest entry' : 'Add harvest entry',
+    confirmLabel: isEdit ? 'Save changes' : 'Save harvest',
     bodyHTML: harvestBodyHTML,
     onConfirm: async (modal) => {
       const production = parseFloat(qs('#hv-production', modal)?.value || 0);
@@ -564,3 +577,5 @@ function _harvestModal(container) {
     initCropTypeSelect('hv-crop-type', () => selectedCommodityId);
   }, 100);
 }
+
+
