@@ -161,16 +161,6 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   const totalHarvest = comHarvests.reduce((s, h) => s + (parseFloat(h.actual_production) || 0), 0);
   const isHarvested = totalHarvest > 0;
 
-  // Contracts / hedging position
-  const totalContracted = contracts.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0);
-  const totalContractValue = contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
-  const avgFwdPrice = totalContracted ? totalContractValue / totalContracted : null;
-  const denominator = isHarvested ? totalHarvest : (forecastProd !== null ? forecastProd : totalBudgetProd);
-  // Hedged = contracted + already sold (paid invoices)
-  const totalHedged = Math.min(denominator || 0, totalContracted + totalPaidQty);
-  const pctHedged = denominator && totalHedged ? Math.round((totalHedged / denominator) * 100) : 0;
-  const unhedged = Math.max(0, (denominator || 0) - totalHedged);
-
   // Paid average — gross amount + quality adj (not selling costs) divided by qty
   // This gives the effective commodity price before deductions
   const completeInvoices = invoices.filter(i => i.status === 'complete' || i.status === 'paid');
@@ -189,6 +179,16 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   }, 0);
   const paidAvg = (totalPaidQty && totalPaidValue) ? totalPaidValue / totalPaidQty : null;
   const totalPaid = completeInvoices.reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
+
+  // Contracts / hedging position
+  const totalContracted = contracts.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0);
+  const totalContractValue = contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
+  const avgFwdPrice = totalContracted ? totalContractValue / totalContracted : null;
+  const denominator = isHarvested ? totalHarvest : (forecastProd !== null ? forecastProd : totalBudgetProd);
+  // Hedged = contracted + already sold (paid invoices)
+  const totalHedged = Math.min(denominator || 0, totalContracted + totalPaidQty);
+  const pctHedged = denominator && totalHedged ? Math.round((totalHedged / denominator) * 100) : 0;
+  const unhedged = Math.max(0, (denominator || 0) - totalHedged);
 
   // Market price
   const marketPrice = com.latestPrice ? parseFloat(com.latestPrice.price_per_unit) : null;
