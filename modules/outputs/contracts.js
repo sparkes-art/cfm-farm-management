@@ -271,7 +271,11 @@ export function openContractModal(existing = null) {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Crop year </label>
-          <input class="form-input" id="f-crop-year" type="text" value="${existing?.crop_year || currentSeason()}" placeholder="2024-25">
+          <select class="form-select" id="f-crop-year">
+            ${['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s =>
+              `<option value="${s}" ${(existing?.crop_year || currentSeason()) === s ? 'selected' : ''}>${s}</option>`
+            ).join('')}
+          </select>
         </div>
         <div class="form-group">
           <label class="form-label">Commodity </label>

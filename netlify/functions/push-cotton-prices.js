@@ -4,8 +4,9 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'test123';
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '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';
+const COTTON_PRICES_API_KEY = process.env.COTTON_PRICES_API_KEY || 'cfm-ldc-cotton-2026-xxxx';
+
 exports.handler = async (event) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
