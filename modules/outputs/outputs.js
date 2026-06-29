@@ -21,6 +21,13 @@ let _activeTab = 'overview';
 export async function mountOutputs(container) {
   const farm = getActiveFarm();
 
+  // Find most recent season with budget data for this farm
+  let defaultSeason = currentSeason();
+  try {
+    const budgetSeasons = await dbSelect('budgets', 'farm_id=eq.' + farm.id + '&select=season&order=season.desc&limit=1');
+    if (budgetSeasons.length && budgetSeasons[0].season) defaultSeason = budgetSeasons[0].season;
+  } catch { /* fall back to currentSeason */ }
+
   container.innerHTML = `
     <div class="page-header">
       <div>
