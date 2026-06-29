@@ -166,8 +166,10 @@ function _buildCard(com, allForecasts, allHarvests, season) {
   const totalContractValue = contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
   const avgFwdPrice = totalContracted ? totalContractValue / totalContracted : null;
   const denominator = isHarvested ? totalHarvest : (forecastProd !== null ? forecastProd : totalBudgetProd);
-  const pctHedged = denominator && totalContracted ? Math.round((totalContracted / denominator) * 100) : 0;
-  const unhedged = Math.max(0, (denominator || 0) - totalContracted);
+  // Hedged = contracted + already sold (paid invoices)
+  const totalHedged = Math.min(denominator || 0, totalContracted + totalPaidQty);
+  const pctHedged = denominator && totalHedged ? Math.round((totalHedged / denominator) * 100) : 0;
+  const unhedged = Math.max(0, (denominator || 0) - totalHedged);
 
   // Paid average — gross amount + quality adj (not selling costs) divided by qty
   // This gives the effective commodity price before deductions
@@ -218,14 +220,18 @@ function _buildCard(com, allForecasts, allHarvests, season) {
         ${denominator ? `
           <div style="flex:1;margin:0 12px">
             <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-              <span style="color:var(--blue);font-weight:500">${formatNumber(totalContracted, 0)} ${unit} fwd contracted</span>
-              <span style="color:var(--hint)">${formatNumber(unhedged, 0)} ${unit} unhedged</span>
+              <div style="display:flex;gap:8px">
+                ${totalContracted ? '<span style="color:var(--blue);font-weight:500">' + formatNumber(totalContracted, 0) + ' ' + unit + ' contracted</span>' : ''}
+                ${totalPaidQty ? '<span style="color:var(--green);font-weight:500">' + formatNumber(totalPaidQty, 0) + ' ' + unit + ' sold</span>' : ''}
+              </div>
+              <span style="color:var(--hint)">${formatNumber(unhedged, 0)} ${unit} open</span>
             </div>
-            <div style="height:7px;background:var(--border);border-radius:4px;overflow:hidden">
-              <div style="height:100%;width:${pctHedged}%;background:var(--blue);border-radius:4px;transition:width .3s"></div>
+            <div style="height:7px;background:var(--border);border-radius:4px;overflow:hidden;display:flex">
+              <div style="height:100%;width:${denominator ? Math.min(100, Math.round((totalPaidQty/denominator)*100)) : 0}%;background:var(--green);transition:width .3s"></div>
+              <div style="height:100%;width:${denominator ? Math.min(100 - Math.round((totalPaidQty/denominator)*100), Math.round((totalContracted/denominator)*100)) : 0}%;background:var(--blue);transition:width .3s"></div>
             </div>
           </div>
-          <span style="font-size:var(--text-sm);font-weight:600;color:var(--blue);white-space:nowrap">${pctHedged}% hedged</span>
+          <span style="font-size:var(--text-sm);font-weight:600;color:var(--blue);white-space:nowrap">${pctHedged}% covered</span>
         ` : ''}
       </div>
 
@@ -301,27 +307,33 @@ function _buildCard(com, allForecasts, allHarvests, season) {
         <!-- Col 3: Prices -->
         <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:8px">
           <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0">Prices</p>
-          <div style="display:flex;flex-direction:column;gap:6px">
-            <div style="display:flex;justify-content:space-between;align-items:baseline">
-              <span style="font-size:10px;color:var(--hint)">Paid avg</span>
-              <span style="font-size:12px;font-weight:600;color:var(--ink)">${paidAvg ? formatCurrency(paidAvg, 0) : '—'}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:baseline">
-              <span style="font-size:10px;color:var(--hint)">Fwd avg</span>
-              <span style="font-size:12px;font-weight:600;color:var(--blue)">${avgFwdPrice ? formatCurrency(avgFwdPrice, 0) : '—'}</span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:baseline">
-              <span style="font-size:10px;color:var(--hint)">Budget</span>
-              <span style="font-size:12px;font-weight:600;color:var(--ink)">${budgetPrice ? formatCurrency(budgetPrice, 0) : '—'}</span>
-            </div>
-            <div style="border-top:1px solid var(--border-light);padding-top:6px;display:flex;justify-content:space-between;align-items:baseline">
-              <span style="font-size:10px;color:var(--hint)">Market</span>
-              <div style="text-align:right">
-                <span style="font-size:12px;font-weight:600;color:${marketVsBudget !== null ? (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)'}">${marketPrice ? formatCurrency(marketPrice, 0) : '—'}</span>
-                ${marketVsBudget !== null ? '<span style="font-size:10px;color:' + (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') + ';margin-left:4px">' + (marketVsBudget >= 0 ? '▲' : '▼') + Math.abs(marketVsBudget).toFixed(1) + '%</span>' : ''}
-              </div>
-            </div>
-          </div>
+          ${(() => {
+            const paidVsBudget = paidAvg && budgetPrice ? ((paidAvg - budgetPrice) / budgetPrice * 100) : null;
+            return '<div style="display:flex;flex-direction:column;gap:6px">' +
+              '<div style="display:flex;justify-content:space-between;align-items:baseline">' +
+                '<span style="font-size:10px;color:var(--hint)">Fwd avg</span>' +
+                '<span style="font-size:12px;font-weight:600;color:var(--blue)">' + (avgFwdPrice ? formatCurrency(avgFwdPrice, 0) : '—') + '</span>' +
+              '</div>' +
+              '<div style="display:flex;justify-content:space-between;align-items:baseline">' +
+                '<span style="font-size:10px;color:var(--hint)">Budget</span>' +
+                '<span style="font-size:12px;font-weight:600;color:var(--ink)">' + (budgetPrice ? formatCurrency(budgetPrice, 0) : '—') + '</span>' +
+              '</div>' +
+              '<div style="border-top:1px solid var(--border-light);padding-top:6px;display:flex;justify-content:space-between;align-items:baseline">' +
+                '<span style="font-size:10px;color:var(--hint)">Market</span>' +
+                '<div style="text-align:right">' +
+                  '<span style="font-size:12px;font-weight:600;color:' + (marketVsBudget !== null ? (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') + '">' + (marketPrice ? formatCurrency(marketPrice, 0) : '—') + '</span>' +
+                  (marketVsBudget !== null ? '<span style="font-size:10px;color:' + (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') + ';margin-left:4px">' + (marketVsBudget >= 0 ? '▲' : '▼') + Math.abs(marketVsBudget).toFixed(1) + '%</span>' : '') +
+                '</div>' +
+              '</div>' +
+              '<div style="border-top:1px solid var(--border-light);padding-top:6px;display:flex;justify-content:space-between;align-items:baseline">' +
+                '<span style="font-size:10px;color:var(--hint)">Paid avg</span>' +
+                '<div style="text-align:right">' +
+                  '<span style="font-size:12px;font-weight:600;color:' + (paidVsBudget !== null ? (paidVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') + '">' + (paidAvg ? formatCurrency(paidAvg, 0) : '—') + '</span>' +
+                  (paidVsBudget !== null ? '<span style="font-size:10px;color:' + (paidVsBudget >= 0 ? 'var(--green)' : 'var(--red)') + ';margin-left:4px">' + (paidVsBudget >= 0 ? '▲' : '▼') + Math.abs(paidVsBudget).toFixed(1) + '%</span>' : '') +
+                '</div>' +
+              '</div>' +
+            '</div>';
+          })()}
         </div>
 
         <!-- Col 4: Chart -->
