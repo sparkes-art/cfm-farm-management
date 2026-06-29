@@ -1,10 +1,6 @@
 [build]
   functions = "netlify/functions"
 
-[functions]
-  node_bundler = "esbuild"
-  external_node_modules = ["exceljs"]
-
 [functions.push-grain-prices]
   timeout = 30
 
