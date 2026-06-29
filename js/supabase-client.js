@@ -80,8 +80,11 @@ export async function dbUpdate(table, id, patch) {
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
-export async function dbUpsert(table, rows) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+export async function dbUpsert(table, rows, onConflict = null) {
+  const url = onConflict
+    ? `${SUPABASE_URL}/rest/v1/${table}?on_conflict=${onConflict}`
+    : `${SUPABASE_URL}/rest/v1/${table}`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       ..._headers(),

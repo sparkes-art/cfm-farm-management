@@ -159,7 +159,7 @@ async function _mountOverview(container) {
             commodity_id: commodityId,
             season: s,
             status,
-          }]);
+          }], 'farm_id,commodity_id,season');
           await _mountOverview(container);
         } catch (err) {
           toast('Failed to save status: ' + err.message, 'error');
