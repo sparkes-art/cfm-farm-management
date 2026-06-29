@@ -492,8 +492,7 @@ function _renderHarvest(container) {
 // ── Harvest modal ─────────────────────────────────────────────
 function _harvestModal(container, existing = null) {
   const isEdit = !!existing;
-  const farm = getActiveFarm();
-  let selectedCommodityId = '';
+  let selectedCommodityId = existing?.commodity_id || null;
 
   const harvestBodyHTML = [
     '<div class="form-row">',
@@ -548,11 +547,11 @@ function _harvestModal(container, existing = null) {
     onConfirm: async (modal) => {
       const production = parseFloat(qs('#hv-production', modal)?.value || 0);
       if (!production) throw new Error('Please enter a production quantity');
-      const commodityId = qs('#hv-commodity', modal)?.value;
-      const row = await dbInsert('harvest_entries', {
+
+      const row = {
         farm_id: farm.id,
         season: _season,
-        commodity_id: commodityId || null,
+        commodity_id: selectedCommodityId || null,
         crop_type_id: qs('#hv-crop-type', modal)?.value || null,
         paddock_name: qs('#hv-paddock', modal)?.value?.trim() || null,
         area_ha: parseFloat(qs('#hv-area', modal)?.value || 0) || null,
@@ -560,10 +559,19 @@ function _harvestModal(container, existing = null) {
         actual_production: production,
         unit: qs('#hv-unit', modal)?.value || 'bale',
         notes: qs('#hv-notes', modal)?.value?.trim() || null,
-        created_by: getSession()?.user?.id,
-      });
-      _harvests.push(row);
-      toast('Harvest entry added', 'success');
+      };
+
+      if (isEdit) {
+        await dbUpdate('harvest_entries', existing.id, row);
+        const idx = _harvests.findIndex(h => h.id === existing.id);
+        if (idx >= 0) _harvests[idx] = { ..._harvests[idx], ...row };
+        toast('Harvest entry updated', 'success');
+      } else {
+        row.created_by = getSession()?.user?.id;
+        const saved = await dbInsert('harvest_entries', row);
+        _harvests.push(saved);
+        toast('Harvest entry added', 'success');
+      }
       _renderHarvest(container);
     },
   });
@@ -575,5 +583,18 @@ function _harvestModal(container, existing = null) {
       initCropTypeSelect('hv-crop-type', () => selectedCommodityId);
     });
     initCropTypeSelect('hv-crop-type', () => selectedCommodityId);
+
+    // Pre-fill commodity and crop type for edit
+    if (isEdit && existing.commodity_id) {
+      const commSel = document.querySelector('#hv-commodity select');
+      if (commSel) {
+        commSel.value = existing.commodity_id;
+        commSel.dispatchEvent(new Event('change'));
+        setTimeout(() => {
+          const ctSel = document.querySelector('#hv-crop-type select');
+          if (ctSel && existing.crop_type_id) ctSel.value = existing.crop_type_id;
+        }, 200);
+      }
+    }
   }, 100);
 }
