@@ -1,7 +1,7 @@
 // modules/outputs/outputs.js
 // Outputs module — Dashboard, Contracts, Market Prices, Invoices
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
 import {
   toast, openModal, formatCurrency, formatDate,
@@ -145,6 +145,27 @@ async function _mountOverview(container) {
 
 
     await drawMiniCharts(commodityMap, season);
+
+    // Wire status toggle buttons
+    container.querySelectorAll('.status-opt-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const commodityId = btn.dataset.commodity;
+        const s = btn.dataset.season;
+        const status = btn.dataset.status;
+        if (!commodityId) return;
+        try {
+          await dbUpsert('commodity_status', [{
+            farm_id: farm.id,
+            commodity_id: commodityId,
+            season: s,
+            status,
+          }]);
+          await _mountOverview(container);
+        } catch (err) {
+          toast('Failed to save status: ' + err.message, 'error');
+        }
+      });
+    });
 
   } catch (err) {
     container.innerHTML = '<div class="empty-state"><p>Failed to load dashboard: ' + err.message + '</p></div>';
