@@ -9,6 +9,7 @@ import {
 } from '../../js/ui.js';
 import { mountContracts, unmountContracts } from './contracts.js';
 import { mountInvoices, unmountInvoices } from './invoices.js';
+import { mountReconciliation, unmountReconciliation } from './reconciliation.js';
 import { mountMarketPrices, unmountMarketPrices } from './market-prices.js';
 import { buildCommodityCards, drawMiniCharts } from './commodity-card.js';
 
@@ -77,6 +78,7 @@ export function unmountOutputs() {
   unmountContracts();
   unmountMarketPrices();
   unmountInvoices();
+  unmountReconciliation();
   if (_unsub) { _unsub(); _unsub = null; }
   _invoices = [];
   _contracts = [];
@@ -104,6 +106,8 @@ async function _loadTab() {
     await mountContracts(content);
   } else if (_activeTab === 'prices') {
     await mountMarketPrices(content);
+  } else if (_activeTab === 'reconciliation') {
+    await mountReconciliation(content);
   } else {
     await mountInvoices(content);
   }
