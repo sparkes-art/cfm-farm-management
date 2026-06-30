@@ -47,6 +47,7 @@ export async function mountOutputs(container) {
       <button class="tab-btn" data-tab="contracts">Contracts</button>
       <button class="tab-btn" data-tab="prices">Market prices</button>
       <button class="tab-btn" data-tab="invoices">Invoices</button>
+      <button class="tab-btn" data-tab="reconciliation">Reconciliation</button>
     </div>
 
     <div id="tab-content"></div>
