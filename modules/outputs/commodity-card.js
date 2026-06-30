@@ -258,7 +258,7 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
       </div>
 
       <!-- Card body: left data + right (future chart placeholder) -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr minmax(0,1fr);min-height:220px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr minmax(0,1fr);min-height:220px" class="commodity-card-body">
 
         <!-- Col 1: Yield -->
         <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:12px">

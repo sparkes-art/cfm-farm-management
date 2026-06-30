@@ -705,15 +705,22 @@ body {
 @media (max-width: 768px) {
   :root { --sidebar-w: 0px; }
 
-  /* Layout */
+  /* Layout — remove sidebar column entirely */
   #app {
-    grid-template-columns: 1fr;
-    grid-template-rows: var(--topbar-h) 1fr 56px;
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100vh;
+    overflow: hidden;
+  }
+  #topbar {
+    flex-shrink: 0;
   }
   #main {
+    flex: 1;
     padding: 12px;
-    padding-bottom: 68px; /* space for bottom nav */
+    padding-bottom: 68px;
     overflow-y: auto;
+    overflow-x: hidden;
   }
 
   /* Topbar */
