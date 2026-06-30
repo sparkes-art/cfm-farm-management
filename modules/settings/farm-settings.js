@@ -170,4 +170,50 @@ export async function mountFarmSettings(container, onSave) {
   qs('#fs-cancel', container)?.addEventListener('click', () => {
     if (onSave) onSave(null);
   });
+
+  // Xero connection section
+  const xeroSection = document.createElement('div');
+  xeroSection.className = 'card';
+  xeroSection.style.marginTop = '16px';
+  xeroSection.innerHTML = `
+    <div class="card-header"><h3 style="font-size:var(--text-sm);font-weight:600;margin:0">Xero connection</h3></div>
+    <div class="card-body" id="xero-status-wrap">
+      <div class="empty-state"><span class="loading-spinner"></span></div>
+    </div>
+  `;
+  container.appendChild(xeroSection);
+  _loadXeroStatus(farm);
+}
+
+async function _loadXeroStatus(farm) {
+  const wrap = document.getElementById('xero-status-wrap');
+  if (!wrap) return;
+  try {
+    const res = await fetch('/api/xero-auth?action=status&farm_id=' + farm.id);
+    const data = await res.json();
+    if (data && data.tenant_name) {
+      const isExpired = new Date(data.expires_at) < new Date();
+      wrap.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;padding:4px 0">
+          <span style="font-size:20px">✅</span>
+          <div>
+            <p style="font-size:var(--text-sm);font-weight:600;color:var(--ink)">${data.tenant_name}</p>
+            <p style="font-size:var(--text-xs);color:var(--muted)">${isExpired ? 'Token expired — reconnect below' : 'Connected · Last updated ' + new Date(data.updated_at).toLocaleDateString('en-AU')}</p>
+          </div>
+          <a href="/api/xero-auth?action=connect&farm_id=${farm.id}" class="btn btn-secondary btn-sm" style="margin-left:auto">Reconnect</a>
+        </div>`;
+    } else {
+      wrap.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;padding:4px 0">
+          <span style="font-size:20px">🔗</span>
+          <div>
+            <p style="font-size:var(--text-sm);color:var(--muted)">Not connected to Xero</p>
+            <p style="font-size:var(--text-xs);color:var(--hint)">Connect to push invoices directly from CFM</p>
+          </div>
+          <a href="/api/xero-auth?action=connect&farm_id=${farm.id}" class="btn btn-primary btn-sm" style="margin-left:auto">Connect Xero</a>
+        </div>`;
+    }
+  } catch {
+    wrap.innerHTML = '<p style="font-size:var(--text-sm);color:var(--muted);padding:8px 0">Could not load Xero status</p>';
+  }
 }
