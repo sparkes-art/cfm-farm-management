@@ -118,7 +118,30 @@ function _populateFarmSelector(farms) {
 
 qs('#farm-select')?.addEventListener('change', (e) => {
   setActiveFarm(e.target.value);
+  _updateXeroIndicator();
 });
+
+async function _updateXeroIndicator() {
+  const el = document.getElementById('xero-status-indicator');
+  if (!el) return;
+  const farm = getActiveFarm();
+  if (!farm) { el.style.display = 'none'; return; }
+  try {
+    const { dbSelect } = await import('./supabase-client.js');
+    const rows = await dbSelect('xero_tokens', 'farm_id=eq.' + farm.id + '&select=tenant_name,expires_at');
+    const token = rows[0];
+    el.style.display = 'flex';
+    if (token && new Date(token.expires_at) > new Date()) {
+      el.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:20px;cursor:pointer;background:rgba(50,180,80,0.15);border:0.5px solid rgba(50,200,80,0.35);color:#80ffaa';
+      el.innerHTML = '<span>🟢</span> Xero';
+      el.title = 'Connected to ' + token.tenant_name;
+    } else {
+      el.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:20px;cursor:pointer;background:rgba(180,50,50,0.15);border:0.5px solid rgba(220,80,80,0.35);color:#ff9090';
+      el.innerHTML = '<span>🔴</span> Xero';
+      el.title = token ? 'Xero token expired — click to reconnect' : 'Xero not connected — click to connect';
+    }
+  } catch { el.style.display = 'none'; }
+}
 
 // ── Navigation ────────────────────────────────────────────────
 document.getElementById('sidebar')?.querySelectorAll('a[data-module]').forEach(link => {
