@@ -3,13 +3,13 @@
 // GET /api/xero-auth?action=connect&farm_id=xxx  → redirects to Xero
 // GET /api/xero-auth?action=callback&code=xxx&state=xxx → exchanges code for tokens
 
-const XERO_CLIENT_ID = process.env.XERO_CLIENT_ID || 'E4E1BDEA8DFF417C88007214BD95EA61';
-const XERO_CLIENT_SECRET = process.env.XERO_CLIENT_SECRET || 'bj8psa31mt2LZzb5xoi0SO3xwE-S-Vithy7S1PSbEPzUbrzL';
+const XERO_CLIENT_ID = process.env.XERO_CLIENT_ID;
+const XERO_CLIENT_SECRET = process.env.XERO_CLIENT_SECRET;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BASE_URL = 'https://profound-tiramisu-8b956e.netlify.app';
 const REDIRECT_URI = `${BASE_URL}/xero/callback`;
-const SCOPES = 'openid profile email accounting.transactions accounting.contacts offline_access';
+const SCOPES = 'openid profile email accounting.invoices accounting.contacts accounting.settings.read offline_access';
 
 const sb = async (method, path, body = null) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
