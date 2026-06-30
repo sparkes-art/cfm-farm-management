@@ -93,8 +93,8 @@ export async function mountMarketPrices(container) {
       <p class="page-subtitle" id="mp-grade-label">Price history</p>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 320px;gap:20px">
-      <div class="card">
+    <div class="mp-layout" style="display:flex;flex-direction:row;gap:20px;align-items:flex-start">
+      <div class="card" style="flex:1;min-width:0">
         <div class="card-header">
           <h2>Price history</h2>
           <div class="flex items-center gap-2">
