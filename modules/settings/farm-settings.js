@@ -1,7 +1,7 @@
 // modules/settings/farm-settings.js
 // Edit settings for the currently active farm
 
-import { dbUpdate } from '../../js/supabase-client.js';
+import { dbSelect, dbUpdate } from '../../js/supabase-client.js';
 import { getActiveFarm, getFarms, setActiveFarm } from '../../js/app-state.js';
 import { toast, qs, formatDate } from '../../js/ui.js';
 const COTTON_REGIONS = [
@@ -189,8 +189,8 @@ async function _loadXeroStatus(farm) {
   const wrap = document.getElementById('xero-status-wrap');
   if (!wrap) return;
   try {
-    const res = await fetch('/api/xero-auth?action=status&farm_id=' + farm.id);
-    const data = await res.json();
+    const rows = await dbSelect('xero_tokens', 'farm_id=eq.' + farm.id + '&select=tenant_name,expires_at,updated_at');
+    const data = rows[0] || null;
     if (data && data.tenant_name) {
       const isExpired = new Date(data.expires_at) < new Date();
       wrap.innerHTML = `
