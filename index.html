@@ -81,6 +81,35 @@
 
   <main id="main" role="main"></main>
 
+  <!-- Mobile bottom navigation -->
+  <nav id="mobile-nav" aria-label="Mobile navigation">
+    <a href="#" data-module="outputs" class="active">
+      <span class="mob-icon">📦</span>
+      Outputs
+    </a>
+    <a href="#" data-module="budget">
+      <span class="mob-icon">📋</span>
+      Budget
+    </a>
+    <a href="#" data-module="settings">
+      <span class="mob-icon">⚙️</span>
+      Settings
+    </a>
+    <button id="mobile-more-btn" aria-label="More navigation options">
+      <span class="mob-icon">☰</span>
+      More
+    </button>
+  </nav>
+
+  <!-- Mobile drawer for extra nav items -->
+  <div id="mobile-drawer-overlay"></div>
+  <div id="mobile-drawer">
+    <a href="#" data-module="inputs"><span>🌿</span> Inputs</a>
+    <a href="#" data-module="gross-margin"><span>📊</span> Gross margin</a>
+    <a href="#" data-module="agronomy"><span>🗺</span> Agronomy</a>
+    <a href="#" data-module="weather"><span>🌦</span> Weather</a>
+  </div>
+
 </div>
 
 <script type="module" src="/js/main.js"></script>

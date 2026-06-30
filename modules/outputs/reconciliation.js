@@ -55,6 +55,8 @@ export async function mountReconciliation(container) {
     await _renderReconciliation(container, farm);
   });
   qs('#rec-commodity', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
+  qs('#rec-date', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
+  qs('#rec-contingency', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
 }
 
 function _seasonOptions(selected) {
@@ -101,10 +103,10 @@ async function _renderReconciliation(container, farm) {
   try {
     const [invoices, contracts, budgets, forecasts, prices] = await Promise.all([
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
-      dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
+      dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&sale_date=lte.' + asAt + '&select=*'),
       dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
-      dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.desc'),
-      dbSelect('market_prices', 'select=commodity_id,price_per_unit,price_date&order=price_date.desc&limit=200'),
+      dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&forecast_date=lte.' + asAt + '&select=*&order=forecast_date.desc'),
+      dbSelect('market_prices', 'price_date=lte.' + asAt + '&select=commodity_id,price_per_unit,price_date&order=price_date.desc&limit=200'),
     ]);
 
     // Filter invoices to those on or before asAt date
@@ -140,10 +142,14 @@ async function _renderReconciliation(container, farm) {
       });
     });
 
-    // Latest market price per commodity
+    // Latest market price per commodity (most recent by price_date)
     const latestPrices = {};
-    prices.forEach(p => {
-      if (!latestPrices[p.commodity_id]) latestPrices[p.commodity_id] = parseFloat(p.price_per_unit);
+    // Sort by date desc so first occurrence is latest
+    const sortedPrices = [...prices].sort((a, b) => b.price_date.localeCompare(a.price_date));
+    sortedPrices.forEach(p => {
+      if (p.commodity_id && !latestPrices[p.commodity_id]) {
+        latestPrices[p.commodity_id] = parseFloat(p.price_per_unit);
+      }
     });
 
     // Filter if specific commodity selected
@@ -196,14 +202,14 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
   const budgetProd = com.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_production) || ((parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0))), 0);
   const denominator = forecastProd || budgetProd;
 
-  // Unpriced = forecast - contracted
-  const unpricedQty = Math.max(0, denominator - contractedQty);
+  // Unpriced = forecast - total contracted (not just unpaid contracts)
   const unit = com.contracts[0]?.unit || com.budgets[0]?.unit || 't';
+  const unpricedQty = Math.max(0, denominator - contractedQty);
 
-  // Indicative price for unpriced crop with contingency
+  // Indicative price = market price × (1 + contingency%)
   const contingencyMultiplier = 1 + (contingencyPct / 100);
   const unpricedPrice = marketPrice ? marketPrice * contingencyMultiplier : null;
-  const unpricedGross = unpricedPrice && unpricedQty ? unpricedPrice * unpricedQty : null;
+  const unpricedGross = (unpricedPrice != null && unpricedQty > 0) ? unpricedPrice * unpricedQty : null;
 
   // Contract rows
   const contractRows = contracts.map(c => {
@@ -375,11 +381,11 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
               <td style="padding:10px 16px;font-weight:700;font-size:var(--text-sm)" colspan="2">
                 ${com.name} — Total Season Position
               </td>
-              <td style="padding:10px 16px;text-align:right;font-weight:700;font-family:var(--font-data)">${fmtN(totalQty, 2)} ${unit}</td>
-              <td style="padding:10px 16px;text-align:right;font-size:11px;color:#aab;font-family:var(--font-data)">avg ${fmtC(avgPrice, 2)}</td>
-              <td style="padding:10px 16px;text-align:right;font-weight:700;font-family:var(--font-data)">${fmtC(totalGross, 0)}</td>
+              <td style="padding:10px 16px;text-align:right;font-weight:700;font-family:inherit">${fmtN(totalQty, 2)} ${unit}</td>
+              <td style="padding:10px 16px;text-align:right;font-size:11px;color:#aab;font-family:inherit">avg ${fmtC(avgPrice, 2)}</td>
+              <td style="padding:10px 16px;text-align:right;font-weight:700;font-family:inherit">${fmtC(totalGross, 0)}</td>
               <td style="padding:10px 16px;text-align:right;color:#aab"></td>
-              <td style="padding:10px 16px;text-align:right;font-weight:700;font-family:var(--font-data)">${fmtC(totalGross, 0)}</td>
+              <td style="padding:10px 16px;text-align:right;font-weight:700;font-family:inherit">${fmtC(totalGross, 0)}</td>
               <td style="padding:10px 16px;text-align:right;font-weight:700">100%</td>
             </tr>
 
@@ -404,7 +410,7 @@ function thStyle(align = 'l') {
 }
 
 function tdStyle(align = 'l') {
-  return `padding:7px 12px;border-bottom:0.5px solid var(--border-light);vertical-align:top;text-align:${align === 'r' ? 'right' : 'left'};font-family:${align === 'r' ? 'var(--font-data)' : 'inherit'};font-size:var(--text-sm)`;
+  return `padding:7px 12px;border-bottom:0.5px solid var(--border-light);vertical-align:top;text-align:${align === 'r' ? 'right' : 'left'};font-family:inherit;font-size:var(--text-sm)`;
 }
 
 function sectionHeaderStyle(bg) {
@@ -433,7 +439,7 @@ function _print(container, farm) {
         th { padding: 5px 8px; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: #666; border-bottom: 1px solid #ccc; text-align: left; background: #f5f5f5; }
         th:not(:first-child):not(:nth-child(2)) { text-align: right; }
         td { padding: 5px 8px; border-bottom: 0.5px solid #eee; vertical-align: top; }
-        td:not(:first-child):not(:nth-child(2)) { text-align: right; font-family: monospace; }
+        td:not(:first-child):not(:nth-child(2)) { text-align: right;  }
         .card { display: block; }
         .form-select, .form-input, .btn, #btn-rec-refresh, #btn-rec-print, .loading-spinner { display: none !important; }
         [style*="background:var(--page-bg)"] { background: #f8f8f8 !important; }
