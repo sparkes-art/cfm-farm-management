@@ -49,6 +49,7 @@ onSessionChange((session) => {
     _populateFarmSelector(getFarms());
     _updateUserDisplay(session);
     _navigateTo('outputs');
+    setTimeout(_updateXeroIndicator, 800);
   } else {
     show('#login-page');
     hide('#app');
