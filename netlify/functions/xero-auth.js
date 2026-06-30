@@ -43,6 +43,9 @@ exports.handler = async (event) => {
     authUrl.searchParams.set('scope', SCOPES);
     authUrl.searchParams.set('state', state);
 
+    console.log('Xero auth URL:', authUrl.toString());
+    console.log('Client ID:', XERO_CLIENT_ID ? XERO_CLIENT_ID.slice(0,8) + '...' : 'MISSING');
+    console.log('Redirect URI:', REDIRECT_URI);
     return {
       statusCode: 302,
       headers: { Location: authUrl.toString() },
