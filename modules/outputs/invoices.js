@@ -166,7 +166,10 @@ function _renderTable(container) {
                 <td>
                   <div class="flex gap-2">
                     <button class="btn btn-ghost btn-sm edit-inv-btn" data-id="${inv.id}">Edit</button>
-                    ${inv.status === 'pending' && !inv.xero_invoice_number ? `<button class="btn btn-ghost btn-sm xero-btn" data-id="${inv.id}" style="color:var(--blue)">+ Xero ref</button>` : ''}
+                    ${inv.status === 'pending' && !inv.xero_invoice_number ? `
+                      <button class="btn btn-ghost btn-sm push-xero-btn" data-id="${inv.id}" style="color:var(--blue)">Push to Xero</button>
+                      <button class="btn btn-ghost btn-sm xero-btn" data-id="${inv.id}" style="color:var(--muted)">+ Xero ref</button>
+                    ` : ''}
                   </div>
                 </td>
               ` : ''}
@@ -191,6 +194,32 @@ function _renderTable(container) {
     btn.addEventListener('click', () => {
       const inv = _invoices.find(i => i.id === btn.dataset.id);
       if (inv) openInvoiceForm(container, inv);
+    });
+  });
+
+  // Push to Xero
+  wrap.querySelectorAll('.push-xero-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const inv = _invoices.find(i => i.id === btn.dataset.id);
+      if (!inv) return;
+      btn.textContent = 'Pushing...';
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/xero-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ invoice_id: inv.id, farm_id: inv.farm_id }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to push to Xero');
+        toast('Pushed to Xero — ' + (data.xero_invoice_number || 'Draft created'), 'success');
+        await _loadData();
+        _renderTable(container);
+      } catch (err) {
+        toast(err.message, 'error');
+        btn.textContent = 'Push to Xero';
+        btn.disabled = false;
+      }
     });
   });
 

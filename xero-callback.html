@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connecting to Xero — CFM</title>
+  <link rel="stylesheet" href="/css/design-system.css">
+  <style>
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--page-bg); }
+    .box { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 40px; max-width: 400px; text-align: center; }
+    .icon { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: var(--text-lg); font-weight: 600; margin-bottom: 8px; }
+    p { color: var(--muted); font-size: var(--text-sm); }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="icon" id="icon">⏳</div>
+    <h1 id="title">Connecting to Xero...</h1>
+    <p id="message">Please wait while we complete the connection.</p>
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+    const error = params.get('error');
+
+    if (error) {
+      document.getElementById('icon').textContent = '❌';
+      document.getElementById('title').textContent = 'Connection failed';
+      document.getElementById('message').textContent = error;
+    } else if (code && state) {
+      // Call our backend to exchange the code for tokens
+      fetch(`/api/xero-auth?action=callback&code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`)
+        .then(res => {
+          if (res.redirected) {
+            window.location.href = res.url;
+          } else {
+            return res.json().then(data => {
+              if (data.error) throw new Error(data.error);
+              document.getElementById('icon').textContent = '✅';
+              document.getElementById('title').textContent = 'Xero connected!';
+              document.getElementById('message').textContent = 'Redirecting back to CFM...';
+              setTimeout(() => window.location.href = '/#settings', 2000);
+            });
+          }
+        })
+        .catch(err => {
+          document.getElementById('icon').textContent = '❌';
+          document.getElementById('title').textContent = 'Connection failed';
+          document.getElementById('message').textContent = err.message;
+        });
+    } else {
+      document.getElementById('icon').textContent = '❌';
+      document.getElementById('title').textContent = 'Invalid callback';
+      document.getElementById('message').textContent = 'Missing required parameters.';
+    }
+  </script>
+</body>
+</html>
