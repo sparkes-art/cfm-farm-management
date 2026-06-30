@@ -122,7 +122,7 @@ qs('#farm-select')?.addEventListener('change', (e) => {
   _updateXeroIndicator();
 });
 
-async function _updateXeroIndicator() {
+window._updateXeroIndicator = async function _updateXeroIndicator() {
   const el = document.getElementById('xero-status-indicator');
   if (!el) return;
   const farm = getActiveFarm();
@@ -142,7 +142,7 @@ async function _updateXeroIndicator() {
       el.title = token ? 'Xero token expired — click to reconnect' : 'Xero not connected — click to connect';
     }
   } catch { el.style.display = 'none'; }
-}
+};
 
 // ── Navigation ────────────────────────────────────────────────
 document.getElementById('sidebar')?.querySelectorAll('a[data-module]').forEach(link => {
