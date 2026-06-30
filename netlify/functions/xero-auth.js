@@ -3,7 +3,7 @@
 // GET /api/xero-auth?action=connect&farm_id=xxx  → redirects to Xero
 // GET /api/xero-auth?action=callback&code=xxx&state=xxx → exchanges code for tokens
 
-const XERO_CLIENT_ID = process.env.XERO_CLIENT_ID || 'E4E1BDEA8DFF417C88007214BD95EA61';
+const XERO_CLIENT_ID = process.env.XERO_CLIENT_ID;
 const XERO_CLIENT_SECRET = process.env.XERO_CLIENT_SECRET;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -106,11 +106,11 @@ exports.handler = async (event) => {
       updated_at: new Date().toISOString(),
     });
 
-    // Redirect back to CFM settings
+    // Return success JSON — callback HTML will redirect
     return {
-      statusCode: 302,
-      headers: { Location: `${BASE_URL}/#settings?xero=connected&farm=${farmId}` },
-      body: '',
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ success: true, tenant_name: tenant?.tenantName, farm_id: farmId }),
     };
   }
 

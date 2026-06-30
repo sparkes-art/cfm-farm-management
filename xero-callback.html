@@ -31,19 +31,20 @@
       document.getElementById('message').textContent = error;
     } else if (code && state) {
       // Call our backend to exchange the code for tokens
-      fetch(`/api/xero-auth?action=callback&code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`)
-        .then(res => {
-          if (res.redirected) {
-            window.location.href = res.url;
-          } else {
-            return res.json().then(data => {
-              if (data.error) throw new Error(data.error);
-              document.getElementById('icon').textContent = '✅';
-              document.getElementById('title').textContent = 'Xero connected!';
-              document.getElementById('message').textContent = 'Redirecting back to CFM...';
-              setTimeout(() => window.location.href = '/#settings', 2000);
-            });
-          }
+      fetch(`/api/xero-auth?action=callback&code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`, {
+          redirect: 'manual'
+        })
+        .then(async res => {
+          const text = await res.text();
+          let data;
+          try { data = JSON.parse(text); } catch { data = {}; }
+          
+          if (data.error) throw new Error(data.error);
+          
+          document.getElementById('icon').textContent = '✅';
+          document.getElementById('title').textContent = 'Xero connected!';
+          document.getElementById('message').textContent = 'Redirecting back to CFM...';
+          setTimeout(() => window.location.href = '/', 2000);
         })
         .catch(err => {
           document.getElementById('icon').textContent = '❌';
