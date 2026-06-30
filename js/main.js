@@ -132,14 +132,15 @@ window._updateXeroIndicator = async function _updateXeroIndicator() {
     const rows = await dbSelect('xero_tokens', 'farm_id=eq.' + farm.id + '&select=tenant_name,expires_at');
     const token = rows[0];
     el.style.display = 'flex';
-    if (token && new Date(token.expires_at) > new Date()) {
+    if (token) {
+      // Show green if connected — access token auto-refreshes, only goes red if no token at all
       el.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:20px;cursor:pointer;background:rgba(50,180,80,0.15);border:0.5px solid rgba(50,200,80,0.35);color:#80ffaa';
       el.innerHTML = '<span>🟢</span> Xero';
-      el.title = 'Connected to ' + token.tenant_name;
+      el.title = 'Connected to ' + (token.tenant_name || 'Xero');
     } else {
       el.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:20px;cursor:pointer;background:rgba(180,50,50,0.15);border:0.5px solid rgba(220,80,80,0.35);color:#ff9090';
       el.innerHTML = '<span>🔴</span> Xero';
-      el.title = token ? 'Xero token expired — click to reconnect' : 'Xero not connected — click to connect';
+      el.title = 'Xero not connected — click to connect in Settings';
     }
   } catch { el.style.display = 'none'; }
 };
