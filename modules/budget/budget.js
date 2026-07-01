@@ -487,57 +487,53 @@ function _renderHarvest(container) {
         const fcastArea = forecastByCommCropType[s.commCropKey] || 0;
         const pctComplete = fcastArea && s.area ? Math.round((s.area / fcastArea) * 100) : null;
 
-        return \`
+        return `
           <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:0.5px solid var(--border-light)">
-            <p style="font-size:13px;font-weight:700;color:var(--ink);margin:0 0 10px">\${s.commodity}\${s.cropType ? ' · ' + s.cropType : ''}</p>
+            <p style="font-size:13px;font-weight:700;color:var(--ink);margin:0 0 10px">${s.commodity}${s.cropType ? ' · ' + s.cropType : ''}</p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
-
               <!-- Left: stat cards -->
               <div style="display:flex;gap:0;border:1px solid var(--border-light);border-radius:8px;overflow:hidden">
-                \${[
+                ${[
                   ['Area harvested', s.area ? formatNumber(s.area,1)+' ha' : '—', 'var(--ink)'],
                   ['% Complete', pctComplete != null ? pctComplete+'%' : '—', pctComplete >= 100 ? 'var(--green)' : pctComplete >= 75 ? 'var(--blue)' : 'var(--amber)'],
                   ['Production', s.production ? formatNumber(s.production,0)+' '+s.unit : '—', 'var(--ink)'],
                   ['Yield / ha', yieldHa ? formatNumber(yieldHa,2) : '—', 'var(--ink)'],
                   ['Turnout', turnout ? formatNumber(turnout,1)+'%' : '—', 'var(--ink)'],
-                ].map(([l,v,c],i) => \`
-                  <div style="padding:8px 12px;\${i>0?'border-left:1px solid var(--border-light)':''}">
-                    <p style="font-size:10px;color:var(--hint);margin:0 0 3px;white-space:nowrap">\${l}</p>
-                    <p style="font-size:15px;font-weight:700;color:\${c};margin:0">\${v}</p>
-                  </div>\`).join('')}
+                ].map(([l,v,c],i) =>
+                  '<div style="padding:8px 12px;' + (i>0?'border-left:1px solid var(--border-light)':'') + '">' +
+                  '<p style="font-size:10px;color:var(--hint);margin:0 0 3px;white-space:nowrap">' + l + '</p>' +
+                  '<p style="font-size:15px;font-weight:700;color:' + c + ';margin:0">' + v + '</p>' +
+                  '</div>'
+                ).join('')}
               </div>
 
               <!-- Right: by variety -->
-              \${showVarieties ? \`
-              <div>
-                <p style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:0 0 6px">By variety</p>
-                <table style="width:100%;border-collapse:collapse;font-size:12px">
-                  <thead>
-                    <tr style="border-bottom:1px solid var(--border-light)">
-                      <th style="text-align:left;padding:4px 8px;color:var(--hint);font-weight:500;font-size:10px">Variety</th>
-                      <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500;font-size:10px">Area</th>
-                      <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500;font-size:10px">Production</th>
-                      <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500;font-size:10px">Yield</th>
-                      <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500;font-size:10px">Turnout</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    \${varieties.map(([v,d]) => {
-                      const vy = d.area ? d.production/d.area : null;
-                      const vt = d.weight ? (d.production*227/d.weight)*100 : null;
-                      return \`<tr style="border-bottom:0.5px solid var(--border-light)">
-                        <td style="padding:5px 8px;font-weight:600;color:var(--ink)">\${v}</td>
-                        <td style="padding:5px 8px;text-align:right;color:var(--muted)">\${d.area?formatNumber(d.area,1)+' ha':'—'}</td>
-                        <td style="padding:5px 8px;text-align:right;color:var(--muted)">\${d.production?formatNumber(d.production,0):'—'}</td>
-                        <td style="padding:5px 8px;text-align:right;color:var(--muted)">\${vy?formatNumber(vy,2):'—'}</td>
-                        <td style="padding:5px 8px;text-align:right;color:var(--muted)">\${vt?formatNumber(vt,1)+'%':'—'}</td>
-                      </tr>\`;
-                    }).join('')}
-                  </tbody>
-                </table>
-              </div>\` : '<div></div>'}
+              ${showVarieties ? (
+                '<div>' +
+                '<p style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:0 0 6px">By variety</p>' +
+                '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+                '<thead><tr style="border-bottom:1px solid var(--border-light)">' +
+                '<th style="text-align:left;padding:4px 8px;color:var(--hint);font-weight:500;font-size:10px">Variety</th>' +
+                '<th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500;font-size:10px">Area</th>' +
+                '<th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500;font-size:10px">Production</th>' +
+                '<th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500;font-size:10px">Yield</th>' +
+                '<th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500;font-size:10px">Turnout</th>' +
+                '</tr></thead><tbody>' +
+                varieties.map(([v,d]) => {
+                  const vy = d.area ? d.production/d.area : null;
+                  const vt = d.weight ? (d.production*227/d.weight)*100 : null;
+                  return '<tr style="border-bottom:0.5px solid var(--border-light)">' +
+                    '<td style="padding:5px 8px;font-weight:600;color:var(--ink)">' + v + '</td>' +
+                    '<td style="padding:5px 8px;text-align:right;color:var(--muted)">' + (d.area?formatNumber(d.area,1)+' ha':'—') + '</td>' +
+                    '<td style="padding:5px 8px;text-align:right;color:var(--muted)">' + (d.production?formatNumber(d.production,0):'—') + '</td>' +
+                    '<td style="padding:5px 8px;text-align:right;color:var(--muted)">' + (vy?formatNumber(vy,2):'—') + '</td>' +
+                    '<td style="padding:5px 8px;text-align:right;color:var(--muted)">' + (vt?formatNumber(vt,1)+'%':'—') + '</td>' +
+                    '</tr>';
+                }).join('') +
+                '</tbody></table></div>'
+              ) : '<div></div>'}
             </div>
-          </div>\`;
+          </div>`;
       }).join('')}
     </div>
     <table class="data-table">
