@@ -451,7 +451,7 @@ function _renderHarvest(container) {
           <th class="num">Area (ha)</th>
           <th class="num">Production</th>
           <th class="num">Yield/ha</th>
-          <th class="num">Ginned wt (t)</th>
+          <th class="num">Total weight (kg)</th>
           <th class="num">Turnout %</th>
           <th>Notes</th>
           ${canWrite() ? '<th></th>' : ''}
@@ -489,7 +489,8 @@ function _renderHarvest(container) {
               <td><input class="harvest-inline num" data-id="${h.id}" data-field="ginned_weight" type="number" step="0.1" value="${h.ginned_weight || ''}" placeholder="—" style="width:100%;border:none;background:transparent;font-size:var(--text-sm);text-align:right;padding:0"></td>
               <td class="num turnout-display-${h.id}">${(() => {
                 if (!h.ginned_weight || !h.actual_production) return '—';
-                return formatNumber((parseFloat(h.actual_production)*227/1000/parseFloat(h.ginned_weight))*100,1)+'%';
+                const turnout = (parseFloat(h.actual_production) * 227) / parseFloat(h.ginned_weight) * 100;
+                return formatNumber(turnout, 1) + '%';
               })()}</td>
               <td><input class="harvest-inline" data-id="${h.id}" data-field="notes" type="text" value="${h.notes || ''}" placeholder="—" style="width:100%;border:none;background:transparent;font-size:var(--text-sm);padding:0"></td>
               <td><button class="btn btn-ghost btn-sm delete-harvest-btn" data-id="${h.id}" style="color:var(--red)">✕</button></td>
@@ -502,8 +503,8 @@ function _renderHarvest(container) {
               <td class="num">${h.area_ha ? formatNumber(h.area_ha,1) : '—'}</td>
               <td class="num"><strong>${formatNumber(h.actual_production,0)} ${h.unit||''}</strong></td>
               <td class="num">${h.area_ha && h.actual_production ? formatNumber(parseFloat(h.actual_production)/parseFloat(h.area_ha),2) : '—'}</td>
-              <td class="num">${h.ginned_weight ? formatNumber(h.ginned_weight,1) : '—'}</td>
-              <td class="num">${(() => { if(!h.ginned_weight||!h.actual_production)return '—'; return formatNumber((parseFloat(h.actual_production)*227/1000/parseFloat(h.ginned_weight))*100,1)+'%'; })()}</td>
+              <td class="num">${h.ginned_weight ? formatNumber(h.ginned_weight,0) : '—'}</td>
+              <td class="num">${(() => { if(!h.ginned_weight||!h.actual_production)return '—'; return formatNumber((parseFloat(h.actual_production)*227/parseFloat(h.ginned_weight))*100,1)+'%'; })()}</td>
               <td class="muted text-sm">${h.notes||''}</td>
               `}
             </tr>
@@ -516,9 +517,9 @@ function _renderHarvest(container) {
           <td class="num">${(() => { const ta = _harvests.reduce((s,h)=>s+(parseFloat(h.area_ha)||0),0); return ta ? formatNumber(total/ta,2) : '—'; })()}</td>
           <td class="num">${formatNumber(_harvests.reduce((s,h)=>s+(parseFloat(h.ginned_weight)||0),0),1)}</td>
           <td class="num">${(() => {
-            const totalGinned = _harvests.reduce((s,h)=>s+(parseFloat(h.ginned_weight)||0),0);
-            const totalBaleWt = _harvests.reduce((s,h)=>s+((parseFloat(h.actual_production)||0)*227/1000),0);
-            return totalGinned ? formatNumber((totalBaleWt/totalGinned)*100,1)+'%' : '—';
+            const totalWeight = _harvests.reduce((s,h)=>s+(parseFloat(h.ginned_weight)||0),0);
+            const totalBaleWt = _harvests.reduce((s,h)=>s+((parseFloat(h.actual_production)||0)*227),0);
+            return totalWeight ? formatNumber((totalBaleWt/totalWeight)*100,1)+'%' : '—';
           })()}</td>
           <td colspan="${canWrite() ? 2 : 1}"></td>
         </tr>
@@ -545,7 +546,7 @@ function _renderHarvest(container) {
           const yEl = wrap.querySelector('.yield-display-' + id);
           if (yEl) yEl.textContent = h.area_ha && h.actual_production ? formatNumber(parseFloat(h.actual_production)/parseFloat(h.area_ha),2) : '—';
           const tEl = wrap.querySelector('.turnout-display-' + id);
-          if (tEl) tEl.textContent = h.ginned_weight && h.actual_production ? formatNumber((parseFloat(h.actual_production)*227/1000/parseFloat(h.ginned_weight))*100,1)+'%' : '—';
+          if (tEl) tEl.textContent = h.ginned_weight && h.actual_production ? formatNumber((parseFloat(h.actual_production)*227/parseFloat(h.ginned_weight))*100,1)+'%' : '—';
         }
       } catch (err) { toast('Save failed: ' + err.message, 'error'); }
     };
