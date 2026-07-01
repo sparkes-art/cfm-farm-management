@@ -156,7 +156,15 @@ function _renderTable(container) {
               <td class="muted text-sm">${commodities}</td>
               <td class="num">${formatCurrency(inv.gross_amount, 0)}</td>
               <td class="num"><strong>${formatCurrency(inv.net_amount, 0)}</strong></td>
-              <td class="muted text-sm">${inv.xero_invoice_number || '—'}</td>
+              <td class="muted text-sm">
+                ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" 
+                  value="${inv.xero_invoice_number || ''}" 
+                  placeholder="—"
+                  style="border:none;background:transparent;color:var(--muted);font-size:var(--text-sm);width:100%;cursor:text;padding:0"
+                  onfocus="this.style.background='var(--white)';this.style.border='1px solid var(--blue)';this.style.borderRadius='4px';this.style.padding='2px 6px'"
+                  onblur="this.style.background='transparent';this.style.border='none';this.style.padding='0'"
+                >` : inv.xero_invoice_number || '—'}
+              </td>
               <td>
                 <span class="badge ${inv.status === 'complete' ? 'badge-paid' : 'badge-amber'}" style="${inv.status !== 'complete' ? 'background:var(--amber-light);color:var(--amber-text)' : ''}">
                   ${inv.status === 'complete' ? 'Complete' : 'Pending'}
@@ -221,6 +229,26 @@ function _renderTable(container) {
         btn.disabled = false;
       }
     });
+  });
+
+  // Editable Xero ref
+  wrap.querySelectorAll('.xero-ref-input').forEach(inp => {
+    const save = async () => {
+      const val = inp.value.trim();
+      const inv = _invoices.find(i => i.id === inp.dataset.id);
+      if (!inv || val === (inv.xero_invoice_number || '')) return;
+      try {
+        await dbUpdate('invoices', inp.dataset.id, {
+          xero_invoice_number: val || null,
+          status: val ? 'complete' : 'pending',
+        });
+        const idx = _invoices.findIndex(i => i.id === inp.dataset.id);
+        if (idx >= 0) { _invoices[idx].xero_invoice_number = val || null; _invoices[idx].status = val ? 'complete' : 'pending'; }
+        _renderTable(container);
+      } catch (err) { toast('Failed to save: ' + err.message, 'error'); }
+    };
+    inp.addEventListener('blur', save);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
   });
 
   // Xero ref button

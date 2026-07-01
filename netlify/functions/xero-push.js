@@ -122,7 +122,7 @@ exports.handler = async (event) => {
       Description: [l.commodity, l.docket, l.season].filter(Boolean).join(' · '),
       Quantity: parseFloat(l.qty) || 1,
       UnitAmount: parseFloat(l.price) || 0,
-      TaxType: isGst ? 'OUTPUT' : 'EXEMPTOUTPUT',
+      TaxType: isGst ? 'GST' : 'NONE',
       LineAmount: parseFloat(l.total) || 0,
     }));
     (inv.deductions || []).forEach(d => {
@@ -131,7 +131,7 @@ exports.handler = async (event) => {
         Description: d.description || 'Deduction',
         Quantity: 1,
         UnitAmount: -Math.abs(parseFloat(d.value)),
-        TaxType: 'EXEMPTOUTPUT',
+        TaxType: 'NONE',
         LineAmount: -Math.abs(parseFloat(d.value)),
       });
     });
@@ -139,7 +139,7 @@ exports.handler = async (event) => {
       Description: inv.notes || 'Sale',
       Quantity: parseFloat(inv.total_qty) || 1,
       UnitAmount: parseFloat(inv.net_amount) || 0,
-      TaxType: isGst ? 'OUTPUT' : 'EXEMPTOUTPUT',
+      TaxType: isGst ? 'GST' : 'NONE',
     });
 
     // Build Xero invoice
@@ -175,9 +175,10 @@ exports.handler = async (event) => {
     const xeroInvoiceNumber = xeroInv?.InvoiceNumber;
     const xeroInvoiceId = xeroInv?.InvoiceID;
 
-    // Update CFM invoice with Xero reference
+    // Update CFM invoice with Xero reference and mark complete
     await sbUpdate(`invoices?id=eq.${invoice_id}`, {
       xero_invoice_number: xeroInvoiceNumber || xeroInvoiceId,
+      status: 'complete',
     });
 
     console.log('Pushed invoice to Xero:', xeroInvoiceNumber);
