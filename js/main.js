@@ -123,6 +123,46 @@ qs('#farm-select')?.addEventListener('change', (e) => {
   _populateSeasonSelector();
 });
 
+// ── Season selector ───────────────────────────────────────────
+async function _populateSeasonSelector() {
+  const sel = document.getElementById('season-select');
+  if (!sel) return;
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const seasons = Array.from({length: 6}, (_, i) => {
+    const sy = y + 1 - i;
+    return `${sy}-${String(sy+1).slice(2)}`;
+  });
+
+  let defaultSeason = seasons[1];
+  try {
+    const farm = getActiveFarm();
+    if (farm) {
+      const { dbSelect } = await import('./supabase-client.js');
+      const rows = await dbSelect('budgets', 'farm_id=eq.' + farm.id + '&select=season&order=season.desc&limit=1');
+      if (rows[0]?.season) defaultSeason = rows[0].season;
+    }
+  } catch {}
+
+  const current = getActiveSeason() || defaultSeason;
+  sel.innerHTML = seasons.map(s =>
+    `<option value="${s}" ${s === current ? 'selected' : ''}>${s}</option>`
+  ).join('');
+
+  if (!getActiveSeason()) setActiveSeason(sel.value);
+
+  if (!sel.dataset.wired) {
+    sel.dataset.wired = '1';
+    sel.addEventListener('change', () => {
+      setActiveSeason(sel.value);
+      const activeLink = document.querySelector('#sidebar a.active, #mobile-nav a.active');
+      const mod = activeLink?.dataset?.module || 'outputs';
+      _navigateTo(mod);
+    });
+  }
+}
+
 window._updateXeroIndicator = async function _updateXeroIndicator() {
   const el = document.getElementById('xero-status-indicator');
   if (!el) return;
