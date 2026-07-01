@@ -532,17 +532,25 @@ function _renderHarvest(container) {
 function _harvestModal(container, existing = null) {
   const isEdit = !!existing;
   const farm = getActiveFarm();
-  let selectedCommodityId = existing?.commodity_id || null;
+
+  const comms = getCommodities();
+  const commOpts = '<option value="">— select —</option>' + comms.map(c =>
+    `<option value="${c.id}" ${c.id === existing?.commodity_id ? 'selected' : ''}>${c.name}</option>`
+  ).join('');
+  const cts = getCropTypes();
+  const ctOpts = '<option value="">— select —</option>' + cts.map(ct =>
+    `<option value="${ct.id}" ${ct.id === existing?.crop_type_id ? 'selected' : ''}>${ct.name}</option>`
+  ).join('');
 
   const harvestBodyHTML = [
     '<div class="form-row">',
       '<div class="form-group">',
         '<label class="form-label">Commodity</label>',
-        commoditySelectHTML('hv-commodity'),
+        '<select class="form-select" id="hv-commodity">' + commOpts + '</select>',
       '</div>',
       '<div class="form-group">',
         '<label class="form-label">Crop type</label>',
-        cropTypeSelectHTML('hv-crop-type'),
+        '<select class="form-select" id="hv-crop-type">' + ctOpts + '</select>',
       '</div>',
     '</div>',
     '<div class="form-row">',
@@ -591,7 +599,7 @@ function _harvestModal(container, existing = null) {
       const row = {
         farm_id: farm.id,
         season: _season,
-        commodity_id: selectedCommodityId || null,
+        commodity_id: qs('#hv-commodity', modal)?.value || null,
         crop_type_id: qs('#hv-crop-type', modal)?.value || null,
         paddock_name: qs('#hv-paddock', modal)?.value?.trim() || null,
         area_ha: parseFloat(qs('#hv-area', modal)?.value || 0) || null,
@@ -618,30 +626,4 @@ function _harvestModal(container, existing = null) {
     },
   });
 
-  setTimeout(() => {
-    initCommoditySelect('hv-commodity', (id) => {
-      selectedCommodityId = id;
-      refreshCropTypeSelect('hv-crop-type', id);
-      initCropTypeSelect('hv-crop-type', () => selectedCommodityId);
-    });
-    initCropTypeSelect('hv-crop-type', () => selectedCommodityId);
-
-    // Pre-fill commodity and crop type for edit
-    if (isEdit && existing.commodity_id) {
-      // Set commodity directly on the select after init rebuilds it
-      const commSel = document.querySelector('#hv-commodity select, #hv-commodity');
-      if (commSel) {
-        commSel.value = existing.commodity_id;
-        selectedCommodityId = existing.commodity_id;
-        // Manually trigger crop type refresh
-        refreshCropTypeSelect('hv-crop-type', existing.commodity_id);
-        initCropTypeSelect('hv-crop-type', () => selectedCommodityId);
-        setTimeout(() => {
-          const ctSel = document.querySelector('#hv-crop-type select, #hv-crop-type');
-          if (ctSel && existing.crop_type_id) ctSel.value = existing.crop_type_id;
-        }, 200);
-      }
-    }
-  }, 150);
 }
-
