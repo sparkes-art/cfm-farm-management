@@ -5,7 +5,7 @@
 import { dbSelect } from '../../js/supabase-client.js';
 import { getActiveFarm } from '../../js/app-state.js';
 import { formatCurrency, formatNumber, formatDate } from '../../js/ui.js';
-import { getCommodities } from '../../js/commodities.js';
+import { getCommodities, getCropTypes } from '../../js/commodities.js';
 
 export async function buildCommodityCards(season) {
   const farm = getActiveFarm();
@@ -274,7 +274,9 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
               const budYield = b.area_ha && b.yield_per_ha ? parseFloat(b.yield_per_ha) : null;
               const lf = latestForecasts.find(f => f.budget_id === b.id);
               const fcastYield = lf && lf.yield_per_ha ? parseFloat(lf.yield_per_ha) : null;
-              const cropTypeLabel = b.crop_type || b.commodity || '';
+              const allCropTypes = getCropTypes();
+              const bCropType = allCropTypes.find(ct => ct.id === b.crop_type_id);
+              const cropTypeLabel = bCropType?.name || b.crop_type || b.commodity || '';
               // Match actual harvest entries to this budget's crop type
               const ctHarvests = comHarvests.filter(h => h.crop_type_id === b.crop_type_id || (!h.crop_type_id && !b.crop_type_id));
               const ctHarvestProd = ctHarvests.reduce((s,h)=>s+(parseFloat(h.actual_production)||0),0);
