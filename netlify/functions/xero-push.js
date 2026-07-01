@@ -149,7 +149,6 @@ exports.handler = async (event) => {
       Date: inv.invoice_date || new Date().toISOString().slice(0, 10),
       DueDate: inv.invoice_date || new Date().toISOString().slice(0, 10),
       Status: 'DRAFT',
-      LineAmountTypes: 'EXCLUSIVE',
       Reference: inv.xero_invoice_number || '',
       LineItems: lineItems,
     };
