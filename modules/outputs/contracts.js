@@ -2,7 +2,7 @@
 // Forward Contracts — list, add, edit, delete, PDF AI extraction
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
-import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js';
 import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js';
 import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js';
 
@@ -280,7 +280,7 @@ export function openContractModal(existing = null) {
           <label class="form-label" style="color:var(--red);font-weight:600">Crop year ⚠ verify after extraction</label>
           <select class="form-select" id="f-crop-year" style="border-color:var(--red)">
             ${['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s =>
-              `<option value="${s}" ${(existing?.crop_year || currentSeason()) === s ? 'selected' : ''}>${s}</option>`
+              `<option value="${s}" ${(existing?.crop_year || getActiveSeason() || currentSeason()) === s ? 'selected' : ''}>${s}</option>`
             ).join('')}
           </select>
         </div>

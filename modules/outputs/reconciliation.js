@@ -2,7 +2,7 @@
 // Income Reconciliation — point-in-time position report for accounting
 
 import { dbSelect } from '../../js/supabase-client.js';
-import { getActiveFarm } from '../../js/app-state.js';
+import { getActiveFarm, getActiveSeason } from '../../js/app-state.js';
 import { formatCurrency, formatNumber, formatDate, qs, currentSeason, toast } from '../../js/ui.js';
 import { getCommodities } from '../../js/commodities.js';
 
@@ -10,18 +10,9 @@ export async function mountReconciliation(container) {
   const farm = getActiveFarm();
   if (!farm) return;
 
-  // Get most recent season with data
-  let defaultSeason = currentSeason();
-  try {
-    const s = await dbSelect('budgets', 'farm_id=eq.' + farm.id + '&select=season&order=season.desc&limit=1');
-    if (s[0]?.season) defaultSeason = s[0].season;
-  } catch {}
-
   container.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-      <select id="rec-season" class="form-select" style="width:120px">
-        ${_seasonOptions(defaultSeason)}
-      </select>
+
       <select id="rec-commodity" class="form-select" style="width:160px">
         <option value="">All commodities</option>
       </select>
@@ -49,12 +40,12 @@ export async function mountReconciliation(container) {
 
   qs('#btn-rec-refresh', container)?.addEventListener('click', () => _renderReconciliation(container, farm));
   qs('#btn-rec-print', container)?.addEventListener('click', () => _print(container, farm));
-  qs('#rec-season', container)?.addEventListener('change', async () => {
-    const season = qs('#rec-season', container)?.value;
-    await _populateCommodities(container, farm.id, season);
+
+  qs('#rec-commodity', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
+  window.addEventListener('cfm:seasonchange', async () => {
+    await _populateCommodities(container, farm.id, getActiveSeason());
     await _renderReconciliation(container, farm);
   });
-  qs('#rec-commodity', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
   qs('#rec-date', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
   qs('#rec-contingency', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
 }
@@ -95,7 +86,7 @@ async function _renderReconciliation(container, farm) {
   if (!output) return;
   output.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>';
 
-  const season = qs('#rec-season', container)?.value || currentSeason();
+  const season = getActiveSeason() || currentSeason();
   const asAt = qs('#rec-date', container)?.value || new Date().toISOString().slice(0, 10);
   const contingencyPct = parseFloat(qs('#rec-contingency', container)?.value || -5);
   const filterCommodity = qs('#rec-commodity', container)?.value || '';
@@ -418,7 +409,7 @@ function sectionHeaderStyle(bg) {
 }
 
 function _print(container, farm) {
-  const season = qs('#rec-season', container)?.value || currentSeason();
+  const season = getActiveSeason() || currentSeason();
   const asAt = qs('#rec-date', container)?.value || new Date().toISOString().slice(0, 10);
   const contingency = qs('#rec-contingency', container)?.value || '-5';
   const content = qs('#rec-output', container)?.innerHTML || '';

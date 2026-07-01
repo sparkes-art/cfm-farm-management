@@ -6,6 +6,7 @@ import { getSession, onSessionChange, dbSelect, closeAllSubscriptions } from './
 export { getSession };
 
 const _state = {
+  activeSeason: null,
   session: null,
   farms: [],
   activeFarm: null,
@@ -17,6 +18,12 @@ const _listeners = new Map();
 export function getState() { return { ..._state }; }
 
 export function getActiveFarm() { return _state.activeFarm; }
+export function getActiveSeason() { return _state.activeSeason; }
+export function setActiveSeason(season) {
+  _state.activeSeason = season;
+  // Dispatch event so modules can react
+  window.dispatchEvent(new CustomEvent('cfm:seasonchange', { detail: { season } }));
+}
 
 export function getRole() {
   return _state.session?.profile?.role || null;

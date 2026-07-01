@@ -2,7 +2,7 @@
 // Outputs module — Dashboard, Contracts, Market Prices, Invoices
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert, subscribeTable } from '../../js/supabase-client.js';
-import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js';
 import {
   toast, openModal, formatCurrency, formatDate,
   commodityBadge, statusBadge, qs, setContent, currentSeason, formatNumber
@@ -12,6 +12,7 @@ import { mountInvoices, unmountInvoices } from './invoices.js';
 import { mountReconciliation, unmountReconciliation } from './reconciliation.js';
 import { mountMarketPrices, unmountMarketPrices } from './market-prices.js';
 import { buildCommodityCards, drawMiniCharts } from './commodity-card.js';
+import { loadCommodities } from '../../js/commodities.js';
 
 let _invoices = [];
 let _contracts = [];
@@ -21,13 +22,6 @@ let _activeTab = 'overview';
 // ── Entry point ───────────────────────────────────────────────
 export async function mountOutputs(container) {
   const farm = getActiveFarm();
-
-  // Find most recent season with budget data for this farm
-  let defaultSeason = currentSeason();
-  try {
-    const budgetSeasons = await dbSelect('budgets', 'farm_id=eq.' + farm.id + '&select=season&order=season.desc&limit=1');
-    if (budgetSeasons.length && budgetSeasons[0].season) defaultSeason = budgetSeasons[0].season;
-  } catch { /* fall back to currentSeason */ }
 
   container.innerHTML = `
     <div class="page-header">
@@ -142,6 +136,7 @@ async function _mountOverview(container) {
     html += '</div>';
 
     // Commodity cards - also get the commodity map back for mini charts
+    await loadCommodities();
     const { html: cardsHtml, commodityMap } = await buildCommodityCards(season);
     html += cardsHtml;
 

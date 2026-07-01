@@ -2,7 +2,7 @@
 // Budget & Forecast — inline editable table per crop type per season
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
-import { getActiveFarm, getSession, canWrite, getFarms } from '../../js/app-state.js';
+import { getActiveFarm, getSession, canWrite, getFarms, getActiveSeason } from '../../js/app-state.js';
 import { loadCommodities, getCommodities, getCropTypes, commoditySelectHTML, initCommoditySelect, cropTypeSelectHTML, initCropTypeSelect, refreshCropTypeSelect } from '../../js/commodities.js';
 import { toast, openModal, formatNumber, formatCurrency, qs, currentSeason } from '../../js/ui.js';
 
@@ -22,12 +22,7 @@ export async function mountBudget(container) {
         <h1>Data Entry</h1>
         <p class="page-subtitle" style="font-size:var(--text-base);font-weight:600;color:var(--ink-mid)">${getActiveFarm()?.name || ''}</p>
       </div>
-      <div class="flex gap-2 items-center">
-        <label style="font-size:var(--text-sm);color:var(--muted)">Crop year</label>
-        <select id="bud-season" class="form-select" style="width:110px">
-          ${_seasonOptions()}
-        </select>
-      </div>
+
     </div>
 
     <div class="tab-strip" style="margin-bottom:16px">
@@ -47,12 +42,15 @@ export async function mountBudget(container) {
     });
   });
 
-  qs('#bud-season', container)?.addEventListener('change', async (e) => {
-    _season = e.target.value;
+
+
+  _season = getActiveSeason() || currentSeason();
+  // Listen for global season changes
+  window.addEventListener('cfm:seasonchange', async (e) => {
+    _season = e.detail.season;
     await _loadData();
     _renderTabContent(container);
   });
-
   await _loadData();
   _renderTabContent(container);
 }
@@ -764,3 +762,4 @@ function _harvestModal(container, existing = null) {
   });
 
 }
+
