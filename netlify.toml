@@ -1,5 +1,6 @@
 [build]
   functions = "netlify/functions"
+  command = "node build.js"
 
 [functions.push-grain-prices]
   timeout = 30
