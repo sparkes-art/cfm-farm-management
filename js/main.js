@@ -3,7 +3,7 @@
 // No localStorage. No caching. Pure Supabase.
 
 import { login, logout, onSessionChange } from './supabase-client.js';
-import { on, setActiveFarm, setActiveModule, getFarms, getState, getActiveFarm } from './app-state.js';
+import { on, setActiveFarm, setActiveModule, getFarms, getState, getActiveFarm, getActiveSeason, setActiveSeason } from './app-state.js';
 import { toast, show, hide, qs } from './ui.js';
 
 // Module loaders (lazy — only imported when navigated to)
