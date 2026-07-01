@@ -116,6 +116,32 @@ exports.handler = async (event) => {
     // Find or create contact
     const contactId = await findOrCreateContact(accessToken, tenantId, inv.buyer || 'Unknown Buyer');
 
+    // Build line items
+    const isGst = inv.gst_type === 'inc';
+    const lineItems = (inv.line_items || []).map(l => ({
+      Description: [l.commodity, l.docket, l.season].filter(Boolean).join(' · '),
+      Quantity: parseFloat(l.qty) || 1,
+      UnitAmount: parseFloat(l.price) || 0,
+      TaxType: isGst ? 'OUTPUT' : 'EXEMPTOUTPUT',
+      LineAmount: parseFloat(l.total) || 0,
+    }));
+    (inv.deductions || []).forEach(d => {
+      if (!d.value) return;
+      lineItems.push({
+        Description: d.description || 'Deduction',
+        Quantity: 1,
+        UnitAmount: -Math.abs(parseFloat(d.value)),
+        TaxType: 'EXEMPTOUTPUT',
+        LineAmount: -Math.abs(parseFloat(d.value)),
+      });
+    });
+    if (!lineItems.length) lineItems.push({
+      Description: inv.notes || 'Sale',
+      Quantity: parseFloat(inv.total_qty) || 1,
+      UnitAmount: parseFloat(inv.net_amount) || 0,
+      TaxType: isGst ? 'OUTPUT' : 'EXEMPTOUTPUT',
+    });
+
     // Build Xero invoice
     const xeroInvoice = {
       Type: 'ACCREC',
@@ -123,7 +149,7 @@ exports.handler = async (event) => {
       Date: inv.invoice_date || new Date().toISOString().slice(0, 10),
       DueDate: inv.invoice_date || new Date().toISOString().slice(0, 10),
       Status: 'DRAFT',
-      LineAmountTypes: inv.gst_type === 'inc' ? 'INCLUSIVE' : 'EXCLUSIVE',
+      LineAmountTypes: 'EXCLUSIVE',
       Reference: inv.xero_invoice_number || '',
       LineItems: lineItems,
     };
