@@ -7,6 +7,7 @@ import { getActiveFarm } from '../../js/app-state.js';
 import { getSession, canWrite } from '../../js/app-state.js';
 import { loadCommodities, getCommodities, commodityOptions } from '../../js/commodities.js';
 import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js';
+import { getActiveSeason } from '../../js/app-state.js';
 
 let _prices = [];
 let _contracts = [];
@@ -30,7 +31,7 @@ export async function mountMarketPrices(container) {
 
   // Filter to only commodities that have price data or a budget
   const farm = getActiveFarm();
-  const season = currentSeason();
+  const season = getActiveSeason() || currentSeason();
 
   const farmSettings = farm?.settings || {};
   const grainSites = farmSettings.grainSites || {};
@@ -198,7 +199,7 @@ async function _loadData() {
   const cutoff = new Date();
   cutoff.setFullYear(cutoff.getFullYear() - 3);
   const cutoffStr = cutoff.toISOString().slice(0, 10);
-  const season = currentSeason();
+  const season = getActiveSeason() || currentSeason();
 
   // Get commodity name to find farm's grain site
   const commodities = getCommodities();

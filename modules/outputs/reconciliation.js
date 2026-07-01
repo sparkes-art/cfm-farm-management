@@ -51,7 +51,7 @@ export async function mountReconciliation(container) {
 }
 
 function _seasonOptions(selected) {
-  const current = currentSeason();
+  const current = getActiveSeason() || currentSeason();
   const [y] = current.split('-').map(Number);
   return Array.from({ length: 5 }, (_, i) => {
     const s = `${y + 1 - i}-${String(y + 2 - i).slice(2)}`;

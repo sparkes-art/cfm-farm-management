@@ -2,7 +2,7 @@
 // Full invoice management — contract sales, cash sales, line items, deductions
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
-import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js';
 import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js';
 import { getCommodities, loadCommodities } from '../../js/commodities.js';
 
@@ -582,7 +582,7 @@ export function openInvoiceForm(container, existing = null) {
       <td style="${tdStyle}min-width:110px"><select class="f-line-comm" style="${inStyle}">${commOptions}</select></td>
       <td style="${tdStyle}min-width:85px"><input type="text" class="f-line-docket" style="${inStyle}" placeholder="D-1042" value="${data.docket||''}"></td>
       <td style="${tdStyle}min-width:80px"><select class="f-line-season" style="${inStyle}">
-        ${['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s=>`<option value="${s}" ${s===(data.season||currentSeason())?'selected':''}>${s}</option>`).join('')}
+        ${['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s=>`<option value="${s}" ${s===(data.season||getActiveSeason()||currentSeason())?'selected':''}>${s}</option>`).join('')}
       </select></td>
       <td style="${tdStyle}min-width:65px"><input type="number" class="f-line-qty" style="${numStyle}" placeholder="0" value="${data.qty||''}" step="0.001"></td>
       <td style="${tdStyle}min-width:50px"><select class="f-line-unit" style="${inStyle}">
@@ -796,7 +796,7 @@ export function openInvoiceForm(container, existing = null) {
       const lineRows = [...modal.querySelectorAll('#f-lines-body tr')].map(tr => ({
         commodity: tr.querySelector('.f-line-comm')?.value || '',
         docket: tr.querySelector('.f-line-docket')?.value || '',
-        season: tr.querySelector('.f-line-season')?.value || currentSeason(),
+        season: tr.querySelector('.f-line-season')?.value || getActiveSeason() || currentSeason(),
 
         qty: parseFloat(tr.querySelector('.f-line-qty')?.value)||0,
         unit: tr.querySelector('.f-line-unit')?.value || 't',

@@ -57,9 +57,10 @@ export async function mountOutputs(container) {
     });
   });
 
-  qs('#out-season-select', container)?.addEventListener('change', () => {
-    if (_activeTab === 'overview') _loadTab();
-  });
+  // Listen for global season changes
+  const onSeasonChange = () => { if (_activeTab === 'overview') _loadTab(); };
+  window.addEventListener('cfm:seasonchange', onSeasonChange);
+  container._offSeasonChange = () => window.removeEventListener('cfm:seasonchange', onSeasonChange);
 
   _loadTab();
 }
@@ -70,6 +71,8 @@ export function unmountOutputs() {
   unmountInvoices();
   unmountReconciliation();
   if (_unsub) { _unsub(); _unsub = null; }
+  const main = document.getElementById('main');
+  if (main?._offSeasonChange) { main._offSeasonChange(); delete main._offSeasonChange; }
   _invoices = [];
   _contracts = [];
 }
@@ -111,7 +114,7 @@ async function _mountOverview(container) {
     return;
   }
 
-  const season = qs('#out-season-select')?.value || currentSeason();
+  const season = getActiveSeason() || currentSeason();
   container.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>';
 
   try {
@@ -389,7 +392,7 @@ export function openInvoiceModal(existing = null) {
         </div>
         <div class="form-group">
           <label class="form-label">Season</label>
-          <input class="form-input" id="f-season" type="text" value="${existing?.season || currentSeason()}">
+          <input class="form-input" id="f-season" type="text" value="${existing?.season || getActiveSeason() || currentSeason()}">
         </div>
       </div>
       <div class="form-row">
@@ -470,7 +473,7 @@ export function openInvoiceModal(existing = null) {
         farm_id: farm.id,
         invoice_number: val('f-invoice-number'),
         invoice_date: val('f-invoice-date'),
-        season: val('f-season') || currentSeason(),
+        season: val('f-season') || getActiveSeason() || currentSeason(),
         commodity_type: val('f-commodity-type'),
         commodity_detail: val('f-commodity-detail') || null,
         buyer: val('f-buyer'),
