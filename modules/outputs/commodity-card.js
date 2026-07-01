@@ -267,47 +267,41 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
       <div class="commodity-card-body" style="display:grid;grid-template-columns:1fr 1fr 1fr minmax(0,1fr);min-height:220px">
 
         <!-- Col 1: Yield -->
-        <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:12px">
-          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0">Yield</p>
-          <!-- Yield by crop type -->
-          ${budgets.length > 1 ? `
-          <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:10px">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0">Yield <span style="font-weight:400;text-transform:none;letter-spacing:0">(${unit}/ha)</span></p>
+          <div style="display:flex;flex-direction:column;gap:8px">
             ${budgets.map(b => {
-              const by = b.area_ha && b.yield_per_ha ? parseFloat(b.yield_per_ha) : null;
+              const budYield = b.area_ha && b.yield_per_ha ? parseFloat(b.yield_per_ha) : null;
               const lf = latestForecasts.find(f => f.budget_id === b.id);
-              const fy = lf && lf.area_ha && lf.yield_per_ha ? parseFloat(lf.yield_per_ha) : null;
-              const label = b.crop_type || b.commodity || '';
-              return '<div style="display:flex;align-items:baseline;gap:6px;font-size:11px">' +
-                '<span style="color:var(--hint);min-width:80px;flex-shrink:0">' + label + '</span>' +
-                '<span style="font-weight:600;color:var(--ink)">' + (by ? formatNumber(by,2) : '—') + '</span>' +
-                '<span style="color:var(--hint);font-size:10px">bud</span>' +
-                (fy ? '<span style="font-weight:600;color:var(--blue);margin-left:6px">' + formatNumber(fy,2) + '</span><span style="color:var(--hint);font-size:10px">fcast</span>' : '') +
-                '<span style="color:var(--hint);font-size:10px;margin-left:4px">' + (b.area_ha ? formatNumber(b.area_ha,0)+' ha' : '') + '</span>' +
+              const fcastYield = lf && lf.yield_per_ha ? parseFloat(lf.yield_per_ha) : null;
+              const cropTypeLabel = b.crop_type || b.commodity || '';
+              // Match actual harvest entries to this budget's crop type
+              const ctHarvests = comHarvests.filter(h => h.crop_type_id === b.crop_type_id || (!h.crop_type_id && !b.crop_type_id));
+              const ctHarvestProd = ctHarvests.reduce((s,h)=>s+(parseFloat(h.actual_production)||0),0);
+              const ctHarvestArea = ctHarvests.reduce((s,h)=>s+(parseFloat(h.area_ha)||0),0);
+              const actualYield = ctHarvestArea && ctHarvestProd ? ctHarvestProd/ctHarvestArea : null;
+              return '<div style="padding-bottom:8px;border-bottom:1px solid var(--border-light)">' +
+                '<p style="font-size:12px;font-weight:600;color:var(--ink);margin:0 0 6px">' + cropTypeLabel + '</p>' +
+                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">' +
+                  '<div>' +
+                    '<p style="font-size:10px;color:var(--hint);margin:0 0 2px">Budget</p>' +
+                    '<p style="font-size:18px;font-weight:600;color:var(--ink);margin:0;line-height:1.1">' + (budYield ? formatNumber(budYield,2) : '—') + '</p>' +
+                    '<p style="font-size:10px;color:var(--hint);margin:2px 0 0">' + (b.area_ha ? formatNumber(b.area_ha,0)+' ha' : '') + '</p>' +
+                  '</div>' +
+                  '<div>' +
+                    '<p style="font-size:10px;color:var(--hint);margin:0 0 2px">Forecast</p>' +
+                    '<p style="font-size:18px;font-weight:600;color:var(--blue);margin:0;line-height:1.1">' + (fcastYield ? formatNumber(fcastYield,2) : '—') + '</p>' +
+                    '<p style="font-size:10px;color:var(--hint);margin:2px 0 0">' + (lf?.area_ha ? formatNumber(lf.area_ha,0)+' ha' : '') + '</p>' +
+                  '</div>' +
+                  '<div>' +
+                    '<p style="font-size:10px;color:var(--hint);margin:0 0 2px">Actual</p>' +
+                    '<p style="font-size:18px;font-weight:600;color:var(--green);margin:0;line-height:1.1">' + (actualYield ? formatNumber(actualYield,2) : '—') + '</p>' +
+                    '<p style="font-size:10px;color:var(--hint);margin:2px 0 0">' + (ctHarvestArea ? formatNumber(ctHarvestArea,0)+' ha' : '') + '</p>' +
+                  '</div>' +
+                '</div>' +
               '</div>';
             }).join('')}
-            ${isHarvested && totalHarvestArea > 0 ? `<div style="display:flex;align-items:baseline;gap:6px;font-size:11px;border-top:1px solid var(--border-light);padding-top:4px;margin-top:2px"><span style="color:var(--hint);min-width:80px;flex-shrink:0">Actual</span><span style="font-weight:600;color:var(--green)">${formatNumber(totalHarvest/totalHarvestArea,2)}</span><span style="color:var(--hint);font-size:10px">${formatNumber(totalHarvestArea,0)} ha</span></div>` : ''}
           </div>
-          ` : `
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-            <div>
-              <p style="font-size:10px;color:var(--hint);margin:0 0 3px">Budget</p>
-              <p style="font-size:16px;font-weight:600;color:var(--ink);margin:0;line-height:1.2">${budgetYield ? formatNumber(budgetYield, 2) : '—'}</p>
-              <p style="font-size:10px;color:var(--hint);margin:2px 0 0">${totalBudgetArea ? formatNumber(totalBudgetArea, 0) + ' ha' : ''}</p>
-            </div>
-            <div>
-              <p style="font-size:10px;color:var(--hint);margin:0 0 3px">Forecast</p>
-              ${latestForecast
-                ? '<p style="font-size:16px;font-weight:600;color:var(--blue);margin:0;line-height:1.2">' + (forecastYield ? formatNumber(forecastYield, 2) : '—') + '</p><p style="font-size:10px;color:var(--hint);margin:2px 0 0">' + (forecastArea ? formatNumber(forecastArea, 0) + ' ha' : '') + '</p>'
-                : '<p style="font-size:13px;color:var(--hint);margin:0">—</p><p style="font-size:10px;color:var(--hint);margin:2px 0 0">none entered</p>'
-              }
-            </div>
-            <div>
-              <p style="font-size:10px;color:var(--hint);margin:0 0 3px">Actual</p>
-              <p style="font-size:16px;font-weight:600;color:var(--green);margin:0;line-height:1.2">${(isHarvested && totalHarvestArea > 0) ? formatNumber(totalHarvest / totalHarvestArea, 2) : (isHarvested ? formatNumber(totalHarvest, 0) : '—')}</p>
-              <p style="font-size:10px;color:var(--hint);margin:2px 0 0">${isHarvested && totalHarvestArea ? formatNumber(totalHarvestArea, 0) + ' ha' : ''}</p>
-            </div>
-          </div>
-          `}
         </div>
 
         <!-- Col 2: Production -->

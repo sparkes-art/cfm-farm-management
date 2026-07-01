@@ -439,7 +439,82 @@ function _renderHarvest(container) {
 
   const total = _harvests.reduce((s, h) => s + (parseFloat(h.actual_production) || 0), 0);
 
+  // Build summary by commodity + crop type
+  const commSummary = {};
+  _harvests.forEach(h => {
+    const comm = commodities.find(c => c.id === h.commodity_id);
+    const ct = cropTypes.find(ct => ct.id === h.crop_type_id);
+    const key = (comm?.name || 'Unknown') + '||' + (ct?.name || '');
+    if (!commSummary[key]) commSummary[key] = { commodity: comm?.name || 'Unknown', cropType: ct?.name || '', unit: h.unit || 't', area: 0, production: 0, weight: 0, varieties: {} };
+    const s = commSummary[key];
+    s.area += parseFloat(h.area_ha) || 0;
+    s.production += parseFloat(h.actual_production) || 0;
+    s.weight += parseFloat(h.ginned_weight) || 0;
+    const v = h.variety || 'Unspecified';
+    if (!s.varieties[v]) s.varieties[v] = { area: 0, production: 0, weight: 0 };
+    s.varieties[v].area += parseFloat(h.area_ha) || 0;
+    s.varieties[v].production += parseFloat(h.actual_production) || 0;
+    s.varieties[v].weight += parseFloat(h.ginned_weight) || 0;
+  });
+
+  const summaryRows = Object.values(commSummary);
+
   wrap.innerHTML = `
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border-light)">
+      <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:10px">Harvest summary</p>
+      ${summaryRows.map(s => {
+        const yieldHa = s.area ? s.production / s.area : null;
+        const turnout = s.weight ? (s.production * 227 / s.weight) * 100 : null;
+        const varieties = Object.entries(s.varieties);
+        const showVarieties = varieties.length > 1 || (varieties.length === 1 && varieties[0][0] !== 'Unspecified');
+        return `
+          <div style="display:grid;grid-template-columns:1fr ${showVarieties ? 'auto' : ''};gap:24px;margin-bottom:12px;padding-bottom:12px;border-bottom:0.5px solid var(--border-light)">
+            <div>
+              <p style="font-size:var(--text-sm);font-weight:600;color:var(--ink);margin-bottom:8px">${s.commodity}${s.cropType ? ' · ' + s.cropType : ''}</p>
+              <div style="display:flex;gap:0;border:1px solid var(--border-light);border-radius:6px;overflow:hidden;width:fit-content">
+                ${[
+                  ['Area', s.area ? formatNumber(s.area,1)+' ha' : '—'],
+                  ['Production', s.production ? formatNumber(s.production,0)+' '+s.unit : '—'],
+                  ['Yield/ha', yieldHa ? formatNumber(yieldHa,2) : '—'],
+                  ['Turnout', turnout ? formatNumber(turnout,1)+'%' : '—'],
+                ].map(([l,v],i) => `
+                  <div style="padding:6px 14px;${i>0?'border-left:1px solid var(--border-light)':''}">
+                    <p style="font-size:10px;color:var(--hint);margin-bottom:2px">${l}</p>
+                    <p style="font-size:14px;font-weight:600;color:var(--ink);margin:0">${v}</p>
+                  </div>`).join('')}
+              </div>
+            </div>
+            ${showVarieties ? `
+            <div>
+              <p style="font-size:10px;color:var(--hint);margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em">By variety</p>
+              <table style="font-size:12px;border-collapse:collapse">
+                <thead>
+                  <tr style="color:var(--hint);font-size:10px">
+                    <th style="text-align:left;padding:2px 10px;border-bottom:1px solid var(--border-light)">Variety</th>
+                    <th style="text-align:right;padding:2px 10px;border-bottom:1px solid var(--border-light)">Area</th>
+                    <th style="text-align:right;padding:2px 10px;border-bottom:1px solid var(--border-light)">Prod</th>
+                    <th style="text-align:right;padding:2px 10px;border-bottom:1px solid var(--border-light)">Yield</th>
+                    <th style="text-align:right;padding:2px 10px;border-bottom:1px solid var(--border-light)">Turnout</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${varieties.map(([v,d]) => {
+                    const vy = d.area ? d.production/d.area : null;
+                    const vt = d.weight ? (d.production*227/d.weight)*100 : null;
+                    return `<tr>
+                      <td style="padding:3px 10px;font-weight:500">${v}</td>
+                      <td style="padding:3px 10px;text-align:right;color:var(--muted)">${d.area?formatNumber(d.area,1)+' ha':'—'}</td>
+                      <td style="padding:3px 10px;text-align:right;color:var(--muted)">${d.production?formatNumber(d.production,0):'—'}</td>
+                      <td style="padding:3px 10px;text-align:right;color:var(--muted)">${vy?formatNumber(vy,2):'—'}</td>
+                      <td style="padding:3px 10px;text-align:right;color:var(--muted)">${vt?formatNumber(vt,1)+'%':'—'}</td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>` : ''}
+          </div>`;
+      }).join('')}
+    </div>
     <table class="data-table">
       <thead>
         <tr>
