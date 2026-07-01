@@ -1,0 +1,17 @@
+/js/*
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Surrogate-Control: no-store
+  CDN-Cache-Control: no-store
+
+/modules/*
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Surrogate-Control: no-store
+  CDN-Cache-Control: no-store
+
+/css/*
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Surrogate-Control: no-store
+  CDN-Cache-Control: no-store
