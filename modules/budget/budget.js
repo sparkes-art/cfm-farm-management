@@ -422,10 +422,13 @@ function _renderHarvest(container) {
           <th>Paddock / block</th>
           <th>Commodity</th>
           <th>Crop type</th>
+          <th>Variety</th>
           <th>Harvest date</th>
           <th class="num">Area (ha)</th>
           <th class="num">Production</th>
           <th class="num">Yield/ha</th>
+          <th class="num">Ginned wt (t)</th>
+          <th class="num">Turnout %</th>
           <th>Notes</th>
           ${canWrite() ? '<th></th>' : ''}
         </tr>
@@ -454,10 +457,16 @@ function _renderHarvest(container) {
           `;
         }).join('')}
         <tr style="font-weight:600;border-top:2px solid var(--border)">
-          <td colspan="4">Total</td>
+          <td colspan="5">Total</td>
           <td class="num">${formatNumber(_harvests.reduce((s,h) => s + (parseFloat(h.area_ha)||0), 0), 1)} ha</td>
           <td class="num">${formatNumber(total, 0)}</td>
           <td class="num">${(() => { const ta = _harvests.reduce((s,h)=>s+(parseFloat(h.area_ha)||0),0); return ta ? formatNumber(total/ta,2) : '—'; })()}</td>
+          <td class="num">${formatNumber(_harvests.reduce((s,h)=>s+(parseFloat(h.ginned_weight)||0),0),1)}</td>
+          <td class="num">${(() => {
+            const totalGinned = _harvests.reduce((s,h)=>s+(parseFloat(h.ginned_weight)||0),0);
+            const totalBaleWt = _harvests.reduce((s,h)=>s+((parseFloat(h.actual_production)||0)*227/1000),0);
+            return totalGinned ? formatNumber((totalBaleWt/totalGinned)*100,1)+'%' : '—';
+          })()}</td>
           <td colspan="${canWrite() ? 2 : 1}"></td>
         </tr>
       </tbody>
@@ -465,9 +474,19 @@ function _renderHarvest(container) {
   `;
 
   wrap.querySelectorAll('.edit-harvest-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       const harvest = _harvests.find(h => h.id === btn.dataset.id);
       if (harvest) _harvestModal(container, harvest);
+    });
+  });
+
+  // Click row to edit
+  wrap.querySelectorAll('.harvest-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      const harvest = _harvests.find(h => h.id === row.dataset.id);
+      if (harvest && canWrite()) _harvestModal(container, harvest);
     });
   });
 
@@ -558,6 +577,8 @@ function _harvestModal(container, existing = null) {
         area_ha: parseFloat(qs('#hv-area', modal)?.value || 0) || null,
         harvest_date: qs('#hv-date', modal)?.value || null,
         actual_production: production,
+        variety: qs('#hv-variety', modal)?.value?.trim() || null,
+        ginned_weight: parseFloat(qs('#hv-ginned', modal)?.value || 0) || null,
         unit: qs('#hv-unit', modal)?.value || 'bale',
         notes: qs('#hv-notes', modal)?.value?.trim() || null,
       };
@@ -603,3 +624,4 @@ function _harvestModal(container, existing = null) {
     }
   }, 150);
 }
+

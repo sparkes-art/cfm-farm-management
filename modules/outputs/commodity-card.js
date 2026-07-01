@@ -194,11 +194,15 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
   const totalContracted = contracts.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0);
   const totalContractValue = contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
   const avgFwdPrice = totalContracted ? totalContractValue / totalContracted : null;
-  const denominator = isHarvested ? totalHarvest : (forecastProd !== null ? forecastProd : totalBudgetProd);
+  // Denominator is always forecast (or budget) — never harvest for hedging purposes
+  const hedgeDenominator = forecastProd !== null ? forecastProd : totalBudgetProd;
+  const denominator = isHarvested ? totalHarvest : hedgeDenominator;
   // Hedged = contracted + already sold (paid invoices)
-  const totalHedged = Math.min(denominator || 0, totalContracted + totalPaidQty);
-  const pctHedged = denominator && totalHedged ? Math.round((totalHedged / denominator) * 100) : 0;
-  const unhedged = Math.max(0, (denominator || 0) - totalHedged);
+  const totalHedged = Math.min(hedgeDenominator || 0, totalContracted + totalPaidQty);
+  const pctHedged = hedgeDenominator && totalHedged ? Math.round((totalHedged / hedgeDenominator) * 100) : 0;
+  const unhedged = Math.max(0, (hedgeDenominator || 0) - totalHedged);
+  // Harvest progress as % of forecast (for bar only, doesn't affect hedging %)
+  const harvestPct = hedgeDenominator && totalHarvest ? Math.min(100, Math.round((totalHarvest / hedgeDenominator) * 100)) : 0;
 
   // Market price
   const marketPrice = com.latestPrice ? parseFloat(com.latestPrice.price_per_unit) : null;
@@ -242,15 +246,17 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
         ${denominator ? `
           <div style="flex:1;margin:0 12px">
             <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-              <div style="display:flex;gap:8px">
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
                 ${totalContracted ? '<span style="color:var(--blue);font-weight:500">' + formatNumber(totalContracted, 0) + ' ' + unit + ' contracted</span>' : ''}
                 ${totalPaidQty ? '<span style="color:var(--green);font-weight:500">' + formatNumber(totalPaidQty, 0) + ' ' + unit + ' sold</span>' : ''}
+                ${status === 'harvesting' && totalHarvest ? '<span style="color:var(--hint)">| ' + formatNumber(totalHarvest, 0) + ' ' + unit + ' harvested so far</span>' : ''}
               </div>
               <span style="color:var(--hint)">${formatNumber(unhedged, 0)} ${unit} open</span>
             </div>
-            <div style="height:7px;background:var(--border);border-radius:4px;overflow:hidden;display:flex">
-              <div style="height:100%;width:${denominator ? Math.min(100, Math.round((totalPaidQty/denominator)*100)) : 0}%;background:var(--green);transition:width .3s"></div>
-              <div style="height:100%;width:${denominator ? Math.min(100 - Math.round((totalPaidQty/denominator)*100), Math.round((totalContracted/denominator)*100)) : 0}%;background:var(--blue);transition:width .3s"></div>
+            <div style="height:7px;background:var(--border);border-radius:4px;overflow:hidden;display:flex;position:relative">
+              <div style="height:100%;width:${hedgeDenominator ? Math.min(100, Math.round((totalPaidQty/hedgeDenominator)*100)) : 0}%;background:var(--green);transition:width .3s;z-index:2"></div>
+              <div style="height:100%;width:${hedgeDenominator ? Math.min(100 - Math.round((totalPaidQty/hedgeDenominator)*100), Math.round((totalContracted/hedgeDenominator)*100)) : 0}%;background:var(--blue);transition:width .3s;z-index:2"></div>
+              ${status === 'harvesting' && harvestPct > 0 ? `<div style="position:absolute;left:0;top:0;height:100%;width:${harvestPct}%;border-right:2px dashed rgba(255,255,255,0.6);z-index:3;pointer-events:none" title="Harvested ${formatNumber(totalHarvest,0)} ${unit} (${harvestPct}% of forecast)"></div>` : ''}
             </div>
           </div>
           <span style="font-size:var(--text-sm);font-weight:600;color:var(--blue);white-space:nowrap">${pctHedged}% covered</span>
@@ -263,6 +269,25 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
         <!-- Col 1: Yield -->
         <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:12px">
           <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0">Yield</p>
+          <!-- Yield by crop type -->
+          ${budgets.length > 1 ? `
+          <div style="display:flex;flex-direction:column;gap:4px">
+            ${budgets.map(b => {
+              const by = b.area_ha && b.yield_per_ha ? parseFloat(b.yield_per_ha) : null;
+              const lf = latestForecasts.find(f => f.budget_id === b.id);
+              const fy = lf && lf.area_ha && lf.yield_per_ha ? parseFloat(lf.yield_per_ha) : null;
+              const label = b.crop_type || b.commodity || '';
+              return '<div style="display:flex;align-items:baseline;gap:6px;font-size:11px">' +
+                '<span style="color:var(--hint);min-width:80px;flex-shrink:0">' + label + '</span>' +
+                '<span style="font-weight:600;color:var(--ink)">' + (by ? formatNumber(by,2) : '—') + '</span>' +
+                '<span style="color:var(--hint);font-size:10px">bud</span>' +
+                (fy ? '<span style="font-weight:600;color:var(--blue);margin-left:6px">' + formatNumber(fy,2) + '</span><span style="color:var(--hint);font-size:10px">fcast</span>' : '') +
+                '<span style="color:var(--hint);font-size:10px;margin-left:4px">' + (b.area_ha ? formatNumber(b.area_ha,0)+' ha' : '') + '</span>' +
+              '</div>';
+            }).join('')}
+            ${isHarvested && totalHarvestArea > 0 ? `<div style="display:flex;align-items:baseline;gap:6px;font-size:11px;border-top:1px solid var(--border-light);padding-top:4px;margin-top:2px"><span style="color:var(--hint);min-width:80px;flex-shrink:0">Actual</span><span style="font-weight:600;color:var(--green)">${formatNumber(totalHarvest/totalHarvestArea,2)}</span><span style="color:var(--hint);font-size:10px">${formatNumber(totalHarvestArea,0)} ha</span></div>` : ''}
+          </div>
+          ` : `
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
             <div>
               <p style="font-size:10px;color:var(--hint);margin:0 0 3px">Budget</p>
@@ -282,6 +307,7 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
               <p style="font-size:10px;color:var(--hint);margin:2px 0 0">${isHarvested && totalHarvestArea ? formatNumber(totalHarvestArea, 0) + ' ha' : ''}</p>
             </div>
           </div>
+          `}
         </div>
 
         <!-- Col 2: Production -->

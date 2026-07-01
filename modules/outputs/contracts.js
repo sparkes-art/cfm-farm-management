@@ -168,6 +168,7 @@ function _renderTable() {
           <th class="num">Price / unit</th>
           <th class="num">Total value</th>
           <th>Delivery</th>
+          <th>PDF</th>
           ${canWrite() ? '<th></th>' : ''}
         </tr>
       </thead>
@@ -189,6 +190,12 @@ function _renderTable() {
               <td class="num">${c.price_per_unit ? formatCurrency(c.price_per_unit, 4) : '—'}</td>
               <td class="num"><strong>${value ? formatCurrency(value, 0) : '—'}</strong></td>
               <td class="muted" style="font-size:var(--text-xs)">${delivery}</td>
+              <td style="font-size:var(--text-xs)">
+                ${c.pdf_url
+                  ? `<a href="${c.pdf_url}" target="_blank" style="color:var(--blue)">📄 View</a>`
+                  : `<span style="color:var(--red);font-weight:500">⚠ No PDF</span>`
+                }
+              </td>
               ${canWrite() ? `
                 <td>
                   <div class="flex gap-2">
@@ -270,16 +277,16 @@ export function openContractModal(existing = null) {
 
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Crop year </label>
-          <select class="form-select" id="f-crop-year">
+          <label class="form-label" style="color:var(--red);font-weight:600">Crop year ⚠ verify after extraction</label>
+          <select class="form-select" id="f-crop-year" style="border-color:var(--red)">
             ${['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s =>
               `<option value="${s}" ${(existing?.crop_year || currentSeason()) === s ? 'selected' : ''}>${s}</option>`
             ).join('')}
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Commodity </label>
-          <select class="form-select" id="f-commodity">
+          <label class="form-label" style="color:var(--red);font-weight:600">Commodity ⚠ verify after extraction</label>
+          <select class="form-select" id="f-commodity" style="border-color:var(--red)">
             <option value="">Select…</option>
             ${commodityOptions(existing?.commodity_id)}
           </select>
@@ -466,6 +473,17 @@ async function _extractFromPDF(overlay) {
 
     statusEl.textContent = '✓ Details extracted — please review and adjust before saving.';
     statusEl.style.color = 'var(--grass)';
+
+    // Highlight blank fields after extraction
+    const fieldsToCheck = ['f-contract-number','f-buyer','f-grade','f-sale-date','f-quantity','f-price'];
+    fieldsToCheck.forEach(id => {
+      const el = qs('#' + id, overlay);
+      if (el && !el.value) {
+        el.style.borderColor = 'var(--red)';
+        el.style.background = '#fff5f5';
+        el.addEventListener('input', () => { el.style.borderColor = ''; el.style.background = ''; }, { once: true });
+      }
+    });
 
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;
