@@ -2,7 +2,7 @@
 // Budget & Forecast — inline editable table per crop type per season
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
-import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js';
+import { getActiveFarm, getSession, canWrite, getFarms } from '../../js/app-state.js';
 import { loadCommodities, getCommodities, getCropTypes, commoditySelectHTML, initCommoditySelect, cropTypeSelectHTML, initCropTypeSelect, refreshCropTypeSelect } from '../../js/commodities.js';
 import { toast, openModal, formatNumber, formatCurrency, qs, currentSeason } from '../../js/ui.js';
 
@@ -11,59 +11,83 @@ let _forecasts = [];
 let _harvests = [];
 let _season = currentSeason();
 
+let _activeTab = 'budget';
+
 export async function mountBudget(container) {
   await loadCommodities();
 
   container.innerHTML = `
     <div class="page-header">
       <div>
-        <h1>Budget & Production</h1>
-        <p class="page-subtitle">Set estimated production and budget price per crop type for each season</p>
+        <h1>Data Entry</h1>
+        <p class="page-subtitle" style="font-size:var(--text-base);font-weight:600;color:var(--ink-mid)">${getActiveFarm()?.name || ''}</p>
       </div>
       <div class="flex gap-2 items-center">
         <label style="font-size:var(--text-sm);color:var(--muted)">Crop year</label>
         <select id="bud-season" class="form-select" style="width:110px">
           ${_seasonOptions()}
         </select>
+      </div>
+    </div>
+
+    <div class="tab-strip" style="margin-bottom:16px">
+      <button class="tab-btn ${_activeTab === 'budget' ? 'active' : ''}" data-tab="budget">Budget & Forecast</button>
+      <button class="tab-btn ${_activeTab === 'harvest' ? 'active' : ''}" data-tab="harvest">Harvest Records</button>
+    </div>
+
+    <div id="bud-tab-content"></div>
+  `;
+
+  // Tab switching
+  container.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _activeTab = btn.dataset.tab;
+      container.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === _activeTab));
+      _renderTabContent(container);
+    });
+  });
+
+  qs('#bud-season', container)?.addEventListener('change', async (e) => {
+    _season = e.target.value;
+    await _loadData();
+    _renderTabContent(container);
+  });
+
+  await _loadData();
+  _renderTabContent(container);
+}
+
+function _renderTabContent(container) {
+  const content = qs('#bud-tab-content', container);
+  if (!content) return;
+
+  if (_activeTab === 'budget') {
+    content.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
         ${canWrite() ? '<button class="btn btn-secondary" id="btn-add-row">＋ Add crop type</button>' : ''}
       </div>
-    </div>
-
-    <div class="card">
-      <div id="budget-table-wrap">
-        <div class="empty-state"><span class="loading-spinner"></span></div>
+      <div class="card">
+        <div id="budget-table-wrap">
+          <div class="empty-state"><span class="loading-spinner"></span></div>
+        </div>
       </div>
-    </div>
-
-    <!-- Harvest section -->
-    <div style="margin-top:20px">
-      <div class="page-header" style="margin-bottom:12px">
-        <h2 style="font-size:var(--text-md);font-weight:600">Harvest entries</h2>
-        ${canWrite() ? '<button class="btn btn-secondary btn-sm" id="btn-add-harvest">＋ Add harvest</button>' : ''}
+    `;
+    if (canWrite()) qs('#btn-add-row', content)?.addEventListener('click', () => _addRowModal(container));
+    _renderTable(container);
+  } else {
+    content.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+        ${canWrite() ? '<button class="btn btn-secondary" id="btn-add-harvest">＋ Add harvest</button>' : ''}
       </div>
       <div class="card">
         <div id="harvest-table-wrap">
           <div class="empty-state"><span class="loading-spinner"></span></div>
         </div>
       </div>
-    </div>
-  `;
-
-  qs('#bud-season', container)?.addEventListener('change', async (e) => {
-    _season = e.target.value;
-    await _loadData();
-    _renderTable(container);
+    `;
+    if (canWrite()) qs('#btn-add-harvest', content)?.addEventListener('click', () => _harvestModal(container));
     _renderHarvest(container);
-  });
-
-  if (canWrite()) {
-    qs('#btn-add-row', container)?.addEventListener('click', () => _addRowModal(container));
-    qs('#btn-add-harvest', container)?.addEventListener('click', () => _harvestModal(container));
   }
-
-  await _loadData();
-  _renderTable(container);
-  _renderHarvest(container);
 }
 
 export function unmountBudget() {
@@ -438,21 +462,27 @@ function _renderHarvest(container) {
           const commodity = commodities.find(c => c.id === h.commodity_id);
           const cropType = cropTypes.find(ct => ct.id === h.crop_type_id);
           return `
-            <tr>
+            <tr class="harvest-row" data-id="${h.id}">
               <td>${h.paddock_name || '—'}</td>
               <td>${commodity?.name || '—'}</td>
               <td class="muted">${cropType?.name || '—'}</td>
+              <td class="muted text-sm">${h.variety || '—'}</td>
               <td class="muted">${h.harvest_date ? new Date(h.harvest_date).toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
               <td class="num">${h.area_ha ? formatNumber(h.area_ha, 1) : '—'}</td>
               <td class="num"><strong>${formatNumber(h.actual_production, 0)} ${h.unit || ''}</strong></td>
               <td class="num">${h.area_ha && h.actual_production ? formatNumber(parseFloat(h.actual_production) / parseFloat(h.area_ha), 2) : '—'}</td>
+              <td class="num">${h.ginned_weight ? formatNumber(h.ginned_weight, 1) : '—'}</td>
+              <td class="num">${(() => {
+                if (!h.ginned_weight || !h.actual_production) return '—';
+                const baleWeight = parseFloat(h.actual_production) * 227 / 1000;
+                const turnout = (baleWeight / parseFloat(h.ginned_weight)) * 100;
+                return formatNumber(turnout, 1) + '%';
+              })()}</td>
               <td class="muted text-sm">${h.notes || ''}</td>
-              ${canWrite() ? `<td>
-                <div class="flex gap-1">
+              ${canWrite() ? `<td><div class="flex gap-1">
                   <button class="btn btn-ghost btn-sm edit-harvest-btn" data-id="${h.id}">Edit</button>
                   <button class="btn btn-ghost btn-sm delete-harvest-btn" data-id="${h.id}" style="color:var(--red)">✕</button>
-                </div>
-              </td>` : ''}
+                </div></td>` : ''}
             </tr>
           `;
         }).join('')}
@@ -474,19 +504,9 @@ function _renderHarvest(container) {
   `;
 
   wrap.querySelectorAll('.edit-harvest-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
+    btn.addEventListener('click', () => {
       const harvest = _harvests.find(h => h.id === btn.dataset.id);
       if (harvest) _harvestModal(container, harvest);
-    });
-  });
-
-  // Click row to edit
-  wrap.querySelectorAll('.harvest-row').forEach(row => {
-    row.addEventListener('click', (e) => {
-      if (e.target.closest('button')) return;
-      const harvest = _harvests.find(h => h.id === row.dataset.id);
-      if (harvest && canWrite()) _harvestModal(container, harvest);
     });
   });
 
