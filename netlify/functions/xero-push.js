@@ -1,8 +1,8 @@
 // netlify/functions/xero-push.js
 // Pushes a CFM invoice to Xero as a draft ACCREC invoice
 
-const XERO_CLIENT_ID = process.env.XERO_CLIENT_ID || 'E4E1BDEA8DFF417C88007214BD95EA61';
-const XERO_CLIENT_SECRET = process.env.XERO_CLIENT_SECRET || 'bj8psa31mt2LZzb5xoi0SO3xwE-S-Vithy7S1PSbEPzUbrzL';
+const XERO_CLIENT_ID = process.env.XERO_CLIENT_ID;
+const XERO_CLIENT_SECRET = process.env.XERO_CLIENT_SECRET;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -115,30 +115,6 @@ exports.handler = async (event) => {
 
     // Find or create contact
     const contactId = await findOrCreateContact(accessToken, tenantId, inv.buyer || 'Unknown Buyer');
-
-    // Build line items from invoice
-    const lineItems = (inv.line_items || []).map(l => {
-      const isGst = inv.gst_type === 'inc';
-      return {
-        Description: [l.commodity, l.docket, l.season].filter(Boolean).join(' · '),
-        Quantity: parseFloat(l.qty) || 1,
-        UnitAmount: parseFloat(l.price) || 0,
-        TaxType: isGst ? 'OUTPUT' : 'NONE',
-        LineAmount: parseFloat(l.total) || 0,
-      };
-    });
-
-    // Add deductions as negative line items
-    (inv.deductions || []).forEach(d => {
-      if (!d.value) return;
-      lineItems.push({
-        Description: d.description || 'Deduction',
-        Quantity: 1,
-        UnitAmount: -Math.abs(parseFloat(d.value)),
-        TaxType: 'NONE',
-        LineAmount: -Math.abs(parseFloat(d.value)),
-      });
-    });
 
     // Build Xero invoice
     const xeroInvoice = {
