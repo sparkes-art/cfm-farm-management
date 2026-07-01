@@ -462,27 +462,50 @@ function _renderHarvest(container) {
           const commodity = commodities.find(c => c.id === h.commodity_id);
           const cropType = cropTypes.find(ct => ct.id === h.crop_type_id);
           return `
-            <tr class="harvest-row" data-id="${h.id}">
+            <tr data-id="${h.id}">
+              ${canWrite() ? `
+              <td><input class="harvest-inline" data-id="${h.id}" data-field="paddock_name" type="text" value="${h.paddock_name || ''}" placeholder="—" style="width:100%;border:none;background:transparent;font-size:var(--text-sm);padding:0"></td>
+              <td>
+                <select class="harvest-inline" data-id="${h.id}" data-field="commodity_id" style="border:none;background:transparent;font-size:var(--text-sm);width:100%;padding:0">
+                  <option value="">—</option>
+                  ${getCommodities().map(c => `<option value="${c.id}" ${c.id === h.commodity_id ? 'selected' : ''}>${c.name}</option>`).join('')}
+                </select>
+              </td>
+              <td>
+                <select class="harvest-inline" data-id="${h.id}" data-field="crop_type_id" style="border:none;background:transparent;font-size:var(--text-sm);width:100%;padding:0">
+                  <option value="">—</option>
+                  ${getCropTypes().map(ct => `<option value="${ct.id}" ${ct.id === h.crop_type_id ? 'selected' : ''}>${ct.name}</option>`).join('')}
+                </select>
+              </td>
+              <td><input class="harvest-inline" data-id="${h.id}" data-field="variety" type="text" value="${h.variety || ''}" placeholder="—" style="width:100%;border:none;background:transparent;font-size:var(--text-sm);padding:0"></td>
+              <td><input class="harvest-inline" data-id="${h.id}" data-field="harvest_date" type="date" value="${h.harvest_date || ''}" style="width:100%;border:none;background:transparent;font-size:var(--text-sm);padding:0"></td>
+              <td><input class="harvest-inline num" data-id="${h.id}" data-field="area_ha" type="number" step="0.1" value="${h.area_ha || ''}" placeholder="—" style="width:100%;border:none;background:transparent;font-size:var(--text-sm);text-align:right;padding:0"></td>
+              <td><input class="harvest-inline num" data-id="${h.id}" data-field="actual_production" type="number" step="0.1" value="${h.actual_production || ''}" placeholder="—" style="width:80px;border:none;background:transparent;font-size:var(--text-sm);font-weight:600;text-align:right;padding:0">
+                <select class="harvest-inline" data-id="${h.id}" data-field="unit" style="border:none;background:transparent;font-size:10px;padding:0;width:40px">
+                  ${['bale','t','kg','head'].map(u => `<option ${h.unit===u?'selected':''}>${u}</option>`).join('')}
+                </select>
+              </td>
+              <td class="num yield-display-${h.id}">${h.area_ha && h.actual_production ? formatNumber(parseFloat(h.actual_production)/parseFloat(h.area_ha),2) : '—'}</td>
+              <td><input class="harvest-inline num" data-id="${h.id}" data-field="ginned_weight" type="number" step="0.1" value="${h.ginned_weight || ''}" placeholder="—" style="width:100%;border:none;background:transparent;font-size:var(--text-sm);text-align:right;padding:0"></td>
+              <td class="num turnout-display-${h.id}">${(() => {
+                if (!h.ginned_weight || !h.actual_production) return '—';
+                return formatNumber((parseFloat(h.actual_production)*227/1000/parseFloat(h.ginned_weight))*100,1)+'%';
+              })()}</td>
+              <td><input class="harvest-inline" data-id="${h.id}" data-field="notes" type="text" value="${h.notes || ''}" placeholder="—" style="width:100%;border:none;background:transparent;font-size:var(--text-sm);padding:0"></td>
+              <td><button class="btn btn-ghost btn-sm delete-harvest-btn" data-id="${h.id}" style="color:var(--red)">✕</button></td>
+              ` : `
               <td>${h.paddock_name || '—'}</td>
               <td>${commodity?.name || '—'}</td>
               <td class="muted">${cropType?.name || '—'}</td>
               <td class="muted text-sm">${h.variety || '—'}</td>
               <td class="muted">${h.harvest_date ? new Date(h.harvest_date).toLocaleDateString('en-AU', {day:'2-digit',month:'short',year:'numeric'}) : '—'}</td>
-              <td class="num">${h.area_ha ? formatNumber(h.area_ha, 1) : '—'}</td>
-              <td class="num"><strong>${formatNumber(h.actual_production, 0)} ${h.unit || ''}</strong></td>
-              <td class="num">${h.area_ha && h.actual_production ? formatNumber(parseFloat(h.actual_production) / parseFloat(h.area_ha), 2) : '—'}</td>
-              <td class="num">${h.ginned_weight ? formatNumber(h.ginned_weight, 1) : '—'}</td>
-              <td class="num">${(() => {
-                if (!h.ginned_weight || !h.actual_production) return '—';
-                const baleWeight = parseFloat(h.actual_production) * 227 / 1000;
-                const turnout = (baleWeight / parseFloat(h.ginned_weight)) * 100;
-                return formatNumber(turnout, 1) + '%';
-              })()}</td>
-              <td class="muted text-sm">${h.notes || ''}</td>
-              ${canWrite() ? `<td><div class="flex gap-1">
-                  <button class="btn btn-ghost btn-sm edit-harvest-btn" data-id="${h.id}">Edit</button>
-                  <button class="btn btn-ghost btn-sm delete-harvest-btn" data-id="${h.id}" style="color:var(--red)">✕</button>
-                </div></td>` : ''}
+              <td class="num">${h.area_ha ? formatNumber(h.area_ha,1) : '—'}</td>
+              <td class="num"><strong>${formatNumber(h.actual_production,0)} ${h.unit||''}</strong></td>
+              <td class="num">${h.area_ha && h.actual_production ? formatNumber(parseFloat(h.actual_production)/parseFloat(h.area_ha),2) : '—'}</td>
+              <td class="num">${h.ginned_weight ? formatNumber(h.ginned_weight,1) : '—'}</td>
+              <td class="num">${(() => { if(!h.ginned_weight||!h.actual_production)return '—'; return formatNumber((parseFloat(h.actual_production)*227/1000/parseFloat(h.ginned_weight))*100,1)+'%'; })()}</td>
+              <td class="muted text-sm">${h.notes||''}</td>
+              `}
             </tr>
           `;
         }).join('')}
@@ -503,11 +526,35 @@ function _renderHarvest(container) {
     </table>
   `;
 
-  wrap.querySelectorAll('.edit-harvest-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const harvest = _harvests.find(h => h.id === btn.dataset.id);
-      if (harvest) _harvestModal(container, harvest);
-    });
+  // Inline edit save on blur/change
+  wrap.querySelectorAll('.harvest-inline').forEach(inp => {
+    const save = async () => {
+      const id = inp.dataset.id;
+      const field = inp.dataset.field;
+      let val = inp.value;
+      if (inp.type === 'number') val = parseFloat(val) || null;
+      else if (!val.trim()) val = null;
+
+      try {
+        await dbUpdate('harvest_entries', id, { [field]: val });
+        const idx = _harvests.findIndex(h => h.id === id);
+        if (idx >= 0) {
+          _harvests[idx][field] = val;
+          // Update calculated fields
+          const h = _harvests[idx];
+          const yEl = wrap.querySelector('.yield-display-' + id);
+          if (yEl) yEl.textContent = h.area_ha && h.actual_production ? formatNumber(parseFloat(h.actual_production)/parseFloat(h.area_ha),2) : '—';
+          const tEl = wrap.querySelector('.turnout-display-' + id);
+          if (tEl) tEl.textContent = h.ginned_weight && h.actual_production ? formatNumber((parseFloat(h.actual_production)*227/1000/parseFloat(h.ginned_weight))*100,1)+'%' : '—';
+        }
+      } catch (err) { toast('Save failed: ' + err.message, 'error'); }
+    };
+    if (inp.tagName === 'SELECT') inp.addEventListener('change', save);
+    else {
+      inp.addEventListener('focus', () => { inp.style.background='var(--blue-light)'; inp.style.border='1px solid var(--blue)'; inp.style.borderRadius='3px'; inp.style.padding='1px 4px'; });
+      inp.addEventListener('blur', () => { inp.style.background='transparent'; inp.style.border='none'; inp.style.padding='0'; save(); });
+      inp.addEventListener('keydown', e => { if(e.key==='Enter') inp.blur(); if(e.key==='Escape') { inp.blur(); } });
+    }
   });
 
   wrap.querySelectorAll('.delete-harvest-btn').forEach(btn => {
