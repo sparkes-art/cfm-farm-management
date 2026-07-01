@@ -49,7 +49,7 @@ onSessionChange((session) => {
     _populateFarmSelector(getFarms());
     _updateUserDisplay(session);
     _navigateTo('outputs');
-    setTimeout(_updateXeroIndicator, 800);
+    setTimeout(async () => { await _populateSeasonSelector(); _updateXeroIndicator(); }, 500);
   } else {
     show('#login-page');
     hide('#app');
@@ -120,6 +120,7 @@ function _populateFarmSelector(farms) {
 qs('#farm-select')?.addEventListener('change', (e) => {
   setActiveFarm(e.target.value);
   _updateXeroIndicator();
+  _populateSeasonSelector();
 });
 
 window._updateXeroIndicator = async function _updateXeroIndicator() {
