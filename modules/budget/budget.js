@@ -195,7 +195,11 @@ function _renderTable(container) {
                 <td>${commodity?.name || b.commodity || '—'}</td>
                 <td class="muted">${b.unit || 't'}</td>
                 <td class="num" style="border-left:2px solid var(--blue-light)">
-                  ${b.is_derived ? '' : `<input type="number" class="budget-inline-input" data-field="area_ha" data-id="${b.id}"
+                  ${b.is_derived ? (() => {
+                    const lintBuds = _budgets.filter(x => x.commodity_id === b.derived_from_commodity_id && x.crop_type_id === b.crop_type_id);
+                    const lintBales = lintBuds.reduce((s,x) => s + (parseFloat(x.area_ha)||0)*(parseFloat(x.yield_per_ha)||0), 0);
+                    return '<span class="num muted" style="font-size:11px">' + (lintBales ? formatNumber(lintBales,0)+' bales' : '—') + '</span>';
+                  })() : `<input type="number" class="budget-inline-input" data-field="area_ha" data-id="${b.id}"
                     value="${b.area_ha || ''}" step="0.1"
                     style="width:70px;text-align:right;border:1px solid transparent;border-radius:4px;padding:2px 4px;font-size:var(--text-sm);font-family:var(--font-data)">`}
                 </td>
