@@ -220,31 +220,7 @@ function _renderTable(container) {
                     value="${b.price || ''}" step="0.01"
                     style="width:70px;text-align:right;border:1px solid transparent;border-radius:4px;padding:2px 4px;font-size:var(--text-sm);font-family:var(--font-data)">
                 </td>
-                ${b.is_derived ? `
-                  <td class="num" style="border-left:2px solid #0f766e22;color:var(--hint);font-size:11px" colspan="2">
-                    ${(() => {
-                      const lintBudgets = _budgets.filter(x => x.commodity_id === b.derived_from_commodity_id);
-                      const lintFcast = lintBudgets.reduce((s,x) => {
-                        const lf = _forecasts.filter(f => f.budget_id === x.id).slice(-1)[0];
-                        return s + (lf ? parseFloat(lf.area_ha||0)*parseFloat(lf.yield_per_ha||0) : parseFloat(x.area_ha||0)*parseFloat(x.yield_per_ha||0));
-                      }, 0);
-                      return lintFcast ? formatNumber(lintFcast,0) + ' lint bales' : '— lint bales';
-                    })()}
-                    <br><span style="font-size:10px">× <input type="number" class="seed-fcast-conversion" data-budget-id="${b.id}"
-                      value="${b.seed_conversion||''}" step="0.001" placeholder="t/bale"
-                      style="width:55px;border:1px solid transparent;border-radius:3px;padding:1px 3px;font-size:11px;font-family:var(--font-data);text-align:right"> t/bale</span>
-                  </td>
-                  <td class="num" style="color:#0f766e;font-weight:600">
-                    <span class="fcast-prod-display" data-id="${b.id}">${(() => {
-                      const lintBudgets = _budgets.filter(x => x.commodity_id === b.derived_from_commodity_id);
-                      const lintFcast = lintBudgets.reduce((s,x) => {
-                        const lf = _forecasts.filter(f => f.budget_id === x.id).slice(-1)[0];
-                        return s + (lf ? parseFloat(lf.area_ha||0)*parseFloat(lf.yield_per_ha||0) : parseFloat(x.area_ha||0)*parseFloat(x.yield_per_ha||0));
-                      }, 0);
-                      const conv = parseFloat(b.seed_conversion||0);
-                      return lintFcast && conv ? formatNumber(lintFcast * conv, 1) : '—';
-                    })()}</span>
-                  </td>
+                ${b.is_derived ? _seedBudgetCells(b, _budgets, _forecasts) : `
                 <td class="num" style="border-left:2px solid #0f766e22">
                   <input type="number" class="forecast-inline-input" data-field="area_ha" data-budget-id="${b.id}"
                     value="${latestF?.area_ha || ''}" step="0.1"

@@ -35,7 +35,7 @@ export async function mountReconciliation(container) {
     </div>
   `;
 
-  await _populateCommodities(container, farm.id, defaultSeason);
+  await _populateCommodities(container, farm.id, getActiveSeason() || currentSeason());
   await _renderReconciliation(container, farm);
 
   qs('#btn-rec-refresh', container)?.addEventListener('click', () => _renderReconciliation(container, farm));
