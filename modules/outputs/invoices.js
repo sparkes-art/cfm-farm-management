@@ -296,8 +296,16 @@ function _openDetail(inv, container) {
       </table>
       ${deductions.length ? `
         <table class="data-table" style="margin-bottom:12px">
-          <thead><tr><th>Deduction</th><th>Type</th><th class="num">Rate</th><th class="num">Value</th></tr></thead>
-          <tbody>${deductions.map(d => `<tr><td>${d.description}</td><td>${d.type === 'pct' ? '%' : '$'}</td><td class="num">${d.rate}${d.type === 'pct' ? '%' : ''}</td><td class="num" style="color:var(--red)">-${formatCurrency(d.value, 2)}</td></tr>`).join('')}</tbody>
+          <thead><tr><th>Description</th><th>Docket</th><th>Season</th><th class="num">Qty</th><th>Unit</th><th class="num">Rate/unit</th><th class="num">Value</th></tr></thead>
+          <tbody>${deductions.map(d => `<tr>
+  <td>${d.description||'—'}</td>
+  <td class="muted text-xs">${d.docket||'—'}</td>
+  <td class="muted text-xs">${d.season||'—'}</td>
+  <td class="num">${d.qty||'—'}</td>
+  <td class="muted text-xs">${d.unit||'—'}</td>
+  <td class="num">${d.rate ? formatCurrency(d.rate,4) : '—'}</td>
+  <td class="num" style="color:var(--red)">-${formatCurrency(d.value, 2)}</td>
+</tr>`).join('')}</tbody>
         </table>
       ` : ''}
       <div style="display:flex;flex-direction:column;gap:4px;background:var(--page-bg);border-radius:var(--radius-sm);padding:10px 12px">
@@ -379,10 +387,6 @@ export function openInvoiceForm(container, existing = null) {
           <input class="form-input" id="f-date" type="date" value="${existing?.invoice_date || new Date().toISOString().slice(0,10)}">
         </div>
         <div class="form-group" style="margin:0">
-          <label class="form-label">Buyer</label>
-          <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer || ''}" placeholder="Buyer name">
-        </div>
-        <div class="form-group" style="margin:0">
           <label class="form-label">GST</label>
           <select class="form-select" id="f-gst">
             <option value="ex" ${(existing?.gst_type||'ex')==='ex'?'selected':''}>Ex-GST</option>
@@ -391,14 +395,20 @@ export function openInvoiceForm(container, existing = null) {
         </div>
       </div>
 
-      <!-- Contract selector -->
+      <!-- Contract selector — first for contract sales so buyer can autofill -->
       <div id="f-contract-section" style="margin-bottom:16px">
-        <div class="form-group" style="margin-bottom:10px">
-          <label class="form-label">Forward contract</label>
-          <select class="form-select" id="f-contract" style="max-width:420px">
-            <option value="">— select a contract —</option>
-            ${_contracts.map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" ${existing?.forward_contract_id===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}</option>`).join('')}
-          </select>
+        <div class="form-row" style="margin-bottom:10px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Forward contract</label>
+            <select class="form-select" id="f-contract">
+              <option value="">— select a contract —</option>
+              ${_contracts.map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" data-buyer="${c.counterparty||c.buyer||''}" ${existing?.forward_contract_id===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Buyer</label>
+            <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer || ''}" placeholder="Auto-fills from contract">
+          </div>
         </div>
         <div id="f-contract-summary" style="display:none;grid-template-columns:repeat(4,1fr);gap:10px;background:var(--blue-light);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px">
           <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Contract qty</p><p id="cs-qty" style="font-weight:600;color:var(--blue-text)">—</p></div>
@@ -442,14 +452,17 @@ export function openInvoiceForm(container, existing = null) {
           <p style="font-size:var(--text-sm);font-weight:600">Deductions</p>
           <button class="btn btn-secondary btn-sm" id="f-add-ded">＋ Add deduction</button>
         </div>
-        <div style="border:1px solid var(--border);border-radius:var(--radius-md);overflow:hidden">
-          <table style="width:100%;border-collapse:collapse" id="f-ded-table">
+        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-md)">
+          <table style="width:100%;border-collapse:collapse;min-width:600px" id="f-ded-table">
             <thead style="background:#fafbfc">
               <tr>
-                <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light)">Description</th>
-                <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:65px">Type</th>
-                <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Rate / amount</th>
-                <th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Deduction value ($)</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:140px">Description</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:85px">Docket / ID</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:70px">Crop year</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:65px">Qty</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:50px">Unit</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:80px">Rate / unit</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Deduction ($)</th>
                 <th style="border-bottom:1px solid var(--border-light);width:30px"></th>
               </tr>
             </thead>
@@ -560,11 +573,23 @@ export function openInvoiceForm(container, existing = null) {
     } catch { modal.querySelector('#cs-qty').textContent = formatNumber(qty,0)+' '+unit; }
 
     modal.querySelector('#pc-contract').textContent = formatCurrency(price, 2);
+    // Autofill buyer from contract
+    const buyerField = modal.querySelector('#f-buyer');
+    const selectedOpt = modal.querySelector('#f-contract option:checked');
+    if (buyerField && selectedOpt?.dataset?.buyer && !buyerField.value) {
+      buyerField.value = selectedOpt.dataset.buyer;
+    }
     // Set price on all lines
     modal.querySelectorAll('.f-line-price').forEach(inp => { inp.value = price.toFixed(4); });
     recalc();
   }
-  modal.querySelector('#f-contract')?.addEventListener('change', updateContractSummary);
+  modal.querySelector('#f-contract')?.addEventListener('change', () => {
+    updateContractSummary();
+    // Always autofill buyer when contract changes
+    const buyerField = modal.querySelector('#f-buyer');
+    const selectedOpt = modal.querySelector('#f-contract option:checked');
+    if (buyerField && selectedOpt?.dataset?.buyer) buyerField.value = selectedOpt.dataset.buyer;
+  });
 
   // Add line
   function addLine(data = {}) {
@@ -672,38 +697,39 @@ export function openInvoiceForm(container, existing = null) {
     const tbody = modal.querySelector('#f-ded-body');
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid var(--border-light)';
-    const tdStyle = 'padding:5px 8px;vertical-align:middle;';
+    const tdStyle = 'padding:4px 6px;vertical-align:middle;';
     const inStyle = 'border:0.5px solid transparent;border-radius:4px;padding:4px 6px;background:transparent;color:var(--ink);font-size:var(--text-sm);width:100%';
+    const numStyle = inStyle + ';text-align:right;font-family:var(--font-data)';
+    const seasonOpts = ['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s =>
+      `<option value="${s}" ${s===(data.season||getActiveSeason()||currentSeason())?'selected':''}>${s}</option>`
+    ).join('');
     tr.innerHTML = `
       <td style="${tdStyle}"><input type="text" class="f-ded-desc" style="${inStyle}" placeholder="e.g. Selling commission" value="${data.description||''}"></td>
-      <td style="${tdStyle}min-width:65px"><select class="f-ded-type" style="${inStyle}"><option value="pct" ${data.type==='pct'?'selected':''}>%</option><option value="flat" ${data.type==='flat'?'selected':''}>$</option></select></td>
-      <td style="${tdStyle}min-width:80px"><input type="number" class="f-ded-rate" style="${inStyle};text-align:right;font-family:var(--font-data)" placeholder="0" value="${data.rate||''}" step="0.01"></td>
-      <td style="${tdStyle}min-width:90px"><input type="number" class="f-ded-value" style="${inStyle};text-align:right;font-family:var(--font-data);color:var(--red)" placeholder="0.00" value="${data.value||''}" step="0.01"></td>
+      <td style="${tdStyle}"><input type="text" class="f-ded-docket" style="${inStyle}" placeholder="Docket" value="${data.docket||''}"></td>
+      <td style="${tdStyle}"><select class="f-ded-season" style="${inStyle};font-size:11px">${seasonOpts}</select></td>
+      <td style="${tdStyle}"><input type="number" class="f-ded-qty" style="${numStyle}" placeholder="0" value="${data.qty||''}" step="0.01"></td>
+      <td style="${tdStyle}"><input type="text" class="f-ded-unit" style="${inStyle};font-size:11px" placeholder="t" value="${data.unit||''}" style="width:50px"></td>
+      <td style="${tdStyle}"><input type="number" class="f-ded-rate" style="${numStyle}" placeholder="0.00" value="${data.rate||''}" step="0.0001"></td>
+      <td style="${tdStyle}"><input type="number" class="f-ded-value" style="${numStyle};color:var(--red)" placeholder="0.00" value="${data.value||''}" step="0.01"></td>
       <td style="padding:4px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:16px;padding:2px 4px" class="del-ded">✕</button></td>
     `;
     tbody.appendChild(tr);
 
-    const dedType = tr.querySelector('.f-ded-type');
+    const dedQty = tr.querySelector('.f-ded-qty');
     const dedRate = tr.querySelector('.f-ded-rate');
     const dedValue = tr.querySelector('.f-ded-value');
 
-    dedRate.addEventListener('input', () => {
-      const gross = [...modal.querySelectorAll('#f-lines-body tr')].reduce((s,r) => s + (parseFloat(r.querySelector('.f-line-total')?.value)||0), 0);
-      const type = dedType.value;
-      const rate = parseFloat(dedRate.value)||0;
-      if (type === 'pct' && gross) dedValue.value = (gross * rate / 100).toFixed(2);
+    // Auto-calc value from qty * rate
+    const calcDedValue = () => {
+      const qty = parseFloat(dedQty.value) || 0;
+      const rate = parseFloat(dedRate.value) || 0;
+      if (qty && rate) dedValue.value = (qty * rate).toFixed(2);
       recalc();
-    });
+    };
 
-    dedValue.addEventListener('input', () => {
-      const gross = [...modal.querySelectorAll('#f-lines-body tr')].reduce((s,r) => s + (parseFloat(r.querySelector('.f-line-total')?.value)||0), 0);
-      const type = dedType.value;
-      const value = parseFloat(dedValue.value)||0;
-      if (type === 'pct' && gross) dedRate.value = (value / gross * 100).toFixed(4);
-      recalc();
-    });
-
-    dedType.addEventListener('change', recalc);
+    dedQty.addEventListener('input', calcDedValue);
+    dedRate.addEventListener('input', calcDedValue);
+    dedValue.addEventListener('input', recalc);
     tr.querySelector('.del-ded').addEventListener('click', () => { tr.remove(); recalc(); });
   }
 
