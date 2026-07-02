@@ -311,7 +311,7 @@ function _openDetail(inv, container) {
       <div style="display:flex;flex-direction:column;gap:4px;background:var(--page-bg);border-radius:var(--radius-sm);padding:10px 12px">
         <div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">Gross</span><span>${formatCurrency(inv.gross_amount, 2)}</span></div>
         ${inv.total_quality_adj ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">Quality adj</span><span style="color:${inv.total_quality_adj < 0 ? 'var(--red)' : 'var(--green)'}">${formatCurrency(inv.total_quality_adj, 2)}</span></div>` : ''}
-        ${inv.total_deductions ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">Deductions</span><span style="color:var(--red)">-${formatCurrency(inv.total_deductions, 2)}</span></div>` : ''}
+        ${inv.total_deductions ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">Sale Expenses</span><span style="color:var(--red)">-${formatCurrency(inv.total_deductions, 2)}</span></div>` : ''}
         <div style="display:flex;justify-content:space-between;font-weight:600;border-top:1px solid var(--border-light);padding-top:6px;margin-top:4px"><span>Net amount</span><span style="color:var(--blue)">${formatCurrency(inv.net_amount, 2)}</span></div>
         ${inv.gst_amount ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">GST</span><span>${formatCurrency(inv.gst_amount, 2)}</span></div>` : ''}
         <div style="display:flex;justify-content:space-between;font-weight:600;font-size:var(--text-md)"><span>Total payable</span><span style="color:var(--blue)">${formatCurrency(inv.total_payable, 2)}</span></div>
@@ -380,22 +380,7 @@ export function openInvoiceForm(container, existing = null) {
         </div>
       </div>
 
-      <!-- Header fields -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
-        <div class="form-group" style="margin:0">
-          <label class="form-label">Date</label>
-          <input class="form-input" id="f-date" type="date" value="${existing?.invoice_date || new Date().toISOString().slice(0,10)}">
-        </div>
-        <div class="form-group" style="margin:0">
-          <label class="form-label">GST</label>
-          <select class="form-select" id="f-gst">
-            <option value="ex" ${(existing?.gst_type||'ex')==='ex'?'selected':''}>Ex-GST</option>
-            <option value="inc" ${existing?.gst_type==='inc'?'selected':''}>Inc-GST (10%)</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Contract selector — first for contract sales so buyer can autofill -->
+      <!-- Contract selector — immediately after sale type -->
       <div id="f-contract-section" style="margin-bottom:16px">
         <div class="form-row" style="margin-bottom:10px">
           <div class="form-group" style="margin:0">
@@ -415,6 +400,21 @@ export function openInvoiceForm(container, existing = null) {
           <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Already invoiced</p><p id="cs-invoiced" style="font-weight:600;color:var(--blue-text)">—</p></div>
           <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Remaining</p><p id="cs-remaining" style="font-weight:600;color:var(--blue)">—</p></div>
           <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Avg price to date</p><p id="cs-avg" style="font-weight:600;color:var(--blue-text)">—</p></div>
+        </div>
+      </div>
+
+      <!-- Header fields -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Date</label>
+          <input class="form-input" id="f-date" type="date" value="${existing?.invoice_date || new Date().toISOString().slice(0,10)}">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">GST</label>
+          <select class="form-select" id="f-gst">
+            <option value="ex" ${(existing?.gst_type||'ex')==='ex'?'selected':''}>Ex-GST</option>
+            <option value="inc" ${existing?.gst_type==='inc'?'selected':''}>Inc-GST (10%)</option>
+          </select>
         </div>
       </div>
 
@@ -446,11 +446,11 @@ export function openInvoiceForm(container, existing = null) {
         </div>
       </div>
 
-      <!-- Deductions -->
+      <!-- Sale Expenses -->
       <div style="margin-bottom:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <p style="font-size:var(--text-sm);font-weight:600">Deductions</p>
-          <button class="btn btn-secondary btn-sm" id="f-add-ded">＋ Add deduction</button>
+          <p style="font-size:var(--text-sm);font-weight:600">Sale Expenses</p>
+          <button class="btn btn-secondary btn-sm" id="f-add-ded">＋ Add expense</button>
         </div>
         <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-md)">
           <table style="width:100%;border-collapse:collapse;min-width:600px" id="f-ded-table">
@@ -485,7 +485,7 @@ export function openInvoiceForm(container, existing = null) {
           <div style="display:flex;flex-direction:column;gap:5px">
             <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Gross</span><span id="t-gross" style="font-family:var(--font-data)">$0.00</span></div>
             <div id="t-qa-row" style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Quality adj</span><span id="t-qa" style="font-family:var(--font-data)">—</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Deductions</span><span id="t-ded" style="font-family:var(--font-data);color:var(--red)">—</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Sale Expenses</span><span id="t-ded" style="font-family:var(--font-data);color:var(--red)">—</span></div>
             <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);font-weight:600;color:var(--ink);border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px"><span>Net amount</span><span id="t-net" style="font-family:var(--font-data)">$0.00</span></div>
             <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>GST</span><span id="t-gst" style="font-family:var(--font-data)">—</span></div>
             <div style="display:flex;justify-content:space-between;font-size:var(--text-md);font-weight:600;color:var(--blue)"><span>Total payable</span><span id="t-total" style="font-family:var(--font-data)">$0.00</span></div>
@@ -808,6 +808,8 @@ export function openInvoiceForm(container, existing = null) {
   }
   if (existing?.deductions?.length) {
     existing.deductions.forEach(d => addDeduction(d));
+  } else {
+    addDeduction(); // default empty row
   }
   if (existing?.forward_contract_id) {
     setTimeout(() => updateContractSummary(), 100);
