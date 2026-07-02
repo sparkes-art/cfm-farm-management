@@ -353,47 +353,104 @@ function _addRowModal(container) {
           </select>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Budget area (ha)</label>
-          <input class="form-input num" id="br-area" type="number" step="0.1">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Budget yield / ha</label>
-          <input class="form-input num" id="br-yield" type="number" step="0.001">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Budget price</label>
-          <input class="form-input num" id="br-price" type="number" step="0.01">
+      <div id="br-standard-fields">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Budget area (ha)</label>
+            <input class="form-input num" id="br-area" type="number" step="0.1">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Budget yield / ha</label>
+            <input class="form-input num" id="br-yield" type="number" step="0.001">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Budget price</label>
+            <input class="form-input num" id="br-price" type="number" step="0.01">
+          </div>
         </div>
       </div>
+
+      <div id="br-seed-fields" style="display:none">
+        <div style="background:var(--blue-light);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px;font-size:var(--text-sm);color:var(--blue-text)">
+          🌱 Cotton Seed is derived from Cotton Lint forecast — enter conversion rate and price only
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Lint source commodity</label>
+            <select class="form-select" id="br-lint-source">
+              <option value="">— loading —</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Conversion rate (t seed / bale lint)</label>
+            <input class="form-input num" id="br-seed-conversion" type="number" step="0.001" placeholder="e.g. 0.8">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Budget price ($/t)</label>
+            <input class="form-input num" id="br-price" type="number" step="0.01">
+          </div>
+        </div>
+      </div>
+
       <div class="form-group">
         <label class="form-label">Budgeted production</label>
-        <div id="br-prod" class="font-mono" style="font-size:var(--text-xl);color:var(--blue);padding:4px 0">—</div>
+        <div id="br-prod" style="font-size:var(--text-xl);color:var(--blue);padding:4px 0">—</div>
       </div>
     `,
     onConfirm: async (modal) => {
       const commodityId = qs('#br-commodity', modal)?.value;
       const cropTypeId = qs('#br-crop-type', modal)?.value || null;
       const unit = qs('#br-unit', modal)?.value || 't';
-      const area = parseFloat(qs('#br-area', modal)?.value || 0) || null;
-      const yld = parseFloat(qs('#br-yield', modal)?.value || 0) || null;
-      const price = parseFloat(qs('#br-price', modal)?.value || 0) || null;
       const commodities = getCommodities();
       const commodity = commodities.find(c => c.id === commodityId);
+      const isCottonSeed = commodity?.name?.toLowerCase().includes('cotton seed') || commodity?.name?.toLowerCase().includes('cottonseed');
 
-      const row = await dbInsert('budgets', {
-        farm_id: farm.id,
-        season: _season,
-        commodity_id: commodityId || null,
-        commodity: commodity?.name || null,
-        crop_type_id: cropTypeId,
-        unit,
-        area_ha: area,
-        yield_per_ha: yld,
-        price,
-        created_by: getSession()?.user?.id,
-      });
+      let row;
+      if (isCottonSeed) {
+        // Derived from lint — save conversion rate and price only
+        const conversion = parseFloat(qs('#br-seed-conversion', modal)?.value || 0) || null;
+        const price = parseFloat(qs('#br-price', modal)?.value || 0) || null;
+        const lintCommodityId = qs('#br-lint-source', modal)?.value || null;
+        // Calculate derived production from lint budgets
+        const lintBudgets = _budgets.filter(b => b.commodity_id === lintCommodityId && (!cropTypeId || b.crop_type_id === cropTypeId));
+        const lintBales = lintBudgets.reduce((s,b) => {
+          const lf = _forecasts.filter(f => f.budget_id === b.id).slice(-1)[0];
+          return s + (lf ? parseFloat(lf.area_ha||0)*parseFloat(lf.yield_per_ha||0) : parseFloat(b.area_ha||0)*parseFloat(b.yield_per_ha||0));
+        }, 0);
+        const derivedProd = conversion && lintBales ? lintBales * conversion : null;
+        row = await dbInsert('budgets', {
+          farm_id: farm.id,
+          season: _season,
+          commodity_id: commodityId || null,
+          commodity: commodity?.name || null,
+          crop_type_id: cropTypeId,
+          unit,
+          area_ha: null,
+          yield_per_ha: conversion,
+          price,
+          is_derived: true,
+          derived_from_commodity_id: lintCommodityId,
+          seed_conversion: conversion,
+          budgeted_production: derivedProd,
+          created_by: getSession()?.user?.id,
+        });
+      } else {
+        const area = parseFloat(qs('#br-area', modal)?.value || 0) || null;
+        const yld = parseFloat(qs('#br-yield', modal)?.value || 0) || null;
+        const price = parseFloat(qs('#br-price', modal)?.value || 0) || null;
+        row = await dbInsert('budgets', {
+          farm_id: farm.id,
+          season: _season,
+          commodity_id: commodityId || null,
+          commodity: commodity?.name || null,
+          crop_type_id: cropTypeId,
+          unit,
+          area_ha: area,
+          yield_per_ha: yld,
+          price,
+          created_by: getSession()?.user?.id,
+        });
+      }
 
       _budgets.push(row);
       toast('Crop type added', 'success');
@@ -407,10 +464,46 @@ function _addRowModal(container) {
       selectedCommodityId = id;
       refreshCropTypeSelect('br-crop-type', id);
       initCropTypeSelect('br-crop-type', () => selectedCommodityId);
+
+      // Show/hide cotton seed fields based on commodity
+      const commodities = getCommodities();
+      const comm = commodities.find(c => c.id === id);
+      const isSeed = comm?.name?.toLowerCase().includes('cotton seed') || comm?.name?.toLowerCase().includes('cottonseed');
+      const standardFields = qs('#br-standard-fields');
+      const seedFields = qs('#br-seed-fields');
+      if (standardFields) standardFields.style.display = isSeed ? 'none' : '';
+      if (seedFields) seedFields.style.display = isSeed ? '' : 'none';
+
+      // Populate lint source options
+      if (isSeed) {
+        const lintComms = commodities.filter(c => c.name?.toLowerCase().includes('cotton lint') || c.name?.toLowerCase().includes('cotton') && !c.name?.toLowerCase().includes('seed'));
+        const lintSel = qs('#br-lint-source');
+        if (lintSel) {
+          lintSel.innerHTML = '<option value="">— select lint commodity —</option>' +
+            lintComms.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        }
+        // Update derived production preview
+        const updateSeedProd = () => {
+          const conversion = parseFloat(qs('#br-seed-conversion')?.value || 0);
+          const lintId = qs('#br-lint-source')?.value;
+          const lintBudgets = _budgets.filter(b => b.commodity_id === lintId);
+          const lintBales = lintBudgets.reduce((s,b) => {
+            const lf = _forecasts.filter(f => f.budget_id === b.id).slice(-1)[0];
+            return s + (lf ? parseFloat(lf.area_ha||0)*parseFloat(lf.yield_per_ha||0) : parseFloat(b.area_ha||0)*parseFloat(b.yield_per_ha||0));
+          }, 0);
+          const prod = conversion && lintBales ? lintBales * conversion : 0;
+          const el = qs('#br-prod');
+          if (el) el.innerHTML = prod
+            ? `<strong>${formatNumber(prod, 1)} t</strong> <span style="font-size:11px;color:var(--hint)">from ${formatNumber(lintBales,0)} lint bales × ${conversion} t/bale</span>`
+            : '—';
+        };
+        qs('#br-seed-conversion')?.addEventListener('input', updateSeedProd);
+        qs('#br-lint-source')?.addEventListener('change', updateSeedProd);
+      }
     });
     initCropTypeSelect('br-crop-type', () => selectedCommodityId);
 
-    // Live production calc
+    // Live production calc (standard)
     const updateProd = () => {
       const a = parseFloat(qs('#br-area')?.value || 0);
       const y = parseFloat(qs('#br-yield')?.value || 0);
@@ -762,4 +855,3 @@ function _harvestModal(container, existing = null) {
   });
 
 }
-
