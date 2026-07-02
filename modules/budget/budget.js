@@ -114,6 +114,43 @@ async function _loadData() {
 }
 
 // ── Budget table ──────────────────────────────────────────────
+function _seedBudgetCells(b, budgets, forecasts) {
+  const lintBudgets = budgets.filter(x => x.commodity_id === b.derived_from_commodity_id);
+  const lintBudBales = lintBudgets.reduce((s,x) => s + (parseFloat(x.area_ha)||0)*(parseFloat(x.yield_per_ha)||0), 0);
+  const lintFcastBales = lintBudgets.reduce((s,x) => {
+    const lf = forecasts.filter(f => f.budget_id === x.id).slice(-1)[0];
+    return s + (lf ? parseFloat(lf.area_ha||0)*parseFloat(lf.yield_per_ha||0) : parseFloat(x.area_ha||0)*parseFloat(x.yield_per_ha||0));
+  }, 0);
+  const conv = parseFloat(b.seed_conversion||0);
+  const budSeedProd = lintBudBales && conv ? lintBudBales * conv : null;
+  const fcastSeedProd = lintFcastBales && conv ? lintFcastBales * conv : null;
+  const inStyle = 'width:65px;text-align:right;border:1px solid transparent;border-radius:4px;padding:2px 4px;font-size:var(--text-sm);font-family:var(--font-data)';
+  return (
+    '<td class="num muted" style="border-left:2px solid var(--blue-light);font-size:11px">' +
+      (lintBudBales ? formatNumber(lintBudBales,0)+' bales' : '—') +
+    '</td>' +
+    '<td class="num">' +
+      '<input type="number" class="budget-inline-input seed-conversion" data-field="seed_conversion" data-id="' + b.id + '"' +
+      ' value="' + (b.seed_conversion||'') + '" step="0.001" placeholder="t/bale"' +
+      ' style="' + inStyle + '" title="Seed yield: tonnes of seed per bale of lint">' +
+    '</td>' +
+    '<td class="num" style="color:var(--blue);font-weight:600">' +
+      '<span class="bud-prod-display" data-id="' + b.id + '">' + (budSeedProd ? formatNumber(budSeedProd,1) : '—') + '</span>' +
+    '</td>' +
+    '<td class="num">' +
+      '<input type="number" class="budget-inline-input" data-field="price" data-id="' + b.id + '"' +
+      ' value="' + (b.price||'') + '" step="0.01" style="' + inStyle + '">' +
+    '</td>' +
+    '<td class="num muted" style="border-left:2px solid #0f766e33;font-size:11px">' +
+      (lintFcastBales ? formatNumber(lintFcastBales,0)+' bales' : '—') +
+    '</td>' +
+    '<td class="num muted" style="font-size:11px">' + (conv ? conv+' t/bale' : '—') + '</td>' +
+    '<td class="num" style="color:#0f766e;font-weight:600">' +
+      '<span class="fcast-prod-display" data-id="' + b.id + '">' + (fcastSeedProd ? formatNumber(fcastSeedProd,1) : '—') + '</span>' +
+    '</td>'
+  );
+}
+
 function _renderTable(container) {
   const wrap = qs('#budget-table-wrap', container);
   if (!wrap) return;
@@ -183,6 +220,31 @@ function _renderTable(container) {
                     value="${b.price || ''}" step="0.01"
                     style="width:70px;text-align:right;border:1px solid transparent;border-radius:4px;padding:2px 4px;font-size:var(--text-sm);font-family:var(--font-data)">
                 </td>
+                ${b.is_derived ? `
+                  <td class="num" style="border-left:2px solid #0f766e22;color:var(--hint);font-size:11px" colspan="2">
+                    ${(() => {
+                      const lintBudgets = _budgets.filter(x => x.commodity_id === b.derived_from_commodity_id);
+                      const lintFcast = lintBudgets.reduce((s,x) => {
+                        const lf = _forecasts.filter(f => f.budget_id === x.id).slice(-1)[0];
+                        return s + (lf ? parseFloat(lf.area_ha||0)*parseFloat(lf.yield_per_ha||0) : parseFloat(x.area_ha||0)*parseFloat(x.yield_per_ha||0));
+                      }, 0);
+                      return lintFcast ? formatNumber(lintFcast,0) + ' lint bales' : '— lint bales';
+                    })()}
+                    <br><span style="font-size:10px">× <input type="number" class="seed-fcast-conversion" data-budget-id="${b.id}"
+                      value="${b.seed_conversion||''}" step="0.001" placeholder="t/bale"
+                      style="width:55px;border:1px solid transparent;border-radius:3px;padding:1px 3px;font-size:11px;font-family:var(--font-data);text-align:right"> t/bale</span>
+                  </td>
+                  <td class="num" style="color:#0f766e;font-weight:600">
+                    <span class="fcast-prod-display" data-id="${b.id}">${(() => {
+                      const lintBudgets = _budgets.filter(x => x.commodity_id === b.derived_from_commodity_id);
+                      const lintFcast = lintBudgets.reduce((s,x) => {
+                        const lf = _forecasts.filter(f => f.budget_id === x.id).slice(-1)[0];
+                        return s + (lf ? parseFloat(lf.area_ha||0)*parseFloat(lf.yield_per_ha||0) : parseFloat(x.area_ha||0)*parseFloat(x.yield_per_ha||0));
+                      }, 0);
+                      const conv = parseFloat(b.seed_conversion||0);
+                      return lintFcast && conv ? formatNumber(lintFcast * conv, 1) : '—';
+                    })()}</span>
+                  </td>
                 <td class="num" style="border-left:2px solid #0f766e22">
                   <input type="number" class="forecast-inline-input" data-field="area_ha" data-budget-id="${b.id}"
                     value="${latestF?.area_ha || ''}" step="0.1"
@@ -196,6 +258,7 @@ function _renderTable(container) {
                 <td class="num" style="color:#0f766e;font-weight:600">
                   <span class="fcast-prod-display" data-id="${b.id}">${fcastProd ? formatNumber(fcastProd, 0) : '—'}</span>
                 </td>
+                `}
                 ${canWrite() ? `
                   <td>
                     <button class="btn btn-ghost btn-sm delete-budget-btn" data-id="${b.id}" style="color:var(--red)">✕</button>
@@ -474,13 +537,27 @@ function _addRowModal(container) {
       if (standardFields) standardFields.style.display = isSeed ? 'none' : '';
       if (seedFields) seedFields.style.display = isSeed ? '' : 'none';
 
-      // Populate lint source options
+      // Populate lint source options and pull crop types from Cotton Lint
       if (isSeed) {
-        const lintComms = commodities.filter(c => c.name?.toLowerCase().includes('cotton lint') || c.name?.toLowerCase().includes('cotton') && !c.name?.toLowerCase().includes('seed'));
+        const lintComms = commodities.filter(c => c.name?.toLowerCase().includes('cotton lint') || (c.name?.toLowerCase().includes('cotton') && !c.name?.toLowerCase().includes('seed')));
         const lintSel = qs('#br-lint-source');
         if (lintSel) {
           lintSel.innerHTML = '<option value="">— select lint commodity —</option>' +
             lintComms.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+          // Auto-select if only one lint commodity
+          if (lintComms.length === 1) {
+            lintSel.value = lintComms[0].id;
+            lintSel.dispatchEvent(new Event('change'));
+          }
+        }
+        // Pull crop types from Cotton Lint
+        const lintCropTypes = getCropTypes().filter(ct =>
+          lintComms.some(c => c.id === ct.commodity_id)
+        );
+        const ctSel = qs('#br-crop-type select, #br-crop-type');
+        if (ctSel) {
+          ctSel.innerHTML = '<option value="">— all crop types —</option>' +
+            lintCropTypes.map(ct => `<option value="${ct.id}">${ct.name}</option>`).join('');
         }
         // Update derived production preview
         const updateSeedProd = () => {
