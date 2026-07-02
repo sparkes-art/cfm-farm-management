@@ -115,7 +115,11 @@ async function _loadData() {
 
 // ── Budget table ──────────────────────────────────────────────
 function _seedBudgetCells(b, budgets, forecasts) {
-  const lintBudgets = budgets.filter(x => x.commodity_id === b.derived_from_commodity_id);
+  // Match lint budgets for the SAME crop type as this seed row
+  const lintBudgets = budgets.filter(x =>
+    x.commodity_id === b.derived_from_commodity_id &&
+    x.crop_type_id === b.crop_type_id
+  );
   const lintBudBales = lintBudgets.reduce((s,x) => s + (parseFloat(x.area_ha)||0)*(parseFloat(x.yield_per_ha)||0), 0);
   const lintFcastBales = lintBudgets.reduce((s,x) => {
     const lf = forecasts.filter(f => f.budget_id === x.id).slice(-1)[0];
@@ -124,23 +128,11 @@ function _seedBudgetCells(b, budgets, forecasts) {
   const conv = parseFloat(b.seed_conversion||0);
   const budSeedProd = lintBudBales && conv ? lintBudBales * conv : null;
   const fcastSeedProd = lintFcastBales && conv ? lintFcastBales * conv : null;
-  const inStyle = 'width:65px;text-align:right;border:1px solid transparent;border-radius:4px;padding:2px 4px;font-size:var(--text-sm);font-family:var(--font-data)';
+
+  // Update bud-prod-display for this row
+  // (returned as part of the forecast section — bud prod is handled in the main row)
+
   return (
-    '<td class="num muted" style="border-left:2px solid var(--blue-light);font-size:11px">' +
-      (lintBudBales ? formatNumber(lintBudBales,0)+' bales' : '—') +
-    '</td>' +
-    '<td class="num">' +
-      '<input type="number" class="budget-inline-input seed-conversion" data-field="seed_conversion" data-id="' + b.id + '"' +
-      ' value="' + (b.seed_conversion||'') + '" step="0.001" placeholder="t/bale"' +
-      ' style="' + inStyle + '" title="Seed yield: tonnes of seed per bale of lint">' +
-    '</td>' +
-    '<td class="num" style="color:var(--blue);font-weight:600">' +
-      '<span class="bud-prod-display" data-id="' + b.id + '">' + (budSeedProd ? formatNumber(budSeedProd,1) : '—') + '</span>' +
-    '</td>' +
-    '<td class="num">' +
-      '<input type="number" class="budget-inline-input" data-field="price" data-id="' + b.id + '"' +
-      ' value="' + (b.price||'') + '" step="0.01" style="' + inStyle + '">' +
-    '</td>' +
     '<td class="num muted" style="border-left:2px solid #0f766e33;font-size:11px">' +
       (lintFcastBales ? formatNumber(lintFcastBales,0)+' bales' : '—') +
     '</td>' +
@@ -203,17 +195,27 @@ function _renderTable(container) {
                 <td>${commodity?.name || b.commodity || '—'}</td>
                 <td class="muted">${b.unit || 't'}</td>
                 <td class="num" style="border-left:2px solid var(--blue-light)">
-                  <input type="number" class="budget-inline-input" data-field="area_ha" data-id="${b.id}"
+                  ${b.is_derived ? '' : `<input type="number" class="budget-inline-input" data-field="area_ha" data-id="${b.id}"
                     value="${b.area_ha || ''}" step="0.1"
-                    style="width:70px;text-align:right;border:1px solid transparent;border-radius:4px;padding:2px 4px;font-size:var(--text-sm);font-family:var(--font-data)">
+                    style="width:70px;text-align:right;border:1px solid transparent;border-radius:4px;padding:2px 4px;font-size:var(--text-sm);font-family:var(--font-data)">`}
                 </td>
                 <td class="num">
-                  <input type="number" class="budget-inline-input" data-field="yield_per_ha" data-id="${b.id}"
-                    value="${b.yield_per_ha || ''}" step="0.001"
-                    style="width:70px;text-align:right;border:1px solid transparent;border-radius:4px;padding:2px 4px;font-size:var(--text-sm);font-family:var(--font-data)">
+                  ${b.is_derived
+                    ? `<input type="number" class="budget-inline-input" data-field="seed_conversion" data-id="${b.id}"
+                        value="${b.seed_conversion || ''}" step="0.001" placeholder="t/bale"
+                        style="width:70px;text-align:right;border:1px solid transparent;border-radius:4px;padding:2px 4px;font-size:var(--text-sm);font-family:var(--font-data)"
+                        title="Seed yield: tonnes per bale of lint">`
+                    : `<input type="number" class="budget-inline-input" data-field="yield_per_ha" data-id="${b.id}"
+                        value="${b.yield_per_ha || ''}" step="0.001"
+                        style="width:70px;text-align:right;border:1px solid transparent;border-radius:4px;padding:2px 4px;font-size:var(--text-sm);font-family:var(--font-data)">`}
                 </td>
                 <td class="num" style="color:var(--blue);font-weight:600">
-                  <span class="bud-prod-display" data-id="${b.id}">${budProd ? formatNumber(budProd, 0) : '—'}</span>
+                  <span class="bud-prod-display" data-id="${b.id}">${b.is_derived ? (() => {
+                    const lintBuds = _budgets.filter(x => x.commodity_id === b.derived_from_commodity_id && x.crop_type_id === b.crop_type_id);
+                    const lintBales = lintBuds.reduce((s,x) => s + (parseFloat(x.area_ha)||0)*(parseFloat(x.yield_per_ha)||0), 0);
+                    const conv = parseFloat(b.seed_conversion||0);
+                    return lintBales && conv ? formatNumber(lintBales * conv, 1) : '—';
+                  })() : (budProd ? formatNumber(budProd, 0) : '—')}</span>
                 </td>
                 <td class="num">
                   <input type="number" class="budget-inline-input" data-field="price" data-id="${b.id}"
