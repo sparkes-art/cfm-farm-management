@@ -1,10 +1,10 @@
 // modules/outputs/reconciliation.js
 // Income Reconciliation — point-in-time position report for accounting
 
-import { dbSelect } from '../../js/supabase-client.js';
-import { getActiveFarm, getActiveSeason } from '../../js/app-state.js';
-import { formatCurrency, formatNumber, formatDate, qs, currentSeason, toast } from '../../js/ui.js';
-import { getCommodities } from '../../js/commodities.js';
+import { dbSelect } from '../../js/supabase-client.js?v=1783290066771';
+import { getActiveFarm, getActiveSeason } from '../../js/app-state.js?v=1783290066771';
+import { formatCurrency, formatNumber, formatDate, qs, currentSeason, toast } from '../../js/ui.js?v=1783290066771';
+import { getCommodities } from '../../js/commodities.js?v=1783290066771';
 
 export async function mountReconciliation(container) {
   const farm = getActiveFarm();
@@ -168,7 +168,8 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
   // Paid to date
   const paidLines = com.paidLines || [];
   const paidQty = paidLines.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
-  const paidGross = paidLines.reduce((s, l) => s + (parseFloat(l.total) || 0), 0);
+  // Gross after QA, before selling costs
+  const paidGross = paidLines.reduce((s, l) => s + (parseFloat(l.total)||0) + (parseFloat(l.quality_adj)||0), 0);
   const paidAvgUnit = paidQty ? paidGross / paidQty : 0;
 
   // Contracted (not yet paid)

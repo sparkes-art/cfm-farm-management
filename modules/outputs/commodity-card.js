@@ -2,10 +2,10 @@
 // Commodity position card — matches the data card design from old system
 // Shows budget vs forecast vs actual, hedging position, price summary
 
-import { dbSelect } from '../../js/supabase-client.js';
-import { getActiveFarm } from '../../js/app-state.js';
-import { formatCurrency, formatNumber, formatDate } from '../../js/ui.js';
-import { getCommodities, getCropTypes } from '../../js/commodities.js';
+import { dbSelect } from '../../js/supabase-client.js?v=1783290066771';
+import { getActiveFarm } from '../../js/app-state.js?v=1783290066771';
+import { formatCurrency, formatNumber, formatDate } from '../../js/ui.js?v=1783290066771';
+import { getCommodities, getCropTypes } from '../../js/commodities.js?v=1783290066771';
 
 export async function buildCommodityCards(season) {
   const farm = getActiveFarm();
@@ -179,12 +179,14 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
     // If line items exist use qty from them, otherwise fall back to total_qty
     return s + (lines.length ? lines.reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0) : (parseFloat(i.total_qty)||0));
   }, 0);
+  // Paid avg = gross + quality adj, BEFORE selling costs
+  // Formula: (line_total + quality_adj) / qty
   const totalPaidValue = completeInvoices.reduce((s, i) => {
     const lines = (i.line_items || []).filter(l => !l.commodity || l.commodity === com.name);
     if (lines.length) {
-      // Sum line totals + quality adj per line
-      return s + lines.reduce((ss, l) => ss + (parseFloat(l.total)||0), 0);
+      return s + lines.reduce((ss, l) => ss + (parseFloat(l.total)||0) + (parseFloat(l.quality_adj)||0), 0);
     }
+    // Fallback: gross_amount + total_quality_adj (before deductions)
     return s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
   }, 0);
   const paidAvg = (totalPaidQty && totalPaidValue) ? totalPaidValue / totalPaidQty : null;

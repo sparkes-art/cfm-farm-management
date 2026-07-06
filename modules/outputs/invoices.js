@@ -424,23 +424,23 @@ export function openInvoiceForm(container, existing = null) {
           <p style="font-size:var(--text-sm);font-weight:600">Line items</p>
           <button class="btn btn-secondary btn-sm" id="f-add-line">＋ Add line</button>
         </div>
-        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-md)">
-          <table style="width:100%;border-collapse:collapse;min-width:700px" id="f-lines-table">
-            <thead style="background:#fafbfc">
-              <tr>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:110px">Commodity</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:85px">Docket / ID</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:70px">Crop year</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:65px">Qty</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:50px">Unit</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:75px">GST</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:80px">Price/unit</th>
-                <th id="th-qa" style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">
-                  Quality adj ($)<br><span style="font-size:9px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--hint)">(Negative or positive)</span>
-                </th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Line total ($)</th>
-                <th id="th-eff" style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Eff. $/unit</th>
-                <th style="border-bottom:1px solid var(--border-light);width:30px"></th>
+        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:white">
+          <table style="width:100%;border-collapse:collapse;min-width:780px" id="f-lines-table">
+            <thead>
+              <tr style="background:#f8f9fa;border-bottom:1px solid var(--border)">
+                ${[
+                  ['Commodity','left','130px'],
+                  ['Docket / ID','left','100px'],
+                  ['Crop year','left','85px'],
+                  ['Qty','right','70px'],
+                  ['Unit','left','65px'],
+                  ['GST','left','80px'],
+                  ['Price / unit','right','90px'],
+                  ['Quality adj<br><span style="font-size:9px;font-weight:400;letter-spacing:0">(neg. or pos.)</span>','right','95px'],
+                  ['Line total','right','95px'],
+                  ['Eff. $/unit','right','90px'],
+                  ['','left','30px'],
+                ].map(([l,a,w],i) => `<th ${i===7?'id="th-qa"':''} ${i===9?'id="th-eff"':''} style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:500;text-align:${a};min-width:${w};white-space:nowrap">${l}</th>`).join('')}
               </tr>
             </thead>
             <tbody id="f-lines-body"></tbody>
@@ -455,19 +455,21 @@ export function openInvoiceForm(container, existing = null) {
           <p style="font-size:var(--text-sm);font-weight:600">Sale Expenses</p>
           <button class="btn btn-secondary btn-sm" id="f-add-ded">＋ Add expense</button>
         </div>
-        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius-md)">
-          <table style="width:100%;border-collapse:collapse;min-width:600px" id="f-ded-table">
-            <thead style="background:#fafbfc">
-              <tr>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:140px">Description</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:85px">Docket / ID</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:70px">Crop year</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:65px">Qty</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:50px">Unit</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:75px">GST</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:80px">Rate / unit</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Amount ($)</th>
-                <th style="border-bottom:1px solid var(--border-light);width:30px"></th>
+        <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:white">
+          <table style="width:100%;border-collapse:collapse;min-width:700px" id="f-ded-table">
+            <thead>
+              <tr style="background:#f8f9fa;border-bottom:1px solid var(--border)">
+                ${[
+                  ['Description','left','150px'],
+                  ['Docket / ID','left','100px'],
+                  ['Crop year','left','85px'],
+                  ['Qty','right','70px'],
+                  ['Unit','left','65px'],
+                  ['GST','left','80px'],
+                  ['Rate / unit','right','90px'],
+                  ['Amount ($)','right','95px'],
+                  ['','left','30px'],
+                ].map(([l,a,w]) => `<th style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:500;text-align:${a};min-width:${w}">${l}</th>`).join('')}
               </tr>
             </thead>
             <tbody id="f-ded-body"></tbody>
@@ -476,7 +478,7 @@ export function openInvoiceForm(container, existing = null) {
       </div>
 
       <!-- Totals + price comparison -->
-      <div style="display:grid;grid-template-columns:1fr 260px;gap:14px;margin-bottom:16px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
         <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px" id="f-price-compare">
           <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Price comparison</p>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
@@ -587,6 +589,18 @@ export function openInvoiceForm(container, existing = null) {
     modal.querySelectorAll('.f-line-price').forEach(inp => { inp.value = price.toFixed(4); });
     recalc();
   }
+  // Load budget price for the active season/commodity
+  (async () => {
+    try {
+      const farm = getActiveFarm();
+      const season = getActiveSeason() || currentSeason();
+      const budgets = await dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=price,commodity,commodity_id&order=price.desc&limit=1');
+      const budgetPrice = budgets[0]?.price;
+      const el = modal.querySelector('#pc-budget');
+      if (el) el.textContent = budgetPrice ? formatCurrency(parseFloat(budgetPrice), 2) : '—';
+    } catch {}
+  })();
+
   modal.querySelector('#f-contract')?.addEventListener('change', () => {
     updateContractSummary();
     // Always autofill buyer when contract changes
@@ -603,9 +617,9 @@ export function openInvoiceForm(container, existing = null) {
     const tr = document.createElement('tr');
     tr.dataset.id = id;
     tr.style.borderBottom = '1px solid var(--border-light)';
-    const tdStyle = 'padding:4px 6px;vertical-align:middle;';
-    const inStyle = 'border:0.5px solid transparent;border-radius:4px;padding:4px 6px;background:transparent;color:var(--ink);font-size:var(--text-sm);width:100%';
-    const numStyle = inStyle + ';text-align:right;font-family:var(--font-data)';
+    const tdStyle = 'padding:3px 5px;vertical-align:middle;';
+    const inStyle = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;background:white;color:var(--ink);font-size:13px;width:100%;font-family:inherit';
+    const numStyle = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;background:white;color:var(--ink);font-size:13px;width:100%;text-align:right;font-family:var(--font-data)';
     const commOptions = '<option value="">— select —</option>' + getCommodities().map(c => `<option value="${c.name}" ${c.name===(data.commodity||'')?'selected':''}>${c.name}</option>`).join('');
     tr.innerHTML = `
       <td style="${tdStyle}min-width:110px"><select class="f-line-comm" style="${inStyle}">${commOptions}</select></td>
@@ -706,9 +720,9 @@ export function openInvoiceForm(container, existing = null) {
     const tbody = modal.querySelector('#f-ded-body');
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid var(--border-light)';
-    const tdStyle = 'padding:4px 6px;vertical-align:middle;';
-    const inStyle = 'border:0.5px solid transparent;border-radius:4px;padding:4px 6px;background:transparent;color:var(--ink);font-size:var(--text-sm);width:100%';
-    const numStyle = inStyle + ';text-align:right;font-family:var(--font-data)';
+    const tdStyle = 'padding:3px 5px;vertical-align:middle;';
+    const inStyle = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;background:white;color:var(--ink);font-size:13px;width:100%;font-family:inherit';
+    const numStyle = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;background:white;color:var(--ink);font-size:13px;width:100%;text-align:right;font-family:var(--font-data)';
     const seasonOpts = ['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s =>
       `<option value="${s}" ${s===(data.season||getActiveSeason()||currentSeason())?'selected':''}>${s}</option>`
     ).join('');

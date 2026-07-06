@@ -1,10 +1,10 @@
 // modules/outputs/contracts.js
 // Forward Contracts — list, add, edit, delete, PDF AI extraction
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js';
-import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js';
-import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1783290066771';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1783290066771';
+import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js?v=1783290066771';
+import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js?v=1783290066771';
 
 let _contracts = [];
 let _unsub = null;
@@ -63,7 +63,8 @@ export function unmountContracts() {
 async function _loadData() {
   const farm = getActiveFarm();
   if (!farm) { _contracts = []; return; }
-  _contracts = await dbSelect('forward_contracts',
+  [_contracts, _invoices] = await Promise.all([
+    dbSelect('forward_contracts',
     `farm_id=eq.${farm.id}&select=*&order=sale_date.desc`);
   _populateYearFilter();
 }
@@ -167,6 +168,8 @@ function _renderTable() {
           <th class="num">Units sold</th>
           <th class="num">Price / unit</th>
           <th class="num">Total value</th>
+          <th class="num">Units invoiced</th>
+          <th class="num">Avg price (after QA)</th>
           <th>Delivery</th>
           <th>PDF</th>
           ${canWrite() ? '<th></th>' : ''}
@@ -175,6 +178,18 @@ function _renderTable() {
       <tbody>
         ${rows.map(c => {
           const value = (parseFloat(c.quantity) || 0) * (parseFloat(c.price_per_unit) || 0);
+          // Calculate invoiced units and avg price for this contract
+          const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id);
+          const invoicedQty = contractInvoices.reduce((s, i) => {
+            const lines = i.line_items || [];
+            return s + (lines.length ? lines.reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0) : 0);
+          }, 0);
+          const invoicedValue = contractInvoices.reduce((s, i) => {
+            const lines = i.line_items || [];
+            if (lines.length) return s + lines.reduce((ss, l) => ss + (parseFloat(l.total)||0) + (parseFloat(l.quality_adj)||0), 0);
+            return s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
+          }, 0);
+          const avgInvoicedPrice = invoicedQty ? invoicedValue / invoicedQty : null;
           const delivery = c.delivery_start
             ? `${formatDate(c.delivery_start)}${c.delivery_end ? ` – ${formatDate(c.delivery_end)}` : ''}`
             : '—';
@@ -189,6 +204,8 @@ function _renderTable() {
               <td class="num">${c.quantity ? `${parseFloat(c.quantity).toLocaleString('en-AU')} ${c.unit || ''}` : '—'}</td>
               <td class="num">${c.price_per_unit ? formatCurrency(c.price_per_unit, 4) : '—'}</td>
               <td class="num"><strong>${value ? formatCurrency(value, 0) : '—'}</strong></td>
+              <td class="num">${invoicedQty ? formatNumber(invoicedQty, 0) + ' ' + (c.unit||'') : '—'}</td>
+              <td class="num">${avgInvoicedPrice ? formatCurrency(avgInvoicedPrice, 2) : '—'}</td>
               <td class="muted" style="font-size:var(--text-xs)">${delivery}</td>
               <td style="font-size:var(--text-xs)">
                 ${c.pdf_url
