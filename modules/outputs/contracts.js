@@ -63,10 +63,16 @@ export function unmountContracts() {
 async function _loadData() {
   const farm = getActiveFarm();
   if (!farm) { _contracts = []; _invoices = []; return; }
-  [_contracts, _invoices] = await Promise.all([
-    dbSelect('forward_contracts', `farm_id=eq.${farm.id}&select=*&order=sale_date.desc`),
-    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=id,forward_contract_id,line_items,gross_amount,total_quality_adj,status'),
-  ]);
+  try {
+    [_contracts, _invoices] = await Promise.all([
+      dbSelect('forward_contracts', `farm_id=eq.${farm.id}&select=*&order=sale_date.desc`),
+      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=id,forward_contract_id,line_items,gross_amount,total_quality_adj,status').catch(() => []),
+    ]);
+  } catch (err) {
+    console.error('Contracts load error:', err);
+    _contracts = [];
+    _invoices = [];
+  }
   _populateYearFilter();
 }
 

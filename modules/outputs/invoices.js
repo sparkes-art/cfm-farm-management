@@ -264,6 +264,8 @@ function _openDetail(inv, container) {
   const lines = inv.line_items || [];
   const deductions = inv.deductions || [];
   const contract = inv.forward_contract_id ? _contracts.find(c => c.id === inv.forward_contract_id) : null;
+  // Get season from first line item that has one
+  const season = lines.find(l => l.season)?.season || inv.season || '—';
 
   openModal({
     title: (inv.sale_type === 'against_contract' ? 'Contract sale' : 'Cash sale') + ' — ' + (inv.buyer || ''),
@@ -271,53 +273,74 @@ function _openDetail(inv, container) {
     confirmClass: 'btn-secondary',
     onConfirm: canWrite() ? async () => { openInvoiceForm(container, inv); } : null,
     bodyHTML: `
-      <div class="form-row" style="margin-bottom:12px">
-        <div><p class="text-xs text-muted">Date</p><p>${formatDate(inv.invoice_date)}</p></div>
-        <div><p class="text-xs text-muted">Season</p><p>${inv.season || '—'}</p></div>
-        <div><p class="text-xs text-muted">Buyer</p><p><strong>${inv.buyer || '—'}</strong></p></div>
-        <div><p class="text-xs text-muted">GST</p><p>${inv.gst_type === 'inc' ? 'Inc-GST' : 'Ex-GST'}</p></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">
+        <div><p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:3px">Date</p><p style="font-size:var(--text-sm);font-weight:500">${formatDate(inv.invoice_date)}</p></div>
+        <div><p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:3px">Season</p><p style="font-size:var(--text-sm);font-weight:500">${season}</p></div>
+        <div><p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:3px">Buyer</p><p style="font-size:var(--text-sm);font-weight:600">${inv.buyer || '—'}</p></div>
       </div>
-      ${contract ? `<div style="background:var(--blue-light);border-radius:var(--radius-sm);padding:8px 12px;margin-bottom:12px;font-size:var(--text-sm)">
+
+      ${contract ? `<div style="background:var(--blue-light);border-radius:6px;padding:8px 12px;margin-bottom:14px;font-size:var(--text-sm)">
         <strong>Contract:</strong> ${contract.contract_number || 'Contract'} — ${contract.commodity || ''} @ ${formatCurrency(contract.price_per_unit, 2)}/${contract.unit || ''}
       </div>` : ''}
-      <table class="data-table" style="margin-bottom:12px">
-        <thead><tr><th>Commodity</th><th>Docket</th><th class="num">Qty</th><th>Unit</th><th class="num">Price/unit</th><th class="num">Quality adj</th><th class="num">Line total</th></tr></thead>
+
+      <p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:600;margin-bottom:6px">Income — Line Items</p>
+      <table class="data-table" style="margin-bottom:16px">
+        <thead><tr>
+          <th>Commodity</th><th>Docket</th><th class="num">Qty</th><th>Unit</th>
+          <th class="num">Price/unit ($)</th><th class="num">Quality adj ($)</th><th class="num">Line total ($)</th>
+        </tr></thead>
         <tbody>
           ${lines.map(l => `<tr>
             <td>${l.commodity || '—'}</td>
             <td class="muted">${l.docket || '—'}</td>
             <td class="num">${formatNumber(l.qty, 0)}</td>
             <td class="muted">${l.unit || '—'}</td>
-            <td class="num">${formatCurrency(l.price, 4)}</td>
-            <td class="num">${l.quality_adj ? formatCurrency(l.quality_adj, 2) : '—'}</td>
+            <td class="num">${formatCurrency(l.price, 2)}</td>
+            <td class="num" style="color:${(l.quality_adj||0) > 0 ? 'var(--green)' : (l.quality_adj||0) < 0 ? 'var(--red)' : 'inherit'}">${l.quality_adj ? formatCurrency(l.quality_adj, 2) : '—'}</td>
             <td class="num"><strong>${formatCurrency(l.total, 2)}</strong></td>
           </tr>`).join('')}
         </tbody>
       </table>
+
       ${deductions.length ? `
-        <table class="data-table" style="margin-bottom:12px">
-          <thead><tr><th>Description</th><th>Docket</th><th>Season</th><th class="num">Qty</th><th>Unit</th><th class="num">Rate/unit</th><th class="num">Value</th></tr></thead>
+        <p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:600;margin-bottom:6px">Sale Expenses — Line Items</p>
+        <table class="data-table" style="margin-bottom:16px">
+          <thead><tr>
+            <th>Description</th><th>Docket</th><th>Season</th>
+            <th class="num">Qty</th><th>Unit</th><th class="num">Rate/unit ($)</th><th class="num">Amount ($)</th>
+          </tr></thead>
           <tbody>${deductions.map(d => `<tr>
-  <td>${d.description||'—'}</td>
-  <td class="muted text-xs">${d.docket||'—'}</td>
-  <td class="muted text-xs">${d.season||'—'}</td>
-  <td class="num">${d.qty||'—'}</td>
-  <td class="muted text-xs">${d.unit||'—'}</td>
-  <td class="num">${d.rate ? formatCurrency(d.rate,4) : '—'}</td>
-  <td class="num" style="color:var(--red)">-${formatCurrency(d.value, 2)}</td>
-</tr>`).join('')}</tbody>
+            <td>${d.description||'—'}</td>
+            <td class="muted">${d.docket||'—'}</td>
+            <td class="muted">${d.season||'—'}</td>
+            <td class="num">${d.qty||'—'}</td>
+            <td class="muted">${d.unit||'—'}</td>
+            <td class="num">${d.rate ? formatCurrency(d.rate, 2) : '—'}</td>
+            <td class="num" style="color:var(--red)">-${formatCurrency(d.value, 2)}</td>
+          </tr>`).join('')}</tbody>
         </table>
       ` : ''}
-      <div style="display:flex;flex-direction:column;gap:4px;background:var(--page-bg);border-radius:var(--radius-sm);padding:10px 12px">
-        <div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">Gross</span><span>${formatCurrency(inv.gross_amount, 2)}</span></div>
-        ${inv.total_quality_adj ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">Quality adj</span><span style="color:${inv.total_quality_adj < 0 ? 'var(--red)' : 'var(--green)'}">${formatCurrency(inv.total_quality_adj, 2)}</span></div>` : ''}
-        ${inv.total_deductions ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">Sale Expenses</span><span style="color:var(--red)">-${formatCurrency(inv.total_deductions, 2)}</span></div>` : ''}
-        <div style="display:flex;justify-content:space-between;font-weight:600;border-top:1px solid var(--border-light);padding-top:6px;margin-top:4px"><span>Net amount</span><span style="color:var(--blue)">${formatCurrency(inv.net_amount, 2)}</span></div>
-        ${inv.gst_amount ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span class="text-muted">GST</span><span>${formatCurrency(inv.gst_amount, 2)}</span></div>` : ''}
-        <div style="display:flex;justify-content:space-between;font-weight:600;font-size:var(--text-md)"><span>Total payable</span><span style="color:var(--blue)">${formatCurrency(inv.total_payable, 2)}</span></div>
+
+      ${inv.notes ? `<div style="background:var(--page-bg);border-radius:6px;padding:8px 12px;margin-bottom:14px">
+        <p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px">Notes</p>
+        <p style="font-size:var(--text-sm)">${inv.notes}</p>
+      </div>` : ''}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div></div>
+        <div style="background:var(--page-bg);border-radius:6px;padding:12px">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:600;margin-bottom:8px">Invoice Summary</p>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span style="color:var(--muted)">Gross</span><span>${formatCurrency(inv.gross_amount, 2)}</span></div>
+            ${inv.total_quality_adj ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span style="color:var(--muted)">Quality adj</span><span style="color:${inv.total_quality_adj > 0 ? 'var(--green)' : 'var(--red)'}">${inv.total_quality_adj > 0 ? '+' : ''}${formatCurrency(inv.total_quality_adj, 2)}</span></div>` : ''}
+            ${inv.total_deductions ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span style="color:var(--muted)">Sale Expenses</span><span style="color:var(--red)">-${formatCurrency(inv.total_deductions, 2)}</span></div>` : ''}
+            <div style="display:flex;justify-content:space-between;font-weight:600;border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px;font-size:var(--text-sm)"><span>Net amount</span><span style="color:var(--blue)">${formatCurrency(inv.net_amount, 2)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-weight:700;font-size:var(--text-md)"><span>Total payable</span><span style="color:var(--blue)">${formatCurrency(inv.total_payable || inv.net_amount, 2)}</span></div>
+          </div>
+        </div>
       </div>
-      ${inv.notes ? `<div style="margin-top:12px"><p class="text-xs text-muted" style="margin-bottom:4px">Notes</p><p style="font-size:var(--text-sm)">${inv.notes}</p></div>` : ''}
-      ${inv.xero_invoice_number ? `<div style="margin-top:8px;font-size:var(--text-sm);color:var(--muted)">Xero ref: <strong>${inv.xero_invoice_number}</strong></div>` : ''}
+
+      ${inv.xero_invoice_number ? `<div style="margin-top:10px;font-size:var(--text-sm);color:var(--muted)">Xero ref: <strong style="color:var(--ink)">${inv.xero_invoice_number}</strong></div>` : ''}
     `,
   });
 }

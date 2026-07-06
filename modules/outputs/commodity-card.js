@@ -250,7 +250,7 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
             <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 ${totalContracted ? '<span style="color:var(--blue);font-weight:500">' + formatNumber(totalContracted, 0) + ' ' + unit + ' contracted</span>' : ''}
-                ${totalPaidQty ? '<span style="color:var(--green);font-weight:500">' + formatNumber(totalPaidQty, 0) + ' ' + unit + ' sold</span>' : ''}
+                ${totalPaidQty ? '<span style="color:var(--green);font-weight:500">' + formatNumber(totalPaidQty, 0) + ' ' + unit + ' paid</span>' : ''}
                 ${status === 'harvesting' && totalHarvest ? '<span style="color:var(--hint)">| ' + formatNumber(totalHarvest, 0) + ' ' + unit + ' harvested so far</span>' : ''}
               </div>
               <span style="color:var(--hint)">${formatNumber(unhedged, 0)} ${unit} open</span>
