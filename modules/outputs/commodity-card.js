@@ -179,14 +179,13 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
     // If line items exist use qty from them, otherwise fall back to total_qty
     return s + (lines.length ? lines.reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0) : (parseFloat(i.total_qty)||0));
   }, 0);
-  // Paid avg = gross + quality adj, BEFORE selling costs
-  // Formula: (line_total + quality_adj) / qty
+  // Paid avg = line total / qty (line total already includes quality adj)
   const totalPaidValue = completeInvoices.reduce((s, i) => {
     const lines = (i.line_items || []).filter(l => !l.commodity || l.commodity === com.name);
     if (lines.length) {
-      return s + lines.reduce((ss, l) => ss + (parseFloat(l.total)||0) + (parseFloat(l.quality_adj)||0), 0);
+      return s + lines.reduce((ss, l) => ss + (parseFloat(l.total)||0), 0);
     }
-    // Fallback: gross_amount + total_quality_adj (before deductions)
+    // Fallback: gross_amount + total_quality_adj
     return s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
   }, 0);
   const paidAvg = (totalPaidQty && totalPaidValue) ? totalPaidValue / totalPaidQty : null;

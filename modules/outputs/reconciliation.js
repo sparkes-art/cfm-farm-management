@@ -168,8 +168,8 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
   // Paid to date
   const paidLines = com.paidLines || [];
   const paidQty = paidLines.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
-  // Gross after QA, before selling costs
-  const paidGross = paidLines.reduce((s, l) => s + (parseFloat(l.total)||0) + (parseFloat(l.quality_adj)||0), 0);
+  // l.total already includes quality adj - don't add it again
+  const paidGross = paidLines.reduce((s, l) => s + (parseFloat(l.total)||0), 0);
   const paidAvgUnit = paidQty ? paidGross / paidQty : 0;
 
   // Contracted (not yet paid)
