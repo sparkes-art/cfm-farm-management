@@ -434,7 +434,6 @@ export function openInvoiceForm(container, existing = null) {
                   ['Crop year','left','85px'],
                   ['Qty','right','70px'],
                   ['Unit','left','65px'],
-                  ['GST','left','80px'],
                   ['Price / unit','right','90px'],
                   ['Quality adj ($)<br><span style="font-size:9px;font-weight:400;letter-spacing:0">(neg. or pos.)</span>','right','95px'],
                   ['Line total ($)','right','95px'],
@@ -465,7 +464,6 @@ export function openInvoiceForm(container, existing = null) {
                   ['Crop year','left','85px'],
                   ['Qty','right','70px'],
                   ['Unit','left','65px'],
-                  ['GST','left','80px'],
                   ['Rate / unit','right','90px'],
                   ['Amount ($)','right','95px'],
                   ['','left','30px'],
@@ -474,52 +472,6 @@ export function openInvoiceForm(container, existing = null) {
             </thead>
             <tbody id="f-ded-body"></tbody>
           </table>
-        </div>
-      </div>
-
-      <!-- Totals + price comparison -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
-        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px" id="f-price-compare">
-          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Price comparison</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Budget price</p><p id="pc-budget" style="font-size:17px;font-weight:600">—</p></div>
-            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Contract price</p><p id="pc-contract" style="font-size:17px;font-weight:600;color:var(--blue)">—</p><p id="pc-contract-vs" style="font-size:10px;color:var(--blue)"></p></div>
-            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Net effective</p><p id="pc-net" style="font-size:17px;font-weight:600">—</p><p id="pc-net-vs" style="font-size:10px"></p></div>
-          </div>
-        </div>
-        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px">
-          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Invoice Summary</p>
-          <div style="display:flex;flex-direction:column;gap:5px">
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Gross</span><span id="t-gross" style="font-family:var(--font-data)">$0.00</span></div>
-            <div id="t-qa-row" style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Quality adj</span><span id="t-qa" style="font-family:var(--font-data)">—</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Sale Expenses</span><span id="t-ded" style="font-family:var(--font-data);color:var(--red)">—</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);font-weight:600;color:var(--ink);border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px"><span>Net amount</span><span id="t-net" style="font-family:var(--font-data)">$0.00</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>GST</span><span id="t-gst" style="font-family:var(--font-data)">—</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-md);font-weight:600;color:var(--blue)"><span>Total payable</span><span id="t-total" style="font-family:var(--font-data)">$0.00</span></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Totals + price comparison -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
-        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px" id="f-price-compare">
-          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Price comparison</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Budget price</p><p id="pc-budget" style="font-size:17px;font-weight:600">—</p></div>
-            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Contract price</p><p id="pc-contract" style="font-size:17px;font-weight:600;color:var(--blue)">—</p><p id="pc-contract-vs" style="font-size:10px;color:var(--blue)"></p></div>
-            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Net effective</p><p id="pc-net" style="font-size:17px;font-weight:600">—</p><p id="pc-net-vs" style="font-size:10px"></p></div>
-          </div>
-        </div>
-        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px">
-          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Invoice Summary</p>
-          <div style="display:flex;flex-direction:column;gap:5px">
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Gross</span><span id="t-gross" style="font-family:var(--font-data)">$0.00</span></div>
-            <div id="t-qa-row" style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Quality adj</span><span id="t-qa" style="font-family:var(--font-data)">—</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Sale Expenses</span><span id="t-ded" style="font-family:var(--font-data);color:var(--red)">—</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);font-weight:600;color:var(--ink);border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px"><span>Net amount</span><span id="t-net" style="font-family:var(--font-data)">$0.00</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>GST</span><span id="t-gst" style="font-family:var(--font-data)">—</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-md);font-weight:600;color:var(--blue)"><span>Total payable</span><span id="t-total" style="font-family:var(--font-data)">$0.00</span></div>
-          </div>
         </div>
       </div>
 
@@ -534,9 +486,31 @@ export function openInvoiceForm(container, existing = null) {
       </div>
 
       <!-- Notes -->
-      <div class="form-group">
+      <div class="form-group" style="margin-bottom:16px">
         <label class="form-label">Notes</label>
         <textarea class="form-textarea" id="f-notes" rows="3" placeholder="Internal notes, gin reference, pool details, delivery information…">${existing?.notes || ''}</textarea>
+      </div>
+
+      <!-- Price comparison + Invoice summary -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px" id="f-price-compare">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Price comparison</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Budget price</p><p id="pc-budget" style="font-size:17px;font-weight:600">—</p></div>
+            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Contract price</p><p id="pc-contract" style="font-size:17px;font-weight:600;color:var(--blue)">—</p><p id="pc-contract-vs" style="font-size:10px;color:var(--blue)"></p></div>
+            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Net effective</p><p id="pc-net" style="font-size:17px;font-weight:600">—</p><p id="pc-net-vs" style="font-size:10px"></p></div>
+          </div>
+        </div>
+        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Invoice Summary</p>
+          <div style="display:flex;flex-direction:column;gap:5px">
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Gross</span><span id="t-gross" style="font-family:var(--font-data)">$0.00</span></div>
+            <div id="t-qa-row" style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Quality adj</span><span id="t-qa" style="font-family:var(--font-data)">—</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Sale Expenses</span><span id="t-ded" style="font-family:var(--font-data);color:var(--red)">—</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);font-weight:600;color:var(--ink);border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px"><span>Net amount</span><span id="t-net" style="font-family:var(--font-data)">$0.00</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-md);font-weight:600;color:var(--blue)"><span>Total payable</span><span id="t-total" style="font-family:var(--font-data)">$0.00</span></div>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -810,7 +784,7 @@ export function openInvoiceForm(container, existing = null) {
     modal.querySelector('#t-qa').style.color = totalQA < 0 ? 'var(--red)' : 'var(--green)';
     modal.querySelector('#t-ded').textContent = totalDed ? '-' + fmt(totalDed) : '—';
     modal.querySelector('#t-net').textContent = fmt(net);
-    modal.querySelector('#t-gst').textContent = gstAmt ? fmt(gstAmt) : '—';
+
     modal.querySelector('#t-total').textContent = fmt(total);
 
     // Price comparison
@@ -874,7 +848,6 @@ export function openInvoiceForm(container, existing = null) {
 
         qty: parseFloat(tr.querySelector('.f-line-qty')?.value)||0,
         unit: tr.querySelector('.f-line-unit')?.value || 't',
-        gst: tr.querySelector('.f-line-gst')?.value || 'ex',
         price: parseFloat(tr.querySelector('.f-line-price')?.value)||0,
         quality_adj: parseFloat(tr.querySelector('.f-line-qa')?.value)||0,
         total: parseFloat(tr.querySelector('.f-line-total')?.value)||0,
@@ -914,8 +887,8 @@ export function openInvoiceForm(container, existing = null) {
         total_quality_adj: totalQA,
         total_deductions: totalDed,
         net_amount: net,
-        gst_type: gstType,
-        gst_amount: gstAmt,
+        gst_type: 'ex',
+        gst_amount: 0,
         total_payable: total,
         total_qty: totalQty,
         notes: modal.querySelector('#f-notes')?.value?.trim() || null,
