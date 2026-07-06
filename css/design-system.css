@@ -57,7 +57,8 @@
 
   /* Typography */
   --font-ui:    'Inter', system-ui, -apple-system, sans-serif;
-  --font-data:  'IBM Plex Mono', 'Courier New', monospace;
+  --font-data:  var(--font-ui);
+  --font-data-features: 'tnum' 1, 'kern' 1;
 
   /* Type scale */
   --text-xs:   0.6875rem;   /* 11px */
@@ -448,6 +449,7 @@ body {
 .data-table tbody td.num {
   text-align: right;
   font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
   letter-spacing: 0.02em;
 }
@@ -492,6 +494,7 @@ body {
 .form-input.num,
 .form-input[type="number"] {
   font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
   text-align: right;
 }
 .form-helper { font-size: var(--text-xs); color: var(--muted); margin-top: 2px; }
@@ -681,7 +684,7 @@ body {
 .text-hint  { color: var(--hint); }
 .text-sm    { font-size: var(--text-sm); }
 .text-xs    { font-size: var(--text-xs); }
-.font-mono  { font-family: var(--font-data); }
+.font-mono  { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 .text-right { text-align: right; }
 .text-blue  { color: var(--blue); }
 .text-green { color: var(--green); }
