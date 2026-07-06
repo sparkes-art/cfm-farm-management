@@ -1,10 +1,10 @@
 // modules/outputs/invoices.js
 // Full invoice management — contract sales, cash sales, line items, deductions
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js';
-import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js';
-import { getCommodities, loadCommodities } from '../../js/commodities.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1783290066771';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1783290066771';
+import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1783290066771';
+import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1783290066771';
 
 let _invoices = [];
 let _contracts = [];
@@ -410,11 +410,11 @@ export function openInvoiceForm(container, existing = null) {
           <input class="form-input" id="f-date" type="date" value="${existing?.invoice_date || new Date().toISOString().slice(0,10)}">
         </div>
         <div class="form-group" style="margin:0">
-          <label class="form-label">GST</label>
-          <select class="form-select" id="f-gst">
-            <option value="ex" ${(existing?.gst_type||'ex')==='ex'?'selected':''}>Ex-GST</option>
-            <option value="inc" ${existing?.gst_type==='inc'?'selected':''}>Inc-GST (10%)</option>
-          </select>
+          <label class="form-label">GST treatment</label>
+          <div style="padding:8px 10px;background:#f0f9f4;border:1px solid #b7e4cc;border-radius:var(--radius-sm);font-size:var(--text-sm);color:#1a6b3c">
+            All amounts entered Ex-GST — GST calculated in Xero
+          </div>
+          <input type="hidden" id="f-gst" value="ex">
         </div>
       </div>
 
@@ -433,8 +433,11 @@ export function openInvoiceForm(container, existing = null) {
                 <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:70px">Crop year</th>
                 <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:65px">Qty</th>
                 <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:50px">Unit</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:75px">GST</th>
                 <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:80px">Price/unit</th>
-                <th id="th-qa" style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Quality adj ($)</th>
+                <th id="th-qa" style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">
+                  Quality adj ($)<br><span style="font-size:9px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--hint)">(Negative or positive)</span>
+                </th>
                 <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Line total ($)</th>
                 <th id="th-eff" style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Eff. $/unit</th>
                 <th style="border-bottom:1px solid var(--border-light);width:30px"></th>
@@ -461,8 +464,9 @@ export function openInvoiceForm(container, existing = null) {
                 <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:70px">Crop year</th>
                 <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:65px">Qty</th>
                 <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:50px">Unit</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:left;border-bottom:1px solid var(--border-light);min-width:75px">GST</th>
                 <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:80px">Rate / unit</th>
-                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Deduction ($)</th>
+                <th style="padding:7px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:right;border-bottom:1px solid var(--border-light);min-width:90px">Amount ($)</th>
                 <th style="border-bottom:1px solid var(--border-light);width:30px"></th>
               </tr>
             </thead>
@@ -613,8 +617,13 @@ export function openInvoiceForm(container, existing = null) {
       <td style="${tdStyle}min-width:50px"><select class="f-line-unit" style="${inStyle}">
         ${['bale','t','kg','head','each'].map(u=>`<option${u===(data.unit||'t')?' selected':''}>${u}</option>`).join('')}
       </select></td>
+      <td style="${tdStyle}min-width:75px"><select class="f-line-gst" style="${inStyle};font-size:11px">
+        <option value="ex" ${(data.gst||'ex')==='ex'?'selected':''}>Ex-GST</option>
+        <option value="free" ${data.gst==='free'?'selected':''}>GST Free</option>
+      </select></td>
       <td style="${tdStyle}min-width:80px"><input type="number" class="f-line-price" style="${numStyle}" placeholder="0.00" value="${data.price||''}" step="0.01"></td>
-      <td class="f-qa-cell" style="${tdStyle}min-width:90px;${saleType!=='contract'?'display:none':''}"><input type="number" class="f-line-qa" style="${numStyle};color:var(--red)" placeholder="0.00" value="${data.quality_adj||''}" step="0.01"></td>
+      <td class="f-qa-cell" style="${tdStyle}min-width:90px;${saleType!=='contract'?'display:none':''}"><input type="number" class="f-line-qa" style="${numStyle};color:${(data.quality_adj||0)>0?'var(--green)':(data.quality_adj||0)<0?'var(--red)':'var(--ink)'}" placeholder="0.00" value="${data.quality_adj||''}" step="0.01"
+        oninput="this.style.color=parseFloat(this.value)>0?'var(--green)':parseFloat(this.value)<0?'var(--red)':'var(--ink)'"></td>
       <td style="${tdStyle}min-width:90px"><input type="number" class="f-line-total" style="${numStyle};background:var(--blue-light);color:var(--blue-text)" placeholder="0.00" value="${data.total||''}" step="0.01"></td>
       <td class="f-eff-cell" style="${tdStyle}min-width:90px;${saleType!=='contract'?'display:none':''}"><input type="text" class="f-line-eff" readonly style="${numStyle};background:var(--page-bg);color:var(--blue);border:none;cursor:default" value="${data.eff||''}"></td>
       <td style="padding:4px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:16px;padding:2px 4px" class="del-line">✕</button></td>
@@ -708,7 +717,14 @@ export function openInvoiceForm(container, existing = null) {
       <td style="${tdStyle}"><input type="text" class="f-ded-docket" style="${inStyle}" placeholder="Docket" value="${data.docket||''}"></td>
       <td style="${tdStyle}"><select class="f-ded-season" style="${inStyle};font-size:11px">${seasonOpts}</select></td>
       <td style="${tdStyle}"><input type="number" class="f-ded-qty" style="${numStyle}" placeholder="0" value="${data.qty||''}" step="0.01"></td>
-      <td style="${tdStyle}"><input type="text" class="f-ded-unit" style="${inStyle};font-size:11px" placeholder="t" value="${data.unit||''}" style="width:50px"></td>
+      <td style="${tdStyle}min-width:50px"><select class="f-ded-unit" style="${inStyle}">
+        ${['bale','t','kg','head','each','%','flat'].map(u=>`<option${u===(data.unit||'t')?' selected':''}>${u}</option>`).join('')}
+      </select></td>
+      <td style="${tdStyle}min-width:75px"><select class="f-ded-gst" style="${inStyle};font-size:11px">
+        <option value="ex" ${(data.gst||'ex')==='ex'?'selected':''}>Ex-GST</option>
+        <option value="inc" ${data.gst==='inc'?'selected':''}>Inc-GST</option>
+        <option value="free" ${data.gst==='free'?'selected':''}>GST Free</option>
+      </select></td>
       <td style="${tdStyle}"><input type="number" class="f-ded-rate" style="${numStyle}" placeholder="0.00" value="${data.rate||''}" step="0.0001"></td>
       <td style="${tdStyle}"><input type="number" class="f-ded-value" style="${numStyle};color:var(--red)" placeholder="0.00" value="${data.value||''}" step="0.01"></td>
       <td style="padding:4px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:16px;padding:2px 4px" class="del-ded">✕</button></td>
@@ -792,8 +808,7 @@ export function openInvoiceForm(container, existing = null) {
     });
   }
 
-  // GST change
-  modal.querySelector('#f-gst')?.addEventListener('change', recalc);
+
 
   // Add/del buttons
   modal.querySelector('#f-add-line').addEventListener('click', () => addLine());
@@ -828,6 +843,7 @@ export function openInvoiceForm(container, existing = null) {
 
         qty: parseFloat(tr.querySelector('.f-line-qty')?.value)||0,
         unit: tr.querySelector('.f-line-unit')?.value || 't',
+        gst: tr.querySelector('.f-line-gst')?.value || 'ex',
         price: parseFloat(tr.querySelector('.f-line-price')?.value)||0,
         quality_adj: parseFloat(tr.querySelector('.f-line-qa')?.value)||0,
         total: parseFloat(tr.querySelector('.f-line-total')?.value)||0,
@@ -847,8 +863,8 @@ export function openInvoiceForm(container, existing = null) {
       const grossPlusQA = gross + totalQA;
       const totalDed = dedRows.reduce((s,d) => s + (d.value||0), 0);
       const net = grossPlusQA - totalDed;
-      const gstType = modal.querySelector('#f-gst')?.value;
-      const gstAmt = gstType === 'inc' ? net * 0.1 : 0;
+      const dedGST2 = dedRows.reduce((s,d) => s + (d.gst==='inc' ? (d.value||0)*0.1 : 0), 0);
+      const gstAmt = dedGST2;
       const total = net + gstAmt;
       const totalQty = lineRows.reduce((s,l) => s + (l.qty||0), 0);
       const contractSel = modal.querySelector('#f-contract');
