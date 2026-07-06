@@ -787,8 +787,8 @@ export function openInvoiceForm(container, existing = null) {
 
     modal.querySelector('#t-total').textContent = fmt(total);
 
-    // Price comparison
-    const netEff = totalQty ? net / totalQty : 0;
+    // Price comparison — net effective = (gross + QA) / qty, before selling costs
+    const netEff = totalQty ? (gross + totalQA) / totalQty : 0;
     if (netEff) {
       modal.querySelector('#pc-net').textContent = formatCurrency(netEff, 2);
     }
