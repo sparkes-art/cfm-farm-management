@@ -421,7 +421,7 @@ export function openInvoiceForm(container, existing = null) {
       <!-- Line items -->
       <div style="margin-bottom:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <p style="font-size:var(--text-sm);font-weight:600">Line items</p>
+          <p style="font-size:var(--text-sm);font-weight:600">Income — Line Items</p>
           <button class="btn btn-secondary btn-sm" id="f-add-line">＋ Add line</button>
         </div>
         <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:white">
@@ -436,8 +436,8 @@ export function openInvoiceForm(container, existing = null) {
                   ['Unit','left','65px'],
                   ['GST','left','80px'],
                   ['Price / unit','right','90px'],
-                  ['Quality adj<br><span style="font-size:9px;font-weight:400;letter-spacing:0">(neg. or pos.)</span>','right','95px'],
-                  ['Line total','right','95px'],
+                  ['Quality adj ($)<br><span style="font-size:9px;font-weight:400;letter-spacing:0">(neg. or pos.)</span>','right','95px'],
+                  ['Line total ($)','right','95px'],
                   ['Eff. $/unit','right','90px'],
                   ['','left','30px'],
                 ].map(([l,a,w],i) => `<th ${i===7?'id="th-qa"':''} ${i===9?'id="th-eff"':''} style="padding:7px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:500;text-align:${a};min-width:${w};white-space:nowrap">${l}</th>`).join('')}
@@ -452,7 +452,7 @@ export function openInvoiceForm(container, existing = null) {
       <!-- Sale Expenses -->
       <div style="margin-bottom:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <p style="font-size:var(--text-sm);font-weight:600">Sale Expenses</p>
+          <p style="font-size:var(--text-sm);font-weight:600">Sale Expenses — Line Items</p>
           <button class="btn btn-secondary btn-sm" id="f-add-ded">＋ Add expense</button>
         </div>
         <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:white">
@@ -488,6 +488,30 @@ export function openInvoiceForm(container, existing = null) {
           </div>
         </div>
         <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Invoice Summary</p>
+          <div style="display:flex;flex-direction:column;gap:5px">
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Gross</span><span id="t-gross" style="font-family:var(--font-data)">$0.00</span></div>
+            <div id="t-qa-row" style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Quality adj</span><span id="t-qa" style="font-family:var(--font-data)">—</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Sale Expenses</span><span id="t-ded" style="font-family:var(--font-data);color:var(--red)">—</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);font-weight:600;color:var(--ink);border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px"><span>Net amount</span><span id="t-net" style="font-family:var(--font-data)">$0.00</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>GST</span><span id="t-gst" style="font-family:var(--font-data)">—</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:var(--text-md);font-weight:600;color:var(--blue)"><span>Total payable</span><span id="t-total" style="font-family:var(--font-data)">$0.00</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Totals + price comparison -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px" id="f-price-compare">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Price comparison</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Budget price</p><p id="pc-budget" style="font-size:17px;font-weight:600">—</p></div>
+            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Contract price</p><p id="pc-contract" style="font-size:17px;font-weight:600;color:var(--blue)">—</p><p id="pc-contract-vs" style="font-size:10px;color:var(--blue)"></p></div>
+            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Net effective</p><p id="pc-net" style="font-size:17px;font-weight:600">—</p><p id="pc-net-vs" style="font-size:10px"></p></div>
+          </div>
+        </div>
+        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Invoice Summary</p>
           <div style="display:flex;flex-direction:column;gap:5px">
             <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Gross</span><span id="t-gross" style="font-family:var(--font-data)">$0.00</span></div>
             <div id="t-qa-row" style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Quality adj</span><span id="t-qa" style="font-family:var(--font-data)">—</span></div>
@@ -586,7 +610,7 @@ export function openInvoiceForm(container, existing = null) {
       buyerField.value = selectedOpt.dataset.buyer;
     }
     // Set price on all lines
-    modal.querySelectorAll('.f-line-price').forEach(inp => { inp.value = price.toFixed(4); });
+    modal.querySelectorAll('.f-line-price').forEach(inp => { inp.value = price.toFixed(2); });
     recalc();
   }
   // Load budget price for the active season/commodity
@@ -624,18 +648,15 @@ export function openInvoiceForm(container, existing = null) {
     tr.innerHTML = `
       <td style="${tdStyle}min-width:110px"><select class="f-line-comm" style="${inStyle}">${commOptions}</select></td>
       <td style="${tdStyle}min-width:85px"><input type="text" class="f-line-docket" style="${inStyle}" placeholder="D-1042" value="${data.docket||''}"></td>
-      <td style="${tdStyle}min-width:80px"><select class="f-line-season" style="${inStyle}">
+      <td style="${tdStyle}min-width:70px;max-width:80px"><select class="f-line-season" style="${inStyle}">
         ${['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s=>`<option value="${s}" ${s===(data.season||getActiveSeason()||currentSeason())?'selected':''}>${s}</option>`).join('')}
       </select></td>
-      <td style="${tdStyle}min-width:65px"><input type="number" class="f-line-qty" style="${numStyle}" placeholder="0" value="${data.qty||''}" step="0.001"></td>
+      <td style="${tdStyle}min-width:55px"><input type="number" class="f-line-qty" style="${numStyle}" placeholder="0" value="${data.qty||''}" step="0.001"></td>
       <td style="${tdStyle}min-width:50px"><select class="f-line-unit" style="${inStyle}">
         ${['bale','t','kg','head','each'].map(u=>`<option${u===(data.unit||'t')?' selected':''}>${u}</option>`).join('')}
       </select></td>
-      <td style="${tdStyle}min-width:75px"><select class="f-line-gst" style="${inStyle};font-size:11px">
-        <option value="ex" ${(data.gst||'ex')==='ex'?'selected':''}>Ex-GST</option>
-        <option value="free" ${data.gst==='free'?'selected':''}>GST Free</option>
-      </select></td>
-      <td style="${tdStyle}min-width:80px"><input type="number" class="f-line-price" style="${numStyle}" placeholder="0.00" value="${data.price||''}" step="0.01"></td>
+
+      <td style="${tdStyle}min-width:80px;max-width:90px"><input type="number" class="f-line-price" style="${numStyle}" placeholder="0.00" value="${data.price||''}" step="0.01"></td>
       <td class="f-qa-cell" style="${tdStyle}min-width:90px;${saleType!=='contract'?'display:none':''}"><input type="number" class="f-line-qa" style="${numStyle};color:${(data.quality_adj||0)>0?'var(--green)':(data.quality_adj||0)<0?'var(--red)':'var(--ink)'}" placeholder="0.00" value="${data.quality_adj||''}" step="0.01"
         oninput="this.style.color=parseFloat(this.value)>0?'var(--green)':parseFloat(this.value)<0?'var(--red)':'var(--ink)'"></td>
       <td style="${tdStyle}min-width:90px"><input type="number" class="f-line-total" style="${numStyle};background:var(--blue-light);color:var(--blue-text)" placeholder="0.00" value="${data.total||''}" step="0.01"></td>
@@ -734,11 +755,7 @@ export function openInvoiceForm(container, existing = null) {
       <td style="${tdStyle}min-width:50px"><select class="f-ded-unit" style="${inStyle}">
         ${['bale','t','kg','head','each','%','flat'].map(u=>`<option${u===(data.unit||'t')?' selected':''}>${u}</option>`).join('')}
       </select></td>
-      <td style="${tdStyle}min-width:75px"><select class="f-ded-gst" style="${inStyle};font-size:11px">
-        <option value="ex" ${(data.gst||'ex')==='ex'?'selected':''}>Ex-GST</option>
-        <option value="inc" ${data.gst==='inc'?'selected':''}>Inc-GST</option>
-        <option value="free" ${data.gst==='free'?'selected':''}>GST Free</option>
-      </select></td>
+
       <td style="${tdStyle}"><input type="number" class="f-ded-rate" style="${numStyle}" placeholder="0.00" value="${data.rate||''}" step="0.0001"></td>
       <td style="${tdStyle}"><input type="number" class="f-ded-value" style="${numStyle};color:var(--red)" placeholder="0.00" value="${data.value||''}" step="0.01"></td>
       <td style="padding:4px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:16px;padding:2px 4px" class="del-ded">✕</button></td>
