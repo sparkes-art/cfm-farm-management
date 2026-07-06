@@ -151,7 +151,7 @@ function _renderTable(container) {
                 const seasons = [...new Set((inv.line_items||[]).map(l=>l.season).filter(Boolean))];
                 return seasons.length ? seasons.join(', ') : (inv.season || '—');
               })()}</td>
-              <td><span class="badge ${inv.sale_type === 'contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'contract' ? 'Contract' : 'Cash'}</span></td>
+              <td><span class="badge ${inv.sale_type === 'against_contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'against_contract' ? 'Contract' : 'Cash'}</span></td>
               <td><strong>${inv.buyer || '—'}</strong></td>
               <td class="muted text-sm">${commodities}</td>
               <td class="num">${formatCurrency(inv.gross_amount, 0)}</td>
@@ -266,7 +266,7 @@ function _openDetail(inv, container) {
   const contract = inv.forward_contract_id ? _contracts.find(c => c.id === inv.forward_contract_id) : null;
 
   openModal({
-    title: (inv.sale_type === 'contract' ? 'Contract sale' : 'Cash sale') + ' — ' + (inv.buyer || ''),
+    title: (inv.sale_type === 'against_contract' ? 'Contract sale' : 'Cash sale') + ' — ' + (inv.buyer || ''),
     confirmLabel: canWrite() ? 'Edit' : null,
     confirmClass: 'btn-secondary',
     onConfirm: canWrite() ? async () => { openInvoiceForm(container, inv); } : null,
@@ -349,7 +349,7 @@ function _xeroRefModal(inv, container) {
 export function openInvoiceForm(container, existing = null) {
   const farm = getActiveFarm();
   const isEdit = !!existing;
-  let saleType = existing?.sale_type || 'contract';
+  let saleType = existing?.sale_type === 'against_contract' ? 'contract' : (existing?.sale_type || 'contract');
   let lines = existing?.line_items ? JSON.parse(JSON.stringify(existing.line_items)) : [];
   let deductions = existing?.deductions ? JSON.parse(JSON.stringify(existing.deductions)) : [];
   let lastEdited = {}; // per line: 'price' or 'total'
@@ -879,7 +879,7 @@ export function openInvoiceForm(container, existing = null) {
         invoice_date: modal.querySelector('#f-date')?.value,
         season: null, // Season is at line item level
         buyer: modal.querySelector('#f-buyer')?.value?.trim() || '',
-        sale_type: saleType,
+        sale_type: saleType === 'contract' ? 'against_contract' : 'cash',
         forward_contract_id: saleType === 'contract' ? contractId : null,
         line_items: lineRows,
         deductions: dedRows,
