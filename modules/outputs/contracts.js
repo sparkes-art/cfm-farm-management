@@ -552,7 +552,8 @@ function _gatherForm(farm, existing) {
     delivery_start: v('f-delivery-start') || null,
     delivery_end: v('f-delivery-end') || null,
     notes: v('f-notes') || null,
-    pdf_filename: document.querySelector('#pdf-upload')?.files?.[0]?.name || existing?.pdf_filename || null,
+    pdf_url: existing?.pdf_url || null,
+    pdf_filename: existing?.pdf_filename || null,
     created_by: getSession()?.user?.id,
   };
 }
