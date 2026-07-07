@@ -30,8 +30,34 @@ export async function login(email, password) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Login failed');
-  _emit({ access_token: data.access_token, user: data.user, profile: data.profile });
+  _emit({ access_token: data.access_token, refresh_token: data.refresh_token, user: data.user, profile: data.profile });
+  _scheduleRefresh(data.expires_in || 3600);
   return _session;
+}
+
+let _refreshTimer = null;
+function _scheduleRefresh(expiresIn) {
+  if (_refreshTimer) clearTimeout(_refreshTimer);
+  // Refresh 5 minutes before expiry
+  const delay = Math.max((expiresIn - 300) * 1000, 30000);
+  _refreshTimer = setTimeout(_refreshSession, delay);
+}
+
+async function _refreshSession() {
+  if (!_session?.refresh_token) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ refresh_token: _session.refresh_token }),
+    });
+    if (!res.ok) { _emit(null); return; }
+    const data = await res.json();
+    _emit({ ..._session, access_token: data.access_token, refresh_token: data.refresh_token });
+    _scheduleRefresh(data.expires_in || 3600);
+  } catch {
+    // Session expired — will prompt re-login on next request
+  }
 }
 
 export function logout() {
