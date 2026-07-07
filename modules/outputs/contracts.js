@@ -391,6 +391,20 @@ export function openContractModal(existing = null) {
       const row = _gatherForm(farm, existing);
       if (!row) return;
 
+      // Upload PDF if selected
+      const pdfFile = document.querySelector('#pdf-upload')?.files?.[0];
+      if (pdfFile) {
+        try {
+          const path = `contracts/${farm.id}/${Date.now()}_${pdfFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+          const url = await uploadFile('cfm-documents', path, pdfFile);
+          row.pdf_url = url;
+          row.pdf_filename = pdfFile.name;
+        } catch (err) {
+          console.error('PDF upload failed:', err.message);
+          toast('PDF upload failed: ' + err.message, 'error');
+        }
+      }
+
       if (isEdit) {
         await dbUpdate('forward_contracts', existing.id, row);
         toast('Contract updated', 'success');

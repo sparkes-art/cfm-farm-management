@@ -100,13 +100,16 @@ export async function uploadFile(bucket, path, file) {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'Authorization': `Bearer ${_session?.access_token || SUPABASE_ANON_KEY}`,
       'Content-Type': file.type,
       'x-upsert': 'true',
     },
     body: file,
   });
-  if (!res.ok) throw new Error(`Upload failed: ${await res.text()}`);
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Upload failed: ${err}`);
+  }
   return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
 }
 
