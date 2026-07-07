@@ -13,8 +13,12 @@ const MODULE_LOADERS = {
     return { mount: m.mountOutputs, unmount: m.unmountOutputs };
   },
   inputs: async () => {
-    const m = await import('../modules/inputs/inputs.js?v=1783290066771');
+    const m = await import('../modules/inputs/inputs.js');
     return { mount: m.mountInputs, unmount: m.unmountInputs };
+  },
+  water: async () => {
+    const m = await import('../modules/water/water.js');
+    return { mount: m.mountWater, unmount: m.unmountWater };
   },
   'gross-margin': async () => {
     const m = await import('../modules/gross-margin/gross-margin.js?v=1783290066771');
