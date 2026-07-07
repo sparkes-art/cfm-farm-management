@@ -2,299 +2,264 @@
 // App bootstrap — auth, navigation, module loading
 // No localStorage. No caching. Pure Supabase.
 
-import { initSupabase, getSupabase } from './supabase-client.js';
-import { setActiveFarm, getActiveFarm, setActiveSeason, getActiveSeason, loadFarms, getFarms } from './app-state.js';
+import { login, logout, onSessionChange } from './supabase-client.js?v=1783290066771';
+import { on, setActiveFarm, setActiveModule, getFarms, getState, getActiveFarm, getActiveSeason, setActiveSeason } from './app-state.js?v=1783290066771';
+import { toast, show, hide, qs } from './ui.js?v=1783290066771';
 
-// ── Module loader map ─────────────────────────────────────────────────────────
-// Each entry is a lazy import — only loaded when that module is first navigated to.
-
+// Module loaders (lazy — only imported when navigated to)
 const MODULE_LOADERS = {
   outputs: async () => {
-    const m = await import('../modules/outputs/outputs.js');
-    return { mount: m.mountOutputs };
+    const m = await import('../modules/outputs/outputs.js?v=1783290066771');
+    return { mount: m.mountOutputs, unmount: m.unmountOutputs };
   },
   inputs: async () => {
-    const m = await import('../modules/inputs/inputs.js');
-    return { mount: m.mountInputs };
-  },
-  budget: async () => {
-    const m = await import('../modules/budget/budget.js');
-    return { mount: m.mountBudget };
+    const m = await import('../modules/inputs/inputs.js?v=1783290066771');
+    return { mount: m.mountInputs, unmount: m.unmountInputs };
   },
   'gross-margin': async () => {
-    const m = await import('../modules/gross-margin/gross-margin.js');
+    const m = await import('../modules/gross-margin/gross-margin.js?v=1783290066771');
     return { mount: m.mountGrossMargin };
   },
   agronomy: async () => {
-    const m = await import('../modules/agronomy/agronomy.js');
+    const m = await import('../modules/agronomy/agronomy.js?v=1783290066771');
     return { mount: m.mountAgronomy };
   },
   weather: async () => {
-    const m = await import('../modules/weather/weather.js');
+    const m = await import('../modules/weather/weather.js?v=1783290066771');
     return { mount: m.mountWeather };
   },
+  budget: async () => {
+    const m = await import('../modules/budget/budget.js?v=1783290066771');
+    return { mount: m.mountBudget, unmount: m.unmountBudget };
+  },
   settings: async () => {
-    const m = await import('../modules/settings/commodities-settings.js');
-    return { mount: m.mountCommoditySettings };
+    const m = await import('../modules/settings/settings.js?v=1783290066771');
+    return { mount: m.mountSettings };
   },
 };
 
-// ── Cached module instances ───────────────────────────────────────────────────
-const _moduleCache = {};
-let _currentModule = null;
+let _activeModuleInstance = null;
+const _main = () => document.getElementById('main');
 
-// ── DOM refs ──────────────────────────────────────────────────────────────────
-const $ = id => document.getElementById(id);
+// ── Auth gate ─────────────────────────────────────────────────
+onSessionChange((session) => {
+  if (session) {
+    hide('#login-page');
+    show('#app');
+    _populateFarmSelector(getFarms());
+    _updateUserDisplay(session);
+    _navigateTo('outputs');
+    setTimeout(async () => { await _populateSeasonSelector(); _updateXeroIndicator(); }, 500);
+  } else {
+    show('#login-page');
+    hide('#app');
+  }
+});
 
-// ── Auth flow ─────────────────────────────────────────────────────────────────
+// ── Login form ────────────────────────────────────────────────
+qs('#btn-login')?.addEventListener('click', async () => {
+  const email = qs('#login-email')?.value?.trim();
+  const password = qs('#login-password')?.value;
+  const btn = qs('#btn-login');
+  const errEl = qs('#login-error');
 
-async function _tryLogin(email, password) {
-  const res = await fetch('/.netlify/functions/auth', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Login failed');
-  return data; // { access_token, user }
-}
-
-function _storeSession(token, user) {
-  // Session kept only in memory — no localStorage
-  window.__cfmSession = { token, user };
-  getSupabase().auth.setSession({ access_token: token, refresh_token: token });
-}
-
-function _getSession() {
-  return window.__cfmSession || null;
-}
-
-function _clearSession() {
-  window.__cfmSession = null;
-}
-
-// ── Navigation ────────────────────────────────────────────────────────────────
-
-async function _navigateTo(moduleName) {
-  const main = $('main-content') || $('main');
-  if (!main) return;
-
-  // Update active nav state
-  document.querySelectorAll('[data-module]').forEach(el => {
-    el.classList.toggle('active', el.dataset.module === moduleName);
-  });
-
-  main.innerHTML = `<div class="loading-state">Loading…</div>`;
+  errEl?.classList.add('hidden');
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
 
   try {
-    // Load module if not cached
-    if (!_moduleCache[moduleName]) {
-      const loader = MODULE_LOADERS[moduleName];
-      if (!loader) {
-        main.innerHTML = `<div class="empty-state"><p>Module "${moduleName}" not found.</p></div>`;
-        return;
-      }
-      _moduleCache[moduleName] = await loader();
-    }
-
-    _currentModule = moduleName;
-    main.innerHTML = '';
-    await _moduleCache[moduleName].mount(main);
-
+    await login(email, password);
   } catch (err) {
-    console.error(`Module load error (${moduleName}):`, err);
-    main.innerHTML = `
-      <div class="card">
-        <div class="card-body">
-          <div class="empty-state">
-            <p>Failed to load ${moduleName} module.</p>
-            <p class="text-muted small">${err.message}</p>
-          </div>
-        </div>
-      </div>`;
+    if (errEl) {
+      errEl.textContent = err.message || 'Login failed — please check your credentials.';
+      errEl.classList.remove('hidden');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign in';
   }
+});
+
+// Allow Enter key on password field
+qs('#login-password')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') qs('#btn-login')?.click();
+});
+
+// ── Sign out ──────────────────────────────────────────────────
+qs('#btn-logout')?.addEventListener('click', () => {
+  if (_activeModuleInstance?.unmount) _activeModuleInstance.unmount();
+  logout();
+  toast('Signed out');
+});
+
+// Farm settings pencil button — navigate to settings with farm tab active
+document.getElementById('btn-farm-settings')?.addEventListener('click', () => {
+  _navigateTo('settings');
+});
+
+// ── Farm selector ─────────────────────────────────────────────
+on('farms', (farms) => _populateFarmSelector(farms));
+on('activeFarm', () => {
+  // Unmount current module to clear its cached data, then remount for new farm
+  if (_activeModuleInstance?.unmount) {
+    _activeModuleInstance.unmount();
+    _activeModuleInstance = null;
+  }
+  const state = getState();
+  if (state.activeModule) _navigateTo(state.activeModule);
+});
+
+function _populateFarmSelector(farms) {
+  const sel = qs('#farm-select');
+  if (!sel) return;
+  sel.innerHTML = farms.map(f =>
+    `<option value="${f.id}">${f.name}${f.state ? ` (${f.state})` : ''}</option>`
+  ).join('');
 }
 
-// ── Season selector ───────────────────────────────────────────────────────────
+qs('#farm-select')?.addEventListener('change', (e) => {
+  setActiveFarm(e.target.value);
+  _updateXeroIndicator();
+  _populateSeasonSelector();
+});
 
-function _buildSeasonOptions() {
-  const currentYear = new Date().getFullYear();
-  const seasons = [];
-  for (let y = currentYear + 1; y >= currentYear - 4; y--) {
-    seasons.push(`${y-1}-${String(y).slice(2)}`);
-  }
-  return seasons;
-}
-
-function _initSeasonSelector() {
-  const sel = $('season-select');
+// ── Season selector ───────────────────────────────────────────
+async function _populateSeasonSelector() {
+  const sel = document.getElementById('season-select');
   if (!sel) return;
 
-  const seasons = _buildSeasonOptions();
-  sel.innerHTML = seasons.map(s =>
-    `<option value="${s}" ${s === getActiveSeason() ? 'selected' : ''}>${s}</option>`
-  ).join('');
-
-  sel.addEventListener('change', () => {
-    setActiveSeason(sel.value);
-    // Reload current module to reflect new season
-    if (_currentModule) {
-      delete _moduleCache[_currentModule];
-      _navigateTo(_currentModule);
-    }
-  });
-}
-
-// ── Farm selector ─────────────────────────────────────────────────────────────
-
-function _initFarmSelector(farms) {
-  const sel = $('farm-select');
-  if (!sel || !farms?.length) return;
-
-  sel.innerHTML = farms.map(f =>
-    `<option value="${f.id}" ${f.id === getActiveFarm() ? 'selected' : ''}>${f.name}</option>`
-  ).join('');
-
-  sel.addEventListener('change', () => {
-    setActiveFarm(sel.value);
-    // Clear module cache — new farm context
-    Object.keys(_moduleCache).forEach(k => delete _moduleCache[k]);
-    if (_currentModule) _navigateTo(_currentModule);
-  });
-}
-
-// ── Sidebar nav ───────────────────────────────────────────────────────────────
-
-function _initNav() {
-  document.querySelectorAll('[data-module]').forEach(el => {
-    el.addEventListener('click', e => {
-      e.preventDefault();
-      const mod = el.dataset.module;
-      if (mod) _navigateTo(mod);
-
-      // Close mobile drawer if open
-      const drawer  = $('mobile-drawer');
-      const overlay = $('mobile-overlay');
-      drawer?.classList.remove('open');
-      overlay?.classList.remove('open');
-
-      // Update active on all nav links
-      document.querySelectorAll('[data-module]').forEach(a =>
-        a.classList.toggle('active', a.dataset.module === mod));
-    });
-  });
-}
-
-// ── Mobile nav ────────────────────────────────────────────────────────────────
-
-function _initMobileNav() {
-  const hamburger = $('mobile-hamburger');
-  const drawer    = $('mobile-drawer');
-  const overlay   = $('mobile-overlay');
-
-  hamburger?.addEventListener('click', () => {
-    drawer?.classList.toggle('open');
-    overlay?.classList.toggle('open');
+  const now = new Date();
+  const y = now.getFullYear();
+  const seasons = Array.from({length: 6}, (_, i) => {
+    const sy = y + 1 - i;
+    return `${sy}-${String(sy+1).slice(2)}`;
   });
 
-  overlay?.addEventListener('click', () => {
-    drawer?.classList.remove('open');
-    overlay?.classList.remove('open');
-  });
-
-  // Wire up drawer nav links
-  drawer?.querySelectorAll('[data-module]').forEach(el => {
-    el.addEventListener('click', e => {
-      e.preventDefault();
-      drawer.classList.remove('open');
-      overlay?.classList.remove('open');
-      _navigateTo(el.dataset.module);
-      document.querySelectorAll('[data-module]').forEach(a =>
-        a.classList.toggle('active', a.dataset.module === el.dataset.module));
-    });
-  });
-}
-
-// ── App init ──────────────────────────────────────────────────────────────────
-
-async function _initApp(user) {
-  // Show app shell
-  $('login-page')?.classList.add('hidden');
-  $('app')?.classList.remove('hidden');
-
-  // Show user info
-  const userDisplay = $('user-info-display');
-  if (userDisplay) userDisplay.textContent = user.email;
-
-  // Load farms
+  let defaultSeason = seasons[1];
   try {
-    const farms = await loadFarms(user);
-    _initFarmSelector(farms);
-  } catch (err) {
-    console.error('Failed to load farms:', err);
+    const farm = getActiveFarm();
+    if (farm) {
+      const { dbSelect } = await import('./supabase-client.js?v=1783290066771');
+      const rows = await dbSelect('budgets', 'farm_id=eq.' + farm.id + '&select=season&order=season.desc&limit=1');
+      if (rows[0]?.season) defaultSeason = rows[0].season;
+    }
+  } catch {}
+
+  const current = getActiveSeason() || defaultSeason;
+  sel.innerHTML = seasons.map(s =>
+    `<option value="${s}" ${s === current ? 'selected' : ''}>${s}</option>`
+  ).join('');
+
+  if (!getActiveSeason()) setActiveSeason(sel.value);
+
+  if (!sel.dataset.wired) {
+    sel.dataset.wired = '1';
+    sel.addEventListener('change', () => {
+      setActiveSeason(sel.value);
+      const activeLink = document.querySelector('#sidebar a.active, #mobile-nav a.active');
+      const mod = activeLink?.dataset?.module || 'outputs';
+      _navigateTo(mod);
+    });
+  }
+}
+
+window._updateXeroIndicator = async function _updateXeroIndicator() {
+  const el = document.getElementById('xero-status-indicator');
+  if (!el) return;
+  const farm = getActiveFarm();
+  if (!farm) { el.style.display = 'none'; return; }
+  try {
+    const { dbSelect } = await import('./supabase-client.js?v=1783290066771');
+    const rows = await dbSelect('xero_tokens', 'farm_id=eq.' + farm.id + '&select=tenant_name,expires_at');
+    const token = rows[0];
+    el.style.display = 'flex';
+    if (token) {
+      // Show green if connected — access token auto-refreshes, only goes red if no token at all
+      el.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:20px;cursor:pointer;background:rgba(50,180,80,0.15);border:0.5px solid rgba(50,200,80,0.35);color:#80ffaa';
+      el.innerHTML = '<span>🟢</span> Xero';
+      el.title = 'Connected to ' + (token.tenant_name || 'Xero');
+    } else {
+      el.style.cssText = 'display:flex;align-items:center;gap:5px;font-size:11px;padding:3px 9px;border-radius:20px;cursor:pointer;background:rgba(180,50,50,0.15);border:0.5px solid rgba(220,80,80,0.35);color:#ff9090';
+      el.innerHTML = '<span>🔴</span> Xero';
+      el.title = 'Xero not connected — click to connect in Settings';
+    }
+  } catch { el.style.display = 'none'; }
+};
+
+// ── Navigation ────────────────────────────────────────────────
+document.getElementById('sidebar')?.querySelectorAll('a[data-module]').forEach(link => {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    _navigateTo(link.dataset.module);
+  });
+});
+
+async function _waitForFarm(timeout = 5000) {
+  if (getActiveFarm()) return getActiveFarm();
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const check = setInterval(() => {
+      const farm = getActiveFarm();
+      if (farm || Date.now() - start > timeout) {
+        clearInterval(check);
+        resolve(farm);
+      }
+    }, 50);
+  });
+}
+
+async function _navigateTo(moduleKey) {
+  // Unmount previous
+  if (_activeModuleInstance?.unmount) {
+    _activeModuleInstance.unmount();
+    _activeModuleInstance = null;
   }
 
-  // Season selector
-  _initSeasonSelector();
-
-  // Nav
-  _initNav();
-  _initMobileNav();
-
-  // Logout
-  $('btn-logout')?.addEventListener('click', () => {
-    _clearSession();
-    location.reload();
+  // Update nav active state
+  document.querySelectorAll('#sidebar a[data-module]').forEach(a => {
+    a.classList.toggle('active', a.dataset.module === moduleKey);
   });
 
-  // Default module
-  _navigateTo('outputs');
-}
+  setActiveModule(moduleKey);
 
-// ── Login page ────────────────────────────────────────────────────────────────
+  // Show loading state
+  _main().innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;padding:40px;color:var(--muted)">
+      <span class="loading-spinner"></span>
+      <span>Loading ${moduleKey}…</span>
+    </div>
+  `;
 
-function _initLoginPage() {
-  const btn   = $('btn-login');
-  const email = $('login-email');
-  const pass  = $('login-password');
-  const err   = $('login-error');
-
-  async function attemptLogin() {
-    if (!email.value || !pass.value) return;
-    btn.disabled = true;
-    btn.textContent = 'Signing in…';
-    if (err) err.classList.add('hidden');
-
-    try {
-      const data = await _tryLogin(email.value.trim(), pass.value);
-      _storeSession(data.access_token, data.user);
-      await _initApp(data.user);
-    } catch (e) {
-      if (err) {
-        err.textContent = e.message;
-        err.classList.remove('hidden');
-      }
-      btn.disabled = false;
-      btn.textContent = 'Sign in';
+  try {
+    const loader = MODULE_LOADERS[moduleKey];
+    if (!loader) {
+      _main().innerHTML = `<div class="empty-state"><p>Module "${moduleKey}" not yet available.</p></div>`;
+      return;
     }
-  }
 
-  btn?.addEventListener('click', attemptLogin);
-  pass?.addEventListener('keydown', e => { if (e.key === 'Enter') attemptLogin(); });
+    // Wait for farm to be loaded before mounting (fixes startup blank screen)
+    await _waitForFarm();
+
+    const moduleExports = await loader();
+    _activeModuleInstance = moduleExports;
+    await moduleExports.mount(_main());
+  } catch (err) {
+    console.error(`Module load error (${moduleKey}):`, err);
+    _main().innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">⚠️</div>
+        <p>Failed to load ${moduleKey}. Check the console for details.</p>
+      </div>
+    `;
+  }
 }
 
-// ── Bootstrap ─────────────────────────────────────────────────────────────────
-
-(async function bootstrap() {
-  await initSupabase();
-
-  // Check for existing in-memory session (page refresh loses it — by design)
-  const session = _getSession();
-  if (session) {
-    await _initApp(session.user);
-  } else {
-    $('app')?.classList.add('hidden');
-    $('login-page')?.classList.remove('hidden');
-    _initLoginPage();
-  }
-})();
+function _updateUserDisplay(session) {
+  const el = qs('#user-info-display');
+  if (!el) return;
+  const profile = session.profile;
+  el.innerHTML = `
+    <strong>${profile?.full_name || session.user?.email}</strong>
+    ${profile?.role ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1) : ''}
+  `;
+}
