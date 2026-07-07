@@ -3,11 +3,11 @@
 // Price history chart per commodity
 
 import { dbSelect, dbInsert, dbDelete, dbUpsert } from '../../js/supabase-client.js';
-import { getActiveFarm } from '../../js/app-state.js';
-import { getSession, canWrite } from '../../js/app-state.js';
-import { loadCommodities, getCommodities, commodityOptions } from '../../js/commodities.js';
-import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js';
-import { getActiveSeason } from '../../js/app-state.js';
+import { getActiveFarm } from '../../js/app-state.js?v=1783407307562';
+import { getSession, canWrite } from '../../js/app-state.js?v=1783407307562';
+import { loadCommodities, getCommodities, commodityOptions } from '../../js/commodities.js?v=1783407307562';
+import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js?v=1783407307562';
+import { getActiveSeason } from '../../js/app-state.js?v=1783407307562';
 
 let _prices = [];
 let _contracts = [];
@@ -216,7 +216,9 @@ async function _loadData() {
   if (gradeLabel) gradeLabel.textContent = grade ? 'Grade: ' + grade + ' · Price history' : 'Price history';
 
   // Build query — filter by farm's grain site if available, otherwise show all
+  // Filter by farm for manual prices, or show all (grain prices have no farm_id)
   let priceQuery = 'commodity_id=eq.' + _selectedCommodityId + '&price_date=gte.' + cutoffStr + '&select=*&order=price_date.asc';
+  if (farm && !grainSite) priceQuery += '&or=(farm_id.eq.' + farm.id + ',farm_id.is.null)';
   if (grainSite) priceQuery += '&region=eq.' + encodeURIComponent(grainSite);
 
   const queries = [
@@ -549,14 +551,15 @@ function _addPriceModal() {
       if (!commodityId) throw new Error('Please select a commodity');
       if (!date || !price) throw new Error('Please enter a date and price');
 
-      await dbInsert('market_prices', {
+      await dbUpsert('market_prices', [{
         commodity_id: commodityId,
+        farm_id: farm?.id || null,
         price_date: date,
         price_per_unit: price,
         source: qs('#mp-source', modal)?.value?.trim() || 'Manual',
         grade: qs('#mp-grade', modal)?.value?.trim() || null,
         created_by: getSession()?.user?.id,
-      });
+      }]);
 
       // Switch to the newly added commodity
       _selectedCommodityId = commodityId;
