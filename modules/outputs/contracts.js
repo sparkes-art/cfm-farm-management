@@ -281,24 +281,24 @@ export function openContractModal(existing = null) {
     title: isEdit ? `Edit Contract ${existing.contract_number || ''}` : 'New Forward Contract',
     confirmLabel: isEdit ? 'Save changes' : 'Add contract',
     bodyHTML: `
-      <!-- PDF Upload section (new contracts only) -->
-      ${!isEdit ? `
-        <div class="card" style="margin-bottom:18px;border:2px dashed var(--rule);box-shadow:none">
-          <div class="card-body" style="padding:14px">
-            <p class="text-sm" style="font-weight:600;margin-bottom:6px">
-              📄 Upload contract PDF
-            </p>
-            <p class="form-helper" style="margin-bottom:10px">
-              Upload a PDF and AI will extract the contract details automatically. You can review and edit before saving.
-            </p>
-            <div class="flex gap-2 items-center">
-              <input type="file" id="pdf-upload" accept=".pdf" style="font-size:var(--text-sm);flex:1">
-              <button class="btn btn-secondary" id="btn-extract" type="button">Extract details</button>
-            </div>
-            <div id="extract-status" class="form-helper mt-1" style="min-height:18px"></div>
+      <!-- PDF Upload section -->
+      <div class="card" style="margin-bottom:18px;border:2px dashed var(--rule);box-shadow:none">
+        <div class="card-body" style="padding:14px">
+          <p class="text-sm" style="font-weight:600;margin-bottom:6px">
+            📄 ${isEdit ? 'Replace contract PDF' : 'Upload contract PDF'}
+          </p>
+          ${!isEdit ? `<p class="form-helper" style="margin-bottom:10px">
+            Upload a PDF and AI will extract the contract details automatically. You can review and edit before saving.
+          </p>` : `<p class="form-helper" style="margin-bottom:10px">
+            ${existing?.pdf_filename ? `Current: <strong>${existing.pdf_filename}</strong> — upload a new file to replace it.` : 'No PDF attached — upload one now.'}
+          </p>`}
+          <div class="flex gap-2 items-center">
+            <input type="file" id="pdf-upload" accept=".pdf" style="font-size:var(--text-sm);flex:1">
+            ${!isEdit ? `<button class="btn btn-secondary" id="btn-extract" type="button">Extract details</button>` : ''}
           </div>
+          <div id="extract-status" class="form-helper mt-1" style="min-height:18px"></div>
         </div>
-      ` : ''}
+      </div>
 
       <div class="form-row">
         <div class="form-group">
