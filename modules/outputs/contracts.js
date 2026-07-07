@@ -7,6 +7,7 @@ import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSe
 import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js?v=1783290066771';
 
 let _contracts = [];
+let _invoices = [];
 let _unsub = null;
 
 // ── Entry point ───────────────────────────────────────────────
