@@ -592,7 +592,7 @@ export function openInvoiceForm(container, existing = null) {
     try {
       const existing_invs = await dbSelect('invoices', 'forward_contract_id=eq.' + opt.value + '&select=net_amount,line_items');
       const invoicedQty = existing_invs.reduce((s, i) => s + (i.line_items||[]).reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0), 0);
-      const invoicedVal = existing_invs.reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
+      const invoicedVal = existing_invs.reduce((s, i) => s + (i.line_items||[]).reduce((ss, l) => ss + (parseFloat(l.total)||0), 0), 0);
       modal.querySelector('#cs-qty').textContent = formatNumber(qty, 0) + ' ' + unit;
       modal.querySelector('#cs-invoiced').textContent = formatNumber(invoicedQty, 0) + ' ' + unit;
       modal.querySelector('#cs-remaining').textContent = formatNumber(qty - invoicedQty, 0) + ' ' + unit;
