@@ -507,6 +507,7 @@ function _drawChart(canvas, labels, data, salePoints = []) {
 
 // ── Add price modal ───────────────────────────────────────────
 function _addPriceModal() {
+  const farm = getActiveFarm();
   const commodities = getCommodities();
   const commOptions = commodities.map(c =>
     `<option value="${c.id}" ${c.id === _selectedCommodityId ? 'selected' : ''}>${c.name}</option>`
