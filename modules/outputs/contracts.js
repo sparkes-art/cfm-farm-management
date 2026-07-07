@@ -194,7 +194,7 @@ function _renderTable() {
           }, 0);
           const invoicedValue = contractInvoices.reduce((s, i) => {
             const lines = i.line_items || [];
-            if (lines.length) return s + lines.reduce((ss, l) => ss + (parseFloat(l.total)||0) + (parseFloat(l.quality_adj)||0), 0);
+            if (lines.length) return s + lines.reduce((ss, l) => ss + (parseFloat(l.total)||0), 0);
             return s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
           }, 0);
           const avgInvoicedPrice = invoicedQty ? invoicedValue / invoicedQty : null;
