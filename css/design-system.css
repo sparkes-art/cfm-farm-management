@@ -836,3 +836,277 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+/* ============================================================
+   CFM AGRONOMY MODULE — CSS ADDITIONS
+   Append these styles to design-system.css
+   ============================================================ */
+
+/* ── Map layout ──────────────────────────────────────────── */
+
+.agro-map-wrap {
+  display: flex;
+  gap: 0;
+  height: 540px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+#farm-map {
+  flex: 1;
+  min-width: 0;
+  z-index: 0;
+}
+
+/* Leaflet overrides */
+.leaflet-container {
+  font-family: var(--font-body);
+  background: #f0f0f0;
+}
+
+.paddock-label {
+  background: none;
+  border: none;
+  box-shadow: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  white-space: nowrap;
+}
+
+/* ── Map sidebar ─────────────────────────────────────────── */
+
+.map-sidebar {
+  width: 320px;
+  min-width: 320px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  transition: width 0.2s ease, min-width 0.2s ease;
+}
+
+.map-sidebar--closed {
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+}
+
+.sidebar-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.sidebar-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.withholding-title {
+  color: #ef4444;
+}
+
+.sidebar-actions {
+  padding: 14px 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 13px;
+}
+
+.detail-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ── Withholding badge ───────────────────────────────────── */
+
+.withholding-badge {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.withholding-badge span {
+  color: #ef4444;
+  font-size: 12px;
+}
+
+/* ── Map legend ──────────────────────────────────────────── */
+
+.map-legend .card-body {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.legend-dot--warning {
+  background: #ef4444;
+  border: 2px dashed #ef4444;
+  background-clip: content-box;
+}
+
+/* ── Mini table (map sidebar) ────────────────────────────── */
+
+.mini-table {
+  width: 100%;
+  font-size: 12px;
+  border-collapse: collapse;
+}
+
+.mini-table th {
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.mini-table td {
+  padding: 4px 6px;
+}
+
+/* ── Badge variants (agronomy-specific) ──────────────────── */
+
+.badge--external   { background: #ede9fe; color: #7c3aed; }
+.badge--internal   { background: #dcfce7; color: #16a34a; }
+.badge--herbicide  { background: #fef9c3; color: #92400e; }
+.badge--insecticide{ background: #fee2e2; color: #991b1b; }
+.badge--fungicide  { background: #dbeafe; color: #1e40af; }
+.badge--fertiliser { background: #d1fae5; color: #065f46; }
+.badge--pgr        { background: #ede9fe; color: #5b21b6; }
+.badge--other      { background: var(--surface-2); color: var(--text-muted); }
+.badge--warning    { background: #fef3c7; color: #92400e; }
+.badge--danger     { background: #fee2e2; color: #991b1b; }
+.badge--success    { background: #dcfce7; color: #166534; }
+.badge--muted      { background: var(--surface-2); color: var(--text-muted); }
+
+/* ── Alerts ──────────────────────────────────────────────── */
+
+.alert {
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  border: 1px solid transparent;
+}
+
+.alert-warning {
+  background: #fffbeb;
+  border-color: #fed7aa;
+  color: #92400e;
+}
+
+/* ── Checkbox group ──────────────────────────────────────── */
+
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 4px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ── Notes cell truncation ───────────────────────────────── */
+
+.notes-cell {
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Input group (rate + unit) ───────────────────────────── */
+
+.input-group {
+  display: flex;
+  gap: 6px;
+}
+
+.input-unit {
+  max-width: 70px;
+}
+
+/* ── Responsive: collapse map sidebar on narrow screens ──── */
+
+@media (max-width: 768px) {
+  .agro-map-wrap {
+    flex-direction: column;
+    height: auto;
+  }
+
+  #farm-map {
+    height: 360px;
+  }
+
+  .map-sidebar {
+    width: 100% !important;
+    min-width: 0 !important;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    max-height: 300px;
+  }
+
+  .map-sidebar--closed {
+    max-height: 0;
+    overflow: hidden;
+  }
+}
