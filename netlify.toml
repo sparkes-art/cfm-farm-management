@@ -11,6 +11,10 @@
 [functions.export-backup]
   timeout = 30
 
+[functions.sync-water-announcements]
+  timeout = 60
+  schedule = "0 2 * * *"
+
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"

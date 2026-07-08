@@ -12,6 +12,7 @@ let _accounts = [];
 let _trades = [];
 let _usage = [];
 let _budgets = [];
+let _announcements = [];
 let _waterYear = null;
 
 function currentWaterYear() {
@@ -92,13 +93,14 @@ export function unmountWater() {
 
 async function _loadData(farm) {
   try {
-    [_sources, _entitlements, _accounts, _trades, _usage, _budgets] = await Promise.all([
+    [_sources, _entitlements, _accounts, _trades, _usage, _budgets, _announcements] = await Promise.all([
       dbSelect('water_sources', 'farm_id=eq.' + farm.id + '&select=*&order=name.asc'),
       dbSelect('water_entitlements', 'farm_id=eq.' + farm.id + '&select=*'),
       dbSelect('water_accounts', 'farm_id=eq.' + farm.id + '&water_year=eq.' + _waterYear + '&select=*'),
       dbSelect('water_trades', 'farm_id=eq.' + farm.id + '&water_year=eq.' + _waterYear + '&select=*&order=trade_date.desc'),
       dbSelect('water_usage', 'farm_id=eq.' + farm.id + '&water_year=eq.' + _waterYear + '&select=*&order=usage_date.desc'),
       dbSelect('water_budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + (getActiveSeason()||currentSeason()) + '&select=*'),
+      dbSelect('water_announcements', 'farm_id=eq.' + farm.id + '&select=*&order=announcement_date.asc'),
     ]);
   } catch (err) {
     console.error('Water load error:', err);
@@ -303,20 +305,80 @@ function _renderSources(content, farm) {
 
 // ── Seasonal Accounts ─────────────────────────────────────────
 function _renderAccounts(content, farm) {
+  // Calculate announced allocation for current water year per entitlement
+  const yearAnnouncements = _announcements.filter(a => a.water_year === _waterYear);
+
+  // Group announcements by water_source for chart
+  const announcementsBySource = {};
+  for (const a of _announcements) {
+    const key = a.water_source || 'Unknown';
+    if (!announcementsBySource[key]) announcementsBySource[key] = [];
+    announcementsBySource[key].push(a);
+  }
+
+  // Build chart data — cumulative ML per share by date, per year, for each source
+  const chartSources = Object.keys(announcementsBySource);
+
+  // For each entitlement, sum announced ML for current water year
+  function announcedMlForEntitlement(ent) {
+    const walAnnouncements = yearAnnouncements.filter(a => a.wal_number === ent.wal_number);
+    const totalPerShare = walAnnouncements.reduce((s,a) => s + (parseFloat(a.ml_per_share)||0), 0);
+    return totalPerShare * (parseFloat(ent.ml_held)||0);
+  }
+
   content.innerHTML = `
+    <!-- Announcement-driven allocation summary -->
+    ${_entitlements.length && yearAnnouncements.length ? `
+    <div class="card" style="padding:16px;margin-bottom:16px">
+      <p style="font-weight:600;font-size:var(--text-sm);margin-bottom:12px">Announced Allocation — ${_waterYear}</p>
+      <table class="data-table">
+        <thead><tr>
+          <th>WAL</th><th>Water Source</th><th>Shares</th>
+          <th class="num">ML/share announced</th><th class="num">Total announced (ML)</th>
+        </tr></thead>
+        <tbody>
+          ${_entitlements.filter(e => e.wal_number).map(e => {
+            const walAnns = yearAnnouncements.filter(a => a.wal_number === e.wal_number);
+            const mlPerShare = walAnns.reduce((s,a) => s+(parseFloat(a.ml_per_share)||0), 0);
+            const totalMl = mlPerShare * (parseFloat(e.ml_held)||0);
+            return `<tr>
+              <td class="muted">${e.wal_number}</td>
+              <td><strong>${e.water_source_name || '—'}</strong></td>
+              <td class="num">${formatNumber(e.ml_held,0)}</td>
+              <td class="num">${formatNumber(mlPerShare,2)}</td>
+              <td class="num"><strong style="color:var(--blue)">${formatNumber(totalMl,1)}</strong></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
+
+    <!-- Allocation timeline chart -->
+    ${_announcements.length ? `
+    <div class="card" style="padding:16px;margin-bottom:16px">
+      <p style="font-weight:600;font-size:var(--text-sm);margin-bottom:4px">Allocation Timeline — ML per share</p>
+      <p class="muted" style="font-size:var(--text-xs);margin-bottom:12px">Cumulative announced ML/share through each water year</p>
+      <canvas id="allocation-chart" style="width:100%;max-height:280px"></canvas>
+    </div>` : ''}
+
+    <!-- Seasonal accounts table -->
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <p style="font-weight:600;font-size:var(--text-sm)">Seasonal Accounts — ${_waterYear}</p>
-      ${canWrite() && _sources.length ? '<button class="btn btn-secondary btn-sm" id="btn-add-account">＋ Add / update account</button>' : ''}
+      <div class="flex gap-2">
+        <button class="btn btn-ghost btn-sm" id="btn-sync-announcements">↻ Sync announcements</button>
+        ${canWrite() && _sources.length ? '<button class="btn btn-secondary btn-sm" id="btn-add-account">＋ Add / update account</button>' : ''}
+      </div>
     </div>
     <div class="card" style="overflow:hidden">
       ${_accounts.length ? `
       <table class="data-table">
         <thead><tr>
           <th>Source</th>
-          <th class="num">Opening allocation (ML)</th>
+          <th class="num">Announced (ML)</th>
           <th class="num">Carryover in (ML)</th>
           <th class="num">Carryover loss %</th>
           <th class="num">Net carryover (ML)</th>
+          <th class="num">Trades (ML)</th>
           <th class="num">Available (ML)</th>
           <th>Notes</th>
           ${canWrite()?'<th></th>':''}
@@ -324,33 +386,200 @@ function _renderAccounts(content, farm) {
         <tbody>
           ${_accounts.map(a => {
             const src = _sources.find(s => s.id === a.source_id);
+            // Find entitlements for this source
+            const sourceEnts = _entitlements.filter(e => e.source_id === a.source_id && e.wal_number);
+            const announcedMl = sourceEnts.reduce((sum, e) => {
+              const walAnns = yearAnnouncements.filter(an => an.wal_number === e.wal_number);
+              const mlPerShare = walAnns.reduce((s,an) => s+(parseFloat(an.ml_per_share)||0), 0);
+              return sum + mlPerShare * (parseFloat(e.ml_held)||0);
+            }, 0);
+            // Fall back to manual opening_allocation_ml if no announcements
+            const openingMl = announcedMl || (parseFloat(a.opening_allocation_ml)||0);
             const carryLoss = parseFloat(a.carryover_loss_pct)||0;
             const netCarry = (parseFloat(a.carryover_in_ml)||0) * (1-carryLoss/100);
-            const tIn = _trades.filter(t=>t.source_id===a.source_id&&(t.trade_type==='temp_in'||t.trade_type==='perm_in')).reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
-            const tOut = _trades.filter(t=>t.source_id===a.source_id&&(t.trade_type==='temp_out'||t.trade_type==='perm_out')).reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
-            const avail = (parseFloat(a.opening_allocation_ml)||0) + netCarry + tIn - tOut;
+            const tIn = _trades.filter(t=>t.source_id===a.source_id&&(t.trade_type==='buy')).reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
+            const tOut = _trades.filter(t=>t.source_id===a.source_id&&(t.trade_type==='sell')).reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
+            const avail = openingMl + netCarry + tIn - tOut;
             return `<tr>
               <td><strong>${src?.name||'—'}</strong></td>
-              <td class="num">${formatNumber(a.opening_allocation_ml,1)}</td>
+              <td class="num">${announcedMl ? formatNumber(announcedMl,1) : formatNumber(a.opening_allocation_ml,1)}</td>
               <td class="num">${formatNumber(a.carryover_in_ml,1)||'—'}</td>
               <td class="num">${carryLoss ? carryLoss+'%' : '—'}</td>
               <td class="num">${netCarry ? formatNumber(netCarry,1) : '—'}</td>
+              <td class="num" style="color:${tIn-tOut>=0?'var(--green)':'var(--red)'}">${tIn||tOut?(tIn-tOut>=0?'+':'')+formatNumber(tIn-tOut,1):'—'}</td>
               <td class="num"><strong style="color:var(--blue)">${formatNumber(avail,1)}</strong></td>
               <td class="muted text-sm">${a.notes||''}</td>
               ${canWrite()?`<td><button class="btn btn-ghost btn-sm edit-account-btn" data-id="${a.id}">Edit</button></td>`:''}
             </tr>`;
           }).join('')}
         </tbody>
-      </table>` : `<div class="empty-state" style="padding:30px"><p>No seasonal accounts for ${_waterYear} yet.</p>${canWrite()&&_sources.length?'<p>Add the opening allocation for each water source.</p>':''}</div>`}
+      </table>` : `<div class="empty-state" style="padding:30px">
+        <p>No seasonal accounts for ${_waterYear} yet.</p>
+        ${canWrite()&&_sources.length?'<p>Add the opening allocation for each water source.</p>':''}
+      </div>`}
     </div>
   `;
 
+  // Wire buttons
   qs('#btn-add-account', content)?.addEventListener('click', () => _accountModal(content, farm));
   content.querySelectorAll('.edit-account-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const acc = _accounts.find(a => a.id === btn.dataset.id);
       if (acc) _accountModal(content, farm, acc);
     });
+  });
+
+  // Manual sync button
+  qs('#btn-sync-announcements', content)?.addEventListener('click', async () => {
+    const btn = qs('#btn-sync-announcements', content);
+    btn.disabled = true;
+    btn.textContent = 'Syncing…';
+    try {
+      const res = await fetch('/.netlify/functions/sync-water-announcements', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        toast('Announcements synced', 'success');
+        await _loadData(farm);
+        _renderAccounts(content, farm);
+      } else {
+        throw new Error(data.error || 'Sync failed');
+      }
+    } catch (err) {
+      toast(err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = '↻ Sync announcements';
+    }
+  });
+
+  // Draw allocation timeline chart
+  if (_announcements.length) {
+    _drawAllocationChart(content);
+  }
+}
+
+function _drawAllocationChart(content) {
+  const canvas = qs('#allocation-chart', content);
+  if (!canvas) return;
+
+  // Group by water_year and wal_number, build cumulative ML/share series
+  const years = [...new Set(_announcements.map(a => a.water_year))].sort();
+  const wals = [...new Set(_announcements.map(a => a.wal_number))].filter(Boolean);
+
+  // For simplicity, chart first WAL's cumulative per year
+  const wal = wals[0];
+  if (!wal) return;
+
+  const walAnns = _announcements.filter(a => a.wal_number === wal).sort((a,b) => new Date(a.announcement_date)-new Date(b.announcement_date));
+
+  // Build dataset per year — x axis = day of water year (0-365), y = cumulative ML/share
+  const colors = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2'];
+  const datasets = years.map((yr, i) => {
+    const yrAnns = walAnns.filter(a => a.water_year === yr);
+    let cumulative = 0;
+    const points = [{ x: 0, y: 0 }];
+    for (const a of yrAnns) {
+      cumulative += parseFloat(a.ml_per_share)||0;
+      // Day of water year
+      const d = new Date(a.announcement_date);
+      const wyStart = new Date(`${yr.split('-')[0]}-07-01`);
+      const dayOfYear = Math.round((d - wyStart) / (1000*60*60*24));
+      points.push({ x: dayOfYear, y: parseFloat(cumulative.toFixed(3)) });
+    }
+    const isCurrentYear = yr === _waterYear;
+    return {
+      label: yr,
+      data: points,
+      borderColor: isCurrentYear ? colors[0] : colors[i % colors.length],
+      borderWidth: isCurrentYear ? 3 : 1.5,
+      borderDash: isCurrentYear ? [] : [4,2],
+      tension: 0,
+      pointRadius: isCurrentYear ? 4 : 2,
+      fill: false,
+    };
+  });
+
+  // Simple canvas chart — no library needed
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth || 600;
+  const H = 260;
+  canvas.width = W;
+  canvas.height = H;
+
+  const pad = { top: 20, right: 20, bottom: 40, left: 50 };
+  const chartW = W - pad.left - pad.right;
+  const chartH = H - pad.top - pad.bottom;
+
+  // Find max values
+  const allPoints = datasets.flatMap(d => d.data);
+  const maxX = 365;
+  const maxY = Math.max(...allPoints.map(p => p.y), 1) * 1.1;
+
+  const toCanvasX = x => pad.left + (x / maxX) * chartW;
+  const toCanvasY = y => pad.top + chartH - (y / maxY) * chartH;
+
+  // Background
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--surface') || '#fff';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.strokeStyle = '#e5e7eb';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = toCanvasY((maxY / 4) * i);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + chartW, y); ctx.stroke();
+    ctx.fillStyle = '#6b7280';
+    ctx.font = '11px Inter, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText(((maxY / 4) * i).toFixed(1), pad.left - 6, y + 4);
+  }
+
+  // Month labels on x axis (Jul=0, Aug=31, Sep=62...)
+  const months = ['Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun'];
+  const monthDays = [0,31,62,92,123,153,184,212,243,273,304,334];
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '10px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  monthDays.forEach((d, i) => {
+    const x = toCanvasX(d);
+    ctx.fillText(months[i], x, H - 8);
+    ctx.strokeStyle = '#f3f4f6';
+    ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + chartH); ctx.stroke();
+  });
+
+  // Draw datasets
+  datasets.forEach(ds => {
+    if (ds.data.length < 2) return;
+    ctx.strokeStyle = ds.borderColor;
+    ctx.lineWidth = ds.borderWidth;
+    if (ds.borderDash?.length) ctx.setLineDash(ds.borderDash);
+    else ctx.setLineDash([]);
+    ctx.beginPath();
+    ds.data.forEach((p, i) => {
+      const x = toCanvasX(p.x);
+      const y = toCanvasY(p.y);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    // Dots
+    ctx.setLineDash([]);
+    ds.data.forEach(p => {
+      ctx.fillStyle = ds.borderColor;
+      ctx.beginPath();
+      ctx.arc(toCanvasX(p.x), toCanvasY(p.y), ds.pointRadius, 0, Math.PI*2);
+      ctx.fill();
+    });
+  });
+
+  // Legend
+  let legendX = pad.left;
+  datasets.slice().reverse().slice(0,6).reverse().forEach(ds => {
+    ctx.fillStyle = ds.borderColor;
+    ctx.fillRect(legendX, 4, 20, 3);
+    ctx.fillStyle = '#374151';
+    ctx.font = ds.label === _waterYear ? 'bold 10px Inter,sans-serif' : '10px Inter,sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(ds.label, legendX + 24, 11);
+    legendX += ctx.measureText(ds.label).width + 40;
   });
 }
 
