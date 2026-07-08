@@ -47,9 +47,8 @@ exports.handler = async (event) => {
     if (!res.ok) throw new Error(`Register returned ${res.status}`);
     const html = await res.text();
 
-    console.log('Response status:', res.status, 'HTML length:', html.length);
-    console.log('HTML sample:', html.slice(0, 500));
     const result = parseWalHtml(html, `WAL${walNum}`);
+    console.log('Parse result:', JSON.stringify(result));
 
     if (!result.found) {
       return {
