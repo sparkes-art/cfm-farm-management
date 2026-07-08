@@ -1,6 +1,5 @@
 // netlify/functions/lookup-wal.js
 // Proxies WAL number lookups to WaterInsights API
-// Keeps the NSW Water API key server-side
 
 const NSW_WATER_API_KEY = process.env.NSW_WATER_API_KEY;
 
@@ -23,50 +22,51 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'WAL number required' }) };
   }
 
-  // Normalise — strip spaces, ensure WAL prefix
   const walNormalised = wal.startsWith('WAL') ? wal : `WAL${wal}`;
 
-  try {
-    const response = await fetch(
-      `https://waterinsights.waternsw.com.au/api/v1/licence?wal_number=${encodeURIComponent(walNormalised)}`,
-      {
-        headers: {
-          'Authorization': NSW_WATER_API_KEY,
-          'Accept': 'application/json',
-        },
-      }
-    );
+  // Try multiple URL patterns since we're not sure of the exact endpoint
+  const urlsToTry = [
+    `https://waterinsights.waternsw.com.au/api/v1/licence?wal_number=${encodeURIComponent(walNormalised)}`,
+    `https://waterinsights.waternsw.com.au/api/v2/licence?wal_number=${encodeURIComponent(walNormalised)}`,
+    `https://waterinsights.waternsw.com.au/api/v1/licences/${encodeURIComponent(walNormalised)}`,
+  ];
 
-    if (response.status === 404) {
-      return { statusCode: 404, headers: CORS, body: JSON.stringify({ error: `WAL number ${walNormalised} not found` }) };
+  for (const url of urlsToTry) {
+    console.log('Trying URL:', url);
+    const response = await fetch(url, {
+      headers: {
+        'Authorization': NSW_WATER_API_KEY,
+        'Accept': 'application/json',
+      },
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    const bodyText = await response.text();
+    console.log('Status:', response.status, 'Content-Type:', contentType);
+    console.log('Body (first 500 chars):', bodyText.slice(0, 500));
+
+    if (contentType.includes('application/json') && response.ok) {
+      const data = JSON.parse(bodyText);
+      const licence = data?.licence || data?.data || data;
+      return {
+        statusCode: 200,
+        headers: CORS,
+        body: JSON.stringify({
+          wal_number: walNormalised,
+          source_name: licence?.water_source_name || licence?.waterSourceName || null,
+          water_source_type: licence?.water_source_type || licence?.waterSourceType || null,
+          ml_held: parseFloat(licence?.share_quantity || licence?.shareQuantity || licence?.volume_ml || 0) || null,
+          licence_category: licence?.licence_category || licence?.licenceCategory || null,
+          licence_purpose: licence?.licence_purpose || licence?.purpose || null,
+          raw: data,
+        }),
+      };
     }
-
-    if (!response.ok) {
-      const text = await response.text();
-      console.error('WaterInsights error:', response.status, text);
-      return { statusCode: response.status, headers: CORS, body: JSON.stringify({ error: 'WaterInsights API error', detail: text }) };
-    }
-
-    const data = await response.json();
-
-    // Normalise response into a clean object for the UI
-    // WaterInsights returns licence details — map to what we need
-    const licence = data?.licence || data?.data || data;
-
-    const result = {
-      wal_number: walNormalised,
-      source_name: licence?.water_source_name || licence?.waterSourceName || null,
-      water_source_type: licence?.water_source_type || licence?.waterSourceType || null,
-      ml_held: parseFloat(licence?.share_quantity || licence?.shareQuantity || licence?.volume_ml || 0) || null,
-      licence_category: licence?.licence_category || licence?.licenceCategory || null,
-      licence_purpose: licence?.licence_purpose || licence?.purpose || null,
-      raw: data, // pass raw back so we can inspect during testing
-    };
-
-    return { statusCode: 200, headers: CORS, body: JSON.stringify(result) };
-
-  } catch (err) {
-    console.error('lookup-wal error:', err);
-    return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: err.message }) };
   }
+
+  return {
+    statusCode: 502,
+    headers: CORS,
+    body: JSON.stringify({ error: 'Could not reach WaterInsights API — check Netlify function logs for details' }),
+  };
 };
