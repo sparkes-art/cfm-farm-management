@@ -390,6 +390,46 @@ function _renderAccounts(content, farm) {
     return totalPerShare * (parseFloat(ent.ml_held)||0);
   }
 
+  // Build allocation rows — entitlements with announcements first, then manual accounts
+  function _buildAllocationRows() {
+    const rows = [];
+    const seenSources = new Set();
+    for (const e of _entitlements.filter(x => x.wal_number && x.source_id)) {
+      if (seenSources.has(e.source_id)) continue;
+      seenSources.add(e.source_id);
+      const src = _sources.find(s => s.id === e.source_id);
+      const sourceEnts = _entitlements.filter(x => x.source_id === e.source_id && x.wal_number);
+      const announcedMl = sourceEnts.reduce((sum, x) => {
+        const walAnns = yearAnnouncements.filter(an => an.wal_number === x.wal_number);
+        const mlPerShare = walAnns.reduce((s,an) => s+(parseFloat(an.ml_per_share)||0), 0);
+        return sum + mlPerShare * (parseFloat(x.ml_held)||0);
+      }, 0);
+      const acc = _accounts.find(a => a.source_id === e.source_id);
+      const openingMl = announcedMl || (parseFloat(acc?.opening_allocation_ml)||0);
+      const carryLoss = parseFloat(acc?.carryover_loss_pct)||0;
+      const netCarry = (parseFloat(acc?.carryover_in_ml)||0) * (1-carryLoss/100);
+      const tIn = _trades.filter(t=>t.source_id===e.source_id&&t.trade_type==='buy').reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
+      const tOut = _trades.filter(t=>t.source_id===e.source_id&&t.trade_type==='sell').reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
+      const avail = openingMl + netCarry + tIn - tOut;
+      rows.push({ src, e, acc, announcedMl, openingMl, carryLoss, netCarry, tIn, tOut, avail });
+    }
+    for (const a of _accounts) {
+      if (seenSources.has(a.source_id)) continue;
+      seenSources.add(a.source_id);
+      const src = _sources.find(s => s.id === a.source_id);
+      const e = _entitlements.find(x => x.source_id === a.source_id);
+      const openingMl = parseFloat(a.opening_allocation_ml)||0;
+      const carryLoss = parseFloat(a.carryover_loss_pct)||0;
+      const netCarry = (parseFloat(a.carryover_in_ml)||0) * (1-carryLoss/100);
+      const tIn = _trades.filter(t=>t.source_id===a.source_id&&t.trade_type==='buy').reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
+      const tOut = _trades.filter(t=>t.source_id===a.source_id&&t.trade_type==='sell').reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
+      const avail = openingMl + netCarry + tIn - tOut;
+      rows.push({ src, e, acc: a, announcedMl: 0, openingMl, carryLoss, netCarry, tIn, tOut, avail });
+    }
+    return rows;
+  }
+  const allocationRows = _buildAllocationRows();
+
   content.innerHTML = `
     <!-- Announcement-driven allocation summary -->
     ${_entitlements.length && yearAnnouncements.length ? `
@@ -402,7 +442,6 @@ function _renderAccounts(content, farm) {
           <th style="background:var(--surface-alt,#f9fafb)">Category</th>
           <th class="num" style="background:var(--surface-alt,#f9fafb)">Shares</th>
           <th class="num">ML/share announced</th>
-          <th class="num">Alloc %</th>
           <th class="num">Total announced (ML)</th>
         </tr></thead>
         <tbody>
@@ -410,16 +449,12 @@ function _renderAccounts(content, farm) {
             const walAnns = yearAnnouncements.filter(a => a.wal_number === e.wal_number);
             const mlPerShare = walAnns.reduce((s,a) => s+(parseFloat(a.ml_per_share)||0), 0);
             const totalMl = mlPerShare * (parseFloat(e.ml_held)||0);
-            // Allocation % = ML/share announced / max possible (use licence conditions ml_per_unit if known, else 1.5 default for groundwater)
-            const maxMlPerShare = 1.5; // will improve once we have licence condition data
-            const allocPct = mlPerShare ? Math.round((mlPerShare/maxMlPerShare)*100) : null;
             return `<tr>
               <td class="muted" style="background:var(--surface-alt,#f9fafb)">${e.wal_number}</td>
               <td style="background:var(--surface-alt,#f9fafb)"><strong>${e.water_source_name || '—'}</strong></td>
               <td class="muted" style="background:var(--surface-alt,#f9fafb)">${e.licence_category||'—'}</td>
               <td class="num" style="background:var(--surface-alt,#f9fafb)">${formatNumber(e.ml_held,0)}</td>
               <td class="num">${formatNumber(mlPerShare,2)}</td>
-              <td class="num"><span style="font-size:11px;color:var(--muted)">${allocPct !== null ? allocPct+'%' : '—'}</span></td>
               <td class="num"><strong style="color:var(--blue)">${formatNumber(totalMl,1)}</strong></td>
             </tr>`;
           }).join('')}
@@ -451,7 +486,7 @@ function _renderAccounts(content, farm) {
       </div>
     </div>
     <div class="card" style="overflow:hidden">
-      ${_accounts.length ? `
+      ${(allocationRows.length) ? `
       <table class="data-table">
         <thead><tr>
           <th>Source</th>
@@ -466,41 +501,22 @@ function _renderAccounts(content, farm) {
           ${canWrite()?'<th></th>':''}
         </tr></thead>
         <tbody>
-          ${_accounts.map(a => {
-            const src = _sources.find(s => s.id === a.source_id);
-            // Find entitlements for this source
-            const sourceEnts = _entitlements.filter(e => e.source_id === a.source_id && e.wal_number);
-            const announcedMl = sourceEnts.reduce((sum, e) => {
-              const walAnns = yearAnnouncements.filter(an => an.wal_number === e.wal_number);
-              const mlPerShare = walAnns.reduce((s,an) => s+(parseFloat(an.ml_per_share)||0), 0);
-              return sum + mlPerShare * (parseFloat(e.ml_held)||0);
-            }, 0);
-            // Fall back to manual opening_allocation_ml if no announcements
-            const openingMl = announcedMl || (parseFloat(a.opening_allocation_ml)||0);
-            const carryLoss = parseFloat(a.carryover_loss_pct)||0;
-            const netCarry = (parseFloat(a.carryover_in_ml)||0) * (1-carryLoss/100);
-            const tIn = _trades.filter(t=>t.source_id===a.source_id&&(t.trade_type==='buy')).reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
-            const tOut = _trades.filter(t=>t.source_id===a.source_id&&(t.trade_type==='sell')).reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
-            const avail = openingMl + netCarry + tIn - tOut;
-            // Find category from entitlements for this source
-            const srcEnt = _entitlements.find(e => e.source_id === a.source_id);
-            return `<tr>
+          ${allocationRows.map(({ src, e, acc, announcedMl, openingMl, carryLoss, netCarry, tIn, tOut, avail }) => `<tr>
               <td><strong>${src?.name||'—'}</strong></td>
-              <td class="muted">${srcEnt?.licence_category||'—'}</td>
-              <td class="num">${announcedMl ? formatNumber(announcedMl,1) : formatNumber(a.opening_allocation_ml,1)}</td>
-              <td class="num">${formatNumber(a.carryover_in_ml,1)||'—'}</td>
+              <td class="muted">${e?.licence_category||'—'}</td>
+              <td class="num">${announcedMl ? formatNumber(announcedMl,1) : (openingMl ? formatNumber(openingMl,1) : '—')}</td>
+              <td class="num">${acc?.carryover_in_ml ? formatNumber(acc.carryover_in_ml,1) : '—'}</td>
               <td class="num">${carryLoss ? carryLoss+'%' : '—'}</td>
               <td class="num">${netCarry ? formatNumber(netCarry,1) : '—'}</td>
               <td class="num" style="color:${tIn-tOut>=0?'var(--green)':'var(--red)'}">${tIn||tOut?(tIn-tOut>=0?'+':'')+formatNumber(tIn-tOut,1):'—'}</td>
               <td class="num"><strong style="color:var(--blue)">${formatNumber(avail,1)}</strong></td>
-              <td class="muted text-sm">${a.notes||''}</td>
-              ${canWrite()?`<td><button class="btn btn-ghost btn-sm edit-account-btn" data-id="${a.id}">Edit</button></td>`:''}
-            </tr>`;
-          }).join('')}
+              <td class="muted text-sm">${acc?.notes||''}</td>
+              ${canWrite()?`<td><button class="btn btn-ghost btn-sm edit-account-btn" data-id="${acc?.id||''}" style="${acc?'':'opacity:.4;pointer-events:none'}">Edit</button></td>`:''}
+            </tr>`).join('')}
         </tbody>
       </table>` : `<div class="empty-state" style="padding:30px">
-        <p>No seasonal accounts for ${_waterYear} yet.</p>
-        ${canWrite()&&_sources.length?'<p>Add the opening allocation for each water source.</p>':''}
+        <p>No allocations for ${_waterYear} yet.</p>
+        ${canWrite()&&_sources.length?'<p>Click Sync announcements or add a manual account above.</p>':''}
       </div>`}
     </div>
   `;
