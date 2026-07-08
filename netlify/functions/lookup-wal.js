@@ -1,6 +1,5 @@
 // netlify/functions/lookup-wal.js
 // Fetches WAL licence details from the NSW Public Water Register
-// Returns: water source, category, share component (ML), licence type
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -23,43 +22,29 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'WAL number required' }) };
   }
 
-  // Normalise — strip leading 'WAL' and any spaces
+  // Strip 'WAL' prefix — the form just takes the number
   const walNum = walNumber.toString().replace(/^WAL/i, '').trim();
 
   try {
-    // The main page uses an iframe — fetch the inner search JSP directly
-    const baseUrl = 'https://waterregister.waternsw.com.au';
-    const searchParams = new URLSearchParams({ WAL: `WAL${walNum}` });
-
-    // Try the inner iframe search URL first
-    const searchRes = await fetch(`${baseUrl}/search/SearchWizard.jsp?${searchParams}`, {
+    // POST to AccessLicenceDetail with just the number (no WAL prefix)
+    const formData = new URLSearchParams({ WAL: walNum });
+    const res = await fetch('https://waterregister.waternsw.com.au/AccessLicenceDetail', {
+      method: 'POST',
       headers: {
         'User-Agent': 'CFM-Farm-Management/1.0',
         'Accept': 'text/html',
+        'Content-Type': 'application/x-www-form-urlencoded',
         'Referer': 'https://waterregister.waternsw.com.au/water-register-frame',
       },
+      body: formData.toString(),
     });
 
-    if (!searchRes.ok) throw new Error(`Register returned ${searchRes.status}`);
-    const html = await searchRes.text();
+    if (!res.ok) throw new Error(`Register returned ${res.status}`);
+    const html = await res.text();
 
-    // Step 2: Parse the HTML for WAL details
     const result = parseWalHtml(html, `WAL${walNum}`);
 
-    console.log('Search HTML snippet:', html.slice(0, 300));
     if (!result.found) {
-      // Try the direct WAL folio URL
-      const folioUrl = `${baseUrl}/search/SearchWizard.jsp?WAL=WAL${walNum}&action=detail`;
-      const folioRes = await fetch(folioUrl, {
-        headers: { 'User-Agent': 'CFM-Farm-Management/1.0', 'Accept': 'text/html' },
-      });
-      if (folioRes.ok) {
-        const folioHtml = await folioRes.text();
-        const folioResult = parseWalHtml(folioHtml, `WAL${walNum}`);
-        if (folioResult.found) {
-          return { statusCode: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify(folioResult) };
-        }
-      }
       return {
         statusCode: 404,
         headers: { ...CORS, 'Content-Type': 'application/json' },
@@ -67,7 +52,11 @@ exports.handler = async (event) => {
       };
     }
 
-    return { statusCode: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify(result) };
+    return {
+      statusCode: 200,
+      headers: { ...CORS, 'Content-Type': 'application/json' },
+      body: JSON.stringify(result),
+    };
 
   } catch (err) {
     console.error('WAL lookup error:', err);
@@ -87,10 +76,9 @@ function parseWalHtml(html, walNumber) {
 
   result.found = true;
 
-  // The API returns a clean table with class="search" cells in this column order:
-  // Category | Status | Water Source | Tenure Type | Management Zone | Share Components | IDEC
   const clean = s => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
+  // Extract td.search cells — columns: Category | Status | Water Source | Tenure | Zone | Share ML | IDEC
   const tdMatches = [...html.matchAll(/<td[^>]*class=.search.[^>]*>([\s\S]*?)<\/td>/gi)];
   const cells = tdMatches.map(m => clean(m[1])).filter(c => c.length > 0);
 
@@ -99,14 +87,18 @@ function parseWalHtml(html, walNumber) {
     result.status      = cells[1] || null;
     result.waterSource = cells[2] || null;
     result.tenure      = cells[3] || null;
-    // cells[4] = Management Zone (often empty)
     const shareNum = (cells[5] || '').replace(/,/g, '').match(/([\d]+\.?\d*)/);
     if (shareNum) result.shareML = parseFloat(shareNum[1]);
   }
 
-  // Water sharing plan from th.result second column
-  const planMatch = html.match(/<th[^>]*class=.result.[^>]*>(Lachlan|Murrumbidgee|Murray|Macquarie|Hunter|Namoi|Border Rivers|Gwydir|Barwon[^<]*)<\/th>/i);
-  if (planMatch) result.waterSharingPlan = planMatch[1].trim();
+  // Water sharing plan
+  const planMatch = html.match(/<th[^>]*class=.result.[^>]*>([\s\S]*?)<\/th>/gi);
+  if (planMatch && planMatch[1]) {
+    const planText = clean(planMatch[1]);
+    if (planText.toLowerCase().includes('plan') || planText.toLowerCase().includes('sharing')) {
+      result.waterSharingPlan = planText;
+    }
+  }
 
   return result;
 }
