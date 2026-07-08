@@ -47,6 +47,8 @@ exports.handler = async (event) => {
     // Step 2: Parse the HTML for WAL details
     const result = parseWalHtml(html, `WAL${walNum}`);
 
+    console.log('Search HTML length:', html.length);
+    console.log('Search HTML snippet:', html.slice(0, 300));
     if (!result.found) {
       // Try the direct WAL folio URL
       const folioUrl = `https://waterregister.waternsw.com.au/water-register-frame?PageID=WALDetail&WAL=WAL${walNum}`;
