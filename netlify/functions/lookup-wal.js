@@ -48,7 +48,6 @@ exports.handler = async (event) => {
     const html = await res.text();
 
     const result = parseWalHtml(html, `WAL${walNum}`);
-    console.log('Parse result:', JSON.stringify(result));
 
     if (!result.found) {
       return {
