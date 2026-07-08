@@ -26,8 +26,13 @@ exports.handler = async (event) => {
   const walNum = walNumber.toString().replace(/^WAL/i, '').trim();
 
   try {
-    // POST to AccessLicenceDetail with just the number (no WAL prefix)
-    const formData = new URLSearchParams({ WAL: walNum });
+    // POST to AccessLicenceDetail with exact form fields from the register
+    const formData = new URLSearchParams({
+      pageCommand: 'search',
+      resultType: 'modern',
+      serType: 'html',
+      wal: walNum,
+    });
     const res = await fetch('https://waterregister.waternsw.com.au/AccessLicenceDetail', {
       method: 'POST',
       headers: {
