@@ -1,7 +1,7 @@
 // modules/water/water.js
 // Water entitlement and usage management
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js';
 import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, currentSeason } from '../../js/ui.js';
 
@@ -14,6 +14,7 @@ let _usage = [];
 let _budgets = [];
 let _announcements = [];
 let _waterYear = null;
+let _realtimeSub = null;
 
 function currentWaterYear() {
   const now = new Date();
@@ -84,11 +85,18 @@ export async function mountWater(container) {
 
   await _loadData(farm);
   _renderTab(container, farm);
+
+  // Subscribe to announcement changes so dashboard updates without refresh
+  _realtimeSub = subscribeTable('water_announcements', farm.id, async () => {
+    _announcements = await dbSelect('water_announcements', 'farm_id=eq.' + farm.id + '&select=*&order=announcement_date.asc');
+    _renderTab(container, farm);
+  });
 }
 
 export function unmountWater() {
   _sources = []; _entitlements = []; _accounts = [];
-  _trades = []; _usage = []; _budgets = [];
+  _trades = []; _usage = []; _budgets = []; _announcements = [];
+  if (_realtimeSub) { _realtimeSub(); _realtimeSub = null; }
 }
 
 async function _loadData(farm) {
@@ -125,14 +133,21 @@ function _renderTab(container, farm) {
 function _renderDashboard(content, farm) {
   // Calculate totals across all sources for this water year
   const totalEntitlement = _entitlements.reduce((s, e) => s + (parseFloat(e.ml_held)||0), 0);
-  const totalAllocation = _accounts.reduce((s, a) => s + (parseFloat(a.opening_allocation_ml)||0), 0);
+  // Use announced allocation if available, otherwise fall back to manual account entry
+  const yearAnnouncements = _announcements.filter(a => a.water_year === _waterYear);
+  const totalAnnouncedMl = _entitlements.filter(e => e.wal_number).reduce((sum, e) => {
+    const walAnns = yearAnnouncements.filter(a => a.wal_number === e.wal_number);
+    const mlPerShare = walAnns.reduce((s,a) => s+(parseFloat(a.ml_per_share)||0), 0);
+    return sum + mlPerShare * (parseFloat(e.ml_held)||0);
+  }, 0);
+  const totalAllocation = totalAnnouncedMl || _accounts.reduce((s, a) => s + (parseFloat(a.opening_allocation_ml)||0), 0);
   const totalCarryover = _accounts.reduce((s, a) => {
     const gross = parseFloat(a.carryover_in_ml)||0;
     const loss = parseFloat(a.carryover_loss_pct)||0;
     return s + (gross * (1 - loss/100));
   }, 0);
-  const totalTradesIn = _trades.filter(t => t.trade_type==='temp_in'||t.trade_type==='perm_in').reduce((s,t) => s+(parseFloat(t.ml)||0), 0);
-  const totalTradesOut = _trades.filter(t => t.trade_type==='temp_out'||t.trade_type==='perm_out').reduce((s,t) => s+(parseFloat(t.ml)||0), 0);
+  const totalTradesIn = _trades.filter(t => t.trade_type==='buy').reduce((s,t) => s+(parseFloat(t.ml)||0), 0);
+  const totalTradesOut = _trades.filter(t => t.trade_type==='sell').reduce((s,t) => s+(parseFloat(t.ml)||0), 0);
   const totalUsed = _usage.reduce((s, u) => s + (parseFloat(u.ml_used)||0), 0);
   const totalAvailable = totalAllocation + totalCarryover + totalTradesIn - totalTradesOut;
   const totalRemaining = Math.max(0, totalAvailable - totalUsed);
@@ -196,12 +211,18 @@ function _renderDashboard(content, farm) {
           ${_sources.map(s => {
             const ent = _entitlements.filter(e => e.source_id === s.id).reduce((sum,e) => sum+(parseFloat(e.ml_held)||0), 0);
             const acc = _accounts.find(a => a.source_id === s.id);
-            const alloc = parseFloat(acc?.opening_allocation_ml)||0;
+            const sourceEnts = _entitlements.filter(e => e.source_id === s.id && e.wal_number);
+            const announcedForSource = sourceEnts.reduce((sum, e) => {
+              const walAnns = yearAnnouncements.filter(a => a.wal_number === e.wal_number);
+              const mlPerShare = walAnns.reduce((sv,a) => sv+(parseFloat(a.ml_per_share)||0), 0);
+              return sum + mlPerShare * (parseFloat(e.ml_held)||0);
+            }, 0);
+            const alloc = announcedForSource || parseFloat(acc?.opening_allocation_ml)||0;
             const carry = parseFloat(acc?.carryover_in_ml)||0;
             const carryLoss = parseFloat(acc?.carryover_loss_pct)||0;
             const netCarry = carry * (1-carryLoss/100);
-            const tIn = _trades.filter(t => t.source_id===s.id && (t.trade_type==='temp_in'||t.trade_type==='perm_in')).reduce((sum,t)=>sum+(parseFloat(t.ml)||0),0);
-            const tOut = _trades.filter(t => t.source_id===s.id && (t.trade_type==='temp_out'||t.trade_type==='perm_out')).reduce((sum,t)=>sum+(parseFloat(t.ml)||0),0);
+            const tIn = _trades.filter(t => t.source_id===s.id && t.trade_type==='buy').reduce((sum,t)=>sum+(parseFloat(t.ml)||0),0);
+            const tOut = _trades.filter(t => t.source_id===s.id && t.trade_type==='sell').reduce((sum,t)=>sum+(parseFloat(t.ml)||0),0);
             const avail = alloc + netCarry + tIn - tOut;
             const used = _usage.filter(u => u.source_id===s.id).reduce((sum,u)=>sum+(parseFloat(u.ml_used)||0),0);
             const rem = Math.max(0, avail-used);
@@ -374,6 +395,7 @@ function _renderAccounts(content, farm) {
       <table class="data-table">
         <thead><tr>
           <th>Source</th>
+          <th>Category</th>
           <th class="num">Announced (ML)</th>
           <th class="num">Carryover in (ML)</th>
           <th class="num">Carryover loss %</th>
@@ -400,8 +422,11 @@ function _renderAccounts(content, farm) {
             const tIn = _trades.filter(t=>t.source_id===a.source_id&&(t.trade_type==='buy')).reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
             const tOut = _trades.filter(t=>t.source_id===a.source_id&&(t.trade_type==='sell')).reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
             const avail = openingMl + netCarry + tIn - tOut;
+            // Find category from entitlements for this source
+            const srcEnt = _entitlements.find(e => e.source_id === a.source_id);
             return `<tr>
               <td><strong>${src?.name||'—'}</strong></td>
+              <td class="muted">${srcEnt?.licence_category||'—'}</td>
               <td class="num">${announcedMl ? formatNumber(announcedMl,1) : formatNumber(a.opening_allocation_ml,1)}</td>
               <td class="num">${formatNumber(a.carryover_in_ml,1)||'—'}</td>
               <td class="num">${carryLoss ? carryLoss+'%' : '—'}</td>
@@ -461,125 +486,164 @@ function _drawAllocationChart(content) {
   const canvas = qs('#allocation-chart', content);
   if (!canvas) return;
 
-  // Group by water_year and wal_number, build cumulative ML/share series
+  // Get all WALs and years
   const years = [...new Set(_announcements.map(a => a.water_year))].sort();
   const wals = [...new Set(_announcements.map(a => a.wal_number))].filter(Boolean);
-
-  // For simplicity, chart first WAL's cumulative per year
   const wal = wals[0];
   if (!wal) return;
 
-  const walAnns = _announcements.filter(a => a.wal_number === wal).sort((a,b) => new Date(a.announcement_date)-new Date(b.announcement_date));
+  const walAnns = _announcements
+    .filter(a => a.wal_number === wal)
+    .sort((a,b) => new Date(a.announcement_date)-new Date(b.announcement_date));
 
-  // Build dataset per year — x axis = day of water year (0-365), y = cumulative ML/share
-  const colors = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2'];
+  // Build dataset per year
+  // Each line: step-function from 0, extending flat to end of water year (day 365)
+  const colors = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#db2777'];
   const datasets = years.map((yr, i) => {
     const yrAnns = walAnns.filter(a => a.water_year === yr);
+    const startYr = parseInt(yr.split('-')[0]);
+    const wyStart = new Date(`${startYr}-07-01`);
     let cumulative = 0;
-    const points = [{ x: 0, y: 0 }];
+    // Start at 0
+    const points = [{ x: 0, y: 0, label: null }];
     for (const a of yrAnns) {
-      cumulative += parseFloat(a.ml_per_share)||0;
-      // Day of water year
       const d = new Date(a.announcement_date);
-      const wyStart = new Date(`${yr.split('-')[0]}-07-01`);
       const dayOfYear = Math.round((d - wyStart) / (1000*60*60*24));
-      points.push({ x: dayOfYear, y: parseFloat(cumulative.toFixed(3)) });
+      cumulative += parseFloat(a.ml_per_share)||0;
+      points.push({
+        x: dayOfYear,
+        y: parseFloat(cumulative.toFixed(3)),
+        label: cumulative.toFixed(2) + ' ML/share',
+        date: a.announcement_date,
+      });
+    }
+    // Extend flat line to end of year (day 365)
+    if (points.length > 1) {
+      const last = points[points.length-1];
+      if (last.x < 365) points.push({ x: 365, y: last.y, label: null });
     }
     const isCurrentYear = yr === _waterYear;
-    return {
-      label: yr,
-      data: points,
-      borderColor: isCurrentYear ? colors[0] : colors[i % colors.length],
-      borderWidth: isCurrentYear ? 3 : 1.5,
-      borderDash: isCurrentYear ? [] : [4,2],
-      tension: 0,
-      pointRadius: isCurrentYear ? 4 : 2,
-      fill: false,
-    };
+    return { label: yr, data: points, color: isCurrentYear ? colors[0] : colors[i % colors.length], isCurrentYear, lineWidth: isCurrentYear ? 2.5 : 1.5, dash: isCurrentYear ? [] : [5,3] };
   });
 
-  // Simple canvas chart — no library needed
   const ctx = canvas.getContext('2d');
-  const W = canvas.offsetWidth || 600;
-  const H = 260;
+  const W = canvas.offsetWidth || 640;
+  const H = 280;
   canvas.width = W;
   canvas.height = H;
 
-  const pad = { top: 20, right: 20, bottom: 40, left: 50 };
+  const pad = { top: 30, right: 20, bottom: 40, left: 55 };
   const chartW = W - pad.left - pad.right;
   const chartH = H - pad.top - pad.bottom;
 
-  // Find max values
   const allPoints = datasets.flatMap(d => d.data);
-  const maxX = 365;
-  const maxY = Math.max(...allPoints.map(p => p.y), 1) * 1.1;
+  const maxY = Math.max(...allPoints.map(p => p.y), 0.5) * 1.15;
+  const toX = x => pad.left + (x / 365) * chartW;
+  const toY = y => pad.top + chartH - (y / maxY) * chartH;
 
-  const toCanvasX = x => pad.left + (x / maxX) * chartW;
-  const toCanvasY = y => pad.top + chartH - (y / maxY) * chartH;
-
-  // Background
-  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--surface') || '#fff';
-  ctx.fillRect(0, 0, W, H);
+  // Clear
+  ctx.clearRect(0, 0, W, H);
 
   // Grid lines
-  ctx.strokeStyle = '#e5e7eb';
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = toCanvasY((maxY / 4) * i);
+  const gridCount = 4;
+  for (let i = 0; i <= gridCount; i++) {
+    const val = (maxY / gridCount) * i;
+    const y = toY(val);
+    ctx.strokeStyle = i === 0 ? '#d1d5db' : '#f3f4f6';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
     ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + chartW, y); ctx.stroke();
     ctx.fillStyle = '#6b7280';
-    ctx.font = '11px Inter, sans-serif';
+    ctx.font = '11px Inter,sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(((maxY / 4) * i).toFixed(1), pad.left - 6, y + 4);
+    ctx.fillText(val.toFixed(2), pad.left - 6, y + 4);
   }
 
-  // Month labels on x axis (Jul=0, Aug=31, Sep=62...)
+  // Month grid + labels
   const months = ['Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun'];
   const monthDays = [0,31,62,92,123,153,184,212,243,273,304,334];
-  ctx.fillStyle = '#6b7280';
-  ctx.font = '10px Inter, sans-serif';
+  ctx.fillStyle = '#9ca3af';
+  ctx.font = '10px Inter,sans-serif';
   ctx.textAlign = 'center';
   monthDays.forEach((d, i) => {
-    const x = toCanvasX(d);
-    ctx.fillText(months[i], x, H - 8);
+    const x = toX(d);
     ctx.strokeStyle = '#f3f4f6';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2,2]);
     ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + chartH); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillText(months[i], x, H - 10);
   });
 
-  // Draw datasets
-  datasets.forEach(ds => {
+  // Draw lines (non-current first, current on top)
+  [...datasets].sort((a,b) => a.isCurrentYear ? 1 : -1).forEach(ds => {
     if (ds.data.length < 2) return;
-    ctx.strokeStyle = ds.borderColor;
-    ctx.lineWidth = ds.borderWidth;
-    if (ds.borderDash?.length) ctx.setLineDash(ds.borderDash);
-    else ctx.setLineDash([]);
+    ctx.strokeStyle = ds.color;
+    ctx.lineWidth = ds.lineWidth;
+    ctx.setLineDash(ds.dash);
+    ctx.globalAlpha = ds.isCurrentYear ? 1 : 0.5;
     ctx.beginPath();
     ds.data.forEach((p, i) => {
-      const x = toCanvasX(p.x);
-      const y = toCanvasY(p.y);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      // Step function — go horizontal then vertical
+      if (i === 0) {
+        ctx.moveTo(toX(p.x), toY(p.y));
+      } else {
+        ctx.lineTo(toX(p.x), toY(ds.data[i-1].y)); // horizontal
+        ctx.lineTo(toX(p.x), toY(p.y));             // vertical
+      }
     });
     ctx.stroke();
-    // Dots
     ctx.setLineDash([]);
-    ds.data.forEach(p => {
-      ctx.fillStyle = ds.borderColor;
+    ctx.globalAlpha = 1;
+
+    // Dots and labels for announcement points (skip first 0,0 and last extension)
+    ds.data.filter(p => p.label).forEach(p => {
+      const x = toX(p.x);
+      const y = toY(p.y);
+      ctx.fillStyle = ds.color;
+      ctx.globalAlpha = ds.isCurrentYear ? 1 : 0.6;
       ctx.beginPath();
-      ctx.arc(toCanvasX(p.x), toCanvasY(p.y), ds.pointRadius, 0, Math.PI*2);
+      ctx.arc(x, y, ds.isCurrentYear ? 5 : 3, 0, Math.PI*2);
       ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Label only for current year
+      if (ds.isCurrentYear) {
+        ctx.fillStyle = '#1e40af';
+        ctx.font = 'bold 10px Inter,sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.label, x, y - 10);
+      }
     });
   });
 
-  // Legend
-  let legendX = pad.left;
-  datasets.slice().reverse().slice(0,6).reverse().forEach(ds => {
-    ctx.fillStyle = ds.borderColor;
-    ctx.fillRect(legendX, 4, 20, 3);
+  // Y axis label
+  ctx.save();
+  ctx.translate(12, pad.top + chartH/2);
+  ctx.rotate(-Math.PI/2);
+  ctx.fillStyle = '#6b7280';
+  ctx.font = '10px Inter,sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('ML per share', 0, 0);
+  ctx.restore();
+
+  // Legend — show recent years only, current year first
+  const legendYears = [...datasets].sort((a,b) => b.label.localeCompare(a.label)).slice(0, 6);
+  let lx = pad.left;
+  const ly = 14;
+  legendYears.forEach(ds => {
+    ctx.globalAlpha = ds.isCurrentYear ? 1 : 0.7;
+    ctx.strokeStyle = ds.color;
+    ctx.lineWidth = ds.isCurrentYear ? 2.5 : 1.5;
+    ctx.setLineDash(ds.dash);
+    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+18, ly); ctx.stroke();
+    ctx.setLineDash([]);
     ctx.fillStyle = '#374151';
-    ctx.font = ds.label === _waterYear ? 'bold 10px Inter,sans-serif' : '10px Inter,sans-serif';
+    ctx.font = ds.isCurrentYear ? 'bold 10px Inter,sans-serif' : '10px Inter,sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(ds.label, legendX + 24, 11);
-    legendX += ctx.measureText(ds.label).width + 40;
+    ctx.globalAlpha = 1;
+    ctx.fillText(ds.label, lx+22, ly+4);
+    lx += ctx.measureText(ds.label).width + 42;
   });
 }
 
