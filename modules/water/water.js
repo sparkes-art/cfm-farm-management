@@ -198,7 +198,7 @@ function _renderDashboard(content, farm) {
       <table class="data-table">
         <thead><tr>
           <th>Source</th>
-          <th>Authority</th>
+          <th>Category</th>
           <th class="num">Entitlement (ML)</th>
           <th class="num">Allocation (ML)</th>
           <th class="num">Carryover (ML)</th>
@@ -226,9 +226,10 @@ function _renderDashboard(content, farm) {
             const avail = alloc + netCarry + tIn - tOut;
             const used = _usage.filter(u => u.source_id===s.id).reduce((sum,u)=>sum+(parseFloat(u.ml_used)||0),0);
             const rem = Math.max(0, avail-used);
+            const srcCategory = _entitlements.find(e => e.source_id === s.id)?.licence_category || '—';
             return `<tr>
               <td><strong>${s.name}</strong></td>
-              <td class="muted">${s.authority||'—'}</td>
+              <td class="muted">${srcCategory}</td>
               <td class="num">${ent ? formatNumber(ent,1) : '—'}</td>
               <td class="num">${alloc ? formatNumber(alloc,1) : '—'}</td>
               <td class="num">${netCarry ? formatNumber(netCarry,1) : '—'}</td>
@@ -354,7 +355,7 @@ function _renderAccounts(content, farm) {
       <p style="font-weight:600;font-size:var(--text-sm);margin-bottom:12px">Announced Allocation — ${_waterYear}</p>
       <table class="data-table">
         <thead><tr>
-          <th>WAL</th><th>Water Source</th><th>Shares</th>
+          <th>WAL</th><th>Water Source</th><th>Category</th><th class="num">Shares</th>
           <th class="num">ML/share announced</th><th class="num">Total announced (ML)</th>
         </tr></thead>
         <tbody>
@@ -365,6 +366,7 @@ function _renderAccounts(content, farm) {
             return `<tr>
               <td class="muted">${e.wal_number}</td>
               <td><strong>${e.water_source_name || '—'}</strong></td>
+              <td class="muted">${e.licence_category||'—'}</td>
               <td class="num">${formatNumber(e.ml_held,0)}</td>
               <td class="num">${formatNumber(mlPerShare,2)}</td>
               <td class="num"><strong style="color:var(--blue)">${formatNumber(totalMl,1)}</strong></td>
@@ -377,7 +379,14 @@ function _renderAccounts(content, farm) {
     <!-- Allocation timeline chart -->
     ${_announcements.length ? `
     <div class="card" style="padding:16px;margin-bottom:16px">
-      <p style="font-weight:600;font-size:var(--text-sm);margin-bottom:4px">Allocation Timeline — ML per share</p>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <p style="font-weight:600;font-size:var(--text-sm)">Allocation Timeline — ML per share</p>
+        <select id="chart-category-filter" class="form-select" style="width:200px;font-size:var(--text-sm)">
+          ${[...new Set(_announcements.map(a => a.category).filter(Boolean))].sort().map(c =>
+            '<option value="' + c + '">' + c + '</option>'
+          ).join('')}
+        </select>
+      </div>
       <p class="muted" style="font-size:var(--text-xs);margin-bottom:12px">Cumulative announced ML/share through each water year</p>
       <canvas id="allocation-chart" style="width:100%;max-height:280px"></canvas>
     </div>` : ''}
@@ -478,21 +487,32 @@ function _renderAccounts(content, farm) {
 
   // Draw allocation timeline chart
   if (_announcements.length) {
-    _drawAllocationChart(content);
+    const categories = [...new Set(_announcements.map(a => a.category).filter(Boolean))].sort();
+    const defaultCat = categories[0] || null;
+    _drawAllocationChart(content, defaultCat);
+
+    qs('#chart-category-filter', content)?.addEventListener('change', (e) => {
+      _drawAllocationChart(content, e.target.value);
+    });
   }
 }
 
-function _drawAllocationChart(content) {
+function _drawAllocationChart(content, categoryFilter) {
   const canvas = qs('#allocation-chart', content);
   if (!canvas) return;
 
-  // Get all WALs and years
-  const years = [...new Set(_announcements.map(a => a.water_year))].sort();
-  const wals = [...new Set(_announcements.map(a => a.wal_number))].filter(Boolean);
+  // Filter announcements by category
+  const filtered = categoryFilter
+    ? _announcements.filter(a => a.category === categoryFilter)
+    : _announcements;
+
+  // Get all WALs and years from filtered set
+  const years = [...new Set(filtered.map(a => a.water_year))].sort();
+  const wals = [...new Set(filtered.map(a => a.wal_number))].filter(Boolean);
   const wal = wals[0];
   if (!wal) return;
 
-  const walAnns = _announcements
+  const walAnns = filtered
     .filter(a => a.wal_number === wal)
     .sort((a,b) => new Date(a.announcement_date)-new Date(b.announcement_date));
 
