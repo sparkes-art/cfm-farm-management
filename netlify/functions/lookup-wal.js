@@ -48,6 +48,7 @@ exports.handler = async (event) => {
     const result = parseWalHtml(html, `WAL${walNum}`);
 
     console.log('Search HTML length:', html.length);
+    console.log('Full HTML:', html);
     console.log('Search HTML snippet:', html.slice(0, 300));
     if (!result.found) {
       // Try the direct WAL folio URL
