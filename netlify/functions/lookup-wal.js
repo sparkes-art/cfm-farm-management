@@ -85,7 +85,7 @@ function parseWalHtml(html, walNumber) {
   const clean = s => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
   // Extract td.search cells — columns: Category | Status | Water Source | Tenure | Zone | Share ML | IDEC
-  const tdMatches = [...html.matchAll(/<td[^>]*class=.search.[^>]*>([\s\S]*?)<\/td>/gi)];
+  const tdMatches = [...html.matchAll(/<td[^>]*class=["']search["'][^>]*>([\s\S]*?)<\/td>/gi)];
   const cells = tdMatches.map(m => clean(m[1])).filter(c => c.length > 0);
 
   if (cells.length >= 6) {
@@ -98,19 +98,38 @@ function parseWalHtml(html, walNumber) {
     if (shareNum) result.shareML = parseFloat(shareNum[1]);
   }
 
+  // Fallback for shareML — find any number near "Share Components" or large standalone number
+  if (!result.shareML) {
+    const shareMatch = html.match(/class=["']search["'][^>]*>\s*([\d,]+\.?\d*)\s*<\/td>/gi);
+    if (shareMatch) {
+      for (const m of shareMatch) {
+        const numMatch = m.match(/([\d,]+\.?\d*)/);
+        if (numMatch) {
+          const val = parseFloat(numMatch[1].replace(/,/g, ''));
+          if (val > 0) { result.shareML = val; break; }
+        }
+      }
+    }
+  }
+
   // Nominated Work Approvals — td.result cells
-  const tdResultMatches = [...html.matchAll(/<td[^>]*class=.result.[^>]*>([\s\S]*?)<\/td>/gi)];
+  const tdResultMatches = [...html.matchAll(/<td[^>]*class=["']result["'][^>]*>([\s\S]*?)<\/td>/gi)];
   const resultCells = tdResultMatches.map(m => clean(m[1])).filter(c => c.length > 0 && c !== '\u00a0');
   if (resultCells.length > 0) {
-    // First td.result is usually the nominated works approval number
     result.nominatedWorks = resultCells[0] || null;
   }
 
-  // Water sharing plan — th.result cells (second one is the plan name)
-  const thResultMatches = [...html.matchAll(/<th[^>]*class=.result.[^>]*>([\s\S]*?)<\/th>/gi)];
+  // Water sharing plan — find the th.result that contains the actual plan name (not the label)
+  const thResultMatches = [...html.matchAll(/<th[^>]*class=["']result["'][^>]*>([\s\S]*?)<\/th>/gi)];
   const thCells = thResultMatches.map(m => clean(m[1])).filter(c => c.length > 0);
-  // Find the cell that looks like a plan name
-  const planCell = thCells.find(c => c.toLowerCase().includes('plan') || c.toLowerCase().includes('sharing') || c.toLowerCase().includes('sources') || c.toLowerCase().includes('river'));
+  // The plan name is the cell that is NOT "Water sharing plan" label but contains year or source name
+  const planCell = thCells.find(c => 
+    c.match(/\d{4}/) || // contains a year
+    c.toLowerCase().includes('sources') || 
+    c.toLowerCase().includes('river') ||
+    c.toLowerCase().includes('alluvial') ||
+    c.toLowerCase().includes('groundwater')
+  );
   if (planCell) result.waterSharingPlan = planCell;
 
   // Plan conditions — extract take of water limit (ML/unit share)
