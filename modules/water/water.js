@@ -659,25 +659,28 @@ function _entitlementModal(content, farm, existing = null) {
         status.textContent = 'Looking up…';
         lookupBtn.disabled = true;
         try {
-          const res = await fetch(`/.netlify/functions/lookup-wal?wal=${encodeURIComponent(walRaw)}`);
+          const res = await fetch('/.netlify/functions/lookup-wal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ walNumber: walRaw }),
+          });
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Lookup failed');
-          // Auto-fill fields
-          if (data.source_name) {
-            qs('#we-source-name', modal).value = data.source_name;
+          // Auto-fill fields from register response
+          if (data.waterSource) {
+            qs('#we-source-name', modal).value = data.waterSource;
           }
-          if (data.ml_held) {
-            qs('#we-ml', modal).value = data.ml_held;
+          if (data.shareML) {
+            qs('#we-ml', modal).value = data.shareML;
           }
-          if (data.licence_category) {
-            qs('#we-category', modal).value = data.licence_category;
+          if (data.category) {
+            qs('#we-category', modal).value = data.category;
           }
-          if (data.licence_purpose) {
-            qs('#we-purpose', modal).value = data.licence_purpose;
+          if (data.tenure) {
+            qs('#we-purpose', modal).value = data.tenure;
           }
-          // Update WAL field to normalised value
-          if (data.wal_number) {
-            qs('#we-wal', modal).value = data.wal_number;
+          if (data.walNumber) {
+            qs('#we-wal', modal).value = data.walNumber;
           }
           status.textContent = '✓ Found';
           status.style.color = 'var(--success)';
