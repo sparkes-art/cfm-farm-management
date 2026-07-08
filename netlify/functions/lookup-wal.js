@@ -94,18 +94,32 @@ function parseWalHtml(html, walNumber) {
     result.status      = cells[1] || null;
     result.waterSource = cells[2] || null;
     result.tenure      = cells[3] || null;
+    // cells[4] = Management Zone (often empty)
     const shareNum = (cells[5] || '').replace(/,/g, '').match(/([\d]+\.?\d*)/);
     if (shareNum) result.shareML = parseFloat(shareNum[1]);
   }
 
-  // Water sharing plan
-  const planMatch = html.match(/<th[^>]*class=.result.[^>]*>([\s\S]*?)<\/th>/gi);
-  if (planMatch && planMatch[1]) {
-    const planText = clean(planMatch[1]);
-    if (planText.toLowerCase().includes('plan') || planText.toLowerCase().includes('sharing')) {
-      result.waterSharingPlan = planText;
-    }
+  // Nominated Work Approvals — td.result cells
+  const tdResultMatches = [...html.matchAll(/<td[^>]*class=.result.[^>]*>([\s\S]*?)<\/td>/gi)];
+  const resultCells = tdResultMatches.map(m => clean(m[1])).filter(c => c.length > 0 && c !== '\u00a0');
+  if (resultCells.length > 0) {
+    // First td.result is usually the nominated works approval number
+    result.nominatedWorks = resultCells[0] || null;
   }
+
+  // Water sharing plan — th.result cells (second one is the plan name)
+  const thResultMatches = [...html.matchAll(/<th[^>]*class=.result.[^>]*>([\s\S]*?)<\/th>/gi)];
+  const thCells = thResultMatches.map(m => clean(m[1])).filter(c => c.length > 0);
+  // Find the cell that looks like a plan name
+  const planCell = thCells.find(c => c.toLowerCase().includes('plan') || c.toLowerCase().includes('sharing') || c.toLowerCase().includes('sources') || c.toLowerCase().includes('river'));
+  if (planCell) result.waterSharingPlan = planCell;
+
+  // Plan conditions — extract take of water limit (ML/unit share)
+  const takeMatch = html.match(/maximum water account debit[\s\S]*?([\d\.]+)\s*ML\/unit share/i);
+  if (takeMatch) result.mlPerUnitShare = parseFloat(takeMatch[1]);
+
+  const carryoverMatch = html.match(/carried over[\s\S]*?([\d\.]+)\s*ML\/unit share/i);
+  if (carryoverMatch) result.carryoverMlPerUnitShare = parseFloat(carryoverMatch[1]);
 
   return result;
 }

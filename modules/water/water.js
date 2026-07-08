@@ -646,6 +646,12 @@ function _entitlementModal(content, farm, existing = null) {
         <div class="form-group"><label class="form-label">Licence purpose <span class="text-muted">(optional)</span></label>
           <input class="form-input" id="we-purpose" value="${existing?.licence_purpose||''}" placeholder="e.g. Irrigation"></div>
       </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Nominated works approval <span class="text-muted">(optional)</span></label>
+          <input class="form-input" id="we-nominated-works" value="${existing?.nominated_works||''}"></div>
+        <div class="form-group"><label class="form-label">Water sharing plan <span class="text-muted">(optional)</span></label>
+          <input class="form-input" id="we-plan" value="${existing?.water_sharing_plan||''}"></div>
+      </div>
       <div class="form-group"><label class="form-label">Notes</label>
         <textarea class="form-textarea" id="we-notes" rows="2">${existing?.notes||''}</textarea></div>
     `,
@@ -667,25 +673,21 @@ function _entitlementModal(content, farm, existing = null) {
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'Lookup failed');
           // Auto-fill fields from register response
-          if (data.waterSource) {
-            qs('#we-source-name', modal).value = data.waterSource;
-          }
-          if (data.shareML) {
-            qs('#we-ml', modal).value = data.shareML;
-          }
-          if (data.category) {
-            qs('#we-category', modal).value = data.category;
-          }
-          if (data.tenure) {
-            qs('#we-purpose', modal).value = data.tenure;
-          }
-          if (data.walNumber) {
-            qs('#we-wal', modal).value = data.walNumber;
+          if (data.waterSource) qs('#we-source-name', modal).value = data.waterSource;
+          if (data.shareML)     qs('#we-ml', modal).value = data.shareML;
+          if (data.category)    qs('#we-category', modal).value = data.category;
+          if (data.tenure)      qs('#we-purpose', modal).value = data.tenure;
+          if (data.walNumber)   qs('#we-wal', modal).value = data.walNumber;
+          if (data.nominatedWorks) qs('#we-nominated-works', modal).value = data.nominatedWorks;
+          if (data.waterSharingPlan) qs('#we-plan', modal).value = data.waterSharingPlan;
+          if (data.mlPerUnitShare) {
+            const notes = [];
+            notes.push('Max debit: ' + data.mlPerUnitShare + ' ML/unit share');
+            if (data.carryoverMlPerUnitShare) notes.push('Max carryover: ' + data.carryoverMlPerUnitShare + ' ML/unit share');
+            qs('#we-notes', modal).value = notes.join('. ');
           }
           status.textContent = '✓ Found';
           status.style.color = 'var(--success)';
-          // Log raw response during testing so we can inspect the shape
-          console.log('WAL lookup raw response:', data.raw);
         } catch (err) {
           status.textContent = err.message;
           status.style.color = 'var(--danger)';
@@ -718,6 +720,8 @@ function _entitlementModal(content, farm, existing = null) {
         purchase_price_per_ml: parseFloat(qs('#we-price', modal)?.value)||null,
         licence_category: qs('#we-category', modal)?.value?.trim() || null,
         licence_purpose: qs('#we-purpose', modal)?.value?.trim() || null,
+        nominated_works: qs('#we-nominated-works', modal)?.value?.trim() || null,
+        water_sharing_plan: qs('#we-plan', modal)?.value?.trim() || null,
         notes: qs('#we-notes', modal)?.value?.trim()||null,
       };
       if (!row.source_id && !row.water_source_name) throw new Error('Please select or enter a water source');
