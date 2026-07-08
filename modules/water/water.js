@@ -59,8 +59,8 @@ export async function mountWater(container) {
 
     <div class="tab-strip" style="margin-bottom:16px">
       <button class="tab-btn ${_activeTab==='dashboard'?'active':''}" data-tab="dashboard">Dashboard</button>
-      <button class="tab-btn ${_activeTab==='sources'?'active':''}" data-tab="sources">Sources & Entitlements</button>
-      <button class="tab-btn ${_activeTab==='accounts'?'active':''}" data-tab="accounts">Seasonal Accounts</button>
+      <button class="tab-btn ${_activeTab==='sources'?'active':''}" data-tab="sources">Entitlements</button>
+      <button class="tab-btn ${_activeTab==='accounts'?'active':''}" data-tab="accounts">Allocations</button>
       <button class="tab-btn ${_activeTab==='trades'?'active':''}" data-tab="trades">Trades</button>
       <button class="tab-btn ${_activeTab==='usage'?'active':''}" data-tab="usage">Usage</button>
       <button class="tab-btn ${_activeTab==='budget'?'active':''}" data-tab="budget">Budget</button>
@@ -130,13 +130,34 @@ function _renderTab(container, farm) {
 }
 
 // ── Dashboard ─────────────────────────────────────────────────
-function _renderDashboard(content, farm) {
-  // Calculate totals across all sources for this water year
+let _dashMonth = 5; // 0=Jul,1=Aug,...,5=Dec,6=Jan,...,11=Jun — default June (month 11 of water year = index 11)
+
+function _renderDashboard(content, farm, asAtMonthIndex) {
+  // Month filter — water year months: Jul(0) Aug(1) Sep(2) Oct(3) Nov(4) Dec(5) Jan(6) Feb(7) Mar(8) Apr(9) May(10) Jun(11)
+  // Default to June (index 11 = full year)
+  if (asAtMonthIndex === undefined) asAtMonthIndex = _dashMonth;
+  const monthNames = ['Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun'];
+
+  // Determine cutoff date from month index and water year
+  const [wyStartYr] = _waterYear.split('-').map(Number);
+  const calMonths = [6,7,8,9,10,11,0,1,2,3,4,5]; // Jul=6, Aug=7,...Jun=5
+  const calMonth = calMonths[asAtMonthIndex]; // 0-based calendar month
+  const calYear = calMonth >= 6 ? wyStartYr : wyStartYr + 1;
+  // Last day of chosen month
+  const cutoffDate = new Date(calYear, calMonth + 1, 0); // last day of month
+  const cutoffStr = cutoffDate.toISOString().slice(0,10);
+
+  // Filter usage and trades up to cutoff
+  const usageToDate = _usage.filter(u => u.usage_date <= cutoffStr);
+  const tradesToDate = _trades.filter(t => !t.trade_date || t.trade_date <= cutoffStr);
+
+  // Announcements up to cutoff
+  const yearAnnouncementsToDate = _announcements.filter(a => a.water_year === _waterYear && a.announcement_date <= cutoffStr);
+
   const totalEntitlement = _entitlements.reduce((s, e) => s + (parseFloat(e.ml_held)||0), 0);
-  // Use announced allocation if available, otherwise fall back to manual account entry
-  const yearAnnouncements = _announcements.filter(a => a.water_year === _waterYear);
+
   const totalAnnouncedMl = _entitlements.filter(e => e.wal_number).reduce((sum, e) => {
-    const walAnns = yearAnnouncements.filter(a => a.wal_number === e.wal_number);
+    const walAnns = yearAnnouncementsToDate.filter(a => a.wal_number === e.wal_number);
     const mlPerShare = walAnns.reduce((s,a) => s+(parseFloat(a.ml_per_share)||0), 0);
     return sum + mlPerShare * (parseFloat(e.ml_held)||0);
   }, 0);
@@ -146,22 +167,33 @@ function _renderDashboard(content, farm) {
     const loss = parseFloat(a.carryover_loss_pct)||0;
     return s + (gross * (1 - loss/100));
   }, 0);
-  const totalTradesIn = _trades.filter(t => t.trade_type==='buy').reduce((s,t) => s+(parseFloat(t.ml)||0), 0);
-  const totalTradesOut = _trades.filter(t => t.trade_type==='sell').reduce((s,t) => s+(parseFloat(t.ml)||0), 0);
-  const totalUsed = _usage.reduce((s, u) => s + (parseFloat(u.ml_used)||0), 0);
+  const totalTradesIn = tradesToDate.filter(t => t.trade_type==='buy').reduce((s,t) => s+(parseFloat(t.ml)||0), 0);
+  const totalTradesOut = tradesToDate.filter(t => t.trade_type==='sell').reduce((s,t) => s+(parseFloat(t.ml)||0), 0);
+  const totalUsed = usageToDate.reduce((s, u) => s + (parseFloat(u.ml_used)||0), 0);
   const totalAvailable = totalAllocation + totalCarryover + totalTradesIn - totalTradesOut;
   const totalRemaining = Math.max(0, totalAvailable - totalUsed);
   const usagePct = totalAvailable ? Math.round((totalUsed/totalAvailable)*100) : 0;
-
-  // Budget vs actual
   const totalBudgeted = _budgets.reduce((s,b) => s + (parseFloat(b.budgeted_ml)||((parseFloat(b.ml_per_ha)||0)*(parseFloat(b.area_ha)||0))), 0);
 
+  // Group entitlements by category for the breakdown table
+  const categories = [...new Set(_entitlements.map(e => e.licence_category).filter(Boolean))];
+
   content.innerHTML = `
+    <!-- Month filter -->
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+      <p style="font-size:var(--text-sm);color:var(--muted);white-space:nowrap">Position as at end of</p>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        ${monthNames.map((m, i) => `
+          <button class="btn btn-sm dash-month-btn ${i===asAtMonthIndex?'btn-primary':'btn-ghost'}" data-month="${i}">${m}</button>
+        `).join('')}
+      </div>
+    </div>
+
     <!-- Summary cards -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
       ${[
         ['Total Entitlement', formatNumber(totalEntitlement,1)+' ML', 'Permanent holdings', 'var(--ink)'],
-        ['Available This Year', formatNumber(totalAvailable,1)+' ML', 'Alloc + carryover ± trades', 'var(--blue)'],
+        ['Announced to '+monthNames[asAtMonthIndex], formatNumber(totalAllocation,1)+' ML', 'Announced allocation to date', 'var(--blue)'],
         ['Used', formatNumber(totalUsed,1)+' ML', usagePct+'% of available', 'var(--green)'],
         ['Remaining', formatNumber(totalRemaining,1)+' ML', 'Available − used', totalRemaining < totalAvailable*0.2 ? 'var(--red)' : 'var(--ink)'],
       ].map(([l,v,s,c]) => `
@@ -176,7 +208,7 @@ function _renderDashboard(content, farm) {
     <!-- Usage bar -->
     <div class="card" style="padding:16px;margin-bottom:20px">
       <div style="display:flex;justify-content:space-between;margin-bottom:8px">
-        <p style="font-size:var(--text-sm);font-weight:600">Water usage — ${_waterYear}</p>
+        <p style="font-size:var(--text-sm);font-weight:600">Water usage — ${_waterYear} to end of ${monthNames[asAtMonthIndex]}</p>
         <p style="font-size:var(--text-sm);color:var(--hint)">${formatNumber(totalUsed,1)} of ${formatNumber(totalAvailable,1)} ML used</p>
       </div>
       <div style="height:10px;background:var(--border-light);border-radius:5px;overflow:hidden;margin-bottom:6px">
@@ -185,22 +217,21 @@ function _renderDashboard(content, farm) {
       ${totalBudgeted ? `
       <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--hint)">
         <span>Budget: ${formatNumber(totalBudgeted,1)} ML</span>
-        <span>${totalBudgeted ? Math.round((totalUsed/totalBudgeted)*100) : 0}% of budget used</span>
+        <span>${Math.round((totalUsed/totalBudgeted)*100)}% of budget used</span>
       </div>` : ''}
     </div>
 
-    <!-- Per source breakdown -->
-    ${_sources.length ? `
+    <!-- By category breakdown -->
+    ${categories.length ? `
     <div class="card" style="overflow:hidden">
       <div style="padding:12px 16px;border-bottom:1px solid var(--border-light)">
-        <p style="font-size:var(--text-sm);font-weight:600">By water source</p>
+        <p style="font-size:var(--text-sm);font-weight:600">By licence category</p>
       </div>
       <table class="data-table">
         <thead><tr>
-          <th>Source</th>
           <th>Category</th>
           <th class="num">Entitlement (ML)</th>
-          <th class="num">Allocation (ML)</th>
+          <th class="num">Announced (ML)</th>
           <th class="num">Carryover (ML)</th>
           <th class="num">Trades (ML)</th>
           <th class="num">Available (ML)</th>
@@ -208,42 +239,50 @@ function _renderDashboard(content, farm) {
           <th class="num">Remaining (ML)</th>
         </tr></thead>
         <tbody>
-          ${_sources.map(s => {
-            const ent = _entitlements.filter(e => e.source_id === s.id).reduce((sum,e) => sum+(parseFloat(e.ml_held)||0), 0);
-            const acc = _accounts.find(a => a.source_id === s.id);
-            const sourceEnts = _entitlements.filter(e => e.source_id === s.id && e.wal_number);
-            const announcedForSource = sourceEnts.reduce((sum, e) => {
-              const walAnns = yearAnnouncements.filter(a => a.wal_number === e.wal_number);
-              const mlPerShare = walAnns.reduce((sv,a) => sv+(parseFloat(a.ml_per_share)||0), 0);
+          ${categories.map(cat => {
+            const catEnts = _entitlements.filter(e => e.licence_category === cat);
+            const ent = catEnts.reduce((s,e) => s+(parseFloat(e.ml_held)||0), 0);
+            const announced = catEnts.filter(e => e.wal_number).reduce((sum,e) => {
+              const walAnns = yearAnnouncementsToDate.filter(a => a.wal_number === e.wal_number);
+              const mlPerShare = walAnns.reduce((s,a) => s+(parseFloat(a.ml_per_share)||0), 0);
               return sum + mlPerShare * (parseFloat(e.ml_held)||0);
             }, 0);
-            const alloc = announcedForSource || parseFloat(acc?.opening_allocation_ml)||0;
-            const carry = parseFloat(acc?.carryover_in_ml)||0;
-            const carryLoss = parseFloat(acc?.carryover_loss_pct)||0;
-            const netCarry = carry * (1-carryLoss/100);
-            const tIn = _trades.filter(t => t.source_id===s.id && t.trade_type==='buy').reduce((sum,t)=>sum+(parseFloat(t.ml)||0),0);
-            const tOut = _trades.filter(t => t.source_id===s.id && t.trade_type==='sell').reduce((sum,t)=>sum+(parseFloat(t.ml)||0),0);
-            const avail = alloc + netCarry + tIn - tOut;
-            const used = _usage.filter(u => u.source_id===s.id).reduce((sum,u)=>sum+(parseFloat(u.ml_used)||0),0);
-            const rem = Math.max(0, avail-used);
-            const srcCategory = _entitlements.find(e => e.source_id === s.id)?.licence_category || '—';
+            const catSourceIds = [...new Set(catEnts.map(e => e.source_id).filter(Boolean))];
+            const carry = _accounts.filter(a => catSourceIds.includes(a.source_id)).reduce((s,a) => {
+              const gross = parseFloat(a.carryover_in_ml)||0;
+              const loss = parseFloat(a.carryover_loss_pct)||0;
+              return s + gross*(1-loss/100);
+            }, 0);
+            const alloc = announced || _accounts.filter(a => catSourceIds.includes(a.source_id)).reduce((s,a) => s+(parseFloat(a.opening_allocation_ml)||0), 0);
+            const tIn = tradesToDate.filter(t => catSourceIds.includes(t.source_id) && t.trade_type==='buy').reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
+            const tOut = tradesToDate.filter(t => catSourceIds.includes(t.source_id) && t.trade_type==='sell').reduce((s,t)=>s+(parseFloat(t.ml)||0),0);
+            const avail = alloc + carry + tIn - tOut;
+            const used = usageToDate.filter(u => catSourceIds.includes(u.source_id)).reduce((s,u)=>s+(parseFloat(u.ml_used)||0),0);
+            const rem = Math.max(0, avail - used);
             return `<tr>
-              <td><strong>${s.name}</strong></td>
-              <td class="muted">${srcCategory}</td>
-              <td class="num">${ent ? formatNumber(ent,1) : '—'}</td>
+              <td><strong>${cat}</strong></td>
+              <td class="num">${formatNumber(ent,1)}</td>
               <td class="num">${alloc ? formatNumber(alloc,1) : '—'}</td>
-              <td class="num">${netCarry ? formatNumber(netCarry,1) : '—'}</td>
-              <td class="num" style="color:${tIn-tOut>=0?'var(--green)':'var(--red)'}">${tIn||tOut ? (tIn-tOut>=0?'+':'')+formatNumber(tIn-tOut,1) : '—'}</td>
-              <td class="num"><strong>${avail ? formatNumber(avail,1) : '—'}</strong></td>
-              <td class="num" style="color:var(--blue)">${used ? formatNumber(used,1) : '—'}</td>
+              <td class="num">${carry ? formatNumber(carry,1) : '—'}</td>
+              <td class="num" style="color:${tIn-tOut>=0?'var(--green)':'var(--red)'}">${tIn||tOut?(tIn-tOut>=0?'+':'')+formatNumber(tIn-tOut,1):'—'}</td>
+              <td class="num"><strong style="color:var(--blue)">${formatNumber(avail,1)}</strong></td>
+              <td class="num">${used ? formatNumber(used,1) : '—'}</td>
               <td class="num" style="color:${rem<avail*0.2?'var(--red)':'var(--ink)'}"><strong>${avail ? formatNumber(rem,1) : '—'}</strong></td>
             </tr>`;
           }).join('')}
         </tbody>
       </table>
     </div>
-    ` : `<div class="empty-state"><p>No water sources configured yet.</p><p>Go to <strong>Sources & Entitlements</strong> to add your first water source.</p></div>`}
+    ` : `<div class="empty-state"><p>No entitlements with categories found.</p><p>Go to <strong>Entitlements</strong> to add your water entitlements.</p></div>`}
   `;
+
+  // Wire month buttons
+  content.querySelectorAll('.dash-month-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _dashMonth = parseInt(btn.dataset.month);
+      _renderDashboard(content, farm, _dashMonth);
+    });
+  });
 }
 
 // ── Sources & Entitlements ────────────────────────────────────
@@ -259,7 +298,7 @@ function _renderSources(content, farm) {
       <table class="data-table">
         <thead><tr><th>WAL</th><th>Source</th><th>Category</th><th class="num">ML held</th><th>Purchased</th><th class="num">$/ML</th>${canWrite()?'<th></th>':''}</tr></thead>
         <tbody>
-          ${_entitlements.map(e => {
+          ${_entitlements.filter(e => e.ml_held || e.wal_number || e.water_source_name).map(e => {
             const src = _sources.find(s => s.id === e.source_id);
             return `<tr>
               <td class="muted">${e.wal_number||'—'}</td>
