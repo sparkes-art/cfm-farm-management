@@ -27,17 +27,16 @@ exports.handler = async (event) => {
   const walNum = walNumber.toString().replace(/^WAL/i, '').trim();
 
   try {
-    // Step 1: Submit the search form on the NSW Public Water Register
-    const searchUrl = 'https://waterregister.waternsw.com.au/water-register-frame';
-    const searchParams = new URLSearchParams({
-      PageID: 'WALSearch',
-      WAL: `WAL${walNum}`,
-    });
+    // The main page uses an iframe — fetch the inner search JSP directly
+    const baseUrl = 'https://waterregister.waternsw.com.au';
+    const searchParams = new URLSearchParams({ WAL: `WAL${walNum}` });
 
-    const searchRes = await fetch(`${searchUrl}?${searchParams}`, {
+    // Try the inner iframe search URL first
+    const searchRes = await fetch(`${baseUrl}/search/SearchWizard.jsp?${searchParams}`, {
       headers: {
         'User-Agent': 'CFM-Farm-Management/1.0',
         'Accept': 'text/html',
+        'Referer': 'https://waterregister.waternsw.com.au/water-register-frame',
       },
     });
 
@@ -52,7 +51,7 @@ exports.handler = async (event) => {
     console.log('Search HTML snippet:', html.slice(0, 300));
     if (!result.found) {
       // Try the direct WAL folio URL
-      const folioUrl = `https://waterregister.waternsw.com.au/water-register-frame?PageID=WALDetail&WAL=WAL${walNum}`;
+      const folioUrl = `${baseUrl}/search/SearchWizard.jsp?WAL=WAL${walNum}&action=detail`;
       const folioRes = await fetch(folioUrl, {
         headers: { 'User-Agent': 'CFM-Farm-Management/1.0', 'Accept': 'text/html' },
       });
