@@ -48,6 +48,7 @@ exports.handler = async (event) => {
 
     console.log('Search HTML length:', html.length);
     console.log('Full HTML:', html);
+    console.log('Parse result:', JSON.stringify(result));
     console.log('Search HTML snippet:', html.slice(0, 300));
     if (!result.found) {
       // Try the direct WAL folio URL
@@ -86,65 +87,34 @@ function parseWalHtml(html, walNumber) {
 
   if (!html || html.length < 100) return result;
   if (html.includes('No results found') || html.includes('no results')) return result;
-  if (!html.toLowerCase().includes('wal') && !html.toLowerCase().includes('water source')) return result;
+  if (!html.toLowerCase().includes('water source') && !html.toLowerCase().includes('aquifer')) return result;
 
   result.found = true;
 
-  // Extract water source
-  const waterSourcePatterns = [
-    /water\s+source[:\s]+([A-Za-z\s\-\/&]+(?:Water\s+Source|River|Aquifer|Groundwater)[A-Za-z\s\-]*)/i,
-    /(?:water\s+source|wsource)[^>]*>([^<]+)</i,
-    /source[:\s]*<[^>]*>([^<]+)/i,
-  ];
-  for (const pat of waterSourcePatterns) {
-    const m = html.match(pat);
-    if (m) { result.waterSource = m[1].trim().replace(/\s+/g, ' '); break; }
-  }
+  // Extract all <td> text content in order — the register uses a simple table
+  const tdMatches = [...html.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+  const cells = tdMatches.map(m => m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g,'&').replace(/&nbsp;/g,' ').trim()).filter(Boolean);
+  console.log('Parsed cells:', JSON.stringify(cells));
 
-  // Extract category
-  const categoryPatterns = [
-    /category[:\s]*<[^>]*>([^<]+)/i,
-    /(?:licence\s+)?category[:\s]+([A-Za-z\s]+Security[A-Za-z\s]*)/i,
-    /(High Security|General Security|Supplementary|Specific Purpose|Domestic and Stock|Local Water Utility)/i,
-  ];
-  for (const pat of categoryPatterns) {
-    const m = html.match(pat);
-    if (m) { result.category = m[1].trim().replace(/\s+/g, ' '); break; }
-  }
-
-  // Extract share component / ML
-  const sharePatterns = [
-    /share\s+component[:\s]*<[^>]*>([\d,\.]+)\s*(?:ML|megalitres?)/i,
-    /share\s+component[:\s]+([\d,\.]+)/i,
-    /([\d,\.]+)\s+megalitres?\s+(?:of\s+)?(?:available\s+)?water/i,
-    /volume[:\s]*([\d,\.]+)\s*(?:ML|megalitres?)/i,
-    /entitlement[:\s]*([\d,\.]+)\s*(?:ML|megalitres?)/i,
-    /([\d,]+\.?\d*)\s+ML/i,
-  ];
-  for (const pat of sharePatterns) {
-    const m = html.match(pat);
-    if (m) { result.shareML = parseFloat(m[1].replace(/,/g, '')); break; }
-  }
-
-  // Extract tenure
-  const tenurePatterns = [
-    /tenure[:\s]*<[^>]*>([^<]+)/i,
-    /tenure[:\s]+(Continuing|Specific\s+Purpose)/i,
-    /(Continuing|Specific\s+Purpose)\s+(?:licence|WAL)/i,
-  ];
-  for (const pat of tenurePatterns) {
-    const m = html.match(pat);
-    if (m) { result.tenure = m[1].trim(); break; }
-  }
-
-  // Extract holder name
-  const holderPatterns = [
-    /holder[:\s]*<[^>]*>([^<]+)/i,
-    /licence\s+holder[:\s]+([A-Za-z\s]+)/i,
-  ];
-  for (const pat of holderPatterns) {
-    const m = html.match(pat);
-    if (m && m[1].trim().length > 2) { result.holder = m[1].trim(); break; }
+  // The result table columns are:
+  // Category[Subcategory] | Status | Water Source | Tenure Type | Management Zone | Share Components (units or ML) | IDEC
+  // Find the row after the header by looking for known category values
+  const categoryKeywords = ['Aquifer','Regulated River','Unregulated River','Groundwater','Domestic','Supplementary','High Security','General Security','Surface Water'];
+  
+  for (let i = 0; i < cells.length; i++) {
+    const isCategory = categoryKeywords.some(k => cells[i].includes(k));
+    if (isCategory) {
+      result.category = cells[i];
+      result.status = cells[i+1] || null;
+      result.waterSource = cells[i+2] || null;
+      result.tenure = cells[i+3] || null;
+      result.managementZone = cells[i+4] || null;
+      // Share components — parse out the number
+      const shareCell = cells[i+5] || '';
+      const shareNum = shareCell.replace(/,/g,'').match(/([\d]+\.?\d*)/);
+      if (shareNum) result.shareML = parseFloat(shareNum[1]);
+      break;
+    }
   }
 
   return result;
