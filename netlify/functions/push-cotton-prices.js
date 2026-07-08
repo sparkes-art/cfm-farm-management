@@ -5,7 +5,7 @@
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const COTTON_PRICES_API_KEY = process.env.COTTON_PRICES_API_KEY || 'test123';
+const COTTON_PRICES_API_KEY = process.env.COTTON_PRICES_API_KEY;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
