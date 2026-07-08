@@ -1123,7 +1123,7 @@ function _entitlementModal(content, farm, existing = null) {
         source_id: sourceId,
         water_source_name: sourceName || null,
         wal_number: qs('#we-wal', modal)?.value?.trim() || null,
-        ml_held: parseFloat(qs('#we-ml', modal)?.value)||0,
+        ml_held: qs('#we-ml', modal)?.value !== '' ? parseFloat(qs('#we-ml', modal)?.value) : null,
         purchase_date: qs('#we-date', modal)?.value || null,
         purchase_price_per_ml: parseFloat(qs('#we-price', modal)?.value)||null,
         licence_category: qs('#we-category', modal)?.value?.trim() || null,
@@ -1133,7 +1133,7 @@ function _entitlementModal(content, farm, existing = null) {
         notes: qs('#we-notes', modal)?.value?.trim()||null,
       };
       if (!row.source_id && !row.water_source_name) throw new Error('Please select or enter a water source');
-      if (!row.ml_held) throw new Error('Please enter ML held');
+      if (row.ml_held === null || row.ml_held === undefined || isNaN(row.ml_held)) throw new Error('Please enter ML held');
       if (existing) {
         await dbUpdate('water_entitlements', existing.id, row);
         Object.assign(_entitlements.find(e => e.id === existing.id), row);
