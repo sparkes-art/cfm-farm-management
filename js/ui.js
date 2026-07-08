@@ -65,6 +65,7 @@ export function openModal({ title, bodyHTML, onConfirm, onMounted, confirmLabel 
     });
   }
 
+  if (onMounted) setTimeout(() => onMounted(overlay), 0);
   setTimeout(() => overlay.querySelector('input, select, textarea')?.focus(), 50);
   return { overlay, close };
 }

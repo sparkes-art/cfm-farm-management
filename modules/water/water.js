@@ -610,9 +610,25 @@ function _entitlementModal(content, farm, existing = null) {
     title: existing ? 'Edit entitlement' : 'Add entitlement',
     confirmLabel: existing ? 'Save changes' : 'Add entitlement',
     bodyHTML: `
+      ${!existing ? `
+      <div class="form-group" style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+        <label class="form-label">WAL Number <span class="text-muted">(optional — auto-fills details)</span></label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="form-input" id="we-wal" placeholder="e.g. WAL1234" style="max-width:180px" value="${existing?.wal_number||''}">
+          <button type="button" class="btn btn-secondary btn-sm" id="we-wal-lookup">Look up</button>
+          <span id="we-wal-status" style="font-size:var(--text-sm);color:var(--muted)"></span>
+        </div>
+      </div>` : `
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">WAL Number</label>
+        <input class="form-input" id="we-wal" style="max-width:180px" value="${existing?.wal_number||''}">
+      </div>`}
       <div class="form-row">
         <div class="form-group"><label class="form-label">Water source</label>
-          <select class="form-select" id="we-source"><option value="">— select —</option>${sourceOpts}</select></div>
+          <select class="form-select" id="we-source"><option value="">— select —</option>${sourceOpts}</select>
+          <input class="form-input" id="we-source-name" placeholder="Or type source name" style="margin-top:6px" value="${existing?.water_source_name||''}">
+          <p style="font-size:11px;color:var(--hint);margin-top:3px">Select existing source above, or type a new name</p>
+        </div>
         <div class="form-group"><label class="form-label">ML held</label>
           <input class="form-input num" id="we-ml" type="number" step="0.1" value="${existing?.ml_held||''}"></div>
       </div>
@@ -622,19 +638,84 @@ function _entitlementModal(content, farm, existing = null) {
         <div class="form-group"><label class="form-label">Purchase price ($/ML) <span class="text-muted">(optional)</span></label>
           <input class="form-input num" id="we-price" type="number" step="1" value="${existing?.purchase_price_per_ml||''}"></div>
       </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Licence category <span class="text-muted">(optional)</span></label>
+          <input class="form-input" id="we-category" value="${existing?.licence_category||''}" placeholder="e.g. General Security"></div>
+        <div class="form-group"><label class="form-label">Licence purpose <span class="text-muted">(optional)</span></label>
+          <input class="form-input" id="we-purpose" value="${existing?.licence_purpose||''}" placeholder="e.g. Irrigation"></div>
+      </div>
       <div class="form-group"><label class="form-label">Notes</label>
         <textarea class="form-textarea" id="we-notes" rows="2">${existing?.notes||''}</textarea></div>
     `,
+    onMounted: (modal) => {
+      const lookupBtn = qs('#we-wal-lookup', modal);
+      if (!lookupBtn) return;
+      lookupBtn.addEventListener('click', async () => {
+        const walRaw = qs('#we-wal', modal)?.value?.trim();
+        if (!walRaw) { toast('Enter a WAL number first', 'warning'); return; }
+        const status = qs('#we-wal-status', modal);
+        status.textContent = 'Looking up…';
+        lookupBtn.disabled = true;
+        try {
+          const res = await fetch(`/.netlify/functions/lookup-wal?wal=${encodeURIComponent(walRaw)}`);
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Lookup failed');
+          // Auto-fill fields
+          if (data.source_name) {
+            qs('#we-source-name', modal).value = data.source_name;
+          }
+          if (data.ml_held) {
+            qs('#we-ml', modal).value = data.ml_held;
+          }
+          if (data.licence_category) {
+            qs('#we-category', modal).value = data.licence_category;
+          }
+          if (data.licence_purpose) {
+            qs('#we-purpose', modal).value = data.licence_purpose;
+          }
+          // Update WAL field to normalised value
+          if (data.wal_number) {
+            qs('#we-wal', modal).value = data.wal_number;
+          }
+          status.textContent = '✓ Found';
+          status.style.color = 'var(--success)';
+          // Log raw response during testing so we can inspect the shape
+          console.log('WAL lookup raw response:', data.raw);
+        } catch (err) {
+          status.textContent = err.message;
+          status.style.color = 'var(--danger)';
+        } finally {
+          lookupBtn.disabled = false;
+        }
+      });
+    },
     onConfirm: async (modal) => {
+      const sourceName = qs('#we-source-name', modal)?.value?.trim();
+      let sourceId = qs('#we-source', modal)?.value || null;
+
+      // If they typed a new source name, create the source automatically
+      if (!sourceId && sourceName) {
+        const newSource = await dbInsert('water_sources', {
+          farm_id: farm.id,
+          name: sourceName,
+        });
+        _sources.push(newSource);
+        sourceId = newSource.id;
+      }
+
       const row = {
         farm_id: farm.id,
-        source_id: qs('#we-source', modal)?.value || null,
+        source_id: sourceId,
+        water_source_name: sourceName || null,
+        wal_number: qs('#we-wal', modal)?.value?.trim() || null,
         ml_held: parseFloat(qs('#we-ml', modal)?.value)||0,
         purchase_date: qs('#we-date', modal)?.value || null,
         purchase_price_per_ml: parseFloat(qs('#we-price', modal)?.value)||null,
+        licence_category: qs('#we-category', modal)?.value?.trim() || null,
+        licence_purpose: qs('#we-purpose', modal)?.value?.trim() || null,
         notes: qs('#we-notes', modal)?.value?.trim()||null,
       };
-      if (!row.source_id) throw new Error('Please select a water source');
+      if (!row.source_id && !row.water_source_name) throw new Error('Please select or enter a water source');
       if (!row.ml_held) throw new Error('Please enter ML held');
       if (existing) {
         await dbUpdate('water_entitlements', existing.id, row);
