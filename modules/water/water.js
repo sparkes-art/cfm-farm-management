@@ -225,12 +225,45 @@ function _renderDashboard(content, farm) {
 // ── Sources & Entitlements ────────────────────────────────────
 function _renderSources(content, farm) {
   content.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <!-- Sources -->
-      <div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <p style="font-weight:600;font-size:var(--text-sm)">Water Sources</p>
-          ${canWrite() ? '<button class="btn btn-secondary btn-sm" id="btn-add-source">＋ Add source</button>' : ''}
+    <!-- Permanent Entitlements — primary section -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <p style="font-weight:600;font-size:var(--text-sm)">Permanent Entitlements</p>
+      ${canWrite() ? '<button class="btn btn-secondary btn-sm" id="btn-add-entitlement">＋ Add entitlement</button>' : ''}
+    </div>
+    <div class="card" style="overflow:hidden;margin-bottom:24px">
+      ${_entitlements.length ? `
+      <table class="data-table">
+        <thead><tr><th>WAL</th><th>Source</th><th>Category</th><th class="num">ML held</th><th>Purchased</th><th class="num">$/ML</th>${canWrite()?'<th></th>':''}</tr></thead>
+        <tbody>
+          ${_entitlements.map(e => {
+            const src = _sources.find(s => s.id === e.source_id);
+            return `<tr>
+              <td class="muted">${e.wal_number||'—'}</td>
+              <td><strong>${e.water_source_name || src?.name||'—'}</strong></td>
+              <td class="muted">${e.licence_category||'—'}</td>
+              <td class="num"><strong>${formatNumber(e.ml_held,1)}</strong></td>
+              <td class="muted">${e.purchase_date ? formatDate(e.purchase_date) : '—'}</td>
+              <td class="num">${e.purchase_price_per_ml ? formatCurrency(e.purchase_price_per_ml,0) : '—'}</td>
+              ${canWrite()?`<td><button class="btn btn-ghost btn-sm edit-entitlement-btn" data-id="${e.id}">Edit</button></td>`:''}
+            </tr>`;
+          }).join('')}
+          <tr style="font-weight:600;border-top:2px solid var(--border)">
+            <td colspan="3">Total</td>
+            <td class="num">${formatNumber(_entitlements.reduce((s,e)=>s+(parseFloat(e.ml_held)||0),0),1)} ML</td>
+            <td colspan="${canWrite()?3:2}"></td>
+          </tr>
+        </tbody>
+      </table>` : '<div class="empty-state" style="padding:20px"><p>No entitlements recorded. Click ＋ Add entitlement to get started.</p></div>'}
+    </div>
+
+    <!-- Water Sources — secondary / reference -->
+    <details>
+      <summary style="cursor:pointer;font-weight:600;font-size:var(--text-sm);color:var(--muted);margin-bottom:10px;user-select:none">
+        Water Sources (${_sources.length}) — reference data
+      </summary>
+      <div style="margin-top:10px">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+          ${canWrite() ? '<button class="btn btn-ghost btn-sm" id="btn-add-source">＋ Add source manually</button>' : ''}
         </div>
         <div class="card" style="overflow:hidden">
           ${_sources.length ? `
@@ -245,41 +278,10 @@ function _renderSources(content, farm) {
                 ${canWrite()?`<td><button class="btn btn-ghost btn-sm edit-source-btn" data-id="${s.id}">Edit</button></td>`:''}
               </tr>`).join('')}
             </tbody>
-          </table>` : '<div class="empty-state" style="padding:20px"><p>No sources added yet.</p></div>'}
+          </table>` : '<div class="empty-state" style="padding:20px"><p>Sources are created automatically when you add an entitlement via WAL lookup.</p></div>'}
         </div>
       </div>
-
-      <!-- Entitlements -->
-      <div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <p style="font-weight:600;font-size:var(--text-sm)">Permanent Entitlements</p>
-          ${canWrite() && _sources.length ? '<button class="btn btn-secondary btn-sm" id="btn-add-entitlement">＋ Add entitlement</button>' : ''}
-        </div>
-        <div class="card" style="overflow:hidden">
-          ${_entitlements.length ? `
-          <table class="data-table">
-            <thead><tr><th>Source</th><th class="num">ML held</th><th>Purchased</th><th class="num">$/ML</th>${canWrite()?'<th></th>':''}</tr></thead>
-            <tbody>
-              ${_entitlements.map(e => {
-                const src = _sources.find(s => s.id === e.source_id);
-                return `<tr>
-                  <td>${src?.name||'—'}</td>
-                  <td class="num"><strong>${formatNumber(e.ml_held,1)}</strong></td>
-                  <td class="muted">${e.purchase_date ? formatDate(e.purchase_date) : '—'}</td>
-                  <td class="num">${e.purchase_price_per_ml ? formatCurrency(e.purchase_price_per_ml,0) : '—'}</td>
-                  ${canWrite()?`<td><button class="btn btn-ghost btn-sm edit-entitlement-btn" data-id="${e.id}">Edit</button></td>`:''}
-                </tr>`;
-              }).join('')}
-              <tr style="font-weight:600;border-top:2px solid var(--border)">
-                <td>Total</td>
-                <td class="num">${formatNumber(_entitlements.reduce((s,e)=>s+(parseFloat(e.ml_held)||0),0),1)} ML</td>
-                <td colspan="${canWrite()?3:2}"></td>
-              </tr>
-            </tbody>
-          </table>` : '<div class="empty-state" style="padding:20px"><p>No entitlements recorded.</p></div>'}
-        </div>
-      </div>
-    </div>
+    </details>
   `;
 
   // Wire buttons
