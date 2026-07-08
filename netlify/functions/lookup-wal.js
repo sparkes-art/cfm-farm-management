@@ -46,9 +46,6 @@ exports.handler = async (event) => {
     // Step 2: Parse the HTML for WAL details
     const result = parseWalHtml(html, `WAL${walNum}`);
 
-    console.log('Search HTML length:', html.length);
-    console.log('Full HTML:', html);
-    console.log('Parse result:', JSON.stringify(result));
     console.log('Search HTML snippet:', html.slice(0, 300));
     if (!result.found) {
       // Try the direct WAL folio URL
@@ -86,36 +83,30 @@ function parseWalHtml(html, walNumber) {
   const result = { found: false, walNumber };
 
   if (!html || html.length < 100) return result;
-  if (html.includes('No results found') || html.includes('no results')) return result;
   if (!html.toLowerCase().includes('water source') && !html.toLowerCase().includes('aquifer')) return result;
 
   result.found = true;
 
-  // Extract all <td> text content in order — the register uses a simple table
-  const tdMatches = [...html.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
-  const cells = tdMatches.map(m => m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g,'&').replace(/&nbsp;/g,' ').trim()).filter(Boolean);
-  console.log('Parsed cells:', JSON.stringify(cells));
+  // The API returns a clean table with class="search" cells in this column order:
+  // Category | Status | Water Source | Tenure Type | Management Zone | Share Components | IDEC
+  const clean = s => s.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // The result table columns are:
-  // Category[Subcategory] | Status | Water Source | Tenure Type | Management Zone | Share Components (units or ML) | IDEC
-  // Find the row after the header by looking for known category values
-  const categoryKeywords = ['Aquifer','Regulated River','Unregulated River','Groundwater','Domestic','Supplementary','High Security','General Security','Surface Water'];
-  
-  for (let i = 0; i < cells.length; i++) {
-    const isCategory = categoryKeywords.some(k => cells[i].includes(k));
-    if (isCategory) {
-      result.category = cells[i];
-      result.status = cells[i+1] || null;
-      result.waterSource = cells[i+2] || null;
-      result.tenure = cells[i+3] || null;
-      result.managementZone = cells[i+4] || null;
-      // Share components — parse out the number
-      const shareCell = cells[i+5] || '';
-      const shareNum = shareCell.replace(/,/g,'').match(/([\d]+\.?\d*)/);
-      if (shareNum) result.shareML = parseFloat(shareNum[1]);
-      break;
-    }
+  const tdMatches = [...html.matchAll(/<td[^>]*class=.search.[^>]*>([\s\S]*?)<\/td>/gi)];
+  const cells = tdMatches.map(m => clean(m[1])).filter(c => c.length > 0);
+
+  if (cells.length >= 6) {
+    result.category    = cells[0] || null;
+    result.status      = cells[1] || null;
+    result.waterSource = cells[2] || null;
+    result.tenure      = cells[3] || null;
+    // cells[4] = Management Zone (often empty)
+    const shareNum = (cells[5] || '').replace(/,/g, '').match(/([\d]+\.?\d*)/);
+    if (shareNum) result.shareML = parseFloat(shareNum[1]);
   }
+
+  // Water sharing plan from th.result second column
+  const planMatch = html.match(/<th[^>]*class=.result.[^>]*>(Lachlan|Murrumbidgee|Murray|Macquarie|Hunter|Namoi|Border Rivers|Gwydir|Barwon[^<]*)<\/th>/i);
+  if (planMatch) result.waterSharingPlan = planMatch[1].trim();
 
   return result;
 }
