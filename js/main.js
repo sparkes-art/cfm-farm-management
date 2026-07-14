@@ -24,6 +24,18 @@ const MODULE_LOADERS = {
     const m = await import('../modules/gross-margin/gross-margin.js?v=1783290066771');
     return { mount: m.mountGrossMargin };
   },
+  stocktake: async () => ({
+    mount: (container) => {
+      container.innerHTML = '<div class="page-header"><h1>Stocktake</h1></div><div class="card" style="padding:40px;text-align:center"><p style="color:var(--hint)">Stocktake module coming soon.</p></div>';
+    },
+    unmount: () => {}
+  }),
+  'meter-readings': async () => ({
+    mount: (container) => {
+      container.innerHTML = '<div class="page-header"><h1>Meter Readings</h1></div><div class="card" style="padding:40px;text-align:center"><p style="color:var(--hint)">Meter readings module coming soon — record water site meter readings here.</p></div>';
+    },
+    unmount: () => {}
+  }),
   agronomy: async () => {
     const m = await import('../modules/agronomy/agronomy.js?v=1783290066771');
     return { mount: m.mountAgronomy };
