@@ -796,19 +796,17 @@ export function openInvoiceForm(container, existing = null) {
     const total = net + gstAmt;
 
     const fmt = n => formatCurrency(n, 2);
-    modal.querySelector('#t-gross').textContent = fmt(gross);
-    modal.querySelector('#t-qa').textContent = totalQA ? (totalQA < 0 ? '-' : '+') + fmt(Math.abs(totalQA)) : '—';
-    modal.querySelector('#t-qa').style.color = totalQA < 0 ? 'var(--red)' : 'var(--green)';
-    modal.querySelector('#t-ded').textContent = totalDed ? '-' + fmt(totalDed) : '—';
-    modal.querySelector('#t-net').textContent = fmt(net);
+    if (modal.querySelector('#t-gross')) modal.querySelector('#t-gross').textContent = fmt(gross);
+    const tQa = modal.querySelector('#t-qa');
+    if (tQa) { tQa.textContent = totalQA ? (totalQA < 0 ? '-' : '+') + fmt(Math.abs(totalQA)) : '—'; tQa.style.color = totalQA < 0 ? 'var(--red)' : 'var(--green)'; }
+    const tDed = modal.querySelector('#t-ded');
+    if (tDed) tDed.textContent = totalDed ? '-' + fmt(totalDed) : '—';
+    const tNet = modal.querySelector('#t-net');
+    if (tNet) tNet.textContent = fmt(net);
+    const tTotal = modal.querySelector('#t-total');
+    if (tTotal) tTotal.textContent = fmt(total);
 
-    modal.querySelector('#t-total').textContent = fmt(total);
-
-    // Price comparison — net effective = (gross + QA) / qty, before selling costs
-    const netEff = totalQty ? (gross + totalQA) / totalQty : 0;
-    if (netEff) {
-      modal.querySelector('#pc-net').textContent = formatCurrency(netEff, 2);
-    }
+    // Price comparison removed from form — no longer needed
   }
 
   // File attachment
