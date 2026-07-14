@@ -624,9 +624,10 @@ export function openInvoiceForm(container, existing = null) {
   });
 
   // Add line
+  let _lineCounter = 0;
   function addLine(data = {}) {
     const tbody = modal.querySelector('#f-lines-body');
-    const id = 'line-' + Date.now();
+    const id = 'line-' + (++_lineCounter);
     lastEdited[id] = data.lastEdited || 'price';
     const tr = document.createElement('tr');
     tr.dataset.id = id;
