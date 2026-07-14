@@ -1195,21 +1195,33 @@ function _accountModal(content, farm, existing = null) {
 }
 
 function _tradeModal(content, farm, existing = null) {
-  const sourceOpts = _sources.map(s => `<option value="${s.id}" ${s.id===existing?.source_id?'selected':''}>${s.name}</option>`).join('');
+  // Build WAL options from entitlements
+  const walOpts = _entitlements
+    .filter(e => e.wal_number)
+    .map(e => `<option value="${e.wal_number}" ${e.wal_number===existing?.wal_number?'selected':''} data-source-id="${e.source_id||''}" data-source-name="${e.water_source_name||''}" data-category="${e.licence_category||''}">${e.wal_number} — ${e.water_source_name||'Unknown source'}</option>`)
+    .join('');
+
+  // For existing trade, find the linked entitlement
+  const existingEnt = existing?.wal_number ? _entitlements.find(e => e.wal_number === existing.wal_number) : null;
+
   openModal({
     title: existing ? 'Edit trade' : 'Record water trade',
     confirmLabel: existing ? 'Save changes' : 'Save trade',
     bodyHTML: `
       <div class="form-row">
-        <div class="form-group"><label class="form-label">Water source</label>
-          <select class="form-select" id="wt-source"><option value="">— select —</option>${sourceOpts}</select></div>
+        <div class="form-group"><label class="form-label">WAL</label>
+          <select class="form-select" id="wt-wal"><option value="">— select WAL —</option>${walOpts}</select></div>
         <div class="form-group"><label class="form-label">Trade type</label>
           <select class="form-select" id="wt-type">
-            <option value="temp_in" ${existing?.trade_type==='temp_in'?'selected':''}>Temporary buy</option>
-            <option value="temp_out" ${existing?.trade_type==='temp_out'?'selected':''}>Temporary sell</option>
-            <option value="perm_in" ${existing?.trade_type==='perm_in'?'selected':''}>Permanent buy</option>
-            <option value="perm_out" ${existing?.trade_type==='perm_out'?'selected':''}>Permanent sell</option>
+            <option value="buy" ${existing?.trade_type==='buy'?'selected':''}>Buy</option>
+            <option value="sell" ${existing?.trade_type==='sell'?'selected':''}>Sell</option>
           </select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Water source</label>
+          <input class="form-input" id="wt-source-name" readonly value="${existingEnt?.water_source_name||''}" placeholder="Auto-fills from WAL" style="background:var(--surface-alt,#f9fafb);color:var(--muted)"></div>
+        <div class="form-group"><label class="form-label">Category</label>
+          <input class="form-input" id="wt-category" readonly value="${existingEnt?.licence_category||''}" placeholder="Auto-fills from WAL" style="background:var(--surface-alt,#f9fafb);color:var(--muted)"></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label class="form-label">ML</label>
@@ -1226,10 +1238,20 @@ function _tradeModal(content, farm, existing = null) {
       <div class="form-group"><label class="form-label">Notes</label>
         <textarea class="form-textarea" id="wt-notes" rows="2">${existing?.notes||''}</textarea></div>
     `,
+    onMounted: (modal) => {
+      qs('#wt-wal', modal)?.addEventListener('change', (e) => {
+        const opt = e.target.selectedOptions[0];
+        qs('#wt-source-name', modal).value = opt?.dataset.sourceName || '';
+        qs('#wt-category', modal).value = opt?.dataset.category || '';
+      });
+    },
     onConfirm: async (modal) => {
+      const walNumber = qs('#wt-wal', modal)?.value || null;
+      const ent = walNumber ? _entitlements.find(e => e.wal_number === walNumber) : null;
       const row = {
         farm_id: farm.id,
-        source_id: qs('#wt-source', modal)?.value || null,
+        wal_number: walNumber,
+        source_id: ent?.source_id || null,
         water_year: _waterYear,
         trade_type: qs('#wt-type', modal)?.value,
         ml: parseFloat(qs('#wt-ml', modal)?.value)||0,
@@ -1238,7 +1260,7 @@ function _tradeModal(content, farm, existing = null) {
         counterparty: qs('#wt-counterparty', modal)?.value?.trim()||null,
         notes: qs('#wt-notes', modal)?.value?.trim()||null,
       };
-      if (!row.source_id) throw new Error('Please select a water source');
+      if (!row.wal_number) throw new Error('Please select a WAL');
       if (!row.ml) throw new Error('Please enter ML amount');
       if (existing) {
         await dbUpdate('water_trades', existing.id, row);
