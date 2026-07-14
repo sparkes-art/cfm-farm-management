@@ -144,6 +144,38 @@ async function _mountOverview(container) {
 
     await drawMiniCharts(commodityMap, season);
 
+    // Wire value per unit inputs — update value on hand when changed
+    container.querySelectorAll('.value-per-unit-input').forEach(inp => {
+      inp.addEventListener('focus', () => {
+        // Show raw number on focus for editing
+        const raw = parseFloat(inp.dataset.current || inp.dataset.default || 0);
+        if (raw) inp.value = raw.toFixed(0);
+      });
+      inp.addEventListener('blur', () => {
+        const val = parseFloat(inp.value.replace(/[^0-9.]/g, '')) || parseFloat(inp.dataset.default) || 0;
+        inp.dataset.current = val;
+        inp.value = val ? '$' + Math.round(val).toLocaleString() : '—';
+        // Recalculate value on hand
+        const comId = inp.dataset.commodity;
+        const onHandEl = container.querySelector('.value-on-hand-display[data-commodity="' + comId + '"]');
+        if (onHandEl) {
+          const onHandText = onHandEl.closest('.commodity-card-body')?.querySelector('[data-on-hand]');
+          // Get on hand qty from the position section
+          const posRows = inp.closest('.commodity-card-body')?.querySelectorAll('div');
+          let onHandQty = 0;
+          posRows?.forEach(div => {
+            if (div.textContent.includes('On hand') && div.style.borderBottom) {
+              const span = div.querySelector('span:last-child');
+              if (span) onHandQty = parseFloat(span.textContent.replace(/[^0-9.]/g,'')) || 0;
+            }
+          });
+          const valueOnHand = onHandQty && val ? onHandQty * val : null;
+          onHandEl.textContent = valueOnHand ? '$' + Math.round(valueOnHand).toLocaleString() : '—';
+        }
+      });
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
+    });
+
     // Wire status toggle buttons
     container.querySelectorAll('.status-opt-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
