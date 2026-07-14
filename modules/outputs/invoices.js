@@ -404,19 +404,19 @@ export function openInvoiceForm(container, existing = null) {
       </div>
 
       <!-- Contract selector — immediately after sale type -->
+      <!-- Buyer field always visible -->
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Buyer</label>
+        <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer || ''}" placeholder="Buyer name">
+      </div>
+
       <div id="f-contract-section" style="margin-bottom:16px">
-        <div class="form-row" style="margin-bottom:10px">
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Forward contract</label>
-            <select class="form-select" id="f-contract">
-              <option value="">— select a contract —</option>
-              ${_contracts.map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" data-buyer="${c.counterparty||c.buyer||''}" ${existing?.forward_contract_id===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Buyer</label>
-            <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer || ''}" placeholder="Auto-fills from contract">
-          </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Forward contract</label>
+          <select class="form-select" id="f-contract">
+            <option value="">— select a contract —</option>
+            ${_contracts.map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" data-buyer="${c.counterparty||c.buyer||''}" ${existing?.forward_contract_id===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}</option>`).join('')}
+          </select>
         </div>
         <div id="f-contract-summary" style="display:none;grid-template-columns:repeat(4,1fr);gap:10px;background:var(--blue-light);border-radius:var(--radius-sm);padding:12px;margin-bottom:10px">
           <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Contract qty</p><p id="cs-qty" style="font-weight:600;color:var(--blue-text)">—</p></div>
@@ -514,16 +514,9 @@ export function openInvoiceForm(container, existing = null) {
         <textarea class="form-textarea" id="f-notes" rows="3" placeholder="Internal notes, gin reference, pool details, delivery information…">${existing?.notes || ''}</textarea>
       </div>
 
-      <!-- Price comparison + Invoice summary -->
+      <!-- Invoice summary only -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
-        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px" id="f-price-compare">
-          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Price comparison</p>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Budget price</p><p id="pc-budget" style="font-size:17px;font-weight:600">—</p></div>
-            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Contract price</p><p id="pc-contract" style="font-size:17px;font-weight:600;color:var(--blue)">—</p><p id="pc-contract-vs" style="font-size:10px;color:var(--blue)"></p></div>
-            <div><p style="font-size:10px;color:var(--hint);margin-bottom:3px">Net effective</p><p id="pc-net" style="font-size:17px;font-weight:600">—</p><p id="pc-net-vs" style="font-size:10px"></p></div>
-          </div>
-        </div>
+        <div></div>
         <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px">
           <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Invoice Summary</p>
           <div style="display:flex;flex-direction:column;gap:5px">
