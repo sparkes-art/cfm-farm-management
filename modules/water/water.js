@@ -190,10 +190,11 @@ function _renderDashboard(content, farm, asAtMonthIndex) {
     </div>
 
     <!-- Summary cards -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px">
       ${[
         ['Total Entitlement', formatNumber(totalEntitlement,1)+' ML', 'Permanent holdings', 'var(--ink)'],
         ['Announced to '+monthNames[asAtMonthIndex], formatNumber(totalAllocation,1)+' ML', 'Announced allocation to date', 'var(--blue)'],
+        ['Net Trades', (totalTradesIn-totalTradesOut>=0?'+':'')+formatNumber(totalTradesIn-totalTradesOut,1)+' ML', formatNumber(totalTradesIn,1)+' in / '+formatNumber(totalTradesOut,1)+' out', totalTradesIn-totalTradesOut>=0?'var(--green)':'var(--red)'],
         ['Used', formatNumber(totalUsed,1)+' ML', usagePct+'% of available', 'var(--green)'],
         ['Remaining', formatNumber(totalRemaining,1)+' ML', 'Available − used', totalRemaining < totalAvailable*0.2 ? 'var(--red)' : 'var(--ink)'],
       ].map(([l,v,s,c]) => `
