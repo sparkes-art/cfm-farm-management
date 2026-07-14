@@ -265,7 +265,7 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
       </div>
 
       <!-- Card body: Production | Chart | Prices & Position -->
-      <div class="commodity-card-body" style="display:grid;grid-template-columns:1fr 38% 28%;min-height:220px">
+      <div class="commodity-card-body" style="display:grid;grid-template-columns:1fr 26% 36%;min-height:220px">
 
         <!-- Col 1: Production (yield + production merged) -->
         <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:4px">
@@ -301,33 +301,7 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
           }).join('')}
         </div>
 
-        <!-- Col 2: Price chart (38%) -->
-        <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:6px">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <div style="display:flex;gap:3px">
-              <button class="mini-range-btn active" data-months="6" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:var(--blue);color:white;cursor:pointer">6m</button>
-              <button class="mini-range-btn" data-months="12" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">12m</button>
-              <button class="mini-range-btn" data-months="24" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">24m</button>
-              <button class="mini-range-btn" data-months="999" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">All</button>
-            </div>
-            <button class="btn btn-ghost btn-sm" onclick="document.querySelector('[data-tab=prices]')?.click()" style="font-size:11px">Full chart →</button>
-          </div>
-          <div style="display:flex;gap:10px;align-items:center">
-            <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:2px;background:var(--blue)"></div>Market</div>
-            ${avgFwdPrice ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:0;border-top:2px dashed #b86e00"></div>Fwd avg</div>' : ''}
-            ${budgetPrice ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:0;border-top:2px dashed #0f766e"></div>Budget</div>' : ''}
-            ${contracts.length ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:8px;height:8px;border-radius:50%;background:var(--green)"></div>Fwd sale</div>' : ''}
-          </div>
-          <div id="card-chart-${com.id || name.replace(/\s/g,'-')}" style="flex:1;min-height:160px;display:flex;align-items:center;justify-content:center">
-            <p style="font-size:12px;color:var(--hint)">Price chart loading…</p>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px">
-            ${marketPrice ? '<div style="background:#fafbfc;border-radius:6px;padding:5px 10px"><p style="font-size:10px;color:var(--hint);margin-bottom:1px">Current market</p><p style="font-size:13px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums">' + formatCurrency(marketPrice,0) + '</p></div>' : ''}
-            ${avgFwdPrice ? '<div style="background:#fafbfc;border-radius:6px;padding:5px 10px"><p style="font-size:10px;color:var(--hint);margin-bottom:1px">Fwd avg</p><p style="font-size:13px;font-weight:600;color:var(--blue);font-variant-numeric:tabular-nums">' + formatCurrency(avgFwdPrice,0) + '</p></div>' : ''}
-          </div>
-        </div>
-
-        <!-- Col 3: Prices & Position (28%) -->
+        <!-- Col 2: Prices & Position (26%) -->
         ${(() => {
           const paidVsBudget = paidAvg && budgetPrice ? ((paidAvg - budgetPrice) / budgetPrice * 100) : null;
           const onHand = totalHarvest ? Math.max(0, totalHarvest - totalPaidQty) : null;
@@ -339,7 +313,7 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
               '<span style="font-size:11px;color:var(--hint)">' + label + (sub ? '<br><span style="font-size:9px">' + sub + '</span>' : '') + '</span>' +
               '<span style="font-size:12px;font-weight:600;color:' + color + ';font-variant-numeric:tabular-nums">' + val + '</span>' +
             '</div>';
-          return '<div style="padding:14px 16px;background:#fafbfc;display:flex;flex-direction:column">' +
+          return '<div style="padding:14px 16px;background:var(--surface-2,white);display:flex;flex-direction:column;border-right:1px solid var(--border-light)">' +
             '<p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0 0 8px">Prices &amp; Position</p>' +
             priceRow('Budget', budgetPrice ? formatCurrency(budgetPrice,0) : '—') +
             priceRow('Market', marketPrice ? formatCurrency(marketPrice,0) : '—', marketVsBudget !== null ? (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') +
@@ -365,6 +339,32 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
             '</div>' +
           '</div>';
         })()}
+
+        <!-- Col 3: Price chart (36%) -->
+        <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div style="display:flex;gap:3px">
+              <button class="mini-range-btn active" data-months="6" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:var(--blue);color:white;cursor:pointer">6m</button>
+              <button class="mini-range-btn" data-months="12" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">12m</button>
+              <button class="mini-range-btn" data-months="24" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">24m</button>
+              <button class="mini-range-btn" data-months="999" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">All</button>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="document.querySelector('[data-tab=prices]')?.click()" style="font-size:11px">Full chart →</button>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center">
+            <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:2px;background:var(--blue)"></div>Market</div>
+            ${avgFwdPrice ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:0;border-top:2px dashed #b86e00"></div>Fwd avg</div>' : ''}
+            ${budgetPrice ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:0;border-top:2px dashed #0f766e"></div>Budget</div>' : ''}
+            ${contracts.length ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:8px;height:8px;border-radius:50%;background:var(--green)"></div>Fwd sale</div>' : ''}
+          </div>
+          <div id="card-chart-${com.id || name.replace(/\s/g,'-')}" style="flex:1;min-height:160px;display:flex;align-items:center;justify-content:center">
+            <p style="font-size:12px;color:var(--hint)">Price chart loading…</p>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px">
+            ${marketPrice ? '<div style="background:#fafbfc;border-radius:6px;padding:5px 10px"><p style="font-size:10px;color:var(--hint);margin-bottom:1px">Current market</p><p style="font-size:13px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums">' + formatCurrency(marketPrice,0) + '</p></div>' : ''}
+            ${avgFwdPrice ? '<div style="background:#fafbfc;border-radius:6px;padding:5px 10px"><p style="font-size:10px;color:var(--hint);margin-bottom:1px">Fwd avg</p><p style="font-size:13px;font-weight:600;color:var(--blue);font-variant-numeric:tabular-nums">' + formatCurrency(avgFwdPrice,0) + '</p></div>' : ''}
+          </div>
+        </div>
 
       </div>
     </div>`;
