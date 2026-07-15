@@ -20,6 +20,10 @@ const MODULE_LOADERS = {
     const m = await import('../modules/water/water.js');
     return { mount: m.mountWater, unmount: m.unmountWater };
   },
+  'meter-readings': async () => {
+    const m = await import('../modules/meter-readings/meter-readings.js');
+    return { mount: m.mountMeterReadings, unmount: m.unmountMeterReadings };
+  },
   'gross-margin': async () => {
     const m = await import('../modules/gross-margin/gross-margin.js?v=1783290066771');
     return { mount: m.mountGrossMargin };
