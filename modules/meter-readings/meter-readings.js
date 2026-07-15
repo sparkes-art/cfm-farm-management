@@ -86,29 +86,26 @@ function _renderSites(content, farm) {
       <table class="data-table">
         <thead><tr>
           <th>Site name</th>
-          <th>Type</th>
+          <th>ESID</th>
+          <th>Work approval</th>
           <th>WAL</th>
-          <th>Water source</th>
-          <th class="num">Day limit (ML)</th>
+          <th>Type</th>
           <th class="num">Year limit (ML)</th>
-          <th>Units</th>
           <th class="num">Last reading</th>
           <th>Last read date</th>
           ${canWrite() ? '<th></th>' : ''}
         </tr></thead>
         <tbody>
           ${_sites.map(s => {
-            const ent = _entitlements.find(e => e.wal_number === s.wal_number);
             const siteReads = _reads.filter(r => r.site_id === s.id);
-            const lastRead = siteReads[0]; // already sorted desc
+            const lastRead = siteReads[0];
             return `<tr class="${s.active ? '' : 'muted'}">
               <td><strong>${s.name}</strong>${s.active ? '' : ' <span style="font-size:10px;color:var(--muted)">(inactive)</span>'}</td>
-              <td class="muted">${_siteTypeLabel(s.site_type)}</td>
+              <td class="muted">${s.esid || '—'}</td>
+              <td class="muted">${s.work_approval || '—'}</td>
               <td class="muted">${s.wal_number || '—'}</td>
-              <td class="muted">${ent?.water_source_name || '—'}</td>
-              <td class="num">${s.extraction_limit_ml_day ? formatNumber(s.extraction_limit_ml_day, 1) : '—'}</td>
-              <td class="num">${s.extraction_limit_ml_year ? formatNumber(s.extraction_limit_ml_year, 1) : '—'}</td>
-              <td class="muted">${s.meter_units || 'ML'}</td>
+              <td class="muted">${_siteTypeLabel(s.site_type)}</td>
+              <td class="num">${s.extraction_limit_ml_year ? formatNumber(s.extraction_limit_ml_year, 0) : 'N/A'}</td>
               <td class="num">${lastRead ? formatNumber(lastRead.reading, 3) : '—'}</td>
               <td class="muted">${lastRead ? formatDate(lastRead.read_date) : '—'}</td>
               ${canWrite() ? `<td><button class="btn btn-ghost btn-sm edit-site-btn" data-id="${s.id}">Edit</button></td>` : ''}
@@ -149,37 +146,46 @@ function _siteModal(content, farm, existing = null) {
     bodyHTML: `
       <div class="form-row">
         <div class="form-group"><label class="form-label">Site name</label>
-          <input class="form-input" id="ms-name" placeholder="e.g. Bore 1, River Pump A" value="${existing?.name || ''}"></div>
+          <input class="form-input" id="ms-name" placeholder="e.g. Merrowie D3" value="${existing?.name || ''}"></div>
         <div class="form-group"><label class="form-label">Type</label>
           <select class="form-select" id="ms-type">
-            <option value="bore" ${existing?.site_type === 'bore' ? 'selected' : ''}>Bore</option>
+            <option value="bore" ${!existing || existing?.site_type === 'bore' ? 'selected' : ''}>Bore</option>
             <option value="river_pump" ${existing?.site_type === 'river_pump' ? 'selected' : ''}>River pump</option>
             <option value="channel" ${existing?.site_type === 'channel' ? 'selected' : ''}>Channel</option>
             <option value="other" ${existing?.site_type === 'other' ? 'selected' : ''}>Other</option>
           </select></div>
       </div>
-      <div class="form-group"><label class="form-label">WAL <span class="text-muted">(optional)</span></label>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">ESID <span class="text-muted">(optional)</span></label>
+          <input class="form-input" id="ms-esid" placeholder="e.g. ESID 19105" value="${existing?.esid || ''}"></div>
+        <div class="form-group"><label class="form-label">Work approval number <span class="text-muted">(optional)</span></label>
+          <input class="form-input" id="ms-work-approval" placeholder="e.g. 70CA603554" value="${existing?.work_approval || ''}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Meter number <span class="text-muted">(optional)</span></label>
+          <input class="form-input" id="ms-meter-number" placeholder="e.g. M12345" value="${existing?.meter_number || ''}"></div>
+        <div class="form-group"><label class="form-label">Meter units</label>
+          <select class="form-select" id="ms-units">
+            <option value="ML" ${!existing || existing?.meter_units === 'ML' ? 'selected' : ''}>ML (megalitres)</option>
+            <option value="m3" ${existing?.meter_units === 'm3' ? 'selected' : ''}>m³ (cubic metres)</option>
+          </select></div>
+      </div>
+      <div class="form-group"><label class="form-label">WAL</label>
         <select class="form-select" id="ms-wal">
           <option value="">— not linked —</option>${walOpts}
         </select></div>
       <div class="form-row">
+        <div class="form-group"><label class="form-label">Annual extraction limit (ML) <span class="text-muted">(optional — leave blank if N/A)</span></label>
+          <input class="form-input num" id="ms-year-limit" type="number" step="1" value="${existing?.extraction_limit_ml_year || ''}"></div>
         <div class="form-group"><label class="form-label">Daily extraction limit (ML) <span class="text-muted">(optional)</span></label>
           <input class="form-input num" id="ms-day-limit" type="number" step="0.1" value="${existing?.extraction_limit_ml_day || ''}"></div>
-        <div class="form-group"><label class="form-label">Annual extraction limit (ML) <span class="text-muted">(optional)</span></label>
-          <input class="form-input num" id="ms-year-limit" type="number" step="1" value="${existing?.extraction_limit_ml_year || ''}"></div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label class="form-label">Meter units</label>
-          <select class="form-select" id="ms-units">
-            <option value="ML" ${existing?.meter_units === 'ML' ? 'selected' : ''}>ML (megalitres)</option>
-            <option value="m3" ${existing?.meter_units === 'm3' ? 'selected' : ''}>m³ (cubic metres)</option>
-          </select></div>
-        ${existing ? `<div class="form-group"><label class="form-label">Status</label>
-          <select class="form-select" id="ms-active">
-            <option value="true" ${existing?.active !== false ? 'selected' : ''}>Active</option>
-            <option value="false" ${existing?.active === false ? 'selected' : ''}>Inactive</option>
-          </select></div>` : ''}
-      </div>
+      ${existing ? `
+      <div class="form-group"><label class="form-label">Status</label>
+        <select class="form-select" id="ms-active">
+          <option value="true" ${existing?.active !== false ? 'selected' : ''}>Active</option>
+          <option value="false" ${existing?.active === false ? 'selected' : ''}>Inactive</option>
+        </select></div>` : ''}
       <div class="form-group"><label class="form-label">Notes</label>
         <textarea class="form-textarea" id="ms-notes" rows="2">${existing?.notes || ''}</textarea></div>
     `,
@@ -187,7 +193,10 @@ function _siteModal(content, farm, existing = null) {
       const row = {
         farm_id: farm.id,
         name: qs('#ms-name', modal)?.value?.trim(),
-        site_type: qs('#ms-type', modal)?.value,
+        site_type: qs('#ms-type', modal)?.value || 'bore',
+        esid: qs('#ms-esid', modal)?.value?.trim() || null,
+        work_approval: qs('#ms-work-approval', modal)?.value?.trim() || null,
+        meter_number: qs('#ms-meter-number', modal)?.value?.trim() || null,
         wal_number: qs('#ms-wal', modal)?.value || null,
         extraction_limit_ml_day: parseFloat(qs('#ms-day-limit', modal)?.value) || null,
         extraction_limit_ml_year: parseFloat(qs('#ms-year-limit', modal)?.value) || null,
@@ -384,50 +393,105 @@ function _renderSummary(content, farm) {
   const wyStart = m >= 7 ? `${y}-07-01` : `${y - 1}-07-01`;
   const wyLabel = m >= 7 ? `${y}-${String(y + 1).slice(2)}` : `${y - 1}-${String(y).slice(2)}`;
 
-  // Per-site summary for current water year
-  const siteSummaries = _sites.map(site => {
-    const siteReads = _reads
-      .filter(r => r.site_id === site.id && r.read_date >= wyStart)
-      .sort((a, b) => new Date(a.read_date) - new Date(b.read_date));
+  // Build water year list from reads (last 6 years)
+  const allYears = [];
+  for (let i = 0; i < 6; i++) {
+    const sy = (m >= 7 ? y : y - 1) - i;
+    allYears.push({ label: `${sy}-${String(sy+1).slice(2)}`, start: `${sy}-07-01`, end: `${sy+1}-06-30` });
+  }
+  const recentYears = allYears.slice(0, 6).reverse(); // oldest first for table columns
 
-    const totalVol = siteReads.reduce((s, r) => s + (parseFloat(r.volume_since_last) || 0), 0);
-    const lastRead = _reads.filter(r => r.site_id === site.id).sort((a, b) => new Date(b.read_date) - new Date(a.read_date))[0];
-    const yearLimit = site.extraction_limit_ml_year;
-    const pct = yearLimit ? Math.min(100, Math.round((totalVol / yearLimit) * 100)) : null;
+  // Per-site summary
+  const siteSummaries = _sites.map(site => {
+    const lastRead = _reads.filter(r => r.site_id === site.id)
+      .sort((a, b) => new Date(b.read_date) - new Date(a.read_date))[0];
     const ent = _entitlements.find(e => e.wal_number === site.wal_number);
 
-    return { site, totalVol, lastRead, yearLimit, pct, ent, readCount: siteReads.length };
+    // Volume per water year
+    const yearVols = recentYears.map(yr => {
+      const vol = _reads
+        .filter(r => r.site_id === site.id && r.read_date >= yr.start && r.read_date <= yr.end)
+        .reduce((s, r) => s + (parseFloat(r.volume_since_last) || 0), 0);
+      return vol;
+    });
+
+    const currentVol = yearVols[yearVols.length - 1];
+    const yearLimit = site.extraction_limit_ml_year;
+    const pct = yearLimit && currentVol ? Math.min(100, Math.round((currentVol / yearLimit) * 100)) : null;
+
+    return { site, ent, lastRead, yearVols, currentVol, yearLimit, pct };
   });
+
+  // Group by WAL for totals
+  const walGroups = {};
+  for (const s of siteSummaries) {
+    const wal = s.site.wal_number || 'unlinked';
+    if (!walGroups[wal]) walGroups[wal] = { wal, ent: s.ent, sites: [], yearVols: recentYears.map(() => 0) };
+    walGroups[wal].sites.push(s);
+    s.yearVols.forEach((v, i) => { walGroups[wal].yearVols[i] += v; });
+  }
 
   content.innerHTML = `
     <p style="font-weight:600;font-size:var(--text-sm);margin-bottom:12px">Extraction Summary — ${wyLabel}</p>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">
-      ${siteSummaries.map(({ site, totalVol, lastRead, yearLimit, pct, ent, readCount }) => `
-        <div class="card" style="padding:16px">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
-            <div>
-              <p style="font-weight:600">${site.name}</p>
-              <p style="font-size:11px;color:var(--muted)">${_siteTypeLabel(site.site_type)}${ent ? ' · ' + (ent.water_source_name || site.wal_number) : ''}</p>
-            </div>
-            <span style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--surface-alt,#f9fafb);color:var(--muted)">${site.wal_number || 'No WAL'}</span>
+
+    <!-- Summary table like the spreadsheet -->
+    <div class="card" style="overflow:hidden;margin-bottom:20px">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Site name</th>
+            <th>ESID</th>
+            <th>WAL</th>
+            <th class="num">Limit (ML)</th>
+            ${recentYears.map(yr => `<th class="num">${yr.label}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${siteSummaries.map(({ site, ent, yearVols, yearLimit, pct }) => `
+            <tr class="${site.active ? '' : 'muted'}">
+              <td><strong>${site.name}</strong>${site.active ? '' : ' <span style="font-size:10px">(inactive)</span>'}</td>
+              <td class="muted">${site.esid || '—'}</td>
+              <td class="muted">${site.wal_number || '—'}</td>
+              <td class="num">${yearLimit ? formatNumber(yearLimit, 0) : 'N/A'}</td>
+              ${yearVols.map((v, i) => {
+                const isCurrent = i === yearVols.length - 1;
+                const over = yearLimit && v > yearLimit;
+                return `<td class="num" style="${over ? 'color:var(--red);font-weight:600' : isCurrent && v > 0 ? 'color:var(--blue);font-weight:600' : ''}">${v > 0 ? formatNumber(v, 2) : '—'}</td>`;
+              }).join('')}
+            </tr>
+          `).join('')}
+          <!-- Totals row -->
+          <tr style="font-weight:600;border-top:2px solid var(--border)">
+            <td colspan="4">Total</td>
+            ${recentYears.map((yr, i) => {
+              const total = siteSummaries.reduce((s, x) => s + x.yearVols[i], 0);
+              const isCurrent = i === recentYears.length - 1;
+              return `<td class="num" style="${isCurrent ? 'color:var(--blue)' : ''}">${total > 0 ? formatNumber(total, 2) : '—'}</td>`;
+            }).join('')}
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Per-site limit progress for current year (only sites with limits) -->
+    ${siteSummaries.some(s => s.yearLimit) ? `
+    <p style="font-weight:600;font-size:var(--text-sm);margin-bottom:12px">Site Limits — ${wyLabel}</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px">
+      ${siteSummaries.filter(s => s.yearLimit).map(({ site, currentVol, yearLimit, pct }) => `
+        <div class="card" style="padding:14px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+            <p style="font-weight:600;font-size:var(--text-sm)">${site.name}</p>
+            <p style="font-size:11px;color:var(--muted)">${site.esid || ''}</p>
           </div>
-
-          <p style="font-size:22px;font-weight:600;color:${pct !== null && pct > 90 ? 'var(--red)' : 'var(--blue)'};margin-bottom:2px">
-            ${formatNumber(totalVol, 1)} ML
+          <p style="font-size:20px;font-weight:600;color:${pct > 90 ? 'var(--red)' : 'var(--blue)'};margin-bottom:4px">
+            ${formatNumber(currentVol, 1)} <span style="font-size:13px;font-weight:400;color:var(--muted)">/ ${formatNumber(yearLimit, 0)} ML</span>
           </p>
-          <p style="font-size:11px;color:var(--muted);margin-bottom:10px">extracted this water year (${readCount} reads)</p>
-
-          ${yearLimit ? `
           <div style="height:6px;background:var(--border-light);border-radius:3px;overflow:hidden;margin-bottom:4px">
-            <div style="height:100%;width:${pct}%;background:${pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--amber)' : 'var(--blue)'};border-radius:3px"></div>
+            <div style="height:100%;width:${pct || 0}%;background:${pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--amber)' : 'var(--blue)'};border-radius:3px"></div>
           </div>
-          <p style="font-size:11px;color:var(--muted);margin-bottom:10px">${pct}% of ${formatNumber(yearLimit, 0)} ML annual limit</p>` : ''}
-
-          <p style="font-size:11px;color:var(--muted)">
-            Last read: ${lastRead ? '<strong>' + formatNumber(lastRead.reading, 3) + ' ' + (site.meter_units || 'ML') + '</strong> on ' + formatDate(lastRead.read_date) : '—'}
-          </p>
+          <p style="font-size:11px;color:var(--muted)">${pct || 0}% of annual limit used</p>
         </div>
       `).join('')}
-    </div>
+    </div>` : ''}
   `;
 }
