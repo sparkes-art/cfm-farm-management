@@ -34,12 +34,7 @@ const MODULE_LOADERS = {
     },
     unmount: () => {}
   }),
-  'meter-readings': async () => ({
-    mount: (container) => {
-      container.innerHTML = '<div class="page-header"><h1>Meter Readings</h1></div><div class="card" style="padding:40px;text-align:center"><p style="color:var(--hint)">Meter readings module coming soon — record water site meter readings here.</p></div>';
-    },
-    unmount: () => {}
-  }),
+
   agronomy: async () => {
     const m = await import('../modules/agronomy/agronomy.js?v=1783290066771');
     return { mount: m.mountAgronomy };
