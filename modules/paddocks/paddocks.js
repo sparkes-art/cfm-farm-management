@@ -3,7 +3,7 @@ import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client
 import { getActiveFarm, canWrite } from '../../js/app-state.js';
 import { toast, openModal, formatNumber, qs } from '../../js/ui.js';
 
-const MAPBOX_TOKEN = 'pk.eyJ1Ijoic2FtdWVsd2lsbGlhbSIsImEiOiJjbXBsc280aHcyOXEyMnBvaGVrNDExdW5pIn0.APAu0LyYKE9CbXvlbYzUbA';
+const MAPBOX_TOKEN = window.__CFM_MAPBOX_TOKEN || '';
 
 let _paddocks = [];
 let _view = 'list'; // 'list' or 'map'
