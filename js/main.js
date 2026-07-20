@@ -35,6 +35,10 @@ const MODULE_LOADERS = {
     unmount: () => {}
   }),
 
+  recommendations: async () => {
+    const m = await import('../modules/agronomy/recommendations.js');
+    return { mount: m.mountRecommendations, unmount: m.unmountRecommendations };
+  },
   agronomy: async () => {
     const m = await import('../modules/agronomy/agronomy.js?v=1783290066771');
     return { mount: m.mountAgronomy };
