@@ -47,6 +47,10 @@ const MODULE_LOADERS = {
     const m = await import('../modules/budget/budget.js?v=1783290066771');
     return { mount: m.mountBudget, unmount: m.unmountBudget };
   },
+  paddocks: async () => {
+    const m = await import('../modules/paddocks/paddocks.js');
+    return { mount: m.mountPaddocks, unmount: m.unmountPaddocks };
+  },
   settings: async () => {
     const m = await import('../modules/settings/settings.js?v=1783290066771');
     return { mount: m.mountSettings };
