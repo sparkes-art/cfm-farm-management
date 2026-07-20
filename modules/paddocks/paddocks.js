@@ -349,7 +349,6 @@ function _paddockModal(container, farm, existing = null) {
 }
 
 function _importModal(container, farm) {
-  const supabaseUrl = 'https://nqvfuqvindsgnogejaei.supabase.co';
   let parsedPaddocks = [];
 
   openModal({
@@ -357,10 +356,7 @@ function _importModal(container, farm) {
     confirmLabel: null,
     bodyHTML: `
       <p style="font-size:13px;color:var(--hint);margin-bottom:16px">Export from Ag World → Geographical view → Download KML</p>
-      <div class="form-group" style="margin-bottom:12px">
-        <label class="form-label">Supabase Service Role Key</label>
-        <input class="form-input" id="imp-key" type="password" placeholder="eyJ... (Supabase → Settings → API)">
-      </div>
+
       <div id="imp-drop" style="border:2px dashed var(--border);border-radius:8px;padding:24px;text-align:center;cursor:pointer;margin-bottom:12px">
         <p style="font-size:20px">📁</p>
         <p style="font-size:13px;color:var(--hint);margin-top:4px"><strong>Drop KML file here</strong> or click to browse</p>
@@ -438,42 +434,37 @@ function _importModal(container, farm) {
     }
 
     async function runImport() {
-      const sbKey = document.getElementById('imp-key')?.value?.trim();
-      if (!sbKey) { alert('Please enter your Supabase service role key'); return; }
       const btn = document.getElementById('imp-run-btn');
-      if (btn) btn.disabled = true;
       const prog = document.getElementById('imp-progress');
+      const status = document.getElementById('imp-status');
+      const bar = document.getElementById('imp-bar');
+      if (btn) btn.disabled = true;
       if (prog) prog.style.display = '';
-      let success = 0, failed = 0;
-      for (let i = 0; i < parsedPaddocks.length; i++) {
-        const p = parsedPaddocks[i];
-        const pct = Math.round(((i+1)/parsedPaddocks.length)*100);
-        const bar = document.getElementById('imp-bar');
-        if (bar) bar.style.width = pct+'%';
-        const status = document.getElementById('imp-status');
-        if (status) status.textContent = (i+1)+' of '+parsedPaddocks.length+' — '+p.name;
-        try {
-          const res = await fetch(supabaseUrl+'/rest/v1/paddocks', {
-            method: 'POST',
-            headers: { 'apikey':sbKey, 'Authorization':'Bearer '+sbKey, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates,return=representation' },
-            body: JSON.stringify({ farm_id:farm.id, external_id:p.externalId, name:p.name, area_ha:p.area, boundary:p.boundary, is_active:true })
-          });
-          if (!res.ok) throw new Error(await res.text());
-          const [paddock] = await res.json();
-          if (p.cropName && paddock?.id) {
-            await fetch(supabaseUrl+'/rest/v1/paddock_crops', {
-              method: 'POST',
-              headers: { 'apikey':sbKey, 'Authorization':'Bearer '+sbKey, 'Content-Type':'application/json', 'Prefer':'resolution=merge-duplicates' },
-              body: JSON.stringify({ paddock_id:paddock.id, season:p.seasonName, crop_name:p.cropName, variety_name:p.varietyName||null })
-            });
-          }
-          success++;
-        } catch { failed++; }
+      if (status) status.textContent = 'Sending ' + parsedPaddocks.length + ' paddocks to server...';
+      if (bar) bar.style.width = '30%';
+      try {
+        const { getSession } = await import('../../js/supabase-client.js');
+        const session = getSession();
+        const res = await fetch('/api/import-paddocks', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + (session?.access_token || ''),
+          },
+          body: JSON.stringify({ farmId: farm.id, paddocks: parsedPaddocks }),
+        });
+        if (bar) bar.style.width = '90%';
+        if (!res.ok) throw new Error(await res.text());
+        const result = await res.json();
+        if (bar) bar.style.width = '100%';
+        if (status) status.textContent = 'Done — ' + result.success + ' imported' + (result.failed ? ' (' + result.failed + ' failed)' : '');
+        await _loadData(farm);
+        _renderView(container, farm);
+        toast(result.success + ' paddocks imported', 'success');
+      } catch (err) {
+        if (status) status.textContent = 'Error: ' + err.message;
+        if (btn) btn.disabled = false;
       }
-      if (status) status.textContent = 'Done — '+success+' imported'+(failed?' ('+failed+' failed)':'');
-      await _loadData(farm);
-      _renderView(container, farm);
-      toast(success+' paddocks imported', 'success');
     }
   }, 200);
 }
