@@ -43,3 +43,6 @@
   [headers.values]
     Cache-Control = "no-cache, no-store, must-revalidate"
     Netlify-CDN-Cache-Control = "no-store"
+
+[functions.import-paddocks]
+  timeout = 26
