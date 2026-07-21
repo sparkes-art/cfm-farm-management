@@ -14,7 +14,7 @@ let _filterMgmt = '';
 let _searchTerm = '';
 let _activeDeal = null;
 
-const STATUSES = ['New', 'Reviewing', 'Interested', 'Due Diligence', 'Proposal Sent', 'Engaged', 'Passed', 'Sold'];
+const STATUSES = ['Reviewing', 'Interested', 'Engaged', 'Passed', 'Sold'];
 const MGMT_STATUSES = ['Available', 'No Interest', 'Already Manage'];
 const DOC_TYPES = ['IM', 'Farm Model', 'Proposal', 'Report', 'Valuation', 'Other'];
 const ACTIVITY_TYPES = ['Note', 'Call', 'Inspection', 'Email', 'Proposal', 'Meeting'];
@@ -437,12 +437,16 @@ function _dealModal(container, existing = null) {
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Farm prospects</label>
-            <textarea class="form-textarea" id="d-prospects" rows="4" placeholder="CFM's assessment of the property prospects…">${existing?.farm_prospects||''}</textarea>
+            <label class="form-label">Land / Cropping assessment</label>
+            <textarea class="form-textarea" id="d-prospects" rows="3" placeholder="Soil types, cropping history, yield potential…">${existing?.land_cropping_assessment||existing?.farm_prospects||''}</textarea>
           </div>
           <div class="form-group">
-            <label class="form-label">CFM notes</label>
-            <textarea class="form-textarea" id="d-notes" rows="4" placeholder="Internal CFM notes…">${existing?.cfm_notes||''}</textarea>
+            <label class="form-label">Water assessment</label>
+            <textarea class="form-textarea" id="d-notes" rows="3" placeholder="Water entitlements, access, quality, infrastructure…">${existing?.water_assessment||existing?.cfm_notes||''}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Development potential</label>
+            <textarea class="form-textarea" id="d-dev-potential" rows="3" placeholder="Expansion opportunities, conversion potential, capex required…">${existing?.development_potential||''}</textarea>
           </div>
         </div>
         <!-- Right column -->
@@ -590,8 +594,9 @@ function _dealModal(container, existing = null) {
         status: qs('#d-status', modal)?.value||'New',
         cfm_management_status: qs('#d-mgmt', modal)?.value||'Available',
         date_created: qs('#d-created', modal)?.value||null,
-        farm_prospects: qs('#d-prospects', modal)?.value?.trim()||null,
-        cfm_notes: qs('#d-notes', modal)?.value?.trim()||null,
+        land_cropping_assessment: qs('#d-prospects', modal)?.value?.trim()||null,
+        water_assessment: qs('#d-notes', modal)?.value?.trim()||null,
+        development_potential: qs('#d-dev-potential', modal)?.value?.trim()||null,
         im_url: imUrl,
         model_url: modelUrl,
       };
@@ -748,12 +753,12 @@ function _activityModal(deal, container) {
 
 // ── Export CSV ────────────────────────────────────────────────
 function _exportCSV() {
-  const headers = ['Property','Location','Region','Lead Agent','Agency','Agent Email','Agent Phone','Price Min','Price Max','Status','CFM Status','Date Created','Farm Prospects','CFM Notes'];
+  const headers = ['Property','Location','Region','Lead Agent','Agency','Agent Email','Agent Phone','Price Min','Price Max','Status','CFM Status','Date Created','Land/Cropping Assessment','Water Assessment','Development Potential'];
   const rows = _deals.map(d => [
     d.property_name, d.location, d.region, d.lead_agent, d.agency,
     d.agent_email, d.agent_phone, d.price_min, d.price_max,
     d.status, d.cfm_management_status,
-    d.date_created, d.farm_prospects, d.cfm_notes
+    d.date_created, d.land_cropping_assessment||d.farm_prospects, d.water_assessment||d.cfm_notes, d.development_potential
   ].map(v => v ? '"'+String(v).replace(/"/g,'""')+'"' : '""'));
 
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
