@@ -6,6 +6,7 @@ import { toast, openModal, formatNumber, qs } from '../../js/ui.js';
 const MAPBOX_TOKEN = window.__CFM_MAPBOX_TOKEN || '';
 
 let _paddocks = [];
+let _plantings = [];
 let _view = 'list'; // 'list' or 'map'
 let _map = null;
 let _filter = '';
@@ -70,7 +71,13 @@ export function unmountPaddocks() {
 }
 
 async function _loadData(farm) {
-  _paddocks = await dbSelect('paddocks', 'farm_id=eq.' + farm.id + '&select=*&order=name.asc');
+  [_paddocks] = await Promise.all([
+    dbSelect('paddocks', 'farm_id=eq.' + farm.id + '&select=*&order=name.asc'),
+  ]);
+  // Load planting records for crop colours on map
+  try {
+    _plantings = await dbSelect('planting_records', 'farm_id=eq.' + farm.id + '&status=eq.planted&select=paddock_id,crop_type,variety,plant_date');
+  } catch { _plantings = []; }
 }
 
 function _filtered() {
@@ -467,4 +474,290 @@ function _importModal(container, farm) {
       }
     }
   }, 200);
+}
+
+// ── Farm Map (standalone view from nav) ───────────────────────
+export async function mountFarmMap(container) {
+  const farm = getActiveFarm();
+  if (!farm) { container.innerHTML = '<div class="empty-state"><p>No farm selected.</p></div>'; return; }
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h1>Farm Map</h1>
+        <p class="page-subtitle" style="font-size:var(--text-base);font-weight:600;color:var(--ink-mid)">${farm.name}</p>
+      </div>
+      <div class="flex gap-2 items-center">
+        <span style="font-size:12px;color:var(--hint)">Click a paddock to view or edit</span>
+        ${canWrite() ? '<button class="btn btn-secondary btn-sm" id="btn-toggle-draw">✏️ Draw new paddock</button>' : ''}
+      </div>
+    </div>
+    <div id="farm-map-container" style="height:calc(100vh - 160px);border-radius:10px;overflow:hidden;border:1px solid var(--border);position:relative">
+      <div id="farm-map" style="width:100%;height:100%"></div>
+      <div id="map-legend" style="position:absolute;bottom:30px;left:10px;background:white;border-radius:8px;padding:10px 14px;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:10">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;align-items:center;gap:6px"><div style="width:12px;height:12px;border-radius:2px;background:#185FA5;opacity:.5"></div> Paddock boundary</div>
+          <div style="display:flex;align-items:center;gap:6px"><div style="width:12px;height:12px;border-radius:2px;background:#3B6D11;opacity:.7"></div> Currently planted</div>
+          <div style="display:flex;align-items:center;gap:6px"><div style="width:12px;height:12px;border-radius:2px;background:#6b7280;opacity:.4"></div> Fallow</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  await _loadData(farm);
+  _initFarmMap(container, farm);
+
+  qs('#btn-toggle-draw', container)?.addEventListener('click', () => {
+    toast('Draw mode coming soon — use Import KML for bulk boundary import', 'info');
+  });
+}
+
+function _initFarmMap(container, farm) {
+  if (_map) { _map.remove(); _map = null; }
+
+  if (!document.getElementById('mapbox-css')) {
+    const link = document.createElement('link');
+    link.id = 'mapbox-css';
+    link.rel = 'stylesheet';
+    link.href = 'https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css';
+    document.head.appendChild(link);
+  }
+
+  const loadMap = () => {
+    window.mapboxgl.accessToken = MAPBOX_TOKEN;
+
+    const withBoundary = _paddocks.filter(p => p.boundary);
+    let centre = [145.5, -33.5];
+    if (withBoundary.length) {
+      const allCoords = withBoundary.flatMap(p => p.boundary.coordinates[0]);
+      const lngs = allCoords.map(c => c[0]);
+      const lats = allCoords.map(c => c[1]);
+      centre = [(Math.min(...lngs)+Math.max(...lngs))/2, (Math.min(...lats)+Math.max(...lats))/2];
+    }
+
+    _map = new window.mapboxgl.Map({
+      container: 'farm-map',
+      style: 'mapbox://styles/mapbox/satellite-streets-v12',
+      center: centre,
+      zoom: 12,
+    });
+
+    _map.addControl(new window.mapboxgl.NavigationControl());
+    _map.addControl(new window.mapboxgl.FullscreenControl());
+    _map.addControl(new window.mapboxgl.ScaleControl({ unit: 'metric' }));
+
+    _map.on('load', () => _renderMapLayers(container, farm));
+  };
+
+  if (window.mapboxgl) loadMap();
+  else {
+    const script = document.createElement('script');
+    script.src = 'https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js';
+    script.onload = loadMap;
+    document.head.appendChild(script);
+  }
+}
+
+function _renderMapLayers(container, farm) {
+  // Remove existing sources/layers if re-rendering
+  ['paddock-fill','paddock-fill-planted','paddock-outline','paddock-outline-hover','paddock-labels'].forEach(id => {
+    if (_map.getLayer(id)) _map.removeLayer(id);
+  });
+  if (_map.getSource('paddocks')) _map.removeSource('paddocks');
+
+  // Build features with planting info
+  const features = _paddocks.filter(p => p.boundary).map(p => {
+    // Find latest planting
+    const plantings = _plantings ? _plantings.filter(pl => pl.paddock_id === p.id && pl.status === 'planted') : [];
+    const currentPlanting = plantings.sort((a,b) => (b.plant_date||'').localeCompare(a.plant_date||''))[0];
+    return {
+      type: 'Feature',
+      properties: {
+        id: p.id,
+        name: p.name,
+        area: p.area_ha,
+        type: p.paddock_type||'',
+        group: p.group_name||'',
+        irrigation: p.irrigation_type||'',
+        crop: currentPlanting?.crop_type || '',
+        variety: currentPlanting?.variety || '',
+        planted: currentPlanting ? true : false,
+      },
+      geometry: p.boundary,
+    };
+  });
+
+  _map.addSource('paddocks', { type: 'geojson', data: { type: 'FeatureCollection', features } });
+
+  // Fill — planted paddocks green, fallow blue
+  _map.addLayer({
+    id: 'paddock-fill',
+    type: 'fill',
+    source: 'paddocks',
+    paint: {
+      'fill-color': ['case', ['get','planted'], '#3B6D11', '#185FA5'],
+      'fill-opacity': ['case', ['get','planted'], 0.25, 0.15],
+    }
+  });
+
+  // Hover highlight
+  _map.addLayer({
+    id: 'paddock-outline-hover',
+    type: 'fill',
+    source: 'paddocks',
+    paint: { 'fill-color': '#fff', 'fill-opacity': 0 },
+  });
+
+  _map.addLayer({
+    id: 'paddock-outline',
+    type: 'line',
+    source: 'paddocks',
+    paint: {
+      'line-color': ['case', ['get','planted'], '#3B6D11', '#185FA5'],
+      'line-width': 1.5,
+    }
+  });
+
+  _map.addLayer({
+    id: 'paddock-labels',
+    type: 'symbol',
+    source: 'paddocks',
+    layout: {
+      'text-field': ['concat', ['get','name'], ['case', ['get','planted'], ['concat', '\n', ['get','crop']], '']],
+      'text-size': 10,
+      'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+      'text-max-width': 8,
+    },
+    paint: {
+      'text-color': '#ffffff',
+      'text-halo-color': '#000000',
+      'text-halo-width': 1,
+    }
+  });
+
+  // Click → edit popup
+  _map.on('click', 'paddock-fill', e => {
+    const props = e.features[0].properties;
+    const paddock = _paddocks.find(p => p.id === props.id);
+    if (!paddock) return;
+    _showPaddockPopup(e.lngLat, paddock, container, farm);
+  });
+
+  _map.on('mouseenter', 'paddock-fill', () => { _map.getCanvas().style.cursor = 'pointer'; });
+  _map.on('mouseleave', 'paddock-fill', () => { _map.getCanvas().style.cursor = ''; });
+
+  // Fit bounds
+  if (features.length) {
+    const allCoords = features.flatMap(f => f.geometry.coordinates[0]);
+    const lngs = allCoords.map(c => c[0]);
+    const lats = allCoords.map(c => c[1]);
+    _map.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 60 });
+  }
+}
+
+function _showPaddockPopup(lngLat, paddock, container, farm) {
+  // Remove existing popup
+  document.querySelectorAll('.mapboxgl-popup').forEach(el => el.remove());
+
+  const currentPlanting = _plantings ? _plantings.filter(p => p.paddock_id === paddock.id && p.status === 'planted')
+    .sort((a,b) => (b.plant_date||'').localeCompare(a.plant_date||''))[0] : null;
+
+  const popup = new window.mapboxgl.Popup({ maxWidth: '280px' })
+    .setLngLat(lngLat)
+    .setHTML(`
+      <div style="font-family:system-ui;padding:4px">
+        <p style="font-weight:600;font-size:14px;margin-bottom:8px">${paddock.name}</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px;margin-bottom:10px">
+          <div><span style="color:#6b7280">Area</span><br><strong>${paddock.area_ha ? paddock.area_ha.toFixed(1)+' ha' : '—'}</strong></div>
+          <div><span style="color:#6b7280">Type</span><br><strong>${paddock.paddock_type||'—'}</strong></div>
+          <div><span style="color:#6b7280">Irrigation</span><br><strong>${paddock.irrigation_type||'—'}</strong></div>
+          <div><span style="color:#6b7280">Current crop</span><br><strong style="color:${currentPlanting?'#065f46':'#6b7280'}">${currentPlanting?.crop_type||'Fallow'}</strong></div>
+          ${currentPlanting?.variety ? '<div style="grid-column:span 2"><span style="color:#6b7280">Variety</span><br><strong>'+currentPlanting.variety+'</strong></div>' : ''}
+        </div>
+        ${canWrite() ? `<div style="display:flex;gap:6px">
+          <button id="popup-edit-${paddock.id}" style="flex:1;padding:5px;border-radius:4px;border:1px solid #d1d5db;background:white;cursor:pointer;font-size:12px;font-weight:500">✏️ Edit paddock</button>
+        </div>` : ''}
+      </div>
+    `)
+    .addTo(_map);
+
+  // Wire edit button after popup renders
+  setTimeout(() => {
+    document.getElementById('popup-edit-'+paddock.id)?.addEventListener('click', () => {
+      popup.remove();
+      _editPaddockFromMap(paddock, container, farm);
+    });
+  }, 100);
+}
+
+function _editPaddockFromMap(paddock, container, farm) {
+  const TYPES = ['Irrigation', 'Dryland', 'Grazing', 'Fallow', 'Other'];
+  const IRR_TYPES = ['Flood', 'Lateral move', 'Centre pivot', 'Drip', 'Dryland'];
+
+  openModal({
+    title: 'Edit — ' + paddock.name,
+    confirmLabel: 'Save changes',
+    bodyHTML: `
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Paddock name</label>
+          <input class="form-input" id="ep-name" value="${paddock.name||''}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Area (ha)</label>
+          <input class="form-input num" id="ep-area" type="number" step="0.1" value="${paddock.area_ha||''}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Paddock type</label>
+          <select class="form-select" id="ep-type">
+            <option value="">— select —</option>
+            ${TYPES.map(t => `<option value="${t}" ${paddock.paddock_type===t?'selected':''}>${t}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Irrigation type</label>
+          <select class="form-select" id="ep-irr">
+            <option value="">— select —</option>
+            ${IRR_TYPES.map(t => `<option value="${t}" ${paddock.irrigation_type===t?'selected':''}>${t}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Group / block</label>
+          <input class="form-input" id="ep-group" value="${paddock.group_name||''}" placeholder="e.g. River block">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-select" id="ep-status">
+            <option value="true" ${paddock.is_active!==false?'selected':''}>Active</option>
+            <option value="false" ${paddock.is_active===false?'selected':''}>Inactive</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <textarea class="form-textarea" id="ep-notes" rows="2">${paddock.notes||''}</textarea>
+      </div>
+      <p style="font-size:11px;color:var(--hint);margin-top:8px">To edit the boundary polygon, use the Import KML function to re-import an updated KML file.</p>
+    `,
+    onConfirm: async (modal) => {
+      const updates = {
+        name: qs('#ep-name', modal)?.value?.trim(),
+        area_ha: parseFloat(qs('#ep-area', modal)?.value)||null,
+        paddock_type: qs('#ep-type', modal)?.value||null,
+        irrigation_type: qs('#ep-irr', modal)?.value||null,
+        group_name: qs('#ep-group', modal)?.value?.trim()||null,
+        is_active: qs('#ep-status', modal)?.value === 'true',
+        notes: qs('#ep-notes', modal)?.value?.trim()||null,
+      };
+      if (!updates.name) throw new Error('Paddock name is required');
+      await dbUpdate('paddocks', paddock.id, updates);
+      Object.assign(_paddocks.find(p => p.id === paddock.id), updates);
+      toast('Paddock updated', 'success');
+      _renderMapLayers(container, farm);
+    },
+  });
 }
