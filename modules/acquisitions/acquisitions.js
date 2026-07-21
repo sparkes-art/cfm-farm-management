@@ -6,6 +6,7 @@ import { toast, openModal, formatCurrency, formatDate, qs } from '../../js/ui.js
 const SUPABASE_URL = 'https://nqvfuqvindsgnogejaei.supabase.co';
 
 let _deals = [];
+let _agents = [];
 let _activeTab = 'pipeline';
 let _filterStatus = '';
 let _filterMgmt = '';
@@ -72,11 +73,15 @@ export async function mountAcquisitions(container) {
 
 export function unmountAcquisitions() {
   _deals = [];
+  _agents = [];
   _activeDeal = null;
 }
 
 async function _loadData() {
-  _deals = await dbSelect('acquisition_deals', 'select=*&order=date_created.desc');
+  [_deals, _agents] = await Promise.all([
+    dbSelect('acquisition_deals', 'select=*&order=date_created.desc'),
+    dbSelect('acquisition_agents', 'select=*&order=name.asc').catch(() => []),
+  ]);
 }
 
 function _renderTab(container) {
@@ -119,7 +124,7 @@ function _renderPipeline(content, container) {
             <div class="deal-card" data-id="${d.id}" style="background:white;border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;cursor:pointer;transition:box-shadow .15s">
               <p style="font-size:12px;font-weight:600;margin-bottom:4px;line-height:1.3">${d.property_name}</p>
               ${d.location ? `<p style="font-size:10px;color:var(--hint);margin-bottom:4px">📍 ${d.location}</p>` : ''}
-              ${d.likely_price_label ? `<p style="font-size:11px;font-weight:500;color:var(--blue);margin-bottom:4px">${d.likely_price_label}</p>` : ''}
+              ${d.price_min ? `<p style="font-size:11px;font-weight:500;color:var(--blue);margin-bottom:4px">$${Number(d.price_min).toLocaleString()}${d.price_max ? ' – $'+Number(d.price_max).toLocaleString() : '+'}</p>` : ''}
               <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
                 ${d.cfm_management_status ? `<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:${(MGMT_COLOURS[d.cfm_management_status]||{}).bg||'#f3f4f6'};color:${(MGMT_COLOURS[d.cfm_management_status]||{}).color||'#374151'}">${d.cfm_management_status}</span>` : '<span></span>'}
                 <span style="font-size:10px;color:var(--hint)">${d.lead_agent||''}</span>
@@ -190,6 +195,7 @@ function _renderList(content, container) {
           <th>Location</th>
           <th>Agent</th>
           <th>Agency</th>
+          <th>Region</th>
           <th>Est. price</th>
           <th>Status</th>
           <th>CFM status</th>
@@ -205,7 +211,8 @@ function _renderList(content, container) {
               <td class="muted">${d.location||'—'}</td>
               <td class="muted">${d.lead_agent||'—'}</td>
               <td class="muted">${d.agency||'—'}</td>
-              <td style="font-size:12px;font-weight:500;color:var(--blue)">${d.likely_price_label||'—'}</td>
+              <td class="muted">${d.region||'—'}</td>
+              <td style="font-size:12px;font-weight:500;color:var(--blue)">${d.price_min ? '$'+Number(d.price_min).toLocaleString() + (d.price_max ? ' – $'+Number(d.price_max).toLocaleString() : '+') : (d.likely_price_label||'—')}</td>
               <td><span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${sc.bg};color:${sc.color};font-weight:500;white-space:nowrap">${d.status||'New'}</span></td>
               <td><span style="font-size:11px;padding:2px 8px;border-radius:10px;background:${mc.bg||'#f3f4f6'};color:${mc.color||'#374151'}">${d.cfm_management_status||'—'}</span></td>
               <td class="muted" style="font-size:11px">${d.date_created?formatDate(d.date_created):'—'}</td>
@@ -271,20 +278,23 @@ async function _openDeal(deal, container) {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
             ${[
               ['Location', deal.location],
+              ['Region', deal.region],
+              ['Est. price', deal.price_min ? '$'+Number(deal.price_min).toLocaleString() + (deal.price_max ? ' – $'+Number(deal.price_max).toLocaleString() : '+') : null],
               ['Lead agent', deal.lead_agent],
               ['Agency', deal.agency],
+              ['Agent email', deal.agent_email],
+              ['Agent phone', deal.agent_phone],
               ['Date created', deal.date_created ? formatDate(deal.date_created) : null],
-              ['Invoice date', deal.invoice_date ? formatDate(deal.invoice_date) : null],
             ].filter(([,v]) => v).map(([l,v]) => `
               <div><p style="font-size:10px;color:var(--hint);margin-bottom:2px">${l}</p><p style="font-size:13px;font-weight:500">${v}</p></div>
             `).join('')}
           </div>
 
-          <!-- Links -->
-          ${deal.lawd_im_url || deal.cfm_im_url ? `
+          <!-- IM and Model links -->
+          ${deal.im_url || deal.model_url ? `
           <div style="display:flex;gap:8px;margin-bottom:14px">
-            ${deal.lawd_im_url && deal.lawd_im_url !== 'No IM' ? `<a href="${deal.lawd_im_url}" target="_blank" class="btn btn-secondary btn-sm">📄 LAWD IM</a>` : ''}
-            ${deal.cfm_im_url ? `<a href="${deal.cfm_im_url}" target="_blank" class="btn btn-secondary btn-sm">📄 CFM IM</a>` : ''}
+            ${deal.im_url ? `<a href="${deal.im_url}" target="_blank" class="btn btn-secondary btn-sm">📄 View IM</a>` : ''}
+            ${deal.model_url ? `<a href="${deal.model_url}" target="_blank" class="btn btn-secondary btn-sm">📊 View Farm Model</a>` : ''}
           </div>` : ''}
 
           <!-- Farm prospects -->
@@ -364,8 +374,9 @@ function _dealModal(container, existing = null) {
     confirmLabel: existing ? 'Save changes' : 'Add deal',
     wide: true,
     bodyHTML: `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-        <div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <!-- Left column -->
+        <div style="display:flex;flex-direction:column;gap:0">
           <div class="form-group">
             <label class="form-label">Property name *</label>
             <input class="form-input" id="d-name" value="${existing?.property_name||''}" placeholder="e.g. Merrowie Station">
@@ -376,20 +387,31 @@ function _dealModal(container, existing = null) {
               <input class="form-input" id="d-location" value="${existing?.location||''}" placeholder="e.g. Hillston, NSW">
             </div>
             <div class="form-group">
-              <label class="form-label">Est. price</label>
-              <input class="form-input" id="d-price" value="${existing?.likely_price_label||''}" placeholder="e.g. $50m to $100m">
+              <label class="form-label">Region</label>
+              <input class="form-input" id="d-region" value="${existing?.region||''}" placeholder="e.g. Riverina, Darling Downs">
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Lead agent</label>
-              <input class="form-input" id="d-agent" value="${existing?.lead_agent||''}">
+              <label class="form-label">Est. price min ($)</label>
+              <input class="form-input num" id="d-price-min" type="number" step="1000000" value="${existing?.price_min||''}" placeholder="50000000">
             </div>
             <div class="form-group">
-              <label class="form-label">Agency</label>
-              <input class="form-input" id="d-agency" value="${existing?.agency||''}" placeholder="e.g. LAWD">
+              <label class="form-label">Est. price max ($)</label>
+              <input class="form-input num" id="d-price-max" type="number" step="1000000" value="${existing?.price_max||''}" placeholder="100000000">
             </div>
           </div>
+          <div class="form-group">
+            <label class="form-label">Farm prospects</label>
+            <textarea class="form-textarea" id="d-prospects" rows="4" placeholder="CFM's assessment of the property prospects…">${existing?.farm_prospects||''}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">CFM notes</label>
+            <textarea class="form-textarea" id="d-notes" rows="4" placeholder="Internal CFM notes…">${existing?.cfm_notes||''}</textarea>
+          </div>
+        </div>
+        <!-- Right column -->
+        <div style="display:flex;flex-direction:column;gap:0">
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Deal status</label>
@@ -404,54 +426,121 @@ function _dealModal(container, existing = null) {
               </select>
             </div>
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Date created</label>
-              <input class="form-input" id="d-created" type="date" value="${existing?.date_created||new Date().toISOString().slice(0,10)}">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Invoice date</label>
-              <input class="form-input" id="d-invoice" type="date" value="${existing?.invoice_date||''}">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">LAWD IM link</label>
-              <input class="form-input" id="d-lawd-im" value="${existing?.lawd_im_url||''}" placeholder="https://…">
-            </div>
-            <div class="form-group">
-              <label class="form-label">CFM IM link</label>
-              <input class="form-input" id="d-cfm-im" value="${existing?.cfm_im_url||''}" placeholder="https://…">
-            </div>
-          </div>
-        </div>
-        <div>
           <div class="form-group">
-            <label class="form-label">Farm prospects</label>
-            <textarea class="form-textarea" id="d-prospects" rows="5" placeholder="CFM's assessment of the property prospects…">${existing?.farm_prospects||''}</textarea>
+            <label class="form-label">Date created</label>
+            <input class="form-input" id="d-created" type="date" value="${existing?.date_created||new Date().toISOString().slice(0,10)}">
           </div>
-          <div class="form-group">
-            <label class="form-label">CFM notes</label>
-            <textarea class="form-textarea" id="d-notes" rows="5" placeholder="Internal CFM notes…">${existing?.cfm_notes||''}</textarea>
+          <!-- Agent section -->
+          <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px">
+            <p style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:10px">Agent details</p>
+            <div class="form-group">
+              <label class="form-label">Lead agent</label>
+              <input class="form-input" id="d-agent" value="${existing?.lead_agent||''}" list="agents-list" placeholder="Start typing agent name…">
+              <datalist id="agents-list">
+                ${_agents.map(a => `<option value="${a.name}" data-agency="${a.agency||''}" data-email="${a.email||''}" data-phone="${a.phone||''}">${a.name} — ${a.agency||''}</option>`).join('')}
+              </datalist>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Agency</label>
+                <input class="form-input" id="d-agency" value="${existing?.agency||''}" placeholder="e.g. LAWD">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Agent phone</label>
+                <input class="form-input" id="d-phone" value="${existing?.agent_phone||''}" placeholder="04xx xxx xxx">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Agent email</label>
+              <input class="form-input" id="d-email" type="email" value="${existing?.agent_email||''}" placeholder="agent@agency.com">
+            </div>
+          </div>
+          <!-- Documents -->
+          <div style="border:1px solid var(--border);border-radius:8px;padding:12px">
+            <p style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:10px">Documents</p>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">IM (Information Memorandum)</label>
+                <input type="file" id="d-im-file" class="form-input" accept=".pdf">
+                ${existing?.im_url ? `<p style="font-size:11px;color:var(--blue);margin-top:4px"><a href="${existing.im_url}" target="_blank">📄 Current IM</a></p>` : ''}
+              </div>
+              <div class="form-group">
+                <label class="form-label">Farm Model</label>
+                <input type="file" id="d-model-file" class="form-input" accept=".pdf,.xlsx,.xls">
+                ${existing?.model_url ? `<p style="font-size:11px;color:var(--blue);margin-top:4px"><a href="${existing.model_url}" target="_blank">📊 Current model</a></p>` : ''}
+              </div>
+            </div>
           </div>
         </div>
       </div>
     `,
     onConfirm: async (modal) => {
+      const session = getSession();
+      const priceMin = parseFloat(qs('#d-price-min', modal)?.value)||null;
+      const priceMax = parseFloat(qs('#d-price-max', modal)?.value)||null;
+      const agentName = qs('#d-agent', modal)?.value?.trim()||null;
+      const agency = qs('#d-agency', modal)?.value?.trim()||null;
+      const agentEmail = qs('#d-email', modal)?.value?.trim()||null;
+      const agentPhone = qs('#d-phone', modal)?.value?.trim()||null;
+
+      // Save/update agent for future pre-filling
+      if (agentName) {
+        const existingAgent = _agents.find(a => a.name.toLowerCase() === agentName.toLowerCase());
+        if (!existingAgent) {
+          const saved = await dbInsert('acquisition_agents', { name: agentName, agency, email: agentEmail, phone: agentPhone }).catch(()=>null);
+          if (saved) _agents.push(saved);
+        } else if (agency || agentEmail || agentPhone) {
+          await dbUpdate('acquisition_agents', existingAgent.id, {
+            agency: agency || existingAgent.agency,
+            email: agentEmail || existingAgent.email,
+            phone: agentPhone || existingAgent.phone,
+          }).catch(()=>{});
+        }
+      }
+
+      // Upload IM if provided
+      let imUrl = existing?.im_url || null;
+      const imFile = qs('#d-im-file', modal)?.files?.[0];
+      if (imFile) {
+        const path = `acquisitions/im/${Date.now()}_${imFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+        const res = await fetch(`${SUPABASE_URL}/storage/v1/object/cfm-documents/${path}`, {
+          method: 'POST',
+          headers: { 'apikey': window.__CFM_ANON_KEY, 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': imFile.type, 'x-upsert': 'true' },
+          body: imFile,
+        });
+        if (res.ok) imUrl = `${SUPABASE_URL}/storage/v1/object/public/cfm-documents/${path}`;
+      }
+
+      // Upload model if provided
+      let modelUrl = existing?.model_url || null;
+      const modelFile = qs('#d-model-file', modal)?.files?.[0];
+      if (modelFile) {
+        const path = `acquisitions/models/${Date.now()}_${modelFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+        const res = await fetch(`${SUPABASE_URL}/storage/v1/object/cfm-documents/${path}`, {
+          method: 'POST',
+          headers: { 'apikey': window.__CFM_ANON_KEY, 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': modelFile.type, 'x-upsert': 'true' },
+          body: modelFile,
+        });
+        if (res.ok) modelUrl = `${SUPABASE_URL}/storage/v1/object/public/cfm-documents/${path}`;
+      }
+
       const row = {
         property_name: qs('#d-name', modal)?.value?.trim(),
         location: qs('#d-location', modal)?.value?.trim()||null,
-        likely_price_label: qs('#d-price', modal)?.value?.trim()||null,
-        lead_agent: qs('#d-agent', modal)?.value?.trim()||null,
-        agency: qs('#d-agency', modal)?.value?.trim()||null,
+        region: qs('#d-region', modal)?.value?.trim()||null,
+        price_min: priceMin,
+        price_max: priceMax,
+        lead_agent: agentName,
+        agency,
+        agent_email: agentEmail,
+        agent_phone: agentPhone,
         status: qs('#d-status', modal)?.value||'New',
         cfm_management_status: qs('#d-mgmt', modal)?.value||'Available',
         date_created: qs('#d-created', modal)?.value||null,
-        invoice_date: qs('#d-invoice', modal)?.value||null,
-        lawd_im_url: qs('#d-lawd-im', modal)?.value?.trim()||null,
-        cfm_im_url: qs('#d-cfm-im', modal)?.value?.trim()||null,
         farm_prospects: qs('#d-prospects', modal)?.value?.trim()||null,
         cfm_notes: qs('#d-notes', modal)?.value?.trim()||null,
+        im_url: imUrl,
+        model_url: modelUrl,
       };
       if (!row.property_name) throw new Error('Property name is required');
       if (existing) {
@@ -466,6 +555,22 @@ function _dealModal(container, existing = null) {
       _renderTab(container);
     },
   });
+
+  // Wire agent autofill
+  setTimeout(() => {
+    const agentInput = document.getElementById('d-agent');
+    agentInput?.addEventListener('change', () => {
+      const agent = _agents.find(a => a.name.toLowerCase() === agentInput.value.toLowerCase());
+      if (agent) {
+        const agencyEl = document.getElementById('d-agency');
+        const emailEl = document.getElementById('d-email');
+        const phoneEl = document.getElementById('d-phone');
+        if (agencyEl && !agencyEl.value) agencyEl.value = agent.agency||'';
+        if (emailEl && !emailEl.value) emailEl.value = agent.email||'';
+        if (phoneEl && !phoneEl.value) phoneEl.value = agent.phone||'';
+      }
+    });
+  }, 200);
 }
 
 // ── Document upload modal ─────────────────────────────────────
@@ -574,10 +679,11 @@ function _activityModal(deal, container) {
 
 // ── Export CSV ────────────────────────────────────────────────
 function _exportCSV() {
-  const headers = ['Property','Location','Lead Agent','Agency','Est. Price','Status','CFM Status','Date Created','Farm Prospects','CFM Notes'];
+  const headers = ['Property','Location','Region','Lead Agent','Agency','Agent Email','Agent Phone','Price Min','Price Max','Status','CFM Status','Date Created','Farm Prospects','CFM Notes'];
   const rows = _deals.map(d => [
-    d.property_name, d.location, d.lead_agent, d.agency,
-    d.likely_price_label, d.status, d.cfm_management_status,
+    d.property_name, d.location, d.region, d.lead_agent, d.agency,
+    d.agent_email, d.agent_phone, d.price_min, d.price_max,
+    d.status, d.cfm_management_status,
     d.date_created, d.farm_prospects, d.cfm_notes
   ].map(v => v ? '"'+String(v).replace(/"/g,'""')+'"' : '""'));
 
