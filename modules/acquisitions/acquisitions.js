@@ -7,6 +7,7 @@ const SUPABASE_URL = 'https://nqvfuqvindsgnogejaei.supabase.co';
 
 let _deals = [];
 let _agents = [];
+let _moduleUsers = [];
 let _activeTab = 'pipeline';
 let _filterStatus = '';
 let _filterMgmt = '';
@@ -78,10 +79,14 @@ export function unmountAcquisitions() {
 }
 
 async function _loadData() {
-  [_deals, _agents] = await Promise.all([
+  let _users = [];
+  [_deals, _agents, _users] = await Promise.all([
     dbSelect('acquisition_deals', 'select=*&order=date_created.desc'),
     dbSelect('acquisition_agents', 'select=*&order=name.asc').catch(() => []),
+    dbSelect('user_profiles', 'select=id,full_name,role&is_active=eq.true&order=full_name.asc').catch(() => []),
   ]);
+  // Store users at module level for access in modals
+  _moduleUsers = _users;
 }
 
 function _renderTab(container) {
@@ -125,6 +130,7 @@ function _renderPipeline(content, container) {
               <p style="font-size:12px;font-weight:600;margin-bottom:4px;line-height:1.3">${d.property_name}</p>
               ${d.location ? `<p style="font-size:10px;color:var(--hint);margin-bottom:4px">📍 ${d.location}</p>` : ''}
               ${d.price_min ? `<p style="font-size:11px;font-weight:500;color:var(--blue);margin-bottom:4px">$${Number(d.price_min).toLocaleString()}${d.price_max ? ' – $'+Number(d.price_max).toLocaleString() : '+'}</p>` : ''}
+              ${(d.assigned_users||[]).length ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px">${(d.assigned_users||[]).map(u=>'<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:#ede9fe;color:#5b21b6">'+u+'</span>').join('')}</div>` : ''}
               <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
                 ${d.cfm_management_status ? `<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:${(MGMT_COLOURS[d.cfm_management_status]||{}).bg||'#f3f4f6'};color:${(MGMT_COLOURS[d.cfm_management_status]||{}).color||'#374151'}">${d.cfm_management_status}</span>` : '<span></span>'}
                 <span style="font-size:10px;color:var(--hint)">${d.lead_agent||''}</span>
@@ -248,10 +254,22 @@ function _renderList(content, container) {
 async function _openDeal(deal, container) {
   _activeDeal = deal;
 
+  // Log this view
+  const session = getSession();
+  if (session?.user) {
+    dbInsert('acquisition_views', {
+      deal_id: deal.id,
+      user_id: session.user.id,
+      user_name: session.profile?.full_name || session.user.email,
+      user_email: session.user.email,
+    }).catch(() => {});
+  }
+
   // Load documents and activities
-  const [docs, activities] = await Promise.all([
+  const [docs, activities, views] = await Promise.all([
     dbSelect('acquisition_documents', 'deal_id=eq.' + deal.id + '&select=*&order=uploaded_at.desc'),
     dbSelect('acquisition_activities', 'deal_id=eq.' + deal.id + '&select=*&order=activity_date.desc,created_at.desc'),
+    dbSelect('acquisition_views', 'deal_id=eq.' + deal.id + '&select=*&order=viewed_at.desc&limit=50'),
   ]);
 
   const sc = STATUS_COLOURS[deal.status] || STATUS_COLOURS['New'];
@@ -270,6 +288,12 @@ async function _openDeal(deal, container) {
         <span style="padding:3px 10px;border-radius:10px;font-size:12px;background:${mc.bg||'#f3f4f6'};color:${mc.color||'#374151'}">${deal.cfm_management_status||'—'}</span>
         ${deal.likely_price_label ? `<span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af">${deal.likely_price_label}</span>` : ''}
       </div>
+
+      <!-- Assigned users -->
+      ${(deal.assigned_users||[]).length ? `<div style="display:flex;gap:6px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--hint)">Assigned:</span>
+        ${(deal.assigned_users||[]).map(u => `<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#ede9fe;color:#5b21b6;font-weight:500">${u}</span>`).join('')}
+      </div>` : ''}
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
         <!-- Left -->
@@ -333,6 +357,17 @@ async function _openDeal(deal, container) {
                 </div>
               `).join('')}
             </div>` : `<p style="font-size:12px;color:var(--hint)">No documents yet.</p>`}
+          </div>
+
+          <!-- Viewer log -->
+          <div style="margin-bottom:16px">
+            <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:8px">Viewed by (${views.length})</p>
+            ${views.length ? `<div style="display:flex;flex-direction:column;gap:3px;max-height:120px;overflow-y:auto">
+              ${views.map(v => `<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:0.5px solid var(--border-light)">
+                <span style="font-weight:500">${v.user_name||v.user_email||'Unknown'}</span>
+                <span style="color:var(--hint)">${v.viewed_at ? new Date(v.viewed_at).toLocaleDateString('en-AU', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : ''}</span>
+              </div>`).join('')}
+            </div>` : `<p style="font-size:11px;color:var(--hint)">No views recorded.</p>`}
           </div>
 
           <!-- Activity log -->
@@ -430,6 +465,19 @@ function _dealModal(container, existing = null) {
             <label class="form-label">Date created</label>
             <input class="form-input" id="d-created" type="date" value="${existing?.date_created||new Date().toISOString().slice(0,10)}">
           </div>
+          <div class="form-group">
+            <label class="form-label">Assigned to (CFM team)</label>
+            <div id="d-assigned-list" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;border:1px solid var(--border);border-radius:6px;min-height:40px">
+              ${_moduleUsers.map(u => {
+                const name = u.full_name || u.id;
+                const assigned = (existing?.assigned_users||[]).includes(name);
+                return `<label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:2px 8px;border-radius:10px;background:${assigned?'#ede9fe':'#f3f4f6'};color:${assigned?'#5b21b6':'#374151'}">
+                  <input type="checkbox" class="assigned-user-check" value="${name}" ${assigned?'checked':''} style="display:none">
+                  ${name}
+                </label>`;
+              }).join('')}
+            </div>
+          </div>
           <!-- Agent section -->
           <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px">
             <p style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:10px">Agent details</p>
@@ -524,8 +572,13 @@ function _dealModal(container, existing = null) {
         if (res.ok) modelUrl = `${SUPABASE_URL}/storage/v1/object/public/cfm-documents/${path}`;
       }
 
+      const assignedUsers = [...(modal.querySelectorAll('.assigned-user-check:checked') || [])].map(cb => cb.value);
+
       const row = {
         property_name: qs('#d-name', modal)?.value?.trim(),
+        assigned_users: assignedUsers,
+        last_modified_by: session?.profile?.full_name || session?.user?.email || null,
+        last_modified_at: new Date().toISOString(),
         location: qs('#d-location', modal)?.value?.trim()||null,
         region: qs('#d-region', modal)?.value?.trim()||null,
         price_min: priceMin,
@@ -555,6 +608,22 @@ function _dealModal(container, existing = null) {
       _renderTab(container);
     },
   });
+
+  // Wire assigned user checkboxes
+  setTimeout(() => {
+    document.querySelectorAll('.assigned-user-check').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const label = cb.closest('label');
+        if (cb.checked) {
+          label.style.background = '#ede9fe';
+          label.style.color = '#5b21b6';
+        } else {
+          label.style.background = '#f3f4f6';
+          label.style.color = '#374151';
+        }
+      });
+    });
+  }, 150);
 
   // Wire agent autofill
   setTimeout(() => {
