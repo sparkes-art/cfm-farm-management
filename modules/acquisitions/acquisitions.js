@@ -142,7 +142,8 @@ function _renderPipeline(content, container) {
     </div>
 
     <!-- Passed & Sold footer -->
-    ${passed.length || sold.length ? `
+    <div style="margin-top:12px;display:flex;justify-content:flex-end"><button id="btn-toggle-archive" class="btn btn-ghost btn-sm" style="font-size:12px">${_showArchived ? '▲ Hide' : '▼ Show'} Passed & Sold (${passed.length + sold.length})</button></div>
+    ${_showArchived && (passed.length || sold.length) ? `
     <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
       ${['Passed','Sold'].map(status => {
         const deals = _deals.filter(d => d.status === status);
@@ -158,6 +159,12 @@ function _renderPipeline(content, container) {
     </div>` : ''}
   `;
 
+  // Wire archive toggle
+  qs('#btn-toggle-archive', content)?.addEventListener('click', () => {
+    _showArchived = !_showArchived;
+    _renderPipeline(content, container);
+  });
+
   // Wire deal card clicks
   content.querySelectorAll('.deal-card').forEach(card => {
     card.addEventListener('mouseenter', () => card.style.boxShadow = '0 2px 8px rgba(0,0,0,.1)');
@@ -172,6 +179,7 @@ function _renderPipeline(content, container) {
 // ── List view ─────────────────────────────────────────────────
 function _renderList(content, container) {
   let deals = _deals;
+  if (!_showArchived && !_filterStatus) deals = deals.filter(d => !['Passed','Sold'].includes(d.status));
   if (_filterStatus) deals = deals.filter(d => d.status === _filterStatus);
   if (_filterMgmt) deals = deals.filter(d => d.cfm_management_status === _filterMgmt);
   if (_searchTerm) deals = deals.filter(d =>
