@@ -17,7 +17,7 @@ let _searchTerm = '';
 let _activeDeal = null;
 
 const STATUSES = ['Reviewing', 'Interested', 'Engaged', 'Sold'];
-const MGMT_STATUSES = ['Available', 'No Interest', 'Already Manage'];
+const MGMT_STATUSES = ['CFM available to manage', 'CFM not interested', 'CFM already manages'];
 const DOC_TYPES = ['IM', 'Farm Model', 'Proposal', 'Report', 'Valuation', 'Other'];
 const ACTIVITY_TYPES = ['Note', 'Call', 'Inspection', 'Email', 'Proposal', 'Meeting'];
 
@@ -33,9 +33,13 @@ const STATUS_COLOURS = {
 };
 
 const MGMT_COLOURS = {
-  'Available':     { bg: '#d1fae5', color: '#065f46' },
-  'No Interest':   { bg: '#fee2e2', color: '#991b1b' },
-  'Already Manage':{ bg: '#dbeafe', color: '#1e40af' },
+  'CFM available to manage': { bg: '#d1fae5', color: '#065f46' },
+  'CFM not interested':      { bg: '#fee2e2', color: '#991b1b' },
+  'CFM already manages':     { bg: '#dbeafe', color: '#1e40af' },
+  // Legacy labels
+  'Available':      { bg: '#d1fae5', color: '#065f46' },
+  'No Interest':    { bg: '#fee2e2', color: '#991b1b' },
+  'Already Manage': { bg: '#dbeafe', color: '#1e40af' },
 };
 
 export async function mountAcquisitions(container) {
@@ -110,7 +114,7 @@ function _renderPipeline(content, container) {
         ['Total deals', _deals.length, 'var(--ink)'],
         ['Active', _deals.filter(d=>d.status !== 'Sold').length, 'var(--blue)'],
         ['Engaged', _deals.filter(d=>d.status==='Engaged').length, '#065f46'],
-        ['Available to manage', _deals.filter(d=>d.cfm_management_status==='Available').length, '#3B6D11'],
+        ['Available to manage', _deals.filter(d=>d.cfm_management_status==='CFM available to manage'||d.cfm_management_status==='Available').length, '#3B6D11'],
       ].map(([l,v,c]) => `<div class="card" style="padding:10px 14px">
         <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:3px">${l}</p>
         <p style="font-size:22px;font-weight:600;color:${c};font-variant-numeric:tabular-nums">${v}</p>
@@ -1030,7 +1034,7 @@ function _dealModal(container, existing = null) {
         agent_email: agentEmail,
         agent_phone: agentPhone,
         status: qs('#d-status', modal)?.value||'New',
-        cfm_management_status: qs('#d-mgmt', modal)?.value||'Available',
+        cfm_management_status: qs('#d-mgmt', modal)?.value||'CFM available to manage',
         agronomy_service: qs('#d-agronomy', modal)?.value||null,
         hr_service: qs('#d-hr', modal)?.checked||false,
         date_created: qs('#d-created', modal)?.value||null,
