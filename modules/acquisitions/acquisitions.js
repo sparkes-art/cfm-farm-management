@@ -251,11 +251,13 @@ function _renderList(content, container) {
 }
 
 // ── Deal detail view ──────────────────────────────────────────
+const STAMP_DUTY_RATES = { NSW:0.055, VIC:0.055, QLD:0.0575, SA:0.055, WA:0.0515, TAS:0.045, NT:0.00, ACT:0.05 };
+
 async function _openDeal(deal, container) {
   _activeDeal = deal;
-
-  // Log this view
   const session = getSession();
+
+  // Log view
   if (session?.user) {
     dbInsert('acquisition_views', {
       deal_id: deal.id,
@@ -265,14 +267,22 @@ async function _openDeal(deal, container) {
     }).catch(() => {});
   }
 
-  // Load documents and activities
-  const [docs, activities, views] = await Promise.all([
+  // Load all data
+  const [docs, activities, views, finRows] = await Promise.all([
     dbSelect('acquisition_documents', 'deal_id=eq.' + deal.id + '&select=*&order=uploaded_at.desc'),
     dbSelect('acquisition_activities', 'deal_id=eq.' + deal.id + '&select=*&order=activity_date.desc,created_at.desc'),
     dbSelect('acquisition_views', 'deal_id=eq.' + deal.id + '&select=*&order=viewed_at.desc&limit=50'),
+    dbSelect('acquisition_financials', 'deal_id=eq.' + deal.id + '&select=*').catch(() => []),
   ]);
 
-  const sc = STATUS_COLOURS[deal.status] || STATUS_COLOURS['New'];
+  let fin = finRows?.[0] || {
+    land_components:[], water_assets:[], other_assets:[],
+    development_land:[], development_water:[], development_other:[],
+    state: deal.location?.match(/\b(NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\b/)?.[1] || 'NSW',
+  };
+  fin.stamp_duty_rate = fin.stamp_duty_rate ?? STAMP_DUTY_RATES[fin.state] ?? 0.055;
+
+  const sc = STATUS_COLOURS[deal.status] || STATUS_COLOURS['Reviewing'];
   const mc = MGMT_COLOURS[deal.cfm_management_status] || {};
 
   openModal({
@@ -282,124 +292,463 @@ async function _openDeal(deal, container) {
     confirmClass: 'btn-secondary',
     onConfirm: () => _dealModal(container, deal),
     bodyHTML: `
-      <!-- Header badges -->
-      <div class="flex gap-2" style="margin-bottom:16px">
-        <span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:500;background:${sc.bg};color:${sc.color}">${deal.status||'New'}</span>
-        <span style="padding:3px 10px;border-radius:10px;font-size:12px;background:${mc.bg||'#f3f4f6'};color:${mc.color||'#374151'}">${deal.cfm_management_status||'—'}</span>
-        ${deal.likely_price_label ? `<span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af">${deal.likely_price_label}</span>` : ''}
+      <!-- Deal tabs -->
+      <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:16px">
+        <button class="dtab active" data-tab="overview" style="padding:8px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid var(--blue);color:var(--blue);margin-bottom:-2px">Overview</button>
+        <button class="dtab" data-tab="financials" style="padding:8px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:400;color:var(--hint);border-bottom:2px solid transparent;margin-bottom:-2px">Financials</button>
+        <button class="dtab" data-tab="activity" style="padding:8px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:400;color:var(--hint);border-bottom:2px solid transparent;margin-bottom:-2px">Activity</button>
       </div>
 
-      <!-- Assigned users -->
-      ${(deal.assigned_users||[]).length ? `<div style="display:flex;gap:6px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-        <span style="font-size:11px;color:var(--hint)">Assigned:</span>
-        ${(deal.assigned_users||[]).map(u => `<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#ede9fe;color:#5b21b6;font-weight:500">${u}</span>`).join('')}
-      </div>` : ''}
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-        <!-- Left -->
-        <div>
-          <!-- Key details -->
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
-            ${[
-              ['Location', deal.location],
-              ['Region', deal.region],
-              ['Est. price', deal.price_min ? '$'+Number(deal.price_min).toLocaleString() + (deal.price_max ? ' – $'+Number(deal.price_max).toLocaleString() : '+') : null],
-              ['Lead agent', deal.lead_agent],
-              ['Agency', deal.agency],
-              ['Agent email', deal.agent_email],
-              ['Agent phone', deal.agent_phone],
-              ['Date created', deal.date_created ? formatDate(deal.date_created) : null],
-            ].filter(([,v]) => v).map(([l,v]) => `
-              <div><p style="font-size:10px;color:var(--hint);margin-bottom:2px">${l}</p><p style="font-size:13px;font-weight:500">${v}</p></div>
-            `).join('')}
-          </div>
-
-          <!-- IM and Model links -->
-          ${deal.im_url || deal.model_url ? `
-          <div style="display:flex;gap:8px;margin-bottom:14px">
-            ${deal.im_url ? `<a href="${deal.im_url}" target="_blank" class="btn btn-secondary btn-sm">📄 View IM</a>` : ''}
-            ${deal.model_url ? `<a href="${deal.model_url}" target="_blank" class="btn btn-secondary btn-sm">📊 View Farm Model</a>` : ''}
-          </div>` : ''}
-
-          <!-- Farm prospects -->
-          ${deal.farm_prospects ? `
-          <div style="margin-bottom:14px">
-            <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:6px">Farm prospects</p>
-            <div style="background:var(--page-bg);border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5">${deal.farm_prospects}</div>
-          </div>` : ''}
-
-          <!-- CFM notes -->
-          ${deal.cfm_notes ? `
-          <div style="margin-bottom:14px">
-            <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:6px">CFM notes</p>
-            <div style="background:#fffbeb;border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5;border-left:3px solid #f59e0b">${deal.cfm_notes}</div>
-          </div>` : ''}
+      <!-- Overview tab -->
+      <div id="dtab-overview">
+        <div class="flex gap-2" style="margin-bottom:14px;flex-wrap:wrap">
+          <span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:500;background:${sc.bg};color:${sc.color}">${deal.status||'Reviewing'}</span>
+          <span style="padding:3px 10px;border-radius:10px;font-size:12px;background:${mc.bg||'#f3f4f6'};color:${mc.color||'#374151'}">${deal.cfm_management_status||'—'}</span>
+          ${deal.price_min ? `<span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af">$${Number(deal.price_min).toLocaleString()}${deal.price_max?' – $'+Number(deal.price_max).toLocaleString():''}</span>` : ''}
         </div>
-
-        <!-- Right -->
-        <div>
-          <!-- Documents -->
-          <div style="margin-bottom:16px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Documents</p>
-              <button class="btn btn-ghost btn-sm" id="btn-add-doc">＋ Upload</button>
+        ${(deal.assigned_users||[]).length ? `<div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--hint)">Assigned:</span>
+          ${(deal.assigned_users||[]).map(u=>`<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#ede9fe;color:#5b21b6;font-weight:500">${u}</span>`).join('')}
+        </div>` : ''}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+          <div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+              ${[['Location',deal.location],['Region',deal.region],['Lead agent',deal.lead_agent],['Agency',deal.agency],['Agent email',deal.agent_email],['Agent phone',deal.agent_phone],['Date created',deal.date_created?formatDate(deal.date_created):null]]
+                .filter(([,v])=>v).map(([l,v])=>`<div><p style="font-size:10px;color:var(--hint);margin-bottom:2px">${l}</p><p style="font-size:13px;font-weight:500">${v}</p></div>`).join('')}
             </div>
-            ${docs.length ? `
-            <div style="display:flex;flex-direction:column;gap:4px">
-              ${docs.map(doc => `
-                <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--page-bg);border-radius:6px;border:1px solid var(--border-light)">
-                  <span style="font-size:18px">${doc.doc_type==='IM'?'📄':doc.doc_type==='Farm Model'?'📊':doc.doc_type==='Proposal'?'📝':'📎'}</span>
-                  <div style="flex:1;min-width:0">
-                    <p style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${doc.filename}</p>
-                    <p style="font-size:10px;color:var(--hint)">${doc.doc_type} · ${doc.uploaded_at?formatDate(doc.uploaded_at):''}</p>
-                  </div>
-                  ${doc.file_url ? `<a href="${doc.file_url}" target="_blank" class="btn btn-ghost btn-sm">View</a>` : ''}
-                </div>
-              `).join('')}
-            </div>` : `<p style="font-size:12px;color:var(--hint)">No documents yet.</p>`}
+            ${deal.land_cropping_assessment||deal.farm_prospects ? `<div style="margin-bottom:12px">
+              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:5px">Land / Cropping assessment</p>
+              <div style="background:var(--page-bg);border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5;border-left:3px solid var(--green)">${deal.land_cropping_assessment||deal.farm_prospects}</div>
+            </div>` : ''}
+            ${deal.water_assessment||deal.cfm_notes ? `<div style="margin-bottom:12px">
+              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:5px">Water assessment</p>
+              <div style="background:#eff6ff;border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5;border-left:3px solid var(--blue)">${deal.water_assessment||deal.cfm_notes}</div>
+            </div>` : ''}
+            ${deal.development_potential ? `<div style="margin-bottom:12px">
+              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:5px">Development potential</p>
+              <div style="background:#f0fdf4;border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5;border-left:3px solid #22c55e">${deal.development_potential}</div>
+            </div>` : ''}
           </div>
+          <div>
+            <div style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Documents</p>
+                <button class="btn btn-ghost btn-sm" id="btn-add-doc">＋ Upload</button>
+              </div>
+              ${docs.length ? `<div style="display:flex;flex-direction:column;gap:4px">
+                ${docs.map(doc=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--page-bg);border-radius:6px;border:1px solid var(--border-light)">
+                  <span style="font-size:18px">${doc.doc_type==='IM'?'📄':doc.doc_type==='Farm Model'?'📊':'📎'}</span>
+                  <div style="flex:1;min-width:0"><p style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${doc.filename}</p>
+                  <p style="font-size:10px;color:var(--hint)">${doc.doc_type} · ${doc.uploaded_at?formatDate(doc.uploaded_at):''}</p></div>
+                  ${doc.file_url?`<a href="${doc.file_url}" target="_blank" class="btn btn-ghost btn-sm">View</a>`:''}
+                </div>`).join('')}
+              </div>` : `<p style="font-size:12px;color:var(--hint)">No documents yet.</p>`}
+            </div>
+            <div>
+              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:6px">Viewed by (${views.length})</p>
+              ${views.length ? `<div style="display:flex;flex-direction:column;gap:2px;max-height:150px;overflow-y:auto">
+                ${views.map(v=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:0.5px solid var(--border-light)">
+                  <span style="font-weight:500">${v.user_name||v.user_email||'Unknown'}</span>
+                  <span style="color:var(--hint)">${v.viewed_at?new Date(v.viewed_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</span>
+                </div>`).join('')}
+              </div>` : `<p style="font-size:11px;color:var(--hint)">No views recorded.</p>`}
+            </div>
+          </div>
+        </div>
+      </div>
 
-          <!-- Viewer log -->
-          <div style="margin-bottom:16px">
-            <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:8px">Viewed by (${views.length})</p>
-            ${views.length ? `<div style="display:flex;flex-direction:column;gap:3px;max-height:120px;overflow-y:auto">
-              ${views.map(v => `<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:0.5px solid var(--border-light)">
+      <!-- Financials tab -->
+      <div id="dtab-financials" style="display:none">
+        ${_buildFinancialsHTML(fin)}
+      </div>
+
+      <!-- Activity tab -->
+      <div id="dtab-activity" style="display:none">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+          <div>
+            <p style="font-size:13px;font-weight:600;margin-bottom:4px">Activity log</p>
+            <p style="font-size:11px;color:var(--hint);margin-bottom:10px">Auto-generated on each save</p>
+            ${activities.length ? `<div style="display:flex;flex-direction:column;gap:6px;max-height:400px;overflow-y:auto">
+              ${activities.map(a=>`<div style="padding:8px 10px;background:var(--page-bg);border-radius:6px;border-left:3px solid var(--blue)">
+                <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+                  <span style="font-size:11px;font-weight:600;color:var(--blue)">${a.activity_type}</span>
+                  <span style="font-size:10px;color:var(--hint)">${a.activity_date?formatDate(a.activity_date):''} · ${a.created_by||''}</span>
+                </div>
+                <p style="font-size:12px">${a.summary||''}</p>
+              </div>`).join('')}
+            </div>` : `<p style="font-size:12px;color:var(--hint)">No activity yet.</p>`}
+          </div>
+          <div>
+            <p style="font-size:13px;font-weight:600;margin-bottom:10px">Viewed by (${views.length})</p>
+            ${views.length ? `<div style="display:flex;flex-direction:column;gap:3px;max-height:400px;overflow-y:auto">
+              ${views.map(v=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:0.5px solid var(--border-light)">
                 <span style="font-weight:500">${v.user_name||v.user_email||'Unknown'}</span>
-                <span style="color:var(--hint)">${v.viewed_at ? new Date(v.viewed_at).toLocaleDateString('en-AU', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : ''}</span>
+                <span style="color:var(--hint)">${v.viewed_at?new Date(v.viewed_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</span>
               </div>`).join('')}
             </div>` : `<p style="font-size:11px;color:var(--hint)">No views recorded.</p>`}
-          </div>
-
-          <!-- Activity log -->
-          <div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Activity log</p>
-              <button class="btn btn-ghost btn-sm" id="btn-add-activity">＋ Add</button>
-            </div>
-            ${activities.length ? `
-            <div style="display:flex;flex-direction:column;gap:6px;max-height:250px;overflow-y:auto">
-              ${activities.map(a => `
-                <div style="padding:8px 10px;background:var(--page-bg);border-radius:6px;border-left:3px solid var(--blue)">
-                  <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-                    <span style="font-size:11px;font-weight:600;color:var(--blue)">${a.activity_type}</span>
-                    <span style="font-size:10px;color:var(--hint)">${a.activity_date?formatDate(a.activity_date):''} · ${a.created_by||''}</span>
-                  </div>
-                  <p style="font-size:12px;font-weight:500">${a.summary||''}</p>
-                  ${a.detail ? `<p style="font-size:11px;color:var(--hint);margin-top:2px">${a.detail}</p>` : ''}
-                </div>
-              `).join('')}
-            </div>` : `<p style="font-size:12px;color:var(--hint)">No activity logged yet.</p>`}
           </div>
         </div>
       </div>
     `,
   });
 
-  // Wire buttons
   setTimeout(() => {
+    // Tab switching
+    document.querySelectorAll('.dtab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.dtab').forEach(b => {
+          b.style.borderBottom = b.dataset.tab === btn.dataset.tab ? '2px solid var(--blue)' : '2px solid transparent';
+          b.style.color = b.dataset.tab === btn.dataset.tab ? 'var(--blue)' : 'var(--hint)';
+          b.style.fontWeight = b.dataset.tab === btn.dataset.tab ? '600' : '400';
+          b.classList.toggle('active', b.dataset.tab === btn.dataset.tab);
+        });
+        ['overview','financials','activity'].forEach(t => {
+          const el = document.getElementById('dtab-' + t);
+          if (el) el.style.display = t === btn.dataset.tab ? '' : 'none';
+        });
+        if (btn.dataset.tab === 'financials') _wireFinancials(deal, fin);
+      });
+    });
+
+    // Overview buttons
     document.getElementById('btn-add-doc')?.addEventListener('click', () => _docModal(deal));
-    document.getElementById('btn-add-activity')?.addEventListener('click', () => _activityModal(deal, container));
+
+    // Wire financials if already on that tab
+    if (document.getElementById('dtab-financials')?.style.display !== 'none') {
+      _wireFinancials(deal, fin);
+    }
   }, 200);
+}
+
+
+
+// ── Financials tab ────────────────────────────────────────────
+function _buildFinancialsHTML(fin) {
+  const fmt = v => v ? '$' + Math.round(v).toLocaleString() : '—';
+  const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
+  const secHead = 'font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin:14px 0 6px';
+  const rowS = 'display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--border-light);font-size:13px';
+
+  const landTotal = (fin.land_components||[]).reduce((s,c)=>s+(parseFloat(c.area)||0)*(parseFloat(c.rate)||0),0);
+  const waterTotal = (fin.water_assets||[]).reduce((s,w)=>s+(parseFloat(w.ml)||0)*(parseFloat(w.rate)||0),0);
+  const otherTotal = (fin.other_assets||[]).reduce((s,o)=>s+(parseFloat(o.value)||0),0);
+  const assetTotal = landTotal + waterTotal + otherTotal;
+  const stampDuty = assetTotal * (parseFloat(fin.stamp_duty_rate)||0);
+  const totalAcq = assetTotal + stampDuty;
+  const devLandCost = (fin.development_land||[]).reduce((s,d)=>s+(parseFloat(d.area)||0)*(parseFloat(d.cost_per_ha)||0),0);
+  const devWaterCost = (fin.development_water||[]).reduce((s,d)=>s+(parseFloat(d.ml)||0)*(parseFloat(d.rate)||0),0);
+  const devOtherCost = (fin.development_other||[]).reduce((s,d)=>s+(parseFloat(d.value)||0),0);
+  const totalDev = devLandCost + devWaterCost + devOtherCost;
+  const totalInvested = totalAcq + totalDev;
+
+  const mkLandRow = (c={}) => `<div class="fin-land-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 80px 24px;gap:6px;margin-bottom:5px;align-items:center">
+    <input class="fin-l-desc" style="${inS}" placeholder="e.g. Flood irrigation" value="${c.description||''}">
+    <input class="fin-l-area num" type="number" step="0.1" style="${inS};text-align:right" placeholder="ha" value="${c.area||''}">
+    <input class="fin-l-rate num" type="number" step="100" style="${inS};text-align:right" placeholder="$/ha" value="${c.rate||''}">
+    <span class="fin-l-total" style="font-size:12px;font-weight:600;color:var(--blue);text-align:right">${c.area&&c.rate?'$'+Math.round(c.area*c.rate).toLocaleString():'—'}</span>
+    <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="land">✕</button>
+  </div>`;
+
+  const mkWaterRow = (w={}) => `<div class="fin-water-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 80px 24px;gap:6px;margin-bottom:5px;align-items:center">
+    <input class="fin-w-desc" style="${inS}" placeholder="e.g. Murrumbidgee Gen Security" value="${w.description||''}">
+    <input class="fin-w-ml num" type="number" step="1" style="${inS};text-align:right" placeholder="ML" value="${w.ml||''}">
+    <input class="fin-w-rate num" type="number" step="10" style="${inS};text-align:right" placeholder="$/ML" value="${w.rate||''}">
+    <span class="fin-w-total" style="font-size:12px;font-weight:600;color:var(--blue);text-align:right">${w.ml&&w.rate?'$'+Math.round(w.ml*w.rate).toLocaleString():'—'}</span>
+    <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="water">✕</button>
+  </div>`;
+
+  const mkOtherRow = (o={}) => `<div class="fin-other-row" style="display:grid;grid-template-columns:2fr 1fr 24px;gap:6px;margin-bottom:5px;align-items:center">
+    <input class="fin-o-desc" style="${inS}" placeholder="e.g. Infrastructure, Machinery" value="${o.description||''}">
+    <input class="fin-o-val num" type="number" step="10000" style="${inS};text-align:right" placeholder="$" value="${o.value||''}">
+    <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="other">✕</button>
+  </div>`;
+
+  const mkDevLandRow = (d={}, comps=[]) => {
+    const opts = comps.map(c=>`<option value="${c}" ${d.from_type===c?'selected':''}>${c}</option>`).join('');
+    const opts2 = comps.map(c=>`<option value="${c}" ${d.to_type===c?'selected':''}>${c}</option>`).join('') + `<option value="New type" ${d.to_type==='New type'?'selected':''}>New type…</option>`;
+    return `<div class="fin-dev-land-row" style="display:grid;grid-template-columns:1.2fr 1.2fr 0.8fr 0.8fr 80px 24px;gap:5px;margin-bottom:5px;align-items:center">
+      <select class="fin-dl-from" style="${inS}"><option value="">From…</option>${opts}</select>
+      <select class="fin-dl-to" style="${inS}"><option value="">To…</option>${opts2}</select>
+      <input class="fin-dl-area num" type="number" step="0.1" style="${inS};text-align:right" placeholder="ha" value="${d.area||''}">
+      <input class="fin-dl-cost num" type="number" step="100" style="${inS};text-align:right" placeholder="$/ha" value="${d.cost_per_ha||''}">
+      <span class="fin-dl-total" style="font-size:12px;font-weight:600;color:#b45309;text-align:right">${d.area&&d.cost_per_ha?'$'+Math.round(d.area*d.cost_per_ha).toLocaleString():'—'}</span>
+      <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="dev-land">✕</button>
+    </div>`;
+  };
+
+  const mkDevWaterRow = (d={}) => `<div class="fin-dev-water-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 80px 24px;gap:6px;margin-bottom:5px;align-items:center">
+    <input class="fin-dw-desc" style="${inS}" placeholder="e.g. Murrumbidgee Gen Security" value="${d.description||''}">
+    <input class="fin-dw-ml num" type="number" step="1" style="${inS};text-align:right" placeholder="ML" value="${d.ml||''}">
+    <input class="fin-dw-rate num" type="number" step="10" style="${inS};text-align:right" placeholder="$/ML" value="${d.rate||''}">
+    <span class="fin-dw-total" style="font-size:12px;font-weight:600;color:#b45309;text-align:right">${d.ml&&d.rate?'$'+Math.round(d.ml*d.rate).toLocaleString():'—'}</span>
+    <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="dev-water">✕</button>
+  </div>`;
+
+  const mkDevOtherRow = (d={}) => `<div class="fin-dev-other-row" style="display:grid;grid-template-columns:2fr 1fr 24px;gap:6px;margin-bottom:5px;align-items:center">
+    <input class="fin-do-desc" style="${inS}" placeholder="e.g. Irrigation infrastructure" value="${d.description||''}">
+    <input class="fin-do-val num" type="number" step="10000" style="${inS};text-align:right" placeholder="$" value="${d.value||''}">
+    <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="dev-other">✕</button>
+  </div>`;
+
+  const comps = (fin.land_components||[]).map(c=>c.description).filter(Boolean);
+
+  return `<div style="display:grid;grid-template-columns:1fr 300px;gap:20px">
+    <!-- Left inputs -->
+    <div style="overflow-y:auto;max-height:600px;padding-right:8px">
+      <!-- State & stamp duty -->
+      <div style="display:flex;gap:10px;align-items:flex-end;padding:10px 12px;background:var(--page-bg);border-radius:6px;margin-bottom:4px">
+        <div><label style="font-size:11px;color:var(--hint);display:block;margin-bottom:3px">State</label>
+          <select class="form-select fin-state" style="width:90px">
+            ${['NSW','VIC','QLD','SA','WA','TAS','NT','ACT'].map(s=>`<option value="${s}" ${fin.state===s?'selected':''}>${s}</option>`).join('')}
+          </select></div>
+        <div><label style="font-size:11px;color:var(--hint);display:block;margin-bottom:3px">Stamp duty %</label>
+          <input type="number" class="form-input num fin-stamp-rate" step="0.001" style="width:80px" value="${((fin.stamp_duty_rate||0)*100).toFixed(2)}"></div>
+      </div>
+
+      <!-- Column headers for land/water -->
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr 80px 24px;gap:6px;padding:0 0 3px">
+        ${['Description','Area/ML','Rate $','Total',''].map(h=>`<span style="font-size:10px;color:var(--hint);text-align:${h==='Total'?'right':''}">${h}</span>`).join('')}
+      </div>
+
+      <p style="${secHead}">Land components <button class="btn btn-ghost btn-sm fin-add" data-section="land" style="margin-left:6px;font-size:11px">＋ Add</button></p>
+      <div id="fin-land-rows">${(fin.land_components||[]).map(c=>mkLandRow(c)).join('')}</div>
+
+      <p style="${secHead}">Water assets <button class="btn btn-ghost btn-sm fin-add" data-section="water" style="margin-left:6px;font-size:11px">＋ Add</button></p>
+      <div id="fin-water-rows">${(fin.water_assets||[]).map(w=>mkWaterRow(w)).join('')}</div>
+
+      <p style="${secHead}">Other assets <button class="btn btn-ghost btn-sm fin-add" data-section="other" style="margin-left:6px;font-size:11px">＋ Add</button></p>
+      <div id="fin-other-rows">${(fin.other_assets||[]).map(o=>mkOtherRow(o)).join('')}</div>
+
+      <div style="border-top:2px solid var(--border);margin-top:14px;padding-top:4px">
+        <p style="${secHead}">Development / Additional capex</p>
+        <p style="font-size:11px;font-weight:600;color:var(--hint);margin-bottom:5px">Land conversions <button class="btn btn-ghost btn-sm fin-add" data-section="dev-land" style="margin-left:6px;font-size:11px">＋ Add</button></p>
+        <div style="display:grid;grid-template-columns:1.2fr 1.2fr 0.8fr 0.8fr 80px 24px;gap:5px;padding:0 0 3px">
+          ${['From type','To type','Area ha','Cost $/ha','Total',''].map(h=>`<span style="font-size:10px;color:var(--hint)">${h}</span>`).join('')}
+        </div>
+        <div id="fin-dev-land-rows">${(fin.development_land||[]).map(d=>mkDevLandRow(d,comps)).join('')}</div>
+
+        <p style="font-size:11px;font-weight:600;color:var(--hint);margin:10px 0 5px">Water purchases <button class="btn btn-ghost btn-sm fin-add" data-section="dev-water" style="margin-left:6px;font-size:11px">＋ Add</button></p>
+        <div id="fin-dev-water-rows">${(fin.development_water||[]).map(d=>mkDevWaterRow(d)).join('')}</div>
+
+        <p style="font-size:11px;font-weight:600;color:var(--hint);margin:10px 0 5px">Other capex <button class="btn btn-ghost btn-sm fin-add" data-section="dev-other" style="margin-left:6px;font-size:11px">＋ Add</button></p>
+        <div id="fin-dev-other-rows">${(fin.development_other||[]).map(d=>mkDevOtherRow(d)).join('')}</div>
+      </div>
+    </div>
+
+    <!-- Right summary -->
+    <div>
+      <div style="background:var(--page-bg);border-radius:8px;padding:16px;position:sticky;top:0">
+        <p style="font-size:13px;font-weight:700;margin-bottom:12px">Acquisition value</p>
+        <div style="${rowS}"><span style="color:var(--hint)">Land</span><span id="fin-s-land">${fmt(landTotal)}</span></div>
+        <div style="${rowS}"><span style="color:var(--hint)">Water</span><span id="fin-s-water">${fmt(waterTotal)}</span></div>
+        <div style="${rowS}"><span style="color:var(--hint)">Other assets</span><span id="fin-s-other">${fmt(otherTotal)}</span></div>
+        <div style="${rowS};font-weight:600"><span>Asset total</span><span id="fin-s-assets">${fmt(assetTotal)}</span></div>
+        <div style="${rowS}"><span style="color:var(--hint)">Stamp duty</span><span id="fin-s-stamp">${fmt(stampDuty)}</span></div>
+        <div style="${rowS};font-weight:700;font-size:14px"><span>Total acq. cost</span><span id="fin-s-total" style="color:var(--blue)">${fmt(totalAcq)}</span></div>
+
+        <p style="font-size:13px;font-weight:700;margin:14px 0 10px">Development capex</p>
+        <div style="${rowS}"><span style="color:var(--hint)">Land conversions</span><span id="fin-s-dev-land">${fmt(devLandCost)}</span></div>
+        <div style="${rowS}"><span style="color:var(--hint)">Water purchases</span><span id="fin-s-dev-water">${fmt(devWaterCost)}</span></div>
+        <div style="${rowS}"><span style="color:var(--hint)">Other capex</span><span id="fin-s-dev-other">${fmt(devOtherCost)}</span></div>
+        <div style="${rowS};font-weight:600"><span>Total capex</span><span id="fin-s-dev-total">${fmt(totalDev)}</span></div>
+
+        <div style="border-top:2px solid var(--border);margin-top:10px;padding-top:10px">
+          <div style="${rowS};font-weight:700;font-size:14px;border-bottom:none"><span>Total invested</span><span id="fin-s-invested" style="color:var(--blue)">${fmt(totalInvested)}</span></div>
+        </div>
+
+        <button id="fin-save-btn" class="btn btn-primary" style="width:100%;margin-top:14px">Save financials</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _wireFinancials(deal, fin) {
+  const tab = document.getElementById('dtab-financials');
+  if (!tab || tab.dataset.wired) return;
+  tab.dataset.wired = '1';
+
+  function collectFin() {
+    return {
+      land_components: [...tab.querySelectorAll('.fin-land-row')].map(r=>({
+        description: r.querySelector('.fin-l-desc')?.value||'',
+        area: parseFloat(r.querySelector('.fin-l-area')?.value)||0,
+        rate: parseFloat(r.querySelector('.fin-l-rate')?.value)||0,
+      })).filter(c=>c.description||c.area),
+      water_assets: [...tab.querySelectorAll('.fin-water-row')].map(r=>({
+        description: r.querySelector('.fin-w-desc')?.value||'',
+        ml: parseFloat(r.querySelector('.fin-w-ml')?.value)||0,
+        rate: parseFloat(r.querySelector('.fin-w-rate')?.value)||0,
+      })).filter(w=>w.description||w.ml),
+      other_assets: [...tab.querySelectorAll('.fin-other-row')].map(r=>({
+        description: r.querySelector('.fin-o-desc')?.value||'',
+        value: parseFloat(r.querySelector('.fin-o-val')?.value)||0,
+      })).filter(o=>o.description||o.value),
+      development_land: [...tab.querySelectorAll('.fin-dev-land-row')].map(r=>({
+        from_type: r.querySelector('.fin-dl-from')?.value||'',
+        to_type: r.querySelector('.fin-dl-to')?.value||'',
+        area: parseFloat(r.querySelector('.fin-dl-area')?.value)||0,
+        cost_per_ha: parseFloat(r.querySelector('.fin-dl-cost')?.value)||0,
+      })).filter(d=>d.area),
+      development_water: [...tab.querySelectorAll('.fin-dev-water-row')].map(r=>({
+        description: r.querySelector('.fin-dw-desc')?.value||'',
+        ml: parseFloat(r.querySelector('.fin-dw-ml')?.value)||0,
+        rate: parseFloat(r.querySelector('.fin-dw-rate')?.value)||0,
+      })).filter(d=>d.ml),
+      development_other: [...tab.querySelectorAll('.fin-dev-other-row')].map(r=>({
+        description: r.querySelector('.fin-do-desc')?.value||'',
+        value: parseFloat(r.querySelector('.fin-do-val')?.value)||0,
+      })).filter(d=>d.value),
+      state: tab.querySelector('.fin-state')?.value||'NSW',
+      stamp_duty_rate: (parseFloat(tab.querySelector('.fin-stamp-rate')?.value)||0)/100,
+    };
+  }
+
+  function recalc() {
+    const f = collectFin();
+    const lT = f.land_components.reduce((s,c)=>s+c.area*c.rate,0);
+    const wT = f.water_assets.reduce((s,w)=>s+w.ml*w.rate,0);
+    const oT = f.other_assets.reduce((s,o)=>s+o.value,0);
+    const aT = lT+wT+oT;
+    const sd = aT*f.stamp_duty_rate;
+    const tA = aT+sd;
+    const dL = f.development_land.reduce((s,d)=>s+d.area*d.cost_per_ha,0);
+    const dW = f.development_water.reduce((s,d)=>s+d.ml*d.rate,0);
+    const dO = f.development_other.reduce((s,d)=>s+d.value,0);
+    const tD = dL+dW+dO;
+    const tI = tA+tD;
+    const fmt = v => v ? '$'+Math.round(v).toLocaleString() : '—';
+    const set = (id,v) => { const el=document.getElementById(id); if(el) el.textContent=fmt(v); };
+    set('fin-s-land',lT); set('fin-s-water',wT); set('fin-s-other',oT);
+    set('fin-s-assets',aT); set('fin-s-stamp',sd); set('fin-s-total',tA);
+    set('fin-s-dev-land',dL); set('fin-s-dev-water',dW); set('fin-s-dev-other',dO);
+    set('fin-s-dev-total',tD); set('fin-s-invested',tI);
+    // Row totals
+    tab.querySelectorAll('.fin-land-row').forEach(r=>{
+      const a=parseFloat(r.querySelector('.fin-l-area')?.value)||0, rt=parseFloat(r.querySelector('.fin-l-rate')?.value)||0;
+      const el=r.querySelector('.fin-l-total'); if(el) el.textContent=a&&rt?'$'+Math.round(a*rt).toLocaleString():'—';
+    });
+    tab.querySelectorAll('.fin-water-row').forEach(r=>{
+      const m=parseFloat(r.querySelector('.fin-w-ml')?.value)||0, rt=parseFloat(r.querySelector('.fin-w-rate')?.value)||0;
+      const el=r.querySelector('.fin-w-total'); if(el) el.textContent=m&&rt?'$'+Math.round(m*rt).toLocaleString():'—';
+    });
+    tab.querySelectorAll('.fin-dev-land-row').forEach(r=>{
+      const a=parseFloat(r.querySelector('.fin-dl-area')?.value)||0, c=parseFloat(r.querySelector('.fin-dl-cost')?.value)||0;
+      const el=r.querySelector('.fin-dl-total'); if(el) el.textContent=a&&c?'$'+Math.round(a*c).toLocaleString():'—';
+    });
+    tab.querySelectorAll('.fin-dev-water-row').forEach(r=>{
+      const m=parseFloat(r.querySelector('.fin-dw-ml')?.value)||0, rt=parseFloat(r.querySelector('.fin-dw-rate')?.value)||0;
+      const el=r.querySelector('.fin-dw-total'); if(el) el.textContent=m&&rt?'$'+Math.round(m*rt).toLocaleString():'—';
+    });
+  }
+
+  tab.addEventListener('input', recalc);
+
+  // State → auto stamp duty
+  tab.querySelector('.fin-state')?.addEventListener('change', e => {
+    const r = STAMP_DUTY_RATES[e.target.value] ?? 0.055;
+    const el = tab.querySelector('.fin-stamp-rate');
+    if (el) el.value = (r*100).toFixed(2);
+    recalc();
+  });
+
+  // Add row buttons
+  const mkLandRow = () => {
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
+    return `<div class="fin-land-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 80px 24px;gap:6px;margin-bottom:5px;align-items:center">
+      <input class="fin-l-desc" style="${inS}" placeholder="e.g. Flood irrigation" value="">
+      <input class="fin-l-area num" type="number" step="0.1" style="${inS};text-align:right" placeholder="ha" value="">
+      <input class="fin-l-rate num" type="number" step="100" style="${inS};text-align:right" placeholder="$/ha" value="">
+      <span class="fin-l-total" style="font-size:12px;font-weight:600;color:var(--blue);text-align:right">—</span>
+      <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="land">✕</button>
+    </div>`;
+  };
+  const mkWaterRow = () => {
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
+    return `<div class="fin-water-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 80px 24px;gap:6px;margin-bottom:5px;align-items:center">
+      <input class="fin-w-desc" style="${inS}" placeholder="e.g. Murrumbidgee Gen Security">
+      <input class="fin-w-ml num" type="number" step="1" style="${inS};text-align:right" placeholder="ML">
+      <input class="fin-w-rate num" type="number" step="10" style="${inS};text-align:right" placeholder="$/ML">
+      <span class="fin-w-total" style="font-size:12px;font-weight:600;color:var(--blue);text-align:right">—</span>
+      <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="water">✕</button>
+    </div>`;
+  };
+  const mkOtherRow = () => {
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
+    return `<div class="fin-other-row" style="display:grid;grid-template-columns:2fr 1fr 24px;gap:6px;margin-bottom:5px;align-items:center">
+      <input class="fin-o-desc" style="${inS}" placeholder="e.g. Infrastructure, Machinery">
+      <input class="fin-o-val num" type="number" step="10000" style="${inS};text-align:right" placeholder="$">
+      <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="other">✕</button>
+    </div>`;
+  };
+  const mkDevLandRow = () => {
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
+    const comps = collectFin().land_components.map(c=>c.description).filter(Boolean);
+    const opts = comps.map(c=>`<option value="${c}">${c}</option>`).join('');
+    return `<div class="fin-dev-land-row" style="display:grid;grid-template-columns:1.2fr 1.2fr 0.8fr 0.8fr 80px 24px;gap:5px;margin-bottom:5px;align-items:center">
+      <select class="fin-dl-from" style="${inS}"><option value="">From…</option>${opts}</select>
+      <select class="fin-dl-to" style="${inS}"><option value="">To…</option>${opts}<option value="New type">New type…</option></select>
+      <input class="fin-dl-area num" type="number" step="0.1" style="${inS};text-align:right" placeholder="ha">
+      <input class="fin-dl-cost num" type="number" step="100" style="${inS};text-align:right" placeholder="$/ha">
+      <span class="fin-dl-total" style="font-size:12px;font-weight:600;color:#b45309;text-align:right">—</span>
+      <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="dev-land">✕</button>
+    </div>`;
+  };
+  const mkDevWaterRow = () => {
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
+    return `<div class="fin-dev-water-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 80px 24px;gap:6px;margin-bottom:5px;align-items:center">
+      <input class="fin-dw-desc" style="${inS}" placeholder="e.g. Murrumbidgee Gen Security">
+      <input class="fin-dw-ml num" type="number" step="1" style="${inS};text-align:right" placeholder="ML">
+      <input class="fin-dw-rate num" type="number" step="10" style="${inS};text-align:right" placeholder="$/ML">
+      <span class="fin-dw-total" style="font-size:12px;font-weight:600;color:#b45309;text-align:right">—</span>
+      <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="dev-water">✕</button>
+    </div>`;
+  };
+  const mkDevOtherRow = () => {
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
+    return `<div class="fin-dev-other-row" style="display:grid;grid-template-columns:2fr 1fr 24px;gap:6px;margin-bottom:5px;align-items:center">
+      <input class="fin-do-desc" style="${inS}" placeholder="e.g. Irrigation infrastructure">
+      <input class="fin-do-val num" type="number" step="10000" style="${inS};text-align:right" placeholder="$">
+      <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="dev-other">✕</button>
+    </div>`;
+  };
+
+  tab.querySelectorAll('.fin-add').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const section = btn.dataset.section;
+      const containers = { land:'fin-land-rows', water:'fin-water-rows', other:'fin-other-rows', 'dev-land':'fin-dev-land-rows', 'dev-water':'fin-dev-water-rows', 'dev-other':'fin-dev-other-rows' };
+      const makers = { land:mkLandRow, water:mkWaterRow, other:mkOtherRow, 'dev-land':mkDevLandRow, 'dev-water':mkDevWaterRow, 'dev-other':mkDevOtherRow };
+      const container = document.getElementById(containers[section]);
+      if (container && makers[section]) { container.insertAdjacentHTML('beforeend', makers[section]()); recalc(); }
+    });
+  });
+
+  // Delete rows
+  tab.addEventListener('click', e => {
+    const btn = e.target.closest('.fin-del');
+    if (!btn) return;
+    btn.closest('[class*="fin-"][class*="-row"]')?.remove();
+    recalc();
+  });
+
+  // Save
+  document.getElementById('fin-save-btn')?.addEventListener('click', async () => {
+    const saveBtn = document.getElementById('fin-save-btn');
+    if (saveBtn) { saveBtn.disabled=true; saveBtn.textContent='Saving…'; }
+    try {
+      const data = { ...collectFin(), deal_id: deal.id, updated_at: new Date().toISOString() };
+      if (fin.id) {
+        await dbUpdate('acquisition_financials', fin.id, data);
+        Object.assign(fin, data);
+      } else {
+        const saved = await dbInsert('acquisition_financials', data);
+        Object.assign(fin, saved);
+      }
+      toast('Financials saved', 'success');
+    } catch(err) {
+      toast('Save failed: ' + err.message, 'error');
+    }
+    if (saveBtn) { saveBtn.disabled=false; saveBtn.textContent='Save financials'; }
+  });
 }
 
 // ── Deal modal (add/edit) ─────────────────────────────────────
