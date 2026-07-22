@@ -25,11 +25,11 @@ export function toast(message, type = 'default', duration = 3500) {
 }
 
 // ── Modal ─────────────────────────────────────────────────────
-export function openModal({ title, bodyHTML, onConfirm, onMounted, confirmLabel = 'Save', confirmClass = 'btn-primary', showCancel = true }) {
+export function openModal({ title, bodyHTML, onConfirm, onMounted, confirmLabel = 'Save', confirmClass = 'btn-primary', showCancel = true, wide = false }) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal${wide ? ' modal-wide' : ''}" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-header">
         <h2 id="modal-title">${title}</h2>
         <button class="modal-close" aria-label="Close">✕</button>

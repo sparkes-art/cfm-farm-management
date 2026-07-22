@@ -301,67 +301,59 @@ async function _openDeal(deal, container) {
 
       <!-- Overview tab -->
       <div id="dtab-overview">
-        <!-- Status badges + assigned -->
-        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px">
+        <div class="flex gap-2" style="margin-bottom:14px;flex-wrap:wrap">
           <span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:500;background:${sc.bg};color:${sc.color}">${deal.status||'Reviewing'}</span>
           <span style="padding:3px 10px;border-radius:10px;font-size:12px;background:${mc.bg||'#f3f4f6'};color:${mc.color||'#374151'}">${deal.cfm_management_status||'—'}</span>
           ${deal.price_min ? `<span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af">$${Number(deal.price_min).toLocaleString()}${deal.price_max?' – $'+Number(deal.price_max).toLocaleString():''}</span>` : ''}
-          ${(deal.assigned_users||[]).map(u=>`<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#ede9fe;color:#5b21b6;font-weight:500">${u}</span>`).join('')}
         </div>
-
-        <!-- Two column: left=details+docs, right=assessments -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:16px">
-          <!-- Left: key details + documents -->
+        ${(deal.assigned_users||[]).length ? `<div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--hint)">Assigned:</span>
+          ${(deal.assigned_users||[]).map(u=>`<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#ede9fe;color:#5b21b6;font-weight:500">${u}</span>`).join('')}
+        </div>` : ''}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
           <div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
               ${[['Location',deal.location],['Region',deal.region],['Lead agent',deal.lead_agent],['Agency',deal.agency],['Agent email',deal.agent_email],['Agent phone',deal.agent_phone],['Date created',deal.date_created?formatDate(deal.date_created):null]]
                 .filter(([,v])=>v).map(([l,v])=>`<div><p style="font-size:10px;color:var(--hint);margin-bottom:2px">${l}</p><p style="font-size:13px;font-weight:500">${v}</p></div>`).join('')}
             </div>
-
-            <!-- Documents -->
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Documents</p>
-              <button class="btn btn-ghost btn-sm" id="btn-add-doc">＋ Upload</button>
-            </div>
-            ${docs.length ? `<div style="display:flex;flex-direction:column;gap:4px">
-              ${docs.map(doc=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--page-bg);border-radius:6px;border:1px solid var(--border-light)">
-                <span style="font-size:20px">${doc.doc_type==='IM'?'📄':doc.doc_type==='Farm Model'?'📊':'📎'}</span>
-                <div style="flex:1;min-width:0">
-                  <p style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${doc.filename}</p>
-                  <p style="font-size:10px;color:var(--hint)">${doc.doc_type} · ${doc.uploaded_at?formatDate(doc.uploaded_at):''}</p>
-                </div>
-                ${doc.file_url ? `<a href="${doc.file_url}" target="_blank" download class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Open</a>` : ''}
-              </div>`).join('')}
-            </div>` : `<p style="font-size:12px;color:var(--hint)">No documents yet.</p>`}
-          </div>
-
-          <!-- Right: assessment boxes -->
-          <div>
             ${deal.land_cropping_assessment||deal.farm_prospects ? `<div style="margin-bottom:12px">
               <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:5px">Land / Cropping assessment</p>
-              <div style="background:var(--page-bg);border-radius:6px;padding:12px 14px;font-size:12px;line-height:1.6;border-left:3px solid #22c55e">${deal.land_cropping_assessment||deal.farm_prospects}</div>
+              <div style="background:var(--page-bg);border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5;border-left:3px solid var(--green)">${deal.land_cropping_assessment||deal.farm_prospects}</div>
             </div>` : ''}
             ${deal.water_assessment||deal.cfm_notes ? `<div style="margin-bottom:12px">
               <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:5px">Water assessment</p>
-              <div style="background:#eff6ff;border-radius:6px;padding:12px 14px;font-size:12px;line-height:1.6;border-left:3px solid var(--blue)">${deal.water_assessment||deal.cfm_notes}</div>
+              <div style="background:#eff6ff;border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5;border-left:3px solid var(--blue)">${deal.water_assessment||deal.cfm_notes}</div>
             </div>` : ''}
             ${deal.development_potential ? `<div style="margin-bottom:12px">
               <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:5px">Development potential</p>
-              <div style="background:#f0fdf4;border-radius:6px;padding:12px 14px;font-size:12px;line-height:1.6;border-left:3px solid #16a34a">${deal.development_potential}</div>
+              <div style="background:#f0fdf4;border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5;border-left:3px solid #22c55e">${deal.development_potential}</div>
             </div>` : ''}
           </div>
-        </div>
-
-        <!-- Viewed by — full width at bottom -->
-        <div style="border-top:1px solid var(--border-light);padding-top:12px">
-          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:6px">Viewed by (${views.length})</p>
-          ${views.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px">
-            ${[...new Map(views.map(v=>[v.user_name||v.user_email, v])).values()].map(v=>`
-              <div style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--page-bg);border-radius:20px;font-size:11px">
-                <span style="font-weight:500">${v.user_name||v.user_email||'Unknown'}</span>
-                <span style="color:var(--hint)">${v.viewed_at?new Date(v.viewed_at).toLocaleDateString('en-AU',{day:'numeric',month:'short'}):''}</span>
-              </div>`).join('')}
-          </div>` : `<p style="font-size:11px;color:var(--hint)">No views recorded.</p>`}
+          <div>
+            <div style="margin-bottom:14px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Documents</p>
+                <button class="btn btn-ghost btn-sm" id="btn-add-doc">＋ Upload</button>
+              </div>
+              ${docs.length ? `<div style="display:flex;flex-direction:column;gap:4px">
+                ${docs.map(doc=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--page-bg);border-radius:6px;border:1px solid var(--border-light)">
+                  <span style="font-size:18px">${doc.doc_type==='IM'?'📄':doc.doc_type==='Farm Model'?'📊':'📎'}</span>
+                  <div style="flex:1;min-width:0"><p style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${doc.filename}</p>
+                  <p style="font-size:10px;color:var(--hint)">${doc.doc_type} · ${doc.uploaded_at?formatDate(doc.uploaded_at):''}</p></div>
+                  ${doc.file_url?`<a href="${doc.file_url}" target="_blank" class="btn btn-ghost btn-sm">View</a>`:''}
+                </div>`).join('')}
+              </div>` : `<p style="font-size:12px;color:var(--hint)">No documents yet.</p>`}
+            </div>
+            <div>
+              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:6px">Viewed by (${views.length})</p>
+              ${views.length ? `<div style="display:flex;flex-direction:column;gap:2px;max-height:150px;overflow-y:auto">
+                ${views.map(v=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:0.5px solid var(--border-light)">
+                  <span style="font-weight:500">${v.user_name||v.user_email||'Unknown'}</span>
+                  <span style="color:var(--hint)">${v.viewed_at?new Date(v.viewed_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</span>
+                </div>`).join('')}
+              </div>` : `<p style="font-size:11px;color:var(--hint)">No views recorded.</p>`}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -433,9 +425,9 @@ async function _openDeal(deal, container) {
 // ── Financials tab ────────────────────────────────────────────
 function _buildFinancialsHTML(fin) {
   const fmt = v => v ? '$' + Math.round(v).toLocaleString() : '—';
-  const inS = 'border:1px solid var(--border-light);border-radius:5px;padding:5px 8px;font-size:13px;background:white;width:100%';
+  const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
   const secHead = 'font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin:14px 0 6px';
-  const rowS = 'display:flex;justify-content:space-between;padding:7px 0;border-bottom:0.5px solid var(--border-light);font-size:13px';
+  const rowS = 'display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--border-light);font-size:13px';
 
   const landTotal = (fin.land_components||[]).reduce((s,c)=>s+(parseFloat(c.area)||0)*(parseFloat(c.rate)||0),0);
   const waterTotal = (fin.water_assets||[]).reduce((s,w)=>s+(parseFloat(w.ml)||0)*(parseFloat(w.rate)||0),0);
@@ -453,7 +445,7 @@ function _buildFinancialsHTML(fin) {
     <input class="fin-l-desc" style="${inS}" placeholder="e.g. Flood irrigation" value="${c.description||''}">
     <input class="fin-l-area num" type="number" step="0.1" style="${inS};text-align:right" placeholder="ha" value="${c.area||''}">
     <input class="fin-l-rate num" type="number" step="100" style="${inS};text-align:right" placeholder="$/ha" value="${c.rate||''}">
-    <span class="fin-l-total" style="font-size:13px;font-weight:600;color:var(--blue);text-align:right">${c.area&&c.rate?'$'+Math.round(c.area*c.rate).toLocaleString():'—'}</span>
+    <span class="fin-l-total" style="font-size:12px;font-weight:600;color:var(--blue);text-align:right">${c.area&&c.rate?'$'+Math.round(c.area*c.rate).toLocaleString():'—'}</span>
     <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="land">✕</button>
   </div>`;
 
@@ -461,7 +453,7 @@ function _buildFinancialsHTML(fin) {
     <input class="fin-w-desc" style="${inS}" placeholder="e.g. Murrumbidgee Gen Security" value="${w.description||''}">
     <input class="fin-w-ml num" type="number" step="1" style="${inS};text-align:right" placeholder="ML" value="${w.ml||''}">
     <input class="fin-w-rate num" type="number" step="10" style="${inS};text-align:right" placeholder="$/ML" value="${w.rate||''}">
-    <span class="fin-w-total" style="font-size:13px;font-weight:600;color:var(--blue);text-align:right">${w.ml&&w.rate?'$'+Math.round(w.ml*w.rate).toLocaleString():'—'}</span>
+    <span class="fin-w-total" style="font-size:12px;font-weight:600;color:var(--blue);text-align:right">${w.ml&&w.rate?'$'+Math.round(w.ml*w.rate).toLocaleString():'—'}</span>
     <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="water">✕</button>
   </div>`;
 
@@ -479,7 +471,7 @@ function _buildFinancialsHTML(fin) {
       <select class="fin-dl-to" style="${inS}"><option value="">To…</option>${opts2}</select>
       <input class="fin-dl-area num" type="number" step="0.1" style="${inS};text-align:right" placeholder="ha" value="${d.area||''}">
       <input class="fin-dl-cost num" type="number" step="100" style="${inS};text-align:right" placeholder="$/ha" value="${d.cost_per_ha||''}">
-      <span class="fin-dl-total" style="font-size:13px;font-weight:600;color:#b45309;text-align:right">${d.area&&d.cost_per_ha?'$'+Math.round(d.area*d.cost_per_ha).toLocaleString():'—'}</span>
+      <span class="fin-dl-total" style="font-size:12px;font-weight:600;color:#b45309;text-align:right">${d.area&&d.cost_per_ha?'$'+Math.round(d.area*d.cost_per_ha).toLocaleString():'—'}</span>
       <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="dev-land">✕</button>
     </div>`;
   };
@@ -488,7 +480,7 @@ function _buildFinancialsHTML(fin) {
     <input class="fin-dw-desc" style="${inS}" placeholder="e.g. Murrumbidgee Gen Security" value="${d.description||''}">
     <input class="fin-dw-ml num" type="number" step="1" style="${inS};text-align:right" placeholder="ML" value="${d.ml||''}">
     <input class="fin-dw-rate num" type="number" step="10" style="${inS};text-align:right" placeholder="$/ML" value="${d.rate||''}">
-    <span class="fin-dw-total" style="font-size:13px;font-weight:600;color:#b45309;text-align:right">${d.ml&&d.rate?'$'+Math.round(d.ml*d.rate).toLocaleString():'—'}</span>
+    <span class="fin-dw-total" style="font-size:12px;font-weight:600;color:#b45309;text-align:right">${d.ml&&d.rate?'$'+Math.round(d.ml*d.rate).toLocaleString():'—'}</span>
     <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="dev-water">✕</button>
   </div>`;
 
@@ -500,9 +492,9 @@ function _buildFinancialsHTML(fin) {
 
   const comps = (fin.land_components||[]).map(c=>c.description).filter(Boolean);
 
-  return `<div style="display:grid;grid-template-columns:1fr 320px;gap:24px">
+  return `<div style="display:grid;grid-template-columns:1fr 300px;gap:20px">
     <!-- Left inputs -->
-    <div style="overflow-y:auto;max-height:62vh;padding-right:12px">
+    <div style="overflow-y:auto;max-height:600px;padding-right:8px">
       <!-- State & stamp duty -->
       <div style="display:flex;gap:10px;align-items:flex-end;padding:10px 12px;background:var(--page-bg);border-radius:6px;margin-bottom:4px">
         <div><label style="font-size:11px;color:var(--hint);display:block;margin-bottom:3px">State</label>
@@ -546,7 +538,7 @@ function _buildFinancialsHTML(fin) {
     <!-- Right summary -->
     <div>
       <div style="background:var(--page-bg);border-radius:8px;padding:16px;position:sticky;top:0">
-        <p style="font-size:14px;font-weight:700;margin-bottom:14px">Acquisition value</p>
+        <p style="font-size:13px;font-weight:700;margin-bottom:12px">Acquisition value</p>
         <div style="${rowS}"><span style="color:var(--hint)">Land</span><span id="fin-s-land">${fmt(landTotal)}</span></div>
         <div style="${rowS}"><span style="color:var(--hint)">Water</span><span id="fin-s-water">${fmt(waterTotal)}</span></div>
         <div style="${rowS}"><span style="color:var(--hint)">Other assets</span><span id="fin-s-other">${fmt(otherTotal)}</span></div>
@@ -554,7 +546,7 @@ function _buildFinancialsHTML(fin) {
         <div style="${rowS}"><span style="color:var(--hint)">Stamp duty</span><span id="fin-s-stamp">${fmt(stampDuty)}</span></div>
         <div style="${rowS};font-weight:700;font-size:14px"><span>Total acq. cost</span><span id="fin-s-total" style="color:var(--blue)">${fmt(totalAcq)}</span></div>
 
-        <p style="font-size:14px;font-weight:700;margin:16px 0 10px">Development capex</p>
+        <p style="font-size:13px;font-weight:700;margin:14px 0 10px">Development capex</p>
         <div style="${rowS}"><span style="color:var(--hint)">Land conversions</span><span id="fin-s-dev-land">${fmt(devLandCost)}</span></div>
         <div style="${rowS}"><span style="color:var(--hint)">Water purchases</span><span id="fin-s-dev-water">${fmt(devWaterCost)}</span></div>
         <div style="${rowS}"><span style="color:var(--hint)">Other capex</span><span id="fin-s-dev-other">${fmt(devOtherCost)}</span></div>
@@ -661,27 +653,27 @@ function _wireFinancials(deal, fin) {
 
   // Add row buttons
   const mkLandRow = () => {
-    const inS = 'border:1px solid var(--border-light);border-radius:5px;padding:5px 8px;font-size:13px;background:white;width:100%';
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
     return `<div class="fin-land-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 80px 24px;gap:6px;margin-bottom:5px;align-items:center">
       <input class="fin-l-desc" style="${inS}" placeholder="e.g. Flood irrigation" value="">
       <input class="fin-l-area num" type="number" step="0.1" style="${inS};text-align:right" placeholder="ha" value="">
       <input class="fin-l-rate num" type="number" step="100" style="${inS};text-align:right" placeholder="$/ha" value="">
-      <span class="fin-l-total" style="font-size:13px;font-weight:600;color:var(--blue);text-align:right">—</span>
+      <span class="fin-l-total" style="font-size:12px;font-weight:600;color:var(--blue);text-align:right">—</span>
       <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="land">✕</button>
     </div>`;
   };
   const mkWaterRow = () => {
-    const inS = 'border:1px solid var(--border-light);border-radius:5px;padding:5px 8px;font-size:13px;background:white;width:100%';
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
     return `<div class="fin-water-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 80px 24px;gap:6px;margin-bottom:5px;align-items:center">
       <input class="fin-w-desc" style="${inS}" placeholder="e.g. Murrumbidgee Gen Security">
       <input class="fin-w-ml num" type="number" step="1" style="${inS};text-align:right" placeholder="ML">
       <input class="fin-w-rate num" type="number" step="10" style="${inS};text-align:right" placeholder="$/ML">
-      <span class="fin-w-total" style="font-size:13px;font-weight:600;color:var(--blue);text-align:right">—</span>
+      <span class="fin-w-total" style="font-size:12px;font-weight:600;color:var(--blue);text-align:right">—</span>
       <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="water">✕</button>
     </div>`;
   };
   const mkOtherRow = () => {
-    const inS = 'border:1px solid var(--border-light);border-radius:5px;padding:5px 8px;font-size:13px;background:white;width:100%';
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
     return `<div class="fin-other-row" style="display:grid;grid-template-columns:2fr 1fr 24px;gap:6px;margin-bottom:5px;align-items:center">
       <input class="fin-o-desc" style="${inS}" placeholder="e.g. Infrastructure, Machinery">
       <input class="fin-o-val num" type="number" step="10000" style="${inS};text-align:right" placeholder="$">
@@ -689,7 +681,7 @@ function _wireFinancials(deal, fin) {
     </div>`;
   };
   const mkDevLandRow = () => {
-    const inS = 'border:1px solid var(--border-light);border-radius:5px;padding:5px 8px;font-size:13px;background:white;width:100%';
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
     const comps = collectFin().land_components.map(c=>c.description).filter(Boolean);
     const opts = comps.map(c=>`<option value="${c}">${c}</option>`).join('');
     return `<div class="fin-dev-land-row" style="display:grid;grid-template-columns:1.2fr 1.2fr 0.8fr 0.8fr 80px 24px;gap:5px;margin-bottom:5px;align-items:center">
@@ -697,22 +689,22 @@ function _wireFinancials(deal, fin) {
       <select class="fin-dl-to" style="${inS}"><option value="">To…</option>${opts}<option value="New type">New type…</option></select>
       <input class="fin-dl-area num" type="number" step="0.1" style="${inS};text-align:right" placeholder="ha">
       <input class="fin-dl-cost num" type="number" step="100" style="${inS};text-align:right" placeholder="$/ha">
-      <span class="fin-dl-total" style="font-size:13px;font-weight:600;color:#b45309;text-align:right">—</span>
+      <span class="fin-dl-total" style="font-size:12px;font-weight:600;color:#b45309;text-align:right">—</span>
       <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="dev-land">✕</button>
     </div>`;
   };
   const mkDevWaterRow = () => {
-    const inS = 'border:1px solid var(--border-light);border-radius:5px;padding:5px 8px;font-size:13px;background:white;width:100%';
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
     return `<div class="fin-dev-water-row" style="display:grid;grid-template-columns:2fr 1fr 1fr 80px 24px;gap:6px;margin-bottom:5px;align-items:center">
       <input class="fin-dw-desc" style="${inS}" placeholder="e.g. Murrumbidgee Gen Security">
       <input class="fin-dw-ml num" type="number" step="1" style="${inS};text-align:right" placeholder="ML">
       <input class="fin-dw-rate num" type="number" step="10" style="${inS};text-align:right" placeholder="$/ML">
-      <span class="fin-dw-total" style="font-size:13px;font-weight:600;color:#b45309;text-align:right">—</span>
+      <span class="fin-dw-total" style="font-size:12px;font-weight:600;color:#b45309;text-align:right">—</span>
       <button class="fin-del btn btn-ghost" style="color:var(--red);padding:0 4px;font-size:14px" data-section="dev-water">✕</button>
     </div>`;
   };
   const mkDevOtherRow = () => {
-    const inS = 'border:1px solid var(--border-light);border-radius:5px;padding:5px 8px;font-size:13px;background:white;width:100%';
+    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:3px 6px;font-size:12px;background:white;width:100%';
     return `<div class="fin-dev-other-row" style="display:grid;grid-template-columns:2fr 1fr 24px;gap:6px;margin-bottom:5px;align-items:center">
       <input class="fin-do-desc" style="${inS}" placeholder="e.g. Irrigation infrastructure">
       <input class="fin-do-val num" type="number" step="10000" style="${inS};text-align:right" placeholder="$">
