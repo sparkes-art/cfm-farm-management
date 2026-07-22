@@ -946,6 +946,8 @@ function _dealModal(container, existing = null) {
         land_cropping_assessment: qs('#d-prospects', modal)?.value?.trim()||null,
         water_assessment: qs('#d-notes', modal)?.value?.trim()||null,
         development_potential: qs('#d-dev-potential', modal)?.value?.trim()||null,
+        farm_prospects: null,
+        cfm_notes: null,
         im_url: imUrl,
         model_url: modelUrl,
       };
