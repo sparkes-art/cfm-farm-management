@@ -301,62 +301,93 @@ async function _openDeal(deal, container) {
 
       <!-- Overview tab -->
       <div id="dtab-overview">
+        <!-- Status badges -->
         <div class="flex gap-2" style="margin-bottom:14px;flex-wrap:wrap">
           <span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:500;background:${sc.bg};color:${sc.color}">${deal.status||'Reviewing'}</span>
           <span style="padding:3px 10px;border-radius:10px;font-size:12px;background:${mc.bg||'#f3f4f6'};color:${mc.color||'#374151'}">${deal.cfm_management_status||'—'}</span>
           ${deal.price_min ? `<span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af">$${Number(deal.price_min).toLocaleString()}${deal.price_max?' – $'+Number(deal.price_max).toLocaleString():''}</span>` : ''}
-        </div>
-        ${(deal.assigned_users||[]).length ? `<div style="display:flex;gap:6px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-          <span style="font-size:11px;color:var(--hint)">Assigned:</span>
           ${(deal.assigned_users||[]).map(u=>`<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#ede9fe;color:#5b21b6;font-weight:500">${u}</span>`).join('')}
-        </div>` : ''}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        </div>
+
+        <!-- Financial summary strip -->
+        ${finRows?.[0] ? (() => {
+          const f = finRows[0];
+          const landT = (f.land_components||[]).reduce((s,c)=>s+(parseFloat(c.area)||0)*(parseFloat(c.rate)||0),0);
+          const waterT = (f.water_assets||[]).reduce((s,w)=>s+(parseFloat(w.ml)||0)*(parseFloat(w.rate)||0),0);
+          const otherT = (f.other_assets||[]).reduce((s,o)=>s+(parseFloat(o.value)||0),0);
+          const assetT = landT+waterT+otherT;
+          const stamp = assetT*(parseFloat(f.stamp_duty_rate)||0);
+          const totalAcq = assetT+stamp;
+          const devT = (f.development_land||[]).reduce((s,d)=>s+(parseFloat(d.area)||0)*(parseFloat(d.cost_per_ha)||0),0)
+                     + (f.development_water||[]).reduce((s,d)=>s+(parseFloat(d.ml)||0)*(parseFloat(d.rate)||0),0)
+                     + (f.development_other||[]).reduce((s,d)=>s+(parseFloat(d.value)||0),0);
+          const totalInv = totalAcq+devT;
+          const askingMid = deal.price_min&&deal.price_max?(deal.price_min+deal.price_max)/2:(deal.price_min||0);
+          const vsAsking = askingMid&&totalAcq ? ((totalAcq-askingMid)/askingMid*100) : null;
+          const fmt = v => v>=1000000?'$'+(v/1000000).toFixed(1)+'m':v>=1000?'$'+(v/1000).toFixed(0)+'k':'$'+Math.round(v).toLocaleString();
+          const cell = (label,val,color,bold) => `<div style="display:flex;flex-direction:column;padding:0 12px;border-right:1px solid var(--border-light)"><span style="font-size:10px;color:var(--hint);margin-bottom:3px;white-space:nowrap">${label}</span><span style="font-size:${bold?'15':'13'}px;font-weight:${bold?'700':'500'};color:${color};font-variant-numeric:tabular-nums;white-space:nowrap">${val}</span></div>`;
+          return `<div style="display:flex;flex-wrap:wrap;gap:0;margin-bottom:16px;padding:10px 2px;background:#f8fafc;border-radius:8px;border:1px solid var(--border-light);overflow:hidden">
+            ${landT ? cell('Land',fmt(landT),'var(--ink)',false) : ''}
+            ${waterT ? cell('Water',fmt(waterT),'var(--ink)',false) : ''}
+            ${otherT ? cell('Other assets',fmt(otherT),'var(--ink)',false) : ''}
+            ${totalAcq ? cell('CFM acq. value',fmt(totalAcq),'var(--blue)',true) : ''}
+            ${devT ? cell('+ Dev capex',fmt(devT),'#b45309',false) : ''}
+            ${devT ? cell('Total invested',fmt(totalInv),'var(--blue)',true) : ''}
+            ${vsAsking!==null ? cell('vs asking',(vsAsking>=0?'+':'')+vsAsking.toFixed(1)+'%',vsAsking>=0?'#065f46':'#991b1b',false) : ''}
+          </div>`;
+        })() : ''}
+
+        <!-- Two columns: left=key details + documents, right=assessments -->
+        <div style="display:grid;grid-template-columns:42% 1fr;gap:24px;margin-bottom:16px">
+          <!-- Left -->
           <div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">
               ${[['Location',deal.location],['Region',deal.region],['Lead agent',deal.lead_agent],['Agency',deal.agency],['Agent email',deal.agent_email],['Agent phone',deal.agent_phone],['Date created',deal.date_created?formatDate(deal.date_created):null]]
                 .filter(([,v])=>v).map(([l,v])=>`<div><p style="font-size:10px;color:var(--hint);margin-bottom:2px">${l}</p><p style="font-size:13px;font-weight:500">${v}</p></div>`).join('')}
             </div>
+            <!-- Documents -->
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Documents</p>
+              <button class="btn btn-ghost btn-sm" id="btn-add-doc">＋ Upload</button>
+            </div>
+            ${docs.length ? `<div style="display:flex;flex-direction:column;gap:4px">
+              ${docs.map(doc=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--page-bg);border-radius:6px;border:1px solid var(--border-light)">
+                <span style="font-size:20px">${doc.doc_type==='IM'?'📄':doc.doc_type==='Farm Model'?'📊':'📎'}</span>
+                <div style="flex:1;min-width:0"><p style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${doc.filename}</p>
+                <p style="font-size:10px;color:var(--hint)">${doc.doc_type} · ${doc.uploaded_at?formatDate(doc.uploaded_at):''}</p></div>
+                ${doc.file_url?`<a href="${doc.file_url}" target="_blank" class="btn btn-ghost btn-sm">⬇ Open</a>`:''}
+              </div>`).join('')}
+            </div>` : `<p style="font-size:12px;color:var(--hint)">No documents yet.</p>`}
+          </div>
+
+          <!-- Right: assessments -->
+          <div style="min-width:0">
             ${deal.land_cropping_assessment||deal.farm_prospects ? `<div style="margin-bottom:12px">
               <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:5px">Land / Cropping assessment</p>
-              <div style="background:var(--page-bg);border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5;border-left:3px solid var(--green)">${deal.land_cropping_assessment||deal.farm_prospects}</div>
+              <div style="background:var(--page-bg);border-radius:6px;padding:12px 14px;font-size:12px;line-height:1.6;border-left:3px solid #22c55e;word-wrap:break-word">${deal.land_cropping_assessment||deal.farm_prospects}</div>
             </div>` : ''}
             ${deal.water_assessment||deal.cfm_notes ? `<div style="margin-bottom:12px">
               <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:5px">Water assessment</p>
-              <div style="background:#eff6ff;border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5;border-left:3px solid var(--blue)">${deal.water_assessment||deal.cfm_notes}</div>
+              <div style="background:#eff6ff;border-radius:6px;padding:12px 14px;font-size:12px;line-height:1.6;border-left:3px solid var(--blue);word-wrap:break-word">${deal.water_assessment||deal.cfm_notes}</div>
             </div>` : ''}
             ${deal.development_potential ? `<div style="margin-bottom:12px">
               <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:5px">Development potential</p>
-              <div style="background:#f0fdf4;border-radius:6px;padding:10px 12px;font-size:12px;line-height:1.5;border-left:3px solid #22c55e">${deal.development_potential}</div>
+              <div style="background:#f0fdf4;border-radius:6px;padding:12px 14px;font-size:12px;line-height:1.6;border-left:3px solid #16a34a;word-wrap:break-word">${deal.development_potential}</div>
             </div>` : ''}
           </div>
-          <div>
-            <div style="margin-bottom:14px">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Documents</p>
-                <button class="btn btn-ghost btn-sm" id="btn-add-doc">＋ Upload</button>
-              </div>
-              ${docs.length ? `<div style="display:flex;flex-direction:column;gap:4px">
-                ${docs.map(doc=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--page-bg);border-radius:6px;border:1px solid var(--border-light)">
-                  <span style="font-size:18px">${doc.doc_type==='IM'?'📄':doc.doc_type==='Farm Model'?'📊':'📎'}</span>
-                  <div style="flex:1;min-width:0"><p style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${doc.filename}</p>
-                  <p style="font-size:10px;color:var(--hint)">${doc.doc_type} · ${doc.uploaded_at?formatDate(doc.uploaded_at):''}</p></div>
-                  ${doc.file_url?`<a href="${doc.file_url}" target="_blank" class="btn btn-ghost btn-sm">View</a>`:''}
-                </div>`).join('')}
-              </div>` : `<p style="font-size:12px;color:var(--hint)">No documents yet.</p>`}
-            </div>
-            <div>
-              <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:6px">Viewed by (${views.length})</p>
-              ${views.length ? `<div style="display:flex;flex-direction:column;gap:2px;max-height:150px;overflow-y:auto">
-                ${views.map(v=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:0.5px solid var(--border-light)">
-                  <span style="font-weight:500">${v.user_name||v.user_email||'Unknown'}</span>
-                  <span style="color:var(--hint)">${v.viewed_at?new Date(v.viewed_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</span>
-                </div>`).join('')}
-              </div>` : `<p style="font-size:11px;color:var(--hint)">No views recorded.</p>`}
-            </div>
-          </div>
+        </div>
+
+        <!-- Viewed by — full width at bottom -->
+        <div style="border-top:1px solid var(--border-light);padding-top:12px">
+          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;margin-bottom:8px">Viewed by (${views.length})</p>
+          ${views.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${[...new Map(views.map(v=>[v.user_name||v.user_email,v])).values()].map(v=>`<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--page-bg);border-radius:20px;font-size:11px">
+              <span style="font-weight:500">${v.user_name||v.user_email||'Unknown'}</span>
+              <span style="color:var(--hint)">${v.viewed_at?new Date(v.viewed_at).toLocaleDateString('en-AU',{day:'numeric',month:'short'}):''}</span>
+            </div>`).join('')}
+          </div>` : `<p style="font-size:11px;color:var(--hint)">No views recorded.</p>`}
         </div>
       </div>
-
       <!-- Financials tab -->
       <div id="dtab-financials" style="display:none">
         ${_buildFinancialsHTML(fin)}
