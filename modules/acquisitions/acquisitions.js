@@ -54,7 +54,6 @@ export async function mountAcquisitions(container) {
     <div class="tab-strip" style="margin-bottom:16px">
       <button class="tab-btn ${_activeTab==='pipeline'?'active':''}" data-tab="pipeline">Pipeline</button>
       <button class="tab-btn ${_activeTab==='list'?'active':''}" data-tab="list">List view</button>
-      <button class="tab-btn ${_activeTab==='sold'?'active':''}" data-tab="sold">Passed / Sold</button>
     </div>
 
     <div id="acq-content"></div>
@@ -95,13 +94,14 @@ async function _loadData() {
 function _renderTab(container) {
   const content = qs('#acq-content', container);
   if (_activeTab === 'pipeline') _renderPipeline(content, container);
-  else if (_activeTab === 'sold') _renderSold(content, container);
   else _renderList(content, container);
 }
 
 // ── Pipeline (kanban-style) ───────────────────────────────────
 function _renderPipeline(content, container) {
   const activeStatuses = STATUSES.filter(s => s !== 'Passed' && s !== 'Sold');
+  const passed = _deals.filter(d => d.status === 'Passed');
+  const sold = _deals.filter(d => d.status === 'Sold');
 
   content.innerHTML = `
     <!-- Summary strip -->
@@ -143,9 +143,34 @@ function _renderPipeline(content, container) {
       }).join('')}
     </div>
 
-    <!-- Passed/Sold moved to own tab -->
-    <p style="font-size:11px;color:var(--hint);margin-top:12px;text-align:right">Passed & Sold deals are in the <strong>Passed / Sold</strong> tab</p>
+    <!-- Passed & Sold — hidden by default with toggle -->
+    <div style="margin-top:16px;border-top:1px solid var(--border-light);padding-top:12px">
+      <button id="btn-toggle-archive" class="btn btn-ghost btn-sm" style="font-size:12px;color:var(--hint)">
+        ${_showArchived ? '▲ Hide' : '▼ Show'} Passed & Sold (${passed.length + sold.length})
+      </button>
+    </div>
+    ${_showArchived ? `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+      ${['Passed','Sold'].map(status => {
+        const deals = _deals.filter(d => d.status === status);
+        const sc = STATUS_COLOURS[status] || {};
+        return `<div>
+          <p style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;display:inline-block;background:${sc.bg};color:${sc.color};margin-bottom:8px">${status} (${deals.length})</p>
+          ${deals.map(d => `<div class="deal-card" data-id="${d.id}" style="background:white;border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer">
+            <p style="font-size:12px;font-weight:600">${d.property_name}</p>
+            ${d.location?`<p style="font-size:10px;color:var(--hint)">${d.location}</p>`:''}
+            <p style="font-size:11px;color:var(--blue)">${d.price_min?'$'+Number(d.price_min).toLocaleString()+(d.price_max?' – $'+Number(d.price_max).toLocaleString():''):'—'}</p>
+          </div>`).join('')}
+        </div>`;
+      }).join('')}
+    </div>` : ''}
   `;
+
+  // Wire archive toggle
+  qs('#btn-toggle-archive', content)?.addEventListener('click', () => {
+    _showArchived = !_showArchived;
+    _renderPipeline(content, container);
+  });
 
   // Wire deal card clicks
   content.querySelectorAll('.deal-card').forEach(card => {
@@ -158,42 +183,6 @@ function _renderPipeline(content, container) {
   });
 }
 
-// ── Sold / Passed tab ────────────────────────────────────────
-function _renderSold(content, container) {
-  const archived = _deals.filter(d => ['Passed','Sold'].includes(d.status));
-
-  content.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-      ${['Passed','Sold'].map(status => {
-        const deals = archived.filter(d => d.status === status);
-        const sc = STATUS_COLOURS[status] || {};
-        return `<div>
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-            <span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;background:${sc.bg};color:${sc.color}">${status}</span>
-            <span style="font-size:12px;color:var(--hint)">${deals.length} deal${deals.length!==1?'s':''}</span>
-          </div>
-          ${deals.length ? deals.map(d => `
-            <div class="deal-card card" data-id="${d.id}" style="padding:12px;margin-bottom:8px;cursor:pointer">
-              <p style="font-size:13px;font-weight:600;margin-bottom:4px">${d.property_name}</p>
-              ${d.location ? `<p style="font-size:11px;color:var(--hint);margin-bottom:3px">📍 ${d.location}${d.region?' · '+d.region:''}</p>` : ''}
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
-                <span style="font-size:12px;font-weight:500;color:var(--blue)">${d.price_min?'$'+Number(d.price_min).toLocaleString()+(d.price_max?' – $'+Number(d.price_max).toLocaleString():''):'—'}</span>
-                <span style="font-size:11px;color:var(--hint)">${d.lead_agent||''} ${d.agency?'· '+d.agency:''}</span>
-              </div>
-              ${d.cfm_management_status ? `<div style="margin-top:6px"><span style="font-size:10px;padding:1px 7px;border-radius:8px;background:${(MGMT_COLOURS[d.cfm_management_status]||{}).bg||'#f3f4f6'};color:${(MGMT_COLOURS[d.cfm_management_status]||{}).color||'#374151'}">${d.cfm_management_status}</span></div>` : ''}
-            </div>`).join('') : `<p style="font-size:12px;color:var(--hint);padding:16px 0">No ${status.toLowerCase()} deals.</p>`}
-        </div>`;
-      }).join('')}
-    </div>
-  `;
-
-  content.querySelectorAll('.deal-card').forEach(card => {
-    card.addEventListener('click', () => {
-      const deal = _deals.find(d => d.id === card.dataset.id);
-      if (deal) _openDeal(deal, container);
-    });
-  });
-}
 
 // ── List view ─────────────────────────────────────────────────
 function _renderList(content, container) {
