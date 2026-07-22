@@ -88,17 +88,18 @@ export function unmountAcquisitions() {
 
 async function _loadData() {
   let _users = [];
-  const dealFilter = isLawd()
-    ? 'agency=ilike.%LAWD%&select=*&order=date_created.desc'
-    : 'select=*&order=date_created.desc';
   [_deals, _agents, _users, _financials, _dealDocs] = await Promise.all([
-    dbSelect('acquisition_deals', dealFilter),
+    dbSelect('acquisition_deals', 'select=*&order=date_created.desc'),
     dbSelect('acquisition_agents', 'select=*&order=name.asc').catch(() => []),
     dbSelect('user_profiles', 'select=id,full_name,role&is_active=eq.true&order=full_name.asc').catch(() => []),
     dbSelect('acquisition_financials', 'select=deal_id,land_components,water_assets,other_assets,development_land,development_water,development_other,stamp_duty_rate').catch(() => []),
     dbSelect('acquisition_documents', 'select=deal_id,doc_type,filename,file_url').catch(() => []),
   ]);
   _moduleUsers = _users;
+  // Filter deals for LAWD users — only show LAWD agency deals
+  if (isLawd()) {
+    _deals = _deals.filter(d => (d.agency||'').toLowerCase().includes('lawd'));
+  }
 }
 
 function _renderTab(container) {
