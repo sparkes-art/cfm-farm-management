@@ -17,7 +17,7 @@ let _searchTerm = '';
 let _activeDeal = null;
 
 const STATUSES = ['Reviewing', 'Interested', 'Engaged', 'Sold'];
-const MGMT_STATUSES = ['CFM available to manage', 'CFM not interested', 'CFM already manages'];
+const MGMT_STATUSES = ['CFM available to manage', 'Outside scope', 'CFM already manages'];
 const DOC_TYPES = ['IM', 'Farm Model', 'Proposal', 'Report', 'Valuation', 'Other'];
 const ACTIVITY_TYPES = ['Note', 'Call', 'Inspection', 'Email', 'Proposal', 'Meeting'];
 
@@ -34,7 +34,7 @@ const STATUS_COLOURS = {
 
 const MGMT_COLOURS = {
   'CFM available to manage': { bg: '#d1fae5', color: '#065f46' },
-  'CFM not interested':      { bg: '#fee2e2', color: '#991b1b' },
+  'Outside scope':           { bg: '#f3f4f6', color: '#6b7280' },
   'CFM already manages':     { bg: '#dbeafe', color: '#1e40af' },
   // Legacy labels
   'Available':      { bg: '#d1fae5', color: '#065f46' },
@@ -105,71 +105,55 @@ function _renderTab(container) {
 function _renderPipeline(content, container) {
   const activeStatuses = STATUSES.filter(s => s !== 'Sold');
   const soldDeals = _deals.filter(d => d.status === 'Sold');
-  const notInterestedDeals = _deals.filter(d => d.cfm_management_status === 'CFM not interested' && d.status !== 'Sold');
-
-  const dealCard = (d) => `
-    <div class="deal-card" data-id="${d.id}" style="background:white;border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;cursor:pointer;transition:box-shadow .15s">
-      <p style="font-size:12px;font-weight:600;margin-bottom:4px;line-height:1.3">${d.property_name}</p>
-      ${d.location ? `<p style="font-size:10px;color:var(--hint);margin-bottom:4px">📍 ${d.location}</p>` : ''}
-      ${d.price_min ? `<p style="font-size:11px;font-weight:500;color:var(--blue);margin-bottom:4px">$${Number(d.price_min).toLocaleString()}${d.price_max?' – $'+Number(d.price_max).toLocaleString():''}</p>` : ''}
-      ${(d.assigned_users||[]).length ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px">${(d.assigned_users||[]).map(u=>'<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:#ede9fe;color:#5b21b6">'+u+'</span>').join('')}</div>` : ''}
-      ${(d.agronomy_service||d.hr_service) ? `<div style="display:flex;gap:4px;margin-bottom:4px;flex-wrap:wrap">
-        ${d.agronomy_service?`<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#fef9c3;color:#854d0e">🌿 ${d.agronomy_service}</span>`:''}
-        ${d.hr_service?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#f0fdf4;color:#166534">👤 HR</span>':''}
-      </div>` : ''}
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-        ${d.cfm_management_status ? `<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:${(MGMT_COLOURS[d.cfm_management_status]||{}).bg||'#f3f4f6'};color:${(MGMT_COLOURS[d.cfm_management_status]||{}).color||'#374151'}">${d.cfm_management_status}</span>` : '<span></span>'}
-        <div style="position:relative;display:inline-block">
-          <button class="quick-status-btn btn btn-ghost" data-id="${d.id}" style="padding:2px 6px;font-size:14px;line-height:1;color:var(--hint)">⋯</button>
-          <div class="quick-status-menu" data-id="${d.id}" style="display:none;position:absolute;right:0;top:100%;background:white;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);z-index:100;min-width:140px;padding:4px 0">
-            ${STATUSES.map(s => s !== d.status ? `<button class="quick-status-opt" data-id="${d.id}" data-status="${s}" style="display:block;width:100%;text-align:left;padding:6px 12px;border:none;background:none;cursor:pointer;font-size:12px;color:var(--ink)">${s}</button>` : '').join('')}
-          </div>
-        </div>
-      </div>
-    </div>`;
+  const notInterestedDeals = _deals.filter(d => (d.cfm_management_status === 'Outside scope' || d.cfm_management_status === 'CFM not interested') && d.status !== 'Sold');
 
   content.innerHTML = `
     <!-- Summary strip -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
       ${[
         ['Total deals', _deals.length, 'var(--ink)'],
-        ['Active', _deals.filter(d=>d.status!=='Sold'&&d.cfm_management_status!=='CFM not interested').length, 'var(--blue)'],
+        ['Active', _deals.filter(d=>d.status !== 'Sold').length, 'var(--blue)'],
         ['Engaged', _deals.filter(d=>d.status==='Engaged').length, '#065f46'],
-        ['Available to manage', _deals.filter(d=>d.cfm_management_status==='CFM available to manage'||d.cfm_management_status==='Available').length, '#3B6D11'],
+        ['Available to manage', _deals.filter(d=>d.cfm_management_status==='CFM available to manage'||d.cfm_management_status==='Available'||d.cfm_management_status==='CFM already manages').length, '#3B6D11'],
       ].map(([l,v,c]) => `<div class="card" style="padding:10px 14px">
         <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:3px">${l}</p>
         <p style="font-size:22px;font-weight:600;color:${c};font-variant-numeric:tabular-nums">${v}</p>
       </div>`).join('')}
     </div>
 
-    <!-- Pipeline columns + Not Interested -->
-    <div style="display:flex;gap:10px;overflow-x:auto;min-width:900px;align-items:flex-start">
-      <!-- Active columns -->
-      <div style="display:grid;grid-template-columns:repeat(${activeStatuses.length},minmax(200px,1fr));gap:10px;flex:1">
-        ${activeStatuses.map(status => {
-          const deals = _deals.filter(d => d.status === status && d.cfm_management_status !== 'CFM not interested');
-          const sc = STATUS_COLOURS[status] || STATUS_COLOURS['Reviewing'];
-          return `<div style="background:var(--page-bg);border-radius:8px;padding:10px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${sc.bg};color:${sc.color}">${status}</span>
-              <span style="font-size:11px;color:var(--hint)">${deals.length}</span>
+    <!-- Pipeline columns -->
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;overflow-x:auto;min-width:900px">
+      ${activeStatuses.map(status => {
+        const deals = _deals.filter(d => d.status === status && d.cfm_management_status !== 'CFM not interested');
+        const sc = STATUS_COLOURS[status] || STATUS_COLOURS['New'];
+        return `<div style="background:var(--page-bg);border-radius:8px;padding:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${sc.bg};color:${sc.color}">${status}</span>
+            <span style="font-size:11px;color:var(--hint)">${deals.length}</span>
+          </div>
+          ${deals.map(d => `
+            <div class="deal-card" data-id="${d.id}" style="background:white;border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;cursor:pointer;transition:box-shadow .15s">
+              <p style="font-size:12px;font-weight:600;margin-bottom:4px;line-height:1.3">${d.property_name}</p>
+              ${d.location ? `<p style="font-size:10px;color:var(--hint);margin-bottom:4px">📍 ${d.location}</p>` : ''}
+              ${d.price_min ? `<p style="font-size:11px;font-weight:500;color:var(--blue);margin-bottom:4px">$${Number(d.price_min).toLocaleString()}${d.price_max ? ' – $'+Number(d.price_max).toLocaleString() : '+'}</p>` : ''}
+              ${(d.assigned_users||[]).length ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px">${(d.assigned_users||[]).map(u=>'<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:#ede9fe;color:#5b21b6">'+u+'</span>').join('')}</div>` : ''}
+              ${(d.agronomy_service||d.hr_service) ? `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
+                ${d.agronomy_service?`<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#fef9c3;color:#854d0e">🌿 ${d.agronomy_service}</span>`:''}
+                ${d.hr_service?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#f0fdf4;color:#166534">👤 HR</span>':''}
+              </div>` : ''}
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+                ${d.cfm_management_status ? `<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:${(MGMT_COLOURS[d.cfm_management_status]||{}).bg||'#f3f4f6'};color:${(MGMT_COLOURS[d.cfm_management_status]||{}).color||'#374151'}">${d.cfm_management_status}</span>` : '<span></span>'}
+                <div style="position:relative;display:inline-block">
+                  <button class="quick-status-btn btn btn-ghost" data-id="${d.id}" style="padding:2px 6px;font-size:14px;line-height:1;color:var(--hint)" title="Change status">⋯</button>
+                  <div class="quick-status-menu" data-id="${d.id}" style="display:none;position:absolute;right:0;top:100%;background:white;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);z-index:100;min-width:140px;padding:4px 0">
+                    ${STATUSES.map(s => s !== d.status ? `<button class="quick-status-opt" data-id="${d.id}" data-status="${s}" style="display:block;width:100%;text-align:left;padding:6px 12px;border:none;background:none;cursor:pointer;font-size:12px;color:var(--ink)">${s}</button>` : '').join('')}
+                  </div>
+                </div>
+              </div>
             </div>
-            ${deals.map(d => dealCard(d)).join('')}
-          </div>`;
-        }).join('')}
-      </div>
-
-      <!-- Divider -->
-      <div style="width:1px;background:var(--border);align-self:stretch;flex-shrink:0;margin:0 4px"></div>
-
-      <!-- Not Interested column -->
-      <div style="background:#fff5f5;border-radius:8px;padding:10px;min-width:200px;max-width:220px;border:1px solid #fecaca;flex-shrink:0">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:#fee2e2;color:#991b1b">Not interested</span>
-          <span style="font-size:11px;color:var(--hint)">${notInterestedDeals.length}</span>
-        </div>
-        ${notInterestedDeals.length ? notInterestedDeals.map(d => dealCard(d)).join('') : '<p style="font-size:11px;color:var(--hint)">None</p>'}
-      </div>
+          `).join('')}
+        </div>`;
+      }).join('')}
     </div>
 
     <!-- Sold toggle -->
@@ -179,12 +163,14 @@ function _renderPipeline(content, container) {
       </button>
     </div>
     ${_showArchived && soldDeals.length ? `
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px">
-      ${soldDeals.map(d => '<div class="deal-card" data-id="'+d.id+'" style="background:white;border:1px solid var(--border);border-radius:6px;padding:8px 10px;cursor:pointer">' +
-        '<p style="font-size:12px;font-weight:600">'+d.property_name+'</p>' +
-        (d.location?'<p style="font-size:10px;color:var(--hint)">'+d.location+'</p>':'') +
-        '<p style="font-size:11px;color:var(--blue)">'+(d.price_min?'$'+Number(d.price_min).toLocaleString()+(d.price_max?' – $'+Number(d.price_max).toLocaleString():''):'—')+'</p>' +
-      '</div>').join('')}
+    <div style="margin-top:10px">
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+        ${soldDeals.map(d => '<div class="deal-card" data-id="'+d.id+'" style="background:white;border:1px solid var(--border);border-radius:6px;padding:8px 10px;cursor:pointer">' +
+          '<p style="font-size:12px;font-weight:600">'+d.property_name+'</p>' +
+          (d.location?'<p style="font-size:10px;color:var(--hint)">'+d.location+'</p>':'') +
+          '<p style="font-size:11px;color:var(--blue)">'+(d.price_min?'$'+Number(d.price_min).toLocaleString()+(d.price_max?' – $'+Number(d.price_max).toLocaleString():''):'—')+'</p>' +
+        '</div>').join('')}
+      </div>
     </div>` : ''}
   `;
 
@@ -198,45 +184,19 @@ function _renderPipeline(content, container) {
   content.querySelectorAll('.deal-card').forEach(card => {
     card.addEventListener('mouseenter', () => card.style.boxShadow = '0 2px 8px rgba(0,0,0,.1)');
     card.addEventListener('mouseleave', () => card.style.boxShadow = '');
-    card.addEventListener('click', e => {
-      if (e.target.closest('.quick-status-btn,.quick-status-menu,.quick-status-opt')) return;
+    card.addEventListener('click', () => {
       const deal = _deals.find(d => d.id === card.dataset.id);
       if (deal) _openDeal(deal, container);
     });
   });
-
-  // Wire quick status buttons
-  content.querySelectorAll('.quick-status-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      content.querySelectorAll('.quick-status-menu').forEach(m => m.style.display = 'none');
-      const menu = content.querySelector(`.quick-status-menu[data-id="${btn.dataset.id}"]`);
-      if (menu) menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-    });
-  });
-
-  content.querySelectorAll('.quick-status-opt').forEach(opt => {
-    opt.addEventListener('click', async e => {
-      e.stopPropagation();
-      const deal = _deals.find(d => d.id === opt.dataset.id);
-      if (!deal) return;
-      await dbUpdate('acquisition_deals', deal.id, { status: opt.dataset.status });
-      deal.status = opt.dataset.status;
-      toast(deal.property_name + ' → ' + opt.dataset.status, 'success');
-      _renderPipeline(content, container);
-    });
-  });
-
-  document.addEventListener('click', () => {
-    content.querySelectorAll('.quick-status-menu').forEach(m => m.style.display = 'none');
-  }, { once: true });
 }
 
 // ── List view ─────────────────────────────────────────────────
 function _renderList(content, container) {
-  let deals = _deals.filter(d => d.status !== 'Sold');
+  let deals = _deals.filter(d => d.status !== 'Sold' && d.cfm_management_status !== 'CFM not interested' && d.cfm_management_status !== 'Outside scope');
   if (_filterStatus) deals = deals.filter(d => d.status === _filterStatus);
-  if (_filterMgmt) deals = deals.filter(d => d.cfm_management_status === _filterMgmt);
+  if (_filterMgmt) deals = deals.filter(d => d.cfm_management_status === _filterMgmt || 
+    (_filterMgmt === 'Outside scope' && d.cfm_management_status === 'CFM not interested'));
   if (_searchTerm) deals = deals.filter(d =>
     d.property_name?.toLowerCase().includes(_searchTerm) ||
     d.location?.toLowerCase().includes(_searchTerm) ||
