@@ -8,6 +8,10 @@ const SUPABASE_URL = 'https://nqvfuqvindsgnogejaei.supabase.co';
 let _deals = [];
 let _agents = [];
 let _moduleUsers = [];
+let _financials = [];
+let _dealDocs = [];
+let _financials = [];
+let _dealDocs = [];
 let _activeTab = 'pipeline';
 let _filterStatus = '';
 let _filterMgmt = '';
@@ -86,12 +90,13 @@ export function unmountAcquisitions() {
 
 async function _loadData() {
   let _users = [];
-  [_deals, _agents, _users] = await Promise.all([
+  [_deals, _agents, _users, _financials, _dealDocs] = await Promise.all([
     dbSelect('acquisition_deals', 'select=*&order=date_created.desc'),
     dbSelect('acquisition_agents', 'select=*&order=name.asc').catch(() => []),
     dbSelect('user_profiles', 'select=id,full_name,role&is_active=eq.true&order=full_name.asc').catch(() => []),
+    dbSelect('acquisition_financials', 'select=deal_id,land_components,water_assets,other_assets,development_land,development_water,development_other,stamp_duty_rate').catch(() => []),
+    dbSelect('acquisition_documents', 'select=deal_id,doc_type,filename,file_url').catch(() => []),
   ]);
-  // Store users at module level for access in modals
   _moduleUsers = _users;
 }
 
@@ -125,24 +130,45 @@ function _renderPipeline(content, container) {
     <div style="display:flex;gap:10px;overflow-x:auto;min-width:900px;align-items:flex-start">
     <div style="display:grid;grid-template-columns:repeat(${activeStatuses.length},minmax(190px,1fr));gap:10px;flex:1">
       ${activeStatuses.map(status => {
-        const deals = _deals.filter(d => d.status === status && d.cfm_management_status !== 'CFM not interested');
-        const sc = STATUS_COLOURS[status] || STATUS_COLOURS['New'];
+        const deals = _deals.filter(d => d.status === status && d.cfm_management_status !== 'CFM not interested' && d.cfm_management_status !== 'Outside scope');
+        const sc = STATUS_COLOURS[status] || STATUS_COLOURS['Reviewing'];
+        const isEngaged = status === 'Engaged';
         return `<div style="background:var(--page-bg);border-radius:8px;padding:10px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:${sc.bg};color:${sc.color}">${status}</span>
             <span style="font-size:11px;color:var(--hint)">${deals.length}</span>
           </div>
-          ${deals.map(d => `
+          ${deals.map(d => {
+            const fin = isEngaged ? _getFinSummary(d.id) : null;
+            const imDoc = isEngaged ? _dealDocs.find(doc => doc.deal_id === d.id && doc.doc_type === 'IM') : null;
+            return `
             <div class="deal-card" data-id="${d.id}" style="background:white;border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;cursor:pointer;transition:box-shadow .15s">
               <p style="font-size:12px;font-weight:600;margin-bottom:4px;line-height:1.3">${d.property_name}</p>
               ${d.location ? `<p style="font-size:10px;color:var(--hint);margin-bottom:4px">📍 ${d.location}</p>` : ''}
               ${d.price_min ? `<p style="font-size:11px;font-weight:500;color:var(--blue);margin-bottom:4px">$${Number(d.price_min).toLocaleString()}${d.price_max ? ' – $'+Number(d.price_max).toLocaleString() : '+'}</p>` : ''}
               ${(d.assigned_users||[]).length ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px">${(d.assigned_users||[]).map(u=>'<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:#ede9fe;color:#5b21b6">'+u+'</span>').join('')}</div>` : ''}
-              ${(d.agronomy_service||d.hr_service) ? `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
+              ${(d.agronomy_service||d.hr_service) ? `<div style="display:flex;gap:4px;margin-top:4px;margin-bottom:4px;flex-wrap:wrap">
                 ${d.agronomy_service?`<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#fef9c3;color:#854d0e">Agronomy: ${d.agronomy_service}</span>`:''}
                 ${d.hr_service?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#f0fdf4;color:#166534">HR Services</span>':''}
               </div>` : ''}
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+              ${isEngaged ? `
+                <div style="margin:6px 0;padding:5px 8px;border-radius:5px;background:${imDoc?'#f0fdf4':'#fff7ed'};border:1px solid ${imDoc?'#86efac':'#fed7aa'}" onclick="event.stopPropagation()">
+                  ${imDoc
+                    ? `<a href="${imDoc.file_url}" target="_blank" style="font-size:11px;font-weight:500;color:#166534;text-decoration:none">📄 View IM</a>`
+                    : '<p style="font-size:11px;color:#9a3412;font-weight:500;margin:0">⚠ No IM uploaded</p>'
+                  }
+                </div>
+                ${fin ? `<div style="padding:6px 8px;background:#f8fafc;border-radius:5px;border:1px solid var(--border-light);margin-bottom:4px">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px">
+                    ${fin.landT ? `<div><p style="font-size:9px;color:var(--hint);margin:0">Land</p><p style="font-size:11px;font-weight:600;margin:0">${fin.fmt(fin.landT)}</p></div>` : ''}
+                    ${fin.waterT ? `<div><p style="font-size:9px;color:var(--hint);margin:0">Water</p><p style="font-size:11px;font-weight:600;margin:0">${fin.fmt(fin.waterT)}</p></div>` : ''}
+                    ${fin.otherT ? `<div><p style="font-size:9px;color:var(--hint);margin:0">Other</p><p style="font-size:11px;font-weight:600;margin:0">${fin.fmt(fin.otherT)}</p></div>` : ''}
+                    <div><p style="font-size:9px;color:var(--hint);margin:0">CFM value</p><p style="font-size:12px;font-weight:700;color:var(--blue);margin:0">${fin.fmt(fin.totalAcq)}</p></div>
+                  </div>
+                  ${fin.devT ? `<div style="margin-top:3px;padding-top:3px;border-top:1px solid var(--border-light);display:flex;justify-content:space-between"><span style="font-size:9px;color:var(--hint)">Total invested</span><span style="font-size:11px;font-weight:700;color:var(--blue)">${fin.fmt(fin.totalInv)}</span></div>` : ''}
+                </div>` : '<p style="font-size:10px;color:var(--hint);font-style:italic;margin-bottom:4px">No financial assessment yet</p>'}
+              ` : ''}
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
                 ${d.cfm_management_status ? `<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:${(MGMT_COLOURS[d.cfm_management_status]||{}).bg||'#f3f4f6'};color:${(MGMT_COLOURS[d.cfm_management_status]||{}).color||'#374151'}">${d.cfm_management_status}</span>` : '<span></span>'}
                 <div style="position:relative;display:inline-block">
                   <button class="quick-status-btn btn btn-ghost" data-id="${d.id}" style="padding:2px 6px;font-size:14px;line-height:1;color:var(--hint)" title="Change status">⋯</button>
@@ -151,8 +177,8 @@ function _renderPipeline(content, container) {
                   </div>
                 </div>
               </div>
-            </div>
-          `).join('')}
+            </div>`;
+          }).join('')}
         </div>`;
       }).join('')}
     </div>
@@ -172,8 +198,8 @@ function _renderPipeline(content, container) {
           ${d.location?`<p style="font-size:10px;color:var(--hint);margin-bottom:2px">📍 ${d.location}</p>`:''}
           ${d.price_min?`<p style="font-size:11px;font-weight:500;color:var(--ink)">$${Number(d.price_min).toLocaleString()}${d.price_max?' – $'+Number(d.price_max).toLocaleString():''}</p>`:''}
           ${(d.agronomy_service||d.hr_service)?`<div style="display:flex;gap:3px;margin-top:4px;flex-wrap:wrap">
-            ${d.agronomy_service?`<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#fef9c3;color:#854d0e">Agronomy: ${d.agronomy_service}</span>`:''}
-            ${d.hr_service?'<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#f0fdf4;color:#166534">HR Services</span>':''}
+            ${d.agronomy_service?`<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#fef9c3;color:#854d0e">🌿 ${d.agronomy_service}</span>`:''}
+            ${d.hr_service?'<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#f0fdf4;color:#166534">👤 HR</span>':''}
           </div>`:''}
         </div>`).join('') : '<p style="font-size:11px;color:var(--hint)">None</p>'}
     </div>
@@ -297,6 +323,24 @@ function _renderList(content, container) {
 }
 
 // ── Deal detail view ──────────────────────────────────────────
+// Helper: get financial summary for a deal
+function _getFinSummary(dealId) {
+  const f = _financials.find(f => f.deal_id === dealId);
+  if (!f) return null;
+  const landT = (f.land_components||[]).reduce((s,c)=>s+(parseFloat(c.area)||0)*(parseFloat(c.rate)||0),0);
+  const waterT = (f.water_assets||[]).reduce((s,w)=>s+(parseFloat(w.ml)||0)*(parseFloat(w.rate)||0),0);
+  const otherT = (f.other_assets||[]).reduce((s,o)=>s+(parseFloat(o.value)||0),0);
+  const assetT = landT+waterT+otherT;
+  const stamp = assetT*(parseFloat(f.stamp_duty_rate)||0);
+  const totalAcq = assetT+stamp;
+  const devT = (f.development_land||[]).reduce((s,d)=>s+(parseFloat(d.area)||0)*(parseFloat(d.cost_per_ha)||0),0)
+             + (f.development_water||[]).reduce((s,d)=>s+(parseFloat(d.ml)||0)*(parseFloat(d.rate)||0),0)
+             + (f.development_other||[]).reduce((s,d)=>s+(parseFloat(d.value)||0),0);
+  const totalInv = totalAcq + devT;
+  const fmt = v => v>=1000000?'$'+(v/1000000).toFixed(1)+'m':v>=1000?'$'+(v/1000).toFixed(0)+'k':'$'+Math.round(v).toLocaleString();
+  return { landT, waterT, otherT, assetT, totalAcq, devT, totalInv, fmt };
+}
+
 const STAMP_DUTY_RATES = { NSW:0.055, VIC:0.055, QLD:0.0575, SA:0.055, WA:0.0515, TAS:0.045, NT:0.00, ACT:0.05 };
 
 async function _openDeal(deal, container) {
@@ -352,8 +396,8 @@ async function _openDeal(deal, container) {
           <span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:500;background:${sc.bg};color:${sc.color}">${deal.status||'Reviewing'}</span>
           <span style="padding:3px 10px;border-radius:10px;font-size:12px;background:${mc.bg||'#f3f4f6'};color:${mc.color||'#374151'}">${deal.cfm_management_status||'—'}</span>
           ${deal.price_min ? `<span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af">$${Number(deal.price_min).toLocaleString()}${deal.price_max?' – $'+Number(deal.price_max).toLocaleString():''}</span>` : ''}
-          ${deal.agronomy_service?`<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#fef9c3;color:#854d0e">Agronomy: ${deal.agronomy_service}</span>`:''}
-          ${deal.hr_service?'<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#f0fdf4;color:#166534">HR Services</span>':''}
+          ${deal.agronomy_service?`<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#fef9c3;color:#854d0e">🌿 ${deal.agronomy_service}</span>`:''}
+          ${deal.hr_service?'<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#f0fdf4;color:#166534">👤 HR</span>':''}
           ${(deal.assigned_users||[]).map(u=>`<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#ede9fe;color:#5b21b6;font-weight:500">${u}</span>`).join('')}
         </div>
 
