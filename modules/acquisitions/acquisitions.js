@@ -16,7 +16,7 @@ let _showArchived = false;
 let _searchTerm = '';
 let _activeDeal = null;
 
-const STATUSES = ['Reviewing', 'Interested', 'Engaged', 'Passed', 'Sold'];
+const STATUSES = ['Reviewing', 'Interested', 'Engaged', 'Sold'];
 const MGMT_STATUSES = ['Available', 'No Interest', 'Already Manage'];
 const DOC_TYPES = ['IM', 'Farm Model', 'Proposal', 'Report', 'Valuation', 'Other'];
 const ACTIVITY_TYPES = ['Note', 'Call', 'Inspection', 'Email', 'Proposal', 'Meeting'];
@@ -108,7 +108,7 @@ function _renderPipeline(content, container) {
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
       ${[
         ['Total deals', _deals.length, 'var(--ink)'],
-        ['Active', _deals.filter(d=>!['Passed','Sold'].includes(d.status)).length, 'var(--blue)'],
+        ['Active', _deals.filter(d=>d.status !== 'Sold').length, 'var(--blue)'],
         ['Engaged', _deals.filter(d=>d.status==='Engaged').length, '#065f46'],
         ['Available to manage', _deals.filter(d=>d.cfm_management_status==='Available').length, '#3B6D11'],
       ].map(([l,v,c]) => `<div class="card" style="padding:10px 14px">
@@ -202,7 +202,7 @@ function _renderSold(content, container) {
 
 // ── List view ─────────────────────────────────────────────────
 function _renderList(content, container) {
-  let deals = _deals.filter(d => !['Passed','Sold'].includes(d.status));
+  let deals = _deals.filter(d => d.status !== 'Sold');
   if (_filterStatus) deals = deals.filter(d => d.status === _filterStatus);
   if (_filterMgmt) deals = deals.filter(d => d.cfm_management_status === _filterMgmt);
   if (_searchTerm) deals = deals.filter(d =>
