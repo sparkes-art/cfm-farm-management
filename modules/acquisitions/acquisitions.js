@@ -121,8 +121,9 @@ function _renderPipeline(content, container) {
       </div>`).join('')}
     </div>
 
-    <!-- Pipeline columns -->
-    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;overflow-x:auto;min-width:900px">
+    <!-- Pipeline columns + Outside scope -->
+    <div style="display:flex;gap:10px;overflow-x:auto;min-width:900px;align-items:flex-start">
+    <div style="display:grid;grid-template-columns:repeat(${activeStatuses.length},minmax(190px,1fr));gap:10px;flex:1">
       ${activeStatuses.map(status => {
         const deals = _deals.filter(d => d.status === status && d.cfm_management_status !== 'CFM not interested');
         const sc = STATUS_COLOURS[status] || STATUS_COLOURS['New'];
@@ -154,6 +155,28 @@ function _renderPipeline(content, container) {
           `).join('')}
         </div>`;
       }).join('')}
+    </div>
+
+    <!-- Divider -->
+    <div style="width:1px;background:var(--border);align-self:stretch;flex-shrink:0"></div>
+
+    <!-- Outside scope column -->
+    <div style="background:#f9fafb;border-radius:8px;padding:10px;min-width:220px;max-width:240px;border:1px solid var(--border);flex-shrink:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:#f3f4f6;color:#6b7280">Outside scope</span>
+        <span style="font-size:11px;color:var(--hint)">${notInterestedDeals.length}</span>
+      </div>
+      ${notInterestedDeals.length ? notInterestedDeals.map(d => `
+        <div class="deal-card" data-id="${d.id}" style="background:white;border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;cursor:pointer">
+          <p style="font-size:12px;font-weight:600;margin-bottom:2px">${d.property_name}</p>
+          ${d.location?`<p style="font-size:10px;color:var(--hint);margin-bottom:2px">📍 ${d.location}</p>`:''}
+          ${d.price_min?`<p style="font-size:11px;font-weight:500;color:var(--ink)">$${Number(d.price_min).toLocaleString()}${d.price_max?' – $'+Number(d.price_max).toLocaleString():''}</p>`:''}
+          ${(d.agronomy_service||d.hr_service)?`<div style="display:flex;gap:3px;margin-top:4px;flex-wrap:wrap">
+            ${d.agronomy_service?`<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#fef9c3;color:#854d0e">🌿 ${d.agronomy_service}</span>`:''}
+            ${d.hr_service?'<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:#f0fdf4;color:#166534">👤 HR</span>':''}
+          </div>`:''}
+        </div>`).join('') : '<p style="font-size:11px;color:var(--hint)">None</p>'}
+    </div>
     </div>
 
     <!-- Sold toggle -->
