@@ -9,6 +9,7 @@ const ROLES = [
   { value: 'admin', label: 'Admin / Accounting', desc: 'Full access to all data and settings' },
   { value: 'operational', label: 'Operational', desc: 'Full data entry, no user management' },
   { value: 'investor', label: 'Investor / Board', desc: 'Read-only access' },
+  { value: 'lawd', label: 'LAWD', desc: 'Acquisitions pipeline only — can add and view LAWD deals' },
 ];
 
 export async function mountUsersSettings(container) {

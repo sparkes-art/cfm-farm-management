@@ -1,6 +1,6 @@
 // modules/acquisitions/acquisitions.js
 import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
-import { getSession, canWrite } from '../../js/app-state.js';
+import { getSession, canWrite, isLawd } from '../../js/app-state.js';
 import { toast, openModal, formatCurrency, formatDate, qs } from '../../js/ui.js';
 
 const SUPABASE_URL = 'https://nqvfuqvindsgnogejaei.supabase.co';
@@ -49,7 +49,7 @@ export async function mountAcquisitions(container) {
     <div class="page-header">
       <div>
         <h1>Deal Pipeline</h1>
-        <p class="page-subtitle" style="font-size:var(--text-base);font-weight:600;color:var(--ink-mid)">Acquisition opportunities</p>
+        <p class="page-subtitle" style="font-size:var(--text-base);font-weight:600;color:var(--ink-mid)">${isLawd() ? 'LAWD deal submissions' : 'Acquisition opportunities'}</p>
       </div>
       <div class="flex gap-2">
         <button class="btn btn-secondary" id="btn-new-deal">＋ Add deal</button>
@@ -88,8 +88,11 @@ export function unmountAcquisitions() {
 
 async function _loadData() {
   let _users = [];
+  const dealFilter = isLawd()
+    ? 'agency=ilike.%LAWD%&select=*&order=date_created.desc'
+    : 'select=*&order=date_created.desc';
   [_deals, _agents, _users, _financials, _dealDocs] = await Promise.all([
-    dbSelect('acquisition_deals', 'select=*&order=date_created.desc'),
+    dbSelect('acquisition_deals', dealFilter),
     dbSelect('acquisition_agents', 'select=*&order=name.asc').catch(() => []),
     dbSelect('user_profiles', 'select=id,full_name,role&is_active=eq.true&order=full_name.asc').catch(() => []),
     dbSelect('acquisition_financials', 'select=deal_id,land_components,water_assets,other_assets,development_land,development_water,development_other,stamp_duty_rate').catch(() => []),
@@ -969,7 +972,7 @@ function _dealModal(container, existing = null) {
             <label class="form-label">Date created</label>
             <input class="form-input" id="d-created" type="date" value="${existing?.date_created||new Date().toISOString().slice(0,10)}">
           </div>
-          <div class="form-group">
+          ${!isLawd() ? `<div class="form-group">
             <label class="form-label">Assigned to (CFM team)</label>
             <div id="d-assigned-list" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;border:1px solid var(--border);border-radius:6px;min-height:40px">
               ${_moduleUsers.map(u => {
@@ -1006,7 +1009,7 @@ function _dealModal(container, existing = null) {
                 👤 HR
               </label>
             </div>
-          </div>
+          </div>` : '<div id="d-assigned-list" style="display:none"></div>'}
           <!-- Agent section -->
           <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px">
             <p style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:10px">Agent details</p>
@@ -1129,6 +1132,11 @@ function _dealModal(container, existing = null) {
         im_url: imUrl,
         model_url: modelUrl,
       };
+      // LAWD users always submit to Reviewing with LAWD agency
+      if (isLawd()) {
+        row.agency = row.agency || 'LAWD';
+        row.status = 'Reviewing';
+      }
       if (!row.property_name) throw new Error('Property name is required');
       if (existing) {
         await dbUpdate('acquisition_deals', existing.id, row);

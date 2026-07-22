@@ -80,15 +80,38 @@ onSessionChange((session) => {
   if (session) {
     hide('#login-page');
     show('#app');
-    _populateFarmSelector(getFarms());
+    const isLawd = session.profile?.role === 'lawd';
+    if (isLawd) {
+      _applyLawdMode();
+      _navigateTo('acquisitions');
+    } else {
+      _populateFarmSelector(getFarms());
+      _updateUserDisplay(session);
+      _navigateTo('outputs');
+      setTimeout(async () => { await _populateSeasonSelector(); _updateXeroIndicator(); }, 500);
+    }
     _updateUserDisplay(session);
-    _navigateTo('outputs');
-    setTimeout(async () => { await _populateSeasonSelector(); _updateXeroIndicator(); }, 500);
   } else {
     show('#login-page');
     hide('#app');
   }
 });
+
+function _applyLawdMode() {
+  // Hide everything except acquisitions in sidebar
+  document.querySelectorAll('#sidebar a[data-module]').forEach(a => {
+    a.style.display = a.dataset.module === 'acquisitions' ? '' : 'none';
+  });
+  // Hide all nav section labels
+  document.querySelectorAll('#sidebar .nav-section-label').forEach(el => el.style.display = 'none');
+  // Hide farm/season selectors and topbar controls
+  const topbarSelects = document.querySelectorAll('#farm-select, #season-select, #btn-farm-settings, #xero-status-indicator');
+  topbarSelects.forEach(el => { if (el) el.style.display = 'none'; });
+  const farmWrap = document.querySelector('#farm-select')?.closest('.topbar-select-wrap');
+  const seasonWrap = document.querySelector('#season-select')?.closest('.topbar-select-wrap');
+  if (farmWrap) farmWrap.style.display = 'none';
+  if (seasonWrap) seasonWrap.style.display = 'none';
+}
 
 // ── Login form ────────────────────────────────────────────────
 qs('#btn-login')?.addEventListener('click', async () => {
@@ -271,8 +294,11 @@ async function _navigateTo(moduleKey) {
       return;
     }
 
-    // Wait for farm to be loaded before mounting (fixes startup blank screen)
-    await _waitForFarm();
+    // Skip farm wait for farm-independent modules
+    const FARM_INDEPENDENT = ['acquisitions', 'settings'];
+    if (!FARM_INDEPENDENT.includes(moduleKey)) {
+      await _waitForFarm();
+    }
 
     const moduleExports = await loader();
     _activeModuleInstance = moduleExports;

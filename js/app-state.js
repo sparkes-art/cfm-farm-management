@@ -31,7 +31,11 @@ export function getRole() {
 
 export function canWrite() {
   const role = getRole();
-  return role === 'operational' || role === 'admin';
+  return role === 'operational' || role === 'admin' || role === 'lawd';
+}
+
+export function isLawd() {
+  return getRole() === 'lawd';
 }
 
 // ── Subscribe to state slices ────────────────────────────────────────────────
