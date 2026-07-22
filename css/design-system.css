@@ -540,8 +540,8 @@ body {
   backdrop-filter: blur(2px);
 }
 .modal-wide {
-  width: min(92vw, 1100px) !important;
-  max-width: 1100px !important;
+  width: min(95vw, 1300px) !important;
+  max-width: 1300px !important;
 }
 
 .modal {
