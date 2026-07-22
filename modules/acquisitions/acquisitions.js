@@ -133,6 +133,10 @@ function _renderPipeline(content, container) {
               ${d.location ? `<p style="font-size:10px;color:var(--hint);margin-bottom:4px">📍 ${d.location}</p>` : ''}
               ${d.price_min ? `<p style="font-size:11px;font-weight:500;color:var(--blue);margin-bottom:4px">$${Number(d.price_min).toLocaleString()}${d.price_max ? ' – $'+Number(d.price_max).toLocaleString() : '+'}</p>` : ''}
               ${(d.assigned_users||[]).length ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px">${(d.assigned_users||[]).map(u=>'<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:#ede9fe;color:#5b21b6">'+u+'</span>').join('')}</div>` : ''}
+              ${d.agronomy_service||d.hr_service ? `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
+                ${d.agronomy_service?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#fef9c3;color:#854d0e">🌿 Agronomy</span>':''}
+                ${d.hr_service?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#f0fdf4;color:#166534">👤 HR</span>':''}
+              </div>` : ''}
               <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
                 ${d.cfm_management_status ? `<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:${(MGMT_COLOURS[d.cfm_management_status]||{}).bg||'#f3f4f6'};color:${(MGMT_COLOURS[d.cfm_management_status]||{}).color||'#374151'}">${d.cfm_management_status}</span>` : '<span></span>'}
                 <div style="position:relative;display:inline-block">
@@ -181,6 +185,10 @@ function _renderSold(content, container) {
             <div class="deal-card card" data-id="${d.id}" style="padding:12px;margin-bottom:8px;cursor:pointer">
               <p style="font-size:13px;font-weight:600;margin-bottom:4px">${d.property_name}</p>
               ${d.location ? `<p style="font-size:11px;color:var(--hint);margin-bottom:3px">📍 ${d.location}${d.region?' · '+d.region:''}</p>` : ''}
+              ${d.agronomy_service||d.hr_service ? `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">
+                ${d.agronomy_service?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#fef9c3;color:#854d0e">🌿 Agronomy</span>':''}
+                ${d.hr_service?'<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:#f0fdf4;color:#166534">👤 HR</span>':''}
+              </div>` : ''}
               <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
                 <span style="font-size:12px;font-weight:500;color:var(--blue)">${d.price_min?'$'+Number(d.price_min).toLocaleString()+(d.price_max?' – $'+Number(d.price_max).toLocaleString():''):'—'}</span>
                 <span style="font-size:11px;color:var(--hint)">${d.lead_agent||''} ${d.agency?'· '+d.agency:''}</span>
@@ -337,6 +345,8 @@ async function _openDeal(deal, container) {
           <span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:500;background:${sc.bg};color:${sc.color}">${deal.status||'Reviewing'}</span>
           <span style="padding:3px 10px;border-radius:10px;font-size:12px;background:${mc.bg||'#f3f4f6'};color:${mc.color||'#374151'}">${deal.cfm_management_status||'—'}</span>
           ${deal.price_min ? `<span style="padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af">$${Number(deal.price_min).toLocaleString()}${deal.price_max?' – $'+Number(deal.price_max).toLocaleString():''}</span>` : ''}
+          ${deal.agronomy_service?'<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#fef9c3;color:#854d0e">🌿 Agronomy opportunity</span>':''}
+          ${deal.hr_service?'<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#f0fdf4;color:#166534">👤 HR opportunity</span>':''}
           ${(deal.assigned_users||[]).map(u=>`<span style="font-size:11px;padding:2px 10px;border-radius:10px;background:#ede9fe;color:#5b21b6;font-weight:500">${u}</span>`).join('')}
         </div>
 
@@ -992,6 +1002,8 @@ function _dealModal(container, existing = null) {
       const row = {
         property_name: qs('#d-name', modal)?.value?.trim(),
         assigned_users: assignedUsers,
+        agronomy_service: qs('#d-agronomy', modal)?.checked || false,
+        hr_service: qs('#d-hr', modal)?.checked || false,
         last_modified_by: session?.profile?.full_name || session?.user?.email || null,
         last_modified_at: new Date().toISOString(),
         location: qs('#d-location', modal)?.value?.trim()||null,
