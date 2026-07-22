@@ -452,7 +452,7 @@ async function _openDeal(deal, container) {
                 </div>
                 <p style="font-size:12px">${a.summary||''}</p>
               </div>`).join('')}
-            </div>` : `<p style="font-size:12px;color:var(--hint)">No activity yet.</p>`}
+            </div>` : `<div id="activity-list"><p style="font-size:12px;color:var(--hint)">No activity yet.</p></div>`}
           </div>
           <div>
             <p style="font-size:13px;font-weight:600;margin-bottom:10px">Viewed by (${views.length})</p>
