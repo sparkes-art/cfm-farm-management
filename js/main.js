@@ -13,15 +13,15 @@ const MODULE_LOADERS = {
     return { mount: m.mountOutputs, unmount: m.unmountOutputs };
   },
   inputs: async () => {
-    const m = await import('../modules/inputs/inputs.js');
+    const m = await import('../modules/inputs/inputs.js?v=1784683108967');
     return { mount: m.mountInputs, unmount: m.unmountInputs };
   },
   water: async () => {
-    const m = await import('../modules/water/water.js');
+    const m = await import('../modules/water/water.js?v=1784683108967');
     return { mount: m.mountWater, unmount: m.unmountWater };
   },
   'meter-readings': async () => {
-    const m = await import('../modules/meter-readings/meter-readings.js');
+    const m = await import('../modules/meter-readings/meter-readings.js?v=1784683108967');
     return { mount: m.mountMeterReadings, unmount: m.unmountMeterReadings };
   },
   'gross-margin': async () => {
@@ -29,7 +29,7 @@ const MODULE_LOADERS = {
     return { mount: m.mountGrossMargin };
   },
   'farm-map': async () => {
-    const m = await import('../modules/paddocks/paddocks.js');
+    const m = await import('../modules/paddocks/paddocks.js?v=1784683108967');
     return {
       mount: (container) => m.mountFarmMap(container),
       unmount: () => m.unmountPaddocks()
@@ -43,7 +43,7 @@ const MODULE_LOADERS = {
   }),
 
   recommendations: async () => {
-    const m = await import('../modules/agronomy/recommendations.js');
+    const m = await import('../modules/agronomy/recommendations.js?v=1784683108967');
     return { mount: m.mountRecommendations, unmount: m.unmountRecommendations };
   },
   agronomy: async () => {
@@ -59,11 +59,11 @@ const MODULE_LOADERS = {
     return { mount: m.mountBudget, unmount: m.unmountBudget };
   },
   acquisitions: async () => {
-    const m = await import('../modules/acquisitions/acquisitions.js');
+    const m = await import('../modules/acquisitions/acquisitions.js?v=1784683108967');
     return { mount: m.mountAcquisitions, unmount: m.unmountAcquisitions };
   },
   paddocks: async () => {
-    const m = await import('../modules/paddocks/paddocks.js');
+    const m = await import('../modules/paddocks/paddocks.js?v=1784683108967');
     return { mount: m.mountPaddocks, unmount: m.unmountPaddocks };
   },
   settings: async () => {
