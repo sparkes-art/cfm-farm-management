@@ -442,26 +442,32 @@ async function _openDeal(deal, container) {
       <div id="dtab-activity" style="display:none">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
           <div>
-            <p style="font-size:13px;font-weight:600;margin-bottom:4px">Activity log</p>
-            <p style="font-size:11px;color:var(--hint);margin-bottom:10px">Auto-generated on each save</p>
-            ${activities.length ? `<div style="display:flex;flex-direction:column;gap:6px;max-height:400px;overflow-y:auto">
-              ${activities.map(a=>`<div style="padding:8px 10px;background:var(--page-bg);border-radius:6px;border-left:3px solid var(--blue)">
+            <!-- Add comment -->
+            <div style="margin-bottom:14px;padding:12px;background:var(--page-bg);border-radius:8px;border:1px solid var(--border-light)">
+              <p style="font-size:12px;font-weight:600;margin-bottom:8px">Add comment</p>
+              <textarea id="new-comment-text" class="form-textarea" rows="3" placeholder="Add a comment or update about this property…" style="margin-bottom:8px;font-size:13px"></textarea>
+              <button id="btn-add-comment" class="btn btn-primary btn-sm">Post comment</button>
+            </div>
+            <p style="font-size:13px;font-weight:600;margin-bottom:4px">Activity &amp; comments</p>
+            <p style="font-size:11px;color:var(--hint);margin-bottom:8px">Comments shown in amber · saves auto-logged in blue</p>
+            <div id="activity-list" style="display:flex;flex-direction:column;gap:6px;max-height:350px;overflow-y:auto">
+              ${activities.length ? activities.map(a=>`<div style="padding:8px 10px;background:var(--page-bg);border-radius:6px;border-left:3px solid ${a.activity_type==='Comment'?'#f59e0b':'var(--blue)'}">
                 <div style="display:flex;justify-content:space-between;margin-bottom:2px">
-                  <span style="font-size:11px;font-weight:600;color:var(--blue)">${a.activity_type}</span>
+                  <span style="font-size:11px;font-weight:600;color:${a.activity_type==='Comment'?'#b45309':'var(--blue)'}">${a.activity_type}</span>
                   <span style="font-size:10px;color:var(--hint)">${a.activity_date?formatDate(a.activity_date):''} · ${a.created_by||''}</span>
                 </div>
-                <p style="font-size:12px">${a.summary||''}</p>
-              </div>`).join('')}
-            </div>` : `<div id="activity-list"><p style="font-size:12px;color:var(--hint)">No activity yet.</p></div>`}
+                <p style="font-size:13px">${a.summary||''}</p>
+              </div>`).join('') : '<p style="font-size:12px;color:var(--hint)">No activity yet.</p>'}
+            </div>
           </div>
           <div>
-            <p style="font-size:13px;font-weight:600;margin-bottom:10px">Viewed by (${views.length})</p>
-            ${views.length ? `<div style="display:flex;flex-direction:column;gap:3px;max-height:400px;overflow-y:auto">
-              ${views.map(v=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:0.5px solid var(--border-light)">
-                <span style="font-weight:500">${v.user_name||v.user_email||'Unknown'}</span>
-                <span style="color:var(--hint)">${v.viewed_at?new Date(v.viewed_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</span>
-              </div>`).join('')}
-            </div>` : `<p style="font-size:11px;color:var(--hint)">No views recorded.</p>`}
+            ${(() => {
+              const unique = [...new Map(views.map(v=>[v.user_name||v.user_email, v])).values()];
+              return '<p style="font-size:13px;font-weight:600;margin-bottom:10px">Viewed by (' + unique.length + ' people)</p>' +
+                (unique.length ? '<div style="display:flex;flex-direction:column;gap:4px;max-height:400px;overflow-y:auto">' +
+                  unique.map(v=>'<div style="display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:0.5px solid var(--border-light)"><span style="font-weight:500">' + (v.user_name||v.user_email||'Unknown') + '</span><span style="color:var(--hint)">' + (v.viewed_at?new Date(v.viewed_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'') + '</span></div>').join('') +
+                '</div>' : '<p style="font-size:11px;color:var(--hint)">No views recorded.</p>');
+            })()}
           </div>
         </div>
       </div>
@@ -488,6 +494,38 @@ async function _openDeal(deal, container) {
 
     // Overview buttons
     document.getElementById('btn-add-doc')?.addEventListener('click', () => _docModal(deal));
+
+    // Comment button
+    document.getElementById('btn-add-comment')?.addEventListener('click', async () => {
+      const textEl = document.getElementById('new-comment-text');
+      const text = textEl?.value?.trim();
+      if (!text) return;
+      const session = getSession();
+      const btn = document.getElementById('btn-add-comment');
+      btn.disabled = true; btn.textContent = 'Posting…';
+      try {
+        await dbInsert('acquisition_activities', {
+          deal_id: deal.id,
+          activity_type: 'Comment',
+          summary: text,
+          activity_date: new Date().toISOString().slice(0,10),
+          created_by: session?.profile?.full_name || session?.user?.email || 'Unknown',
+        });
+        if (textEl) textEl.value = '';
+        // Refresh list in place
+        const updated = await dbSelect('acquisition_activities', 'deal_id=eq.' + deal.id + '&select=*&order=activity_date.desc,created_at.desc');
+        const list = document.getElementById('activity-list');
+        if (list) list.innerHTML = updated.map(a=>`<div style="padding:8px 10px;background:var(--page-bg);border-radius:6px;border-left:3px solid ${a.activity_type==='Comment'?'#f59e0b':'var(--blue)'}">
+          <div style="display:flex;justify-content:space-between;margin-bottom:2px">
+            <span style="font-size:11px;font-weight:600;color:${a.activity_type==='Comment'?'#b45309':'var(--blue)'}">${a.activity_type}</span>
+            <span style="font-size:10px;color:var(--hint)">${a.activity_date?formatDate(a.activity_date):''} · ${a.created_by||''}</span>
+          </div>
+          <p style="font-size:13px">${a.summary||''}</p>
+        </div>`).join('');
+        toast('Comment added', 'success');
+      } catch(err) { toast('Failed: ' + err.message, 'error'); }
+      btn.disabled = false; btn.textContent = 'Post comment';
+    });
 
     // Wire financials if already on that tab
     if (document.getElementById('dtab-financials')?.style.display !== 'none') {
