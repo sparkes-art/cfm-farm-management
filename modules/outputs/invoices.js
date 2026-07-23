@@ -117,6 +117,10 @@ function _renderTable(container) {
   }
 
   const totalNet = rows.reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
+  const totalGross = rows.reduce((s, i) => s + (parseFloat(i.gross_amount)||0), 0);
+  const totalQA = rows.reduce((s, i) => s + (parseFloat(i.total_quality_adj)||0), 0);
+  const totalIncome = totalGross + totalQA;
+  const totalDeductions = rows.reduce((s, i) => s + (parseFloat(i.total_deductions)||0), 0);
   const totalPending = rows.filter(i => i.status === 'pending').reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
   const totalComplete = rows.filter(i => i.status === 'complete').reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
 
@@ -144,7 +148,10 @@ function _renderTable(container) {
           <th>Buyer</th>
           <th>Commodities</th>
           <th class="num">Gross</th>
-          <th class="num">Net amount</th>
+          <th class="num">Quality adj</th>
+          <th class="num">Total income</th>
+          <th class="num">Selling costs</th>
+          <th class="num">Net</th>
           <th>Xero ref</th>
           <th>Status</th>
           ${canWrite() ? '<th></th>' : ''}
@@ -165,6 +172,9 @@ function _renderTable(container) {
               <td><strong>${inv.buyer || '—'}</strong></td>
               <td class="muted text-sm">${commodities}</td>
               <td class="num">${formatCurrency(inv.gross_amount, 0)}</td>
+              <td class="num" style="color:${(inv.total_quality_adj||0)>0?'var(--green)':(inv.total_quality_adj||0)<0?'var(--red)':'inherit'}">${inv.total_quality_adj ? ((inv.total_quality_adj>0?'+':'')+formatCurrency(inv.total_quality_adj,0)) : '—'}</td>
+              <td class="num">${formatCurrency((parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0), 0)}</td>
+              <td class="num" style="color:var(--red)">${inv.total_deductions ? '-'+formatCurrency(inv.total_deductions,0) : '—'}</td>
               <td class="num"><strong>${formatCurrency(inv.net_amount, 0)}</strong></td>
               <td class="muted text-sm">
                 ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" 
