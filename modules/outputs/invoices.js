@@ -26,6 +26,11 @@ export async function mountInvoices(container) {
           <option value="pending">Pending</option>
           <option value="complete">Complete</option>
         </select>
+        <select id="inv-filter-contract" class="form-select" style="width:180px">
+          <option value="">All contracts</option>
+          <option value="cash">Cash sales only</option>
+          ${_contracts.map(c => `<option value="${c.id}">${c.contract_number || 'Contract'} — ${c.commodity || ''}</option>`).join('')}
+        </select>
       </div>
       ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New invoice</button>' : ''}
     </div>
@@ -40,7 +45,7 @@ export async function mountInvoices(container) {
   _subscribeRealtime();
 
   qs('#btn-new-invoice', container)?.addEventListener('click', () => openInvoiceForm(container));
-  ['#inv-filter-season', '#inv-filter-status'].forEach(sel => {
+  ['#inv-filter-season', '#inv-filter-status', '#inv-filter-contract'].forEach(sel => {
     qs(sel, container)?.addEventListener('change', () => _renderTable(container));
   });
 }
@@ -76,12 +81,17 @@ async function _loadData() {
 function _filtered() {
   const season = qs('#inv-filter-season')?.value || '';
   const status = qs('#inv-filter-status')?.value || '';
+  const contract = qs('#inv-filter-contract')?.value || '';
   return _invoices.filter(i => {
     const statusMatch = !status || i.status === status;
-    if (!season) return statusMatch;
-    // Check invoice season or any line item season
+    const contractMatch = !contract
+      ? true
+      : contract === 'cash'
+        ? !i.forward_contract_id
+        : i.forward_contract_id === contract;
+    if (!season) return statusMatch && contractMatch;
     const seasonMatch = i.season === season || (i.line_items || []).some(l => l.season === season);
-    return seasonMatch && statusMatch;
+    return seasonMatch && statusMatch && contractMatch;
   });
 }
 
