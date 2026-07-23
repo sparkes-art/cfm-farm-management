@@ -196,23 +196,32 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
 
   // Unpriced = forecast - total contracted (not just unpaid contracts)
   const unit = com.contracts[0]?.unit || com.budgets[0]?.unit || 't';
-  const unpricedQty = Math.max(0, denominator - contractedQty);
+  const totalContractedQty = contracts.reduce((s, c) => s + (parseFloat(c.quantity)||0), 0);
+  const unpricedQty = Math.max(0, denominator - totalContractedQty);
 
   // Indicative price = market price × (1 + contingency%)
   const contingencyMultiplier = 1 + (contingencyPct / 100);
   const unpricedPrice = marketPrice ? marketPrice * contingencyMultiplier : null;
   const unpricedGross = (unpricedPrice != null && unpricedQty > 0) ? unpricedPrice * unpricedQty : null;
 
-  // Contract rows
+  // Contract rows — calculate per-contract invoiced qty
   const contractRows = contracts.map(c => {
-    const qty = parseFloat(c.quantity) || 0;
+    const contractedQtyTotal = parseFloat(c.quantity) || 0;
     const price = parseFloat(c.price_per_unit) || 0;
-    const gross = qty * price;
+    // Find invoices against this specific contract
+    const invoicedAgainstContract = paidLines
+      .filter(l => l.invoice?.forward_contract_id === c.id)
+      .reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
+    const remainingQty = Math.max(0, contractedQtyTotal - invoicedAgainstContract);
+    const gross = remainingQty * price;
     const pct = denominator ? (gross / (denominator * (unpricedPrice || price))) * 100 : 0;
-    return { c, qty, price, gross, pct };
+    return { c, qty: remainingQty, contractedQty: contractedQtyTotal, invoicedQty: invoicedAgainstContract, price, gross, pct };
   });
 
-  const contractedGross = contractedQty * (contractedQty ? contracts.reduce((s, c) => s + (parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0), 0) / contractedQty : 0);
+  // Contracted balance = sum of remaining (unpaid) qty per contract
+  const contractedRemainingQty = contractRows.reduce((s, r) => s + r.qty, 0);
+  const contractedGross = contractRows.reduce((s, r) => s + r.gross, 0);
+  const contractedAvgPriceCalc = contractedRemainingQty ? contractedGross / contractedRemainingQty : 0;
   const contractedAvgPrice = contractedQty ? contractedGross / contractedQty : 0;
 
   // Totals
@@ -308,7 +317,7 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
             ` : contractRows.map((row, i) => `
               <tr>
                 <td style="${tdStyle()}">${String(i+1).padStart(2,'0')} · ${row.c.counterparty || row.c.buyer || 'Contract'}</td>
-                <td style="${tdStyle()}">${row.c.contract_number || ''} — ${fmtN(row.qty, 0)} ${unit} unpaid</td>
+                <td style="${tdStyle()}">${row.c.contract_number || ''} — ${fmtN(row.contractedQty, 0)} ${unit} total${row.invoicedQty > 0 ? ' · ' + fmtN(row.invoicedQty, 0) + ' invoiced' : ''}</td>
                 <td style="${tdStyle('r')}">${fmtN(row.qty, 0)} ${unit}</td>
                 <td style="${tdStyle('r')}">${fmtC(row.price, 2)}</td>
                 <td style="${tdStyle('r')}">${fmtC(row.gross, 0)}</td>
@@ -321,8 +330,8 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
               <tr style="background:var(--blue-light)">
                 <td style="${tdStyle()}"></td>
                 <td style="${tdStyle()}"><strong>Contracted balance subtotal</strong></td>
-                <td style="${tdStyle('r')}"><strong>${fmtN(contractedQty, 2)} ${unit}</strong></td>
-                <td style="${tdStyle('r')}"><strong>${fmtC(contractedAvgPrice, 2)}</strong></td>
+                <td style="${tdStyle('r')}"><strong>${fmtN(contractedRemainingQty, 2)} ${unit}</strong></td>
+                <td style="${tdStyle('r')}"><strong>${fmtC(contractedAvgPriceCalc, 2)}</strong></td>
                 <td style="${tdStyle('r')}"><strong>${fmtC(contractedGross, 0)}</strong></td>
                 <td style="${tdStyle('r')}">est.</td>
                 <td style="${tdStyle('r')}"><strong>${fmtC(contractedGross, 0)}</strong></td>
