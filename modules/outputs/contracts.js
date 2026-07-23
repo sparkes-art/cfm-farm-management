@@ -177,7 +177,8 @@ function _renderTable() {
           <th class="num">Price / unit</th>
           <th class="num">Total value</th>
           <th class="num">Units invoiced</th>
-          <th class="num">Avg price (after QA)</th>
+          <th class="num">Total paid (incl. QA)</th>
+          <!-- Avg price after QA hidden -->
           <th>Delivery</th>
           <th>PDF</th>
           ${canWrite() ? '<th></th>' : ''}
@@ -210,10 +211,11 @@ function _renderTable() {
               <td class="muted">${c.grade_spec || '—'}</td>
               <td class="muted">${formatDate(c.sale_date)}</td>
               <td class="num">${c.quantity ? `${parseFloat(c.quantity).toLocaleString('en-AU')} ${c.unit || ''}` : '—'}</td>
-              <td class="num">${c.price_per_unit ? formatCurrency(c.price_per_unit, 4) : '—'}</td>
+              <td class="num">${c.price_per_unit ? formatCurrency(c.price_per_unit, 0) : '—'}</td>
               <td class="num"><strong>${value ? formatCurrency(value, 0) : '—'}</strong></td>
               <td class="num">${invoicedQty ? formatNumber(invoicedQty, 0) + ' ' + (c.unit||'') : '—'}</td>
-              <td class="num">${avgInvoicedPrice ? formatCurrency(avgInvoicedPrice, 2) : '—'}</td>
+              <td class="num"><strong>${invoicedValue ? formatCurrency(invoicedValue, 0) : '—'}</strong></td>
+              <!-- avg price hidden -->
               <td class="muted" style="font-size:var(--text-xs)">${delivery}</td>
               <td style="font-size:var(--text-xs)">
                 ${c.pdf_url
