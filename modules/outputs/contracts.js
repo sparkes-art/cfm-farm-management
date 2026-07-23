@@ -171,7 +171,7 @@ function _renderTable() {
           <th>Crop year</th>
           <th>Commodity</th>
           <th>Buyer</th>
-          <th>Grade / Spec</th>
+          <!-- Grade/Spec hidden -->
           <th>Sale date</th>
           <th class="num">Units sold</th>
           <th class="num">Price / unit</th>
@@ -208,7 +208,7 @@ function _renderTable() {
               <td class="muted">${c.crop_year || '—'}</td>
               <td><span class="badge badge-${c.commodity}">${_cap(c.commodity || 'other')}</span></td>
               <td>${c.counterparty || '—'}</td>
-              <td class="muted">${c.grade_spec || '—'}</td>
+              <!-- grade_spec hidden -->
               <td class="muted">${formatDate(c.sale_date)}</td>
               <td class="num">${c.quantity ? `${parseFloat(c.quantity).toLocaleString('en-AU')} ${c.unit || ''}` : '—'}</td>
               <td class="num">${c.price_per_unit ? formatCurrency(c.price_per_unit, 0) : '—'}</td>
