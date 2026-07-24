@@ -152,6 +152,7 @@ function _renderTable(container) {
           <th class="num">Total income</th>
           <th class="num">Selling costs</th>
           <th class="num">Net</th>
+          <th>Documents</th>
           <th>Xero ref</th>
           <th>Status</th>
           ${canWrite() ? '<th></th>' : ''}
