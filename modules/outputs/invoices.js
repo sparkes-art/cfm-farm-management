@@ -520,12 +520,42 @@ export function openInvoiceForm(container, existing = null) {
 
       <!-- Attachments -->
       <div style="margin-bottom:16px">
-        <p style="font-size:var(--text-sm);font-weight:600;margin-bottom:8px">Attachments</p>
-        <div id="f-drop-zone" style="border:1.5px dashed var(--border);border-radius:var(--radius-md);padding:18px;text-align:center;cursor:pointer;background:var(--page-bg)">
-          <p style="color:var(--muted);font-size:var(--text-sm)">Drop dockets, remittances or PDFs here, or click to browse</p>
+        <p style="font-size:var(--text-sm);font-weight:600;margin-bottom:10px">Attachments</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+
+          <!-- Merchant RCTI -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:10px">
+            <p style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📄 Merchant RCTI</p>
+            ${existing?.rcti_url ? `<div style="margin-bottom:6px;padding:5px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;display:flex;justify-content:space-between;align-items:center"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${existing.rcti_filename||'RCTI'}</span><a href="${existing.rcti_url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a></div>` : ''}
+            <div id="f-rcti-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:10px;text-align:center;cursor:pointer;background:var(--page-bg)">
+              <p style="color:var(--muted);font-size:11px">Drop or click</p>
+            </div>
+            <input type="file" id="f-rcti-input" accept=".pdf,image/*" style="display:none">
+            <div id="f-rcti-file" style="margin-top:6px"></div>
+          </div>
+
+          <!-- Ginning Advice / Invoice -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:10px">
+            <p style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">🧾 Ginning Advice / Invoice</p>
+            ${existing?.gin_url ? `<div style="margin-bottom:6px;padding:5px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;display:flex;justify-content:space-between;align-items:center"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${existing.gin_filename||'Gin Advice'}</span><a href="${existing.gin_url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a></div>` : ''}
+            <div id="f-gin-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:10px;text-align:center;cursor:pointer;background:var(--page-bg)">
+              <p style="color:var(--muted);font-size:11px">Drop or click</p>
+            </div>
+            <input type="file" id="f-gin-input" accept=".pdf,image/*" style="display:none">
+            <div id="f-gin-file" style="margin-top:6px"></div>
+          </div>
+
+          <!-- Other -->
+          <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:10px">
+            <p style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📎 Other documents</p>
+            <div id="f-drop-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:10px;text-align:center;cursor:pointer;background:var(--page-bg)">
+              <p style="color:var(--muted);font-size:11px">Drop or click</p>
+            </div>
+            <input type="file" id="f-file-input" multiple accept=".pdf,image/*" style="display:none">
+            <div id="f-file-list" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px"></div>
+          </div>
+
         </div>
-        <input type="file" id="f-file-input" multiple accept=".pdf,image/*" style="display:none">
-        <div id="f-file-list" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px"></div>
       </div>
 
       <!-- Notes -->
@@ -829,14 +859,37 @@ export function openInvoiceForm(container, existing = null) {
     // Price comparison removed from form — no longer needed
   }
 
-  // File attachment
-  const dropZone = modal.querySelector('#f-drop-zone');
-  const fileInput = modal.querySelector('#f-file-input');
-  dropZone.addEventListener('click', () => fileInput.click());
-  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = 'var(--blue)'; });
-  dropZone.addEventListener('dragleave', () => dropZone.style.borderColor = '');
-  dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.style.borderColor = ''; addFiles(e.dataTransfer.files); });
-  fileInput.addEventListener('change', () => addFiles(fileInput.files));
+  // File attachments — RCTI, Gin Advice, Other
+  let rctiFile = null, ginFile = null;
+
+  function wireDropZone(zoneId, inputId, onFile, multi=false) {
+    const zone = modal.querySelector('#'+zoneId);
+    const inp = modal.querySelector('#'+inputId);
+    if (!zone || !inp) return;
+    zone.addEventListener('click', () => inp.click());
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.style.borderColor='var(--blue)'; });
+    zone.addEventListener('dragleave', () => zone.style.borderColor='');
+    zone.addEventListener('drop', e => { e.preventDefault(); zone.style.borderColor=''; onFile(e.dataTransfer.files); });
+    inp.addEventListener('change', () => onFile(inp.files));
+  }
+
+  function showSingleFile(containerId, file) {
+    const el = modal.querySelector('#'+containerId);
+    if (!el) return;
+    el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px;background:var(--blue-light);border:1px solid var(--blue);border-radius:20px;padding:3px 10px;font-size:11px;color:var(--blue-text)">📎 ${file.name} <span style="cursor:pointer;font-size:13px" onclick="this.closest('span').remove()">×</span></span>`;
+  }
+
+  wireDropZone('f-rcti-zone', 'f-rcti-input', files => {
+    rctiFile = files[0];
+    if (rctiFile) showSingleFile('f-rcti-file', rctiFile);
+  });
+
+  wireDropZone('f-gin-zone', 'f-gin-input', files => {
+    ginFile = files[0];
+    if (ginFile) showSingleFile('f-gin-file', ginFile);
+  });
+
+  wireDropZone('f-drop-zone', 'f-file-input', files => addFiles(files), true);
 
   function addFiles(fileList) {
     [...fileList].forEach(f => {
@@ -894,8 +947,12 @@ export function openInvoiceForm(container, existing = null) {
         const rate = parseFloat(tr.querySelector('.f-ded-rate')?.value)||0;
         const grossPlusQA = lineRows.reduce((s,l) => s + (l.total||0), 0);
         const value = parseFloat(tr.querySelector('.f-ded-value')?.value)||0;
-        return { description: tr.querySelector('.f-ded-desc')?.value || '', type, rate, value };
-      }).filter(d => d.rate > 0);
+        const docket = tr.querySelector('.f-ded-docket')?.value || '';
+        const qty = parseFloat(tr.querySelector('.f-ded-qty')?.value)||0;
+        const unit = tr.querySelector('.f-ded-unit')?.value || '';
+        const season = tr.querySelector('.f-ded-season')?.value || '';
+        return { description: tr.querySelector('.f-ded-desc')?.value || '', docket, season, qty, unit, type, rate, value };
+      }).filter(d => d.value > 0);
 
       const gross = lineRows.reduce((s,l) => s + ((l.total||0) - (saleType==='contract' ? (l.quality_adj||0) : 0)), 0);
       const totalQA = saleType==='contract' ? lineRows.reduce((s,l) => s + (l.quality_adj||0), 0) : 0;
@@ -909,8 +966,28 @@ export function openInvoiceForm(container, existing = null) {
       const contractSel = modal.querySelector('#f-contract');
       const contractId = contractSel?.value || null;
 
+      // Upload RCTI and Gin files
+      const session = getSession();
+      const uploadFile2 = async (file, prefix) => {
+        const path = `invoices/${farm.id}/${Date.now()}_${prefix}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+        const res = await fetch(`https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/cfm-documents/${path}`, {
+          method: 'POST',
+          headers: { 'apikey': window.__CFM_ANON_KEY, 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': file.type, 'x-upsert': 'true' },
+          body: file,
+        });
+        if (!res.ok) throw new Error('Upload failed');
+        return { url: `https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/public/cfm-documents/${path}`, filename: file.name };
+      };
+
+      let rctiUrl = existing?.rcti_url || null, rctiFilename = existing?.rcti_filename || null;
+      let ginUrl = existing?.gin_url || null, ginFilename = existing?.gin_filename || null;
+      if (rctiFile) { const r = await uploadFile2(rctiFile, 'rcti'); rctiUrl = r.url; rctiFilename = r.filename; }
+      if (ginFile) { const r = await uploadFile2(ginFile, 'gin'); ginUrl = r.url; ginFilename = r.filename; }
+
       const row = {
         farm_id: farm.id,
+        rcti_url: rctiUrl, rcti_filename: rctiFilename,
+        gin_url: ginUrl, gin_filename: ginFilename,
         invoice_date: modal.querySelector('#f-date')?.value,
         season: null, // Season is at line item level
         buyer: modal.querySelector('#f-buyer')?.value?.trim() || '',
