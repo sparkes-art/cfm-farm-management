@@ -177,6 +177,11 @@ function _renderTable(container) {
               <td class="num">${formatCurrency((parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0), 0)}</td>
               <td class="num" style="color:var(--red)">${inv.total_deductions ? '-'+formatCurrency(inv.total_deductions,0) : '—'}</td>
               <td class="num"><strong>${formatCurrency(inv.net_amount, 0)}</strong></td>
+              <td style="white-space:nowrap;font-size:12px">
+                ${inv.rcti_url ? `<a href="${inv.rcti_url}" target="_blank" style="color:var(--blue);text-decoration:none;margin-right:6px" onclick="event.stopPropagation()" title="Merchant RCTI">📄 RCTI</a>` : ''}
+                ${inv.gin_url ? `<a href="${inv.gin_url}" target="_blank" style="color:var(--blue);text-decoration:none" onclick="event.stopPropagation()" title="Ginning Advice">🧾 Gin</a>` : ''}
+                ${!inv.rcti_url && !inv.gin_url ? '<span style="color:var(--hint)">—</span>' : ''}
+              </td>
               <td class="muted text-sm">
                 ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" 
                   value="${inv.xero_invoice_number || ''}" 
