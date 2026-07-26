@@ -443,13 +443,7 @@ export function openInvoiceForm(container, existing = null) {
         </div>
       </div>
 
-      <!-- Contract selector — immediately after sale type -->
-      <!-- Buyer field always visible -->
-      <div class="form-group" style="margin-bottom:12px">
-        <label class="form-label">Buyer</label>
-        <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer || ''}" placeholder="Buyer name">
-      </div>
-
+      <!-- Contract selector first, then buyer -->
       <div id="f-contract-section" style="margin-bottom:16px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Forward contract</label>
