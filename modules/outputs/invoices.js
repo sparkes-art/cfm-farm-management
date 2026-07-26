@@ -460,6 +460,12 @@ export function openInvoiceForm(container, existing = null) {
         </div>
       </div>
 
+      <!-- Buyer field -->
+      <div class="form-group" style="margin-bottom:16px">
+        <label class="form-label">Buyer</label>
+        <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer || ''}" placeholder="Buyer name">
+      </div>
+
       <!-- Header fields -->
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
         <div class="form-group" style="margin:0">
