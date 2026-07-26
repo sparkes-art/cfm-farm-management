@@ -178,6 +178,7 @@ exports.handler = async (event) => {
     // Update CFM invoice with Xero reference and mark complete
     await sbUpdate(`invoices?id=eq.${invoice_id}`, {
       xero_invoice_number: xeroInvoiceNumber || xeroInvoiceId,
+      xero_invoice_id: xeroInvoiceId,
       status: 'complete',
     });
 

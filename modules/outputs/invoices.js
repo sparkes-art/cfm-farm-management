@@ -179,8 +179,9 @@ function _renderTable(container) {
               <td class="num"><strong>${formatCurrency(inv.net_amount, 0)}</strong></td>
               <td style="white-space:nowrap;font-size:12px">
                 ${inv.rcti_url ? `<a href="${inv.rcti_url}" target="_blank" style="color:var(--blue);text-decoration:none;margin-right:6px" onclick="event.stopPropagation()" title="Merchant RCTI">📄 RCTI</a>` : ''}
-                ${inv.gin_url ? `<a href="${inv.gin_url}" target="_blank" style="color:var(--blue);text-decoration:none" onclick="event.stopPropagation()" title="Ginning Advice">🧾 Gin</a>` : ''}
-                ${!inv.rcti_url && !inv.gin_url ? '<span style="color:var(--hint)">—</span>' : ''}
+                ${inv.gin_url ? `<a href="${inv.gin_url}" target="_blank" style="color:var(--blue);text-decoration:none;margin-right:6px" onclick="event.stopPropagation()" title="Ginning Advice">🧾 Gin</a>` : ''}
+                ${inv.xero_invoice_url ? `<a href="${inv.xero_invoice_url}" target="_blank" style="color:var(--blue);text-decoration:none" onclick="event.stopPropagation()" title="Xero Invoice">📋 Xero</a>` : ''}
+                ${!inv.rcti_url && !inv.gin_url && !inv.xero_invoice_url ? '<span style="color:var(--hint)">—</span>' : ''}
               </td>
               <td class="muted text-sm">
                 ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" 
