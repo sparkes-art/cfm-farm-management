@@ -27,6 +27,8 @@ export async function mountInvoices(container) {
         </select>
         <select id="inv-filter-contract" class="form-select" style="width:180px">
           <option value="">All contracts</option>
+          <option value="cash">Cash sales only</option>
+          ${_contracts.map(c => `<option value="${c.id}">${c.contract_number || 'Contract'} — ${c.commodity || ''}</option>`).join('')}
         </select>
       </div>
       ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New invoice</button>' : ''}
@@ -106,13 +108,6 @@ function _subscribeRealtime() {
 function _renderTable(container) {
   const wrap = qs('#inv-table-wrap', container || document);
   if (!wrap) return;
-  // Rebuild contract filter with live data
-  const sel = document.getElementById('inv-filter-contract');
-  if (sel && _contracts.length) {
-    const cur = sel.value;
-    sel.innerHTML = '<option value="">All contracts</option><option value="cash">Cash sales only</option>' +
-      _contracts.map(c => `<option value="${c.id}" ${cur===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''}</option>`).join('');
-  }
   const rows = _filtered();
 
   if (!rows.length) {
@@ -738,9 +733,9 @@ export function openInvoiceForm(container, existing = null) {
       <td style="${tdStyle}min-width:70px;max-width:80px"><select class="f-line-season" style="${inStyle}">
         ${['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s=>`<option value="${s}" ${s===(data.season||getActiveSeason()||currentSeason())?'selected':''}>${s}</option>`).join('')}
       </select></td>
-      <td style="${tdStyle}min-width:55px"><input type="number" class="f-line-qty" style="${numStyle}" placeholder="0" value="${data.qty||''}" step="0.001"></td>
+      <td style="${tdStyle}min-width:55px"><input type="number" class="f-line-qty" style="${numStyle}" placeholder="0" value="${data.qty!=null&&data.qty!==''?data.qty:''}" step="0.001"></td>
       <td style="${tdStyle}min-width:50px"><select class="f-line-unit" style="${inStyle}">
-        ${['bale','t','kg','head','each'].map(u=>`<option${u===(data.unit||'t')?' selected':''}>${u}</option>`).join('')}
+        ${['bale','t','kg','head','each'].map(u=>`<option${u===(data.unit||(modal.querySelector('#f-master-qty-toggle')?.checked?modal.querySelector('#f-master-unit')?.value:null)||'t')?' selected':''}>${u}</option>`).join('')}
       </select></td>
 
       <td style="${tdStyle}min-width:80px;max-width:90px"><input type="number" class="f-line-price" style="${numStyle}" placeholder="0.00" value="${data.price||''}" step="0.01"></td>
