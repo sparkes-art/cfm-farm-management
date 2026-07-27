@@ -17,20 +17,7 @@ export async function mountInvoices(container) {
 
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <div style="display:flex;gap:8px">
-        <select id="inv-filter-season" class="form-select" style="width:120px">
-          <option value="">All seasons</option>
-        </select>
-        <select id="inv-filter-commodity" class="form-select" style="width:160px">
-          <option value="">All commodities</option>
-          ${[...new Set(_invoices.flatMap(i => (i.line_items||[]).map(l => l.commodity).filter(Boolean)))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
-        </select>
-        <select id="inv-filter-contract" class="form-select" style="width:180px">
-          <option value="">All contracts</option>
-          <option value="cash">Cash sales only</option>
-          ${_contracts.map(c => `<option value="${c.id}">${c.contract_number || 'Contract'} — ${c.commodity || ''}</option>`).join('')}
-        </select>
-      </div>
+      <div id="inv-filter-bar"></div>
       ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New invoice</button>' : ''}
     </div>
 
@@ -44,9 +31,7 @@ export async function mountInvoices(container) {
   _subscribeRealtime();
 
   qs('#btn-new-invoice', container)?.addEventListener('click', () => openInvoiceForm(container));
-  ['#inv-filter-season', '#inv-filter-commodity', '#inv-filter-contract'].forEach(sel => {
-    qs(sel, container)?.addEventListener('change', () => _renderTable(container));
-  });
+  // Filter events wired inside _renderTable
 }
 
 export function unmountInvoices() {
@@ -78,9 +63,9 @@ async function _loadData() {
 }
 
 function _filtered() {
-  const season = qs('#inv-filter-season')?.value || '';
-  const commodity = qs('#inv-filter-commodity')?.value || '';
-  const contract = qs('#inv-filter-contract')?.value || '';
+  const season = document.getElementById('inv-filter-season')?.value || '';
+  const commodity = document.getElementById('inv-filter-commodity')?.value || '';
+  const contract = document.getElementById('inv-filter-contract')?.value || '';
   return _invoices.filter(i => {
     const commodityMatch = !commodity || (i.line_items||[]).some(l => l.commodity === commodity);
     const contractMatch = !contract
@@ -108,6 +93,34 @@ function _subscribeRealtime() {
 function _renderTable(container) {
   const wrap = qs('#inv-table-wrap', container || document);
   if (!wrap) return;
+
+  // Rebuild filter bar fresh with live data every render
+  const filterBar = document.getElementById('inv-filter-bar');
+  if (filterBar) {
+    const prevSeason = document.getElementById('inv-filter-season')?.value || '';
+    const prevCommodity = document.getElementById('inv-filter-commodity')?.value || '';
+    const prevContract = document.getElementById('inv-filter-contract')?.value || '';
+    const seasons = [...new Set(_invoices.map(i => i.season).filter(Boolean))].sort().reverse();
+    const commodities = [...new Set(_invoices.flatMap(i => (i.line_items||[]).map(l => l.commodity).filter(Boolean)))].sort();
+    filterBar.innerHTML =
+      `<select id="inv-filter-season" class="form-select" style="width:120px">
+        <option value="">All seasons</option>
+        ${seasons.map(s => `<option value="${s}" ${prevSeason===s?'selected':''}>${s}</option>`).join('')}
+      </select>
+      <select id="inv-filter-commodity" class="form-select" style="width:160px">
+        <option value="">All commodities</option>
+        ${commodities.map(c => `<option value="${c}" ${prevCommodity===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <select id="inv-filter-contract" class="form-select" style="width:180px">
+        <option value="">All contracts</option>
+        <option value="cash" ${prevContract==='cash'?'selected':''}>Cash sales only</option>
+        ${_contracts.map(c => `<option value="${c.id}" ${prevContract===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''}</option>`).join('')}
+      </select>`;
+    ['inv-filter-season','inv-filter-commodity','inv-filter-contract'].forEach(id => {
+      document.getElementById(id)?.addEventListener('change', () => _renderTable(container));
+    });
+  }
+
   const rows = _filtered();
 
   if (!rows.length) {
