@@ -1071,12 +1071,17 @@ export function openInvoiceForm(container, existing = null) {
       const session = getSession();
       const uploadFile2 = async (file, prefix) => {
         const path = `invoices/${farm.id}/${Date.now()}_${prefix}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+        const contentType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
         const res = await fetch(`https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/cfm-documents/${path}`, {
           method: 'POST',
-          headers: { 'apikey': window.__CFM_ANON_KEY, 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': file.type, 'x-upsert': 'true' },
+          headers: { 'apikey': window.__CFM_ANON_KEY, 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': contentType, 'x-upsert': 'true' },
           body: file,
         });
-        if (!res.ok) throw new Error('Upload failed');
+        if (!res.ok) {
+          const errText = await res.text();
+          console.error('Upload failed:', res.status, errText, 'Path:', path);
+          throw new Error(`Upload failed (${res.status}): ${errText}`);
+        }
         return { url: `https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/public/cfm-documents/${path}`, filename: file.name };
       };
 
