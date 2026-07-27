@@ -71,7 +71,6 @@ async function _loadData() {
     _contracts = [];
     _invoices = [];
   }
-  _populateYearFilter();
 }
 
 function _filtered() {
@@ -97,8 +96,7 @@ function _subscribeRealtime() {
     } else if (event === 'DELETE') {
       _contracts = _contracts.filter(c => c.id !== payload.old_record.id);
     }
-    _populateYearFilter();
-    _renderStats();
+      _renderStats();
     _renderTable();
   });
 }

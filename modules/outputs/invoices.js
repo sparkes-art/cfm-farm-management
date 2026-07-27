@@ -18,9 +18,7 @@ export async function mountInvoices(container) {
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
       <div style="display:flex;gap:8px">
-        <select id="inv-filter-season" class="form-select" style="width:120px">
-          <option value="">All seasons</option>
-        </select>
+
         <select id="inv-filter-commodity" class="form-select" style="width:160px">
           <option value="">All commodities</option>
           ${[...new Set(_invoices.flatMap(i => (i.line_items||[]).map(l => l.commodity).filter(Boolean)))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
@@ -42,9 +40,10 @@ export async function mountInvoices(container) {
   _subscribeRealtime();
 
   qs('#btn-new-invoice', container)?.addEventListener('click', () => openInvoiceForm(container));
-  ['#inv-filter-season', '#inv-filter-commodity', '#inv-filter-contract'].forEach(sel => {
+  ['#inv-filter-commodity', '#inv-filter-contract'].forEach(sel => {
     qs(sel, container)?.addEventListener('change', () => _renderTable(container));
   });
+  document.addEventListener('cfm:seasonchange', () => _renderTable(container));
 }
 
 export function unmountInvoices() {
@@ -60,23 +59,10 @@ async function _loadData() {
     dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&select=*&order=sale_date.desc'),
   ]);
-  // Populate season filter
-  const sel = qs('#inv-filter-season');
-  if (sel) {
-    // Seasons from line items since season is stored at line item level
-  const allSeasons = new Set();
-  _invoices.forEach(i => {
-    if (i.season) allSeasons.add(i.season);
-    (i.line_items || []).forEach(l => { if (l.season) allSeasons.add(l.season); });
-  });
-  const seasons = [...allSeasons].sort().reverse();
-    while (sel.options.length > 1) sel.remove(1);
-    seasons.forEach(s => { const o = document.createElement('option'); o.value = s; o.textContent = s; sel.appendChild(o); });
-  }
 }
 
 function _filtered() {
-  const season = qs('#inv-filter-season')?.value || '';
+  const season = getActiveSeason() || '';
   const commodity = qs('#inv-filter-commodity')?.value || '';
   const contract = qs('#inv-filter-contract')?.value || '';
   return _invoices.filter(i => {
