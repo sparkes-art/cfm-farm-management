@@ -118,28 +118,37 @@ exports.handler = async (event) => {
 
     // Build line items
     const isGst = inv.gst_type === 'inc';
-    const lineItems = (inv.line_items || []).map(l => ({
-      Description: [l.commodity, l.docket, l.season].filter(Boolean).join(' · '),
-      Quantity: parseFloat(l.qty) || 1,
-      UnitAmount: parseFloat(l.price) || 0,
-      TaxType: isGst ? 'GST' : 'NONE',
-      LineAmount: parseFloat(l.total) || 0,
-    }));
+    const taxType = isGst ? 'OUTPUT2' : 'BASEXCLUDED';
+    const lineItems = (inv.line_items || []).map(l => {
+      const qty = parseFloat(l.qty) || 1;
+      const lineTotal = parseFloat(l.total) || 0;
+      const qualityAdj = parseFloat(l.quality_adj) || 0;
+      // Include quality adjustment in unit amount so Xero qty × unit = total
+      const effectiveTotal = lineTotal + qualityAdj;
+      const unitAmount = qty ? effectiveTotal / qty : 0;
+      return {
+        Description: [l.commodity, l.docket, l.season].filter(Boolean).join(' · '),
+        Quantity: qty,
+        UnitAmount: Math.round(unitAmount * 10000) / 10000,
+        TaxType: taxType,
+      };
+    });
     (inv.deductions || []).forEach(d => {
       if (!d.value) return;
+      const dedQty = parseFloat(d.qty) || 1;
+      const dedTotal = -Math.abs(parseFloat(d.value));
       lineItems.push({
         Description: d.description || 'Deduction',
-        Quantity: 1,
-        UnitAmount: -Math.abs(parseFloat(d.value)),
-        TaxType: 'NONE',
-        LineAmount: -Math.abs(parseFloat(d.value)),
+        Quantity: dedQty,
+        UnitAmount: Math.round((dedTotal / dedQty) * 10000) / 10000,
+        TaxType: taxType,
       });
     });
     if (!lineItems.length) lineItems.push({
       Description: inv.notes || 'Sale',
       Quantity: parseFloat(inv.total_qty) || 1,
       UnitAmount: parseFloat(inv.net_amount) || 0,
-      TaxType: isGst ? 'GST' : 'NONE',
+      TaxType: taxType,
     });
 
     // Build Xero invoice
