@@ -27,8 +27,6 @@ export async function mountInvoices(container) {
         </select>
         <select id="inv-filter-contract" class="form-select" style="width:180px">
           <option value="">All contracts</option>
-          <option value="cash">Cash sales only</option>
-          ${_contracts.map(c => `<option value="${c.id}">${c.contract_number || 'Contract'} — ${c.commodity || ''}</option>`).join('')}
         </select>
       </div>
       ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New invoice</button>' : ''}
@@ -108,6 +106,13 @@ function _subscribeRealtime() {
 function _renderTable(container) {
   const wrap = qs('#inv-table-wrap', container || document);
   if (!wrap) return;
+  // Rebuild contract filter with live data
+  const sel = document.getElementById('inv-filter-contract');
+  if (sel && _contracts.length) {
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All contracts</option><option value="cash">Cash sales only</option>' +
+      _contracts.map(c => `<option value="${c.id}" ${cur===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''}</option>`).join('');
+  }
   const rows = _filtered();
 
   if (!rows.length) {
