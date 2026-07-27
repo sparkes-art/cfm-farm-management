@@ -195,10 +195,16 @@ function _renderTable(container) {
               <td class="num" style="color:var(--red)">${inv.total_deductions ? '-'+formatCurrency(inv.total_deductions,0) : '—'}</td>
               <td class="num"><strong>${formatCurrency(inv.net_amount, 0)}</strong></td>
               <td style="white-space:nowrap;font-size:12px">
-                ${inv.rcti_url ? `<a href="${inv.rcti_url}" target="_blank" style="color:var(--blue);text-decoration:none;margin-right:6px" onclick="event.stopPropagation()" title="Merchant RCTI">📄 RCTI</a>` : ''}
-                ${inv.gin_url ? `<a href="${inv.gin_url}" target="_blank" style="color:var(--blue);text-decoration:none;margin-right:6px" onclick="event.stopPropagation()" title="Ginning Advice">🧾 Gin</a>` : ''}
-                ${inv.xero_invoice_url ? `<a href="${inv.xero_invoice_url}" target="_blank" style="color:var(--blue);text-decoration:none" onclick="event.stopPropagation()" title="Xero Invoice">📋 Xero</a>` : ''}
-                ${!inv.rcti_url && !inv.gin_url && !inv.xero_invoice_url ? '<span style="color:var(--hint)">—</span>' : ''}
+                ${(() => {
+                  const rctiCount = (inv.rcti_files||[]).length || (inv.rcti_url ? 1 : 0);
+                  const ginCount = (inv.gin_files||[]).length || (inv.gin_url ? 1 : 0);
+                  const rctiUrl = (inv.rcti_files||[])[0]?.url || inv.rcti_url;
+                  const ginUrl = (inv.gin_files||[])[0]?.url || inv.gin_url;
+                  return (rctiUrl ? `<a href="${rctiUrl}" target="_blank" style="color:var(--blue);text-decoration:none;margin-right:6px" onclick="event.stopPropagation()" title="Merchant RCTI">📄 RCTI${rctiCount>1?' ('+rctiCount+')':''}</a>` : '') +
+                    (ginUrl ? `<a href="${ginUrl}" target="_blank" style="color:var(--blue);text-decoration:none;margin-right:6px" onclick="event.stopPropagation()" title="Ginning Advice">🧾 Gin${ginCount>1?' ('+ginCount+')':''}</a>` : '') +
+                    (inv.xero_invoice_url ? `<a href="${inv.xero_invoice_url}" target="_blank" style="color:var(--blue);text-decoration:none" onclick="event.stopPropagation()" title="Xero Invoice">📋 Xero</a>` : '') +
+                    (!rctiUrl && !ginUrl && !inv.xero_invoice_url ? '<span style="color:var(--hint)">—</span>' : '');
+                })()}
               </td>
               <td class="muted text-sm">
                 ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" 
@@ -562,33 +568,51 @@ export function openInvoiceForm(container, existing = null) {
           <!-- Merchant RCTI -->
           <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:10px">
             <p style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📄 Merchant RCTI</p>
-            ${existing?.rcti_url ? `<div style="margin-bottom:6px;padding:5px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;display:flex;justify-content:space-between;align-items:center"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${existing.rcti_filename||'RCTI'}</span><a href="${existing.rcti_url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a></div>` : ''}
-            <div id="f-rcti-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:10px;text-align:center;cursor:pointer;background:var(--page-bg)">
-              <p style="color:var(--muted);font-size:11px">Drop or click</p>
+            <div id="f-rcti-existing" style="margin-bottom:6px">
+              ${(existing?.rcti_files||[]).map((f,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-bottom:3px">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${f.filename||'RCTI '+(i+1)}</span>
+                <a href="${f.url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a>
+              </div>`).join('')}
+              ${existing?.rcti_url&&!(existing?.rcti_files||[]).length?`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-bottom:3px"><span>${existing.rcti_filename||'RCTI'}</span><a href="${existing.rcti_url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a></div>`:''}
             </div>
-            <input type="file" id="f-rcti-input" accept=".pdf,image/*" style="display:none">
-            <div id="f-rcti-file" style="margin-top:6px"></div>
+            <div id="f-rcti-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:8px;text-align:center;cursor:pointer;background:var(--page-bg)">
+              <p style="color:var(--muted);font-size:11px">Drop or click to add</p>
+            </div>
+            <input type="file" id="f-rcti-input" multiple accept=".pdf,image/*" style="display:none">
+            <div id="f-rcti-list" style="margin-top:5px"></div>
           </div>
 
-          <!-- Ginning Advice / Invoice -->
+          <!-- Ginning Advice -->
           <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:10px">
             <p style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">🧾 Ginning Advice / Invoice</p>
-            ${existing?.gin_url ? `<div style="margin-bottom:6px;padding:5px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;display:flex;justify-content:space-between;align-items:center"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${existing.gin_filename||'Gin Advice'}</span><a href="${existing.gin_url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a></div>` : ''}
-            <div id="f-gin-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:10px;text-align:center;cursor:pointer;background:var(--page-bg)">
-              <p style="color:var(--muted);font-size:11px">Drop or click</p>
+            <div id="f-gin-existing" style="margin-bottom:6px">
+              ${(existing?.gin_files||[]).map((f,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-bottom:3px">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${f.filename||'Gin '+(i+1)}</span>
+                <a href="${f.url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a>
+              </div>`).join('')}
+              ${existing?.gin_url&&!(existing?.gin_files||[]).length?`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-bottom:3px"><span>${existing.gin_filename||'Gin Advice'}</span><a href="${existing.gin_url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a></div>`:''}
             </div>
-            <input type="file" id="f-gin-input" accept=".pdf,image/*" style="display:none">
-            <div id="f-gin-file" style="margin-top:6px"></div>
+            <div id="f-gin-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:8px;text-align:center;cursor:pointer;background:var(--page-bg)">
+              <p style="color:var(--muted);font-size:11px">Drop or click to add</p>
+            </div>
+            <input type="file" id="f-gin-input" multiple accept=".pdf,image/*" style="display:none">
+            <div id="f-gin-list" style="margin-top:5px"></div>
           </div>
 
           <!-- Other -->
           <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:10px">
             <p style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📎 Other documents</p>
-            <div id="f-drop-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:10px;text-align:center;cursor:pointer;background:var(--page-bg)">
-              <p style="color:var(--muted);font-size:11px">Drop or click</p>
+            <div id="f-other-existing" style="margin-bottom:6px">
+              ${(existing?.other_files||[]).map((f,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-bottom:3px">
+                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${f.filename||'Doc '+(i+1)}</span>
+                <a href="${f.url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a>
+              </div>`).join('')}
+            </div>
+            <div id="f-drop-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:8px;text-align:center;cursor:pointer;background:var(--page-bg)">
+              <p style="color:var(--muted);font-size:11px">Drop or click to add</p>
             </div>
             <input type="file" id="f-file-input" multiple accept=".pdf,image/*" style="display:none">
-            <div id="f-file-list" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px"></div>
+            <div id="f-file-list" style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px"></div>
           </div>
 
         </div>
@@ -917,37 +941,33 @@ export function openInvoiceForm(container, existing = null) {
     // Price comparison removed from form — no longer needed
   }
 
-  // File attachments — RCTI, Gin Advice, Other
-  let rctiFile = null, ginFile = null;
+  // File attachments — multi-file per section
+  let rctiFiles = [], ginFiles = [];
 
-  function wireDropZone(zoneId, inputId, onFile, multi=false) {
+  function wireMultiZone(zoneId, inputId, fileArr, listId) {
     const zone = modal.querySelector('#'+zoneId);
     const inp = modal.querySelector('#'+inputId);
     if (!zone || !inp) return;
     zone.addEventListener('click', () => inp.click());
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.style.borderColor='var(--blue)'; });
     zone.addEventListener('dragleave', () => zone.style.borderColor='');
-    zone.addEventListener('drop', e => { e.preventDefault(); zone.style.borderColor=''; onFile(e.dataTransfer.files); });
-    inp.addEventListener('change', () => onFile(inp.files));
+    zone.addEventListener('drop', e => { e.preventDefault(); zone.style.borderColor=''; addToSection(e.dataTransfer.files, fileArr, listId); });
+    inp.addEventListener('change', () => { addToSection(inp.files, fileArr, listId); inp.value=''; });
   }
 
-  function showSingleFile(containerId, file) {
-    const el = modal.querySelector('#'+containerId);
-    if (!el) return;
-    el.innerHTML = `<span style="display:inline-flex;align-items:center;gap:5px;background:var(--blue-light);border:1px solid var(--blue);border-radius:20px;padding:3px 10px;font-size:11px;color:var(--blue-text)">📎 ${file.name} <span style="cursor:pointer;font-size:13px" onclick="this.closest('span').remove()">×</span></span>`;
+  function addToSection(fileList, fileArr, listId) {
+    const list = modal.querySelector('#'+listId);
+    [...fileList].forEach(f => {
+      fileArr.push(f);
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:3px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-top:3px';
+      row.innerHTML = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">📎 ${f.name}</span><span style="cursor:pointer;color:var(--hint);margin-left:6px;font-size:13px" onclick="this.closest('div').remove()">×</span>`;
+      list?.appendChild(row);
+    });
   }
 
-  wireDropZone('f-rcti-zone', 'f-rcti-input', files => {
-    rctiFile = files[0];
-    if (rctiFile) showSingleFile('f-rcti-file', rctiFile);
-  });
-
-  wireDropZone('f-gin-zone', 'f-gin-input', files => {
-    ginFile = files[0];
-    if (ginFile) showSingleFile('f-gin-file', ginFile);
-  });
-
-  wireDropZone('f-drop-zone', 'f-file-input', files => addFiles(files), true);
+  wireMultiZone('f-rcti-zone', 'f-rcti-input', rctiFiles, 'f-rcti-list');
+  wireMultiZone('f-gin-zone', 'f-gin-input', ginFiles, 'f-gin-list');
 
   function addFiles(fileList) {
     [...fileList].forEach(f => {
@@ -958,6 +978,14 @@ export function openInvoiceForm(container, existing = null) {
       modal.querySelector('#f-file-list').appendChild(pill);
     });
   }
+
+  const dropZone = modal.querySelector('#f-drop-zone');
+  const fileInput = modal.querySelector('#f-file-input');
+  dropZone?.addEventListener('click', () => fileInput.click());
+  dropZone?.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor='var(--blue)'; });
+  dropZone?.addEventListener('dragleave', () => dropZone.style.borderColor='');
+  dropZone?.addEventListener('drop', e => { e.preventDefault(); dropZone.style.borderColor=''; addFiles(e.dataTransfer.files); });
+  fileInput?.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value=''; });
 
 
 
@@ -1053,7 +1081,7 @@ export function openInvoiceForm(container, existing = null) {
       const contractSel = modal.querySelector('#f-contract');
       const contractId = contractSel?.value || null;
 
-      // Upload RCTI and Gin files
+      // Upload attachments
       const session = getSession();
       const uploadFile2 = async (file, prefix) => {
         const path = `invoices/${farm.id}/${Date.now()}_${prefix}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
@@ -1066,15 +1094,28 @@ export function openInvoiceForm(container, existing = null) {
         return { url: `https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/public/cfm-documents/${path}`, filename: file.name };
       };
 
-      let rctiUrl = existing?.rcti_url || null, rctiFilename = existing?.rcti_filename || null;
-      let ginUrl = existing?.gin_url || null, ginFilename = existing?.gin_filename || null;
-      if (rctiFile) { const r = await uploadFile2(rctiFile, 'rcti'); rctiUrl = r.url; rctiFilename = r.filename; }
-      if (ginFile) { const r = await uploadFile2(ginFile, 'gin'); ginUrl = r.url; ginFilename = r.filename; }
+      // Upload all RCTI files
+      const existingRctiFiles = existing?.rcti_files || (existing?.rcti_url ? [{ url: existing.rcti_url, filename: existing.rcti_filename }] : []);
+      const newRctiUploads = await Promise.all(rctiFiles.map(f => uploadFile2(f, 'rcti')));
+      const allRctiFiles = [...existingRctiFiles, ...newRctiUploads];
+
+      // Upload all Gin files
+      const existingGinFiles = existing?.gin_files || (existing?.gin_url ? [{ url: existing.gin_url, filename: existing.gin_filename }] : []);
+      const newGinUploads = await Promise.all(ginFiles.map(f => uploadFile2(f, 'gin')));
+      const allGinFiles = [...existingGinFiles, ...newGinUploads];
+
+      // Upload other attachments
+      const otherUploads = await Promise.all(attachments.map(f => uploadFile2(f, 'other')));
+      const existingOtherFiles = existing?.other_files || [];
+      const allOtherFiles = [...existingOtherFiles, ...otherUploads];
 
       const row = {
         farm_id: farm.id,
-        rcti_url: rctiUrl, rcti_filename: rctiFilename,
-        gin_url: ginUrl, gin_filename: ginFilename,
+        rcti_files: allRctiFiles,
+        gin_files: allGinFiles,
+        other_files: allOtherFiles,
+        rcti_url: allRctiFiles[0]?.url || null, rcti_filename: allRctiFiles[0]?.filename || null,
+        gin_url: allGinFiles[0]?.url || null, gin_filename: allGinFiles[0]?.filename || null,
         invoice_date: modal.querySelector('#f-date')?.value,
         season: null, // Season is at line item level
         buyer: modal.querySelector('#f-buyer')?.value?.trim() || '',
