@@ -158,6 +158,7 @@ exports.handler = async (event) => {
     }
 
     if (rows.length) {
+      // Store in cotton_prices table
       const upsertRes = await fetch(`${SUPABASE_URL}/rest/v1/cotton_prices`, {
         method: 'POST',
         headers: {
@@ -170,10 +171,47 @@ exports.handler = async (event) => {
       });
       if (!upsertRes.ok) {
         const err = await upsertRes.text();
-        console.error('Supabase error:', err);
+        console.error('Supabase cotton_prices error:', err);
         throw new Error('Supabase upsert failed: ' + err);
       }
       console.log('Stored', rows.length, 'price rows for', date);
+
+      // Also write into market_prices so the UI can display them
+      // Look up Cotton Lint commodity_id
+      const commRes = await fetch(`${SUPABASE_URL}/rest/v1/commodities?name=ilike.Cotton%20Lint&select=id&limit=1`, {
+        headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+      });
+      const comms = commRes.ok ? await commRes.json() : [];
+      const commodityId = comms[0]?.id;
+
+      if (commodityId) {
+        // Use cottonRegion setting to pick the right region row, default to Darling Downs
+        const marketRows = rows.map(r => ({
+          commodity_id: commodityId,
+          farm_id: null,
+          price_date: r.price_date,
+          price_per_unit: r.price_aud,
+          region: r.region,
+          grade: r.crop_year,
+          source: 'LDC',
+        }));
+
+        const mpRes = await fetch(`${SUPABASE_URL}/rest/v1/market_prices`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_SERVICE_ROLE_KEY,
+            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=ignore-duplicates return=minimal',
+          },
+          body: JSON.stringify(marketRows),
+        });
+        if (!mpRes.ok) {
+          console.error('market_prices upsert error:', await mpRes.text());
+        } else {
+          console.log('Also stored', marketRows.length, 'rows in market_prices');
+        }
+      }
     }
 
     return {
