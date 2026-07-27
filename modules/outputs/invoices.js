@@ -27,8 +27,6 @@ export async function mountInvoices(container) {
         </select>
         <select id="inv-filter-contract" class="form-select" style="width:180px">
           <option value="">All contracts</option>
-          <option value="cash">Cash sales only</option>
-          ${_contracts.map(c => `<option value="${c.id}">${c.contract_number || 'Contract'} — ${c.commodity || ''}</option>`).join('')}
         </select>
       </div>
       ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New invoice</button>' : ''}
@@ -816,6 +814,14 @@ export function openInvoiceForm(container, existing = null) {
 
   // Add deduction
   function addDeduction(data = {}) {
+    // Auto-fill qty from master if toggle on
+    if (!data.qty) {
+      const masterToggle = modal.querySelector('#f-master-qty-toggle');
+      const masterInput = modal.querySelector('#f-master-qty');
+      if (masterToggle?.checked && masterInput?.value) {
+        data = { ...data, qty: parseFloat(masterInput.value) };
+      }
+    }
     const tbody = modal.querySelector('#f-ded-body');
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid var(--border-light)';
@@ -958,13 +964,15 @@ export function openInvoiceForm(container, existing = null) {
   function applyMasterQty() {
     const qty = parseFloat(masterInput?.value) || 0;
     if (!qty || !masterToggle?.checked) return;
+    // Apply to income line items
     modal.querySelectorAll('#f-lines-body tr').forEach(tr => {
       const qtyInput = tr.querySelector('.f-line-qty');
-      if (qtyInput) qtyInput.value = qty;
+      if (qtyInput) { qtyInput.value = qty; qtyInput.dispatchEvent(new Event('input')); }
     });
-    // Trigger recalc on all rows
-    modal.querySelectorAll('#f-lines-body tr').forEach(tr => {
-      tr.querySelector('.f-line-qty')?.dispatchEvent(new Event('input'));
+    // Apply to sale expense deduction rows
+    modal.querySelectorAll('#f-ded-body tr').forEach(tr => {
+      const qtyInput = tr.querySelector('.f-ded-qty');
+      if (qtyInput) { qtyInput.value = qty; qtyInput.dispatchEvent(new Event('input')); }
     });
   }
   modal.querySelector('#f-add-ded').addEventListener('click', () => addDeduction());
