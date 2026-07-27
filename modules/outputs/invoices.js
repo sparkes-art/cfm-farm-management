@@ -712,15 +712,16 @@ export function openInvoiceForm(container, existing = null) {
   // Add line
   let _lineCounter = 0;
   function addLine(data = {}) {
-    // Auto-fill from master qty/unit if toggle is on and no explicit qty
-    if (!data.qty) {
-      const masterToggle = modal.querySelector('#f-master-qty-toggle');
-      const masterInput = modal.querySelector('#f-master-qty');
-      const masterUnit = modal.querySelector('#f-master-unit');
-      if (masterToggle?.checked) {
-        if (masterInput?.value) data = { ...data, qty: parseFloat(masterInput.value) };
-        if (masterUnit?.value) data = { ...data, unit: masterUnit.value };
+    // Auto-fill from master qty/unit if toggle is on
+    const _mToggle = modal.querySelector('#f-master-qty-toggle');
+    const _mInput = modal.querySelector('#f-master-qty');
+    const _mUnit = modal.querySelector('#f-master-unit');
+    if (_mToggle?.checked) {
+      if (data.qty == null || data.qty === '') {
+        const mQty = parseFloat(_mInput?.value);
+        if (!isNaN(mQty) && mQty > 0) data = { ...data, qty: mQty };
       }
+      if (!data.unit && _mUnit?.value) data = { ...data, unit: _mUnit.value };
     }
     const tbody = modal.querySelector('#f-lines-body');
     const id = 'line-' + (++_lineCounter);
@@ -825,6 +826,17 @@ export function openInvoiceForm(container, existing = null) {
 
   // Add deduction
   function addDeduction(data = {}) {
+    // Auto-fill from master qty/unit if toggle is on
+    const _mToggle = modal.querySelector('#f-master-qty-toggle');
+    const _mInput = modal.querySelector('#f-master-qty');
+    const _mUnit = modal.querySelector('#f-master-unit');
+    if (_mToggle?.checked) {
+      if (data.qty == null || data.qty === '') {
+        const mQty = parseFloat(_mInput?.value);
+        if (!isNaN(mQty) && mQty > 0) data = { ...data, qty: mQty };
+      }
+      if (!data.unit && _mUnit?.value) data = { ...data, unit: _mUnit.value };
+    }
     const tbody = modal.querySelector('#f-ded-body');
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid var(--border-light)';
