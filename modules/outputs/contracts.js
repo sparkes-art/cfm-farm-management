@@ -19,9 +19,6 @@ export async function mountContracts(container) {
         <p class="page-subtitle">Sales contracts by crop year and commodity</p>
       </div>
       <div class="flex gap-2">
-        <select id="con-year-filter" class="form-select" style="width:120px">
-          <option value="">All years</option>
-        </select>
         <select id="con-commodity-filter" class="form-select" style="width:130px">
           <option value="">All commodities</option>
           ${getCommodities().map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
@@ -77,21 +74,8 @@ async function _loadData() {
   _populateYearFilter();
 }
 
-function _populateYearFilter() {
-  const sel = qs('#con-year-filter');
-  if (!sel) return;
-  const years = [...new Set(_contracts.map(c => c.crop_year).filter(Boolean))].sort().reverse();
-  // Clear existing options except first
-  while (sel.options.length > 1) sel.remove(1);
-  years.forEach(y => {
-    const opt = document.createElement('option');
-    opt.value = y; opt.textContent = y;
-    sel.appendChild(opt);
-  });
-}
-
 function _filtered() {
-  const year = qs('#con-year-filter')?.value || '';
+  const year = getActiveSeason() || '';
   const commodity = qs('#con-commodity-filter')?.value || '';
   return _contracts.filter(c =>
     (!year || c.crop_year === year) &&
@@ -298,7 +282,7 @@ function _renderTable() {
 }
 
 function _bindFilters(container) {
-  ['#con-year-filter', '#con-commodity-filter'].forEach(sel => {
+  ['#con-commodity-filter'].forEach(sel => {
     qs(sel, container)?.addEventListener('change', () => {
       _renderStats();
       _renderTable();
