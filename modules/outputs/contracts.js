@@ -177,6 +177,7 @@ function _renderTable() {
           <th class="num">Price / unit</th>
           <th class="num">Total value</th>
           <th class="num">Units invoiced</th>
+          <th class="num">Units to go</th>
           <th class="num">Total paid (incl. QA)</th>
           <!-- Avg price after QA hidden -->
           <th>Delivery</th>
@@ -214,6 +215,9 @@ function _renderTable() {
               <td class="num">${c.price_per_unit ? formatCurrency(c.price_per_unit, 0) : '—'}</td>
               <td class="num"><strong>${value ? formatCurrency(value, 0) : '—'}</strong></td>
               <td class="num">${invoicedQty ? formatNumber(invoicedQty, 0) + ' ' + (c.unit||'') : '—'}</td>
+              <td class="num" style="color:${(parseFloat(c.quantity)||0)-invoicedQty>0?'var(--amber)':'var(--green)'};font-weight:600">
+                ${formatNumber(Math.max(0,(parseFloat(c.quantity)||0)-invoicedQty),0)} ${c.unit||''}
+              </td>
               <td class="num"><strong>${invoicedValue ? formatCurrency(invoicedValue, 0) : '—'}</strong></td>
               <!-- avg price hidden -->
               <td class="muted" style="font-size:var(--text-xs)">${delivery}</td>
