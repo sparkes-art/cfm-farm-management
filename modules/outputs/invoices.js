@@ -108,16 +108,6 @@ function _subscribeRealtime() {
 function _renderTable(container) {
   const wrap = qs('#inv-table-wrap', container || document);
   if (!wrap) return;
-
-  // Rebuild contract filter with live data now that _contracts is loaded
-  const contractSel = document.getElementById('inv-filter-contract');
-  if (contractSel && _contracts.length && contractSel.options.length <= 2) {
-    const currentVal = contractSel.value;
-    contractSel.innerHTML = '<option value="">All contracts</option><option value="cash">Cash sales only</option>' +
-      _contracts.map(c => `<option value="${c.id}">${c.contract_number || 'Contract'} — ${c.commodity || ''}</option>`).join('');
-    contractSel.value = currentVal;
-  }
-
   const rows = _filtered();
 
   if (!rows.length) {
@@ -500,8 +490,10 @@ export function openInvoiceForm(container, existing = null) {
               Use master quantity
             </label>
             <div id="f-master-qty-wrap" style="display:${existing?.master_qty ? 'flex' : 'none'};align-items:center;gap:6px">
-              <input type="number" id="f-master-qty" class="form-input num" step="0.001" style="width:100px" value="${existing?.master_qty || ''}" placeholder="0">
-              <span style="font-size:12px;color:var(--hint)" id="f-master-qty-unit">${existing?.unit || ''}</span>
+              <input type="number" id="f-master-qty" class="form-input num" step="0.001" style="width:90px" value="${existing?.master_qty || ''}" placeholder="0">
+              <select id="f-master-unit" class="form-select" style="width:80px">
+                ${['bale','t','kg','head','each'].map(u=>`<option${u===(existing?.master_unit||'bale')?' selected':''}>${u}</option>`).join('')}
+              </select>
             </div>
             <button class="btn btn-secondary btn-sm" id="f-add-line">＋ Add line</button>
           </div>
@@ -715,12 +707,14 @@ export function openInvoiceForm(container, existing = null) {
   // Add line
   let _lineCounter = 0;
   function addLine(data = {}) {
-    // Auto-fill from master qty if toggle is on and no explicit qty
+    // Auto-fill from master qty/unit if toggle is on and no explicit qty
     if (!data.qty) {
       const masterToggle = modal.querySelector('#f-master-qty-toggle');
       const masterInput = modal.querySelector('#f-master-qty');
-      if (masterToggle?.checked && masterInput?.value) {
-        data = { ...data, qty: parseFloat(masterInput.value) };
+      const masterUnit = modal.querySelector('#f-master-unit');
+      if (masterToggle?.checked) {
+        if (masterInput?.value) data = { ...data, qty: parseFloat(masterInput.value) };
+        if (masterUnit?.value) data = { ...data, unit: masterUnit.value };
       }
     }
     const tbody = modal.querySelector('#f-lines-body');
@@ -964,6 +958,7 @@ export function openInvoiceForm(container, existing = null) {
   });
 
   masterInput?.addEventListener('input', applyMasterQty);
+  modal.querySelector('#f-master-unit')?.addEventListener('change', applyMasterQty);
 
   function applyMasterQty() {
     const qty = parseFloat(masterInput?.value) || 0;
@@ -1064,6 +1059,7 @@ export function openInvoiceForm(container, existing = null) {
         season: null, // Season is at line item level
         buyer: modal.querySelector('#f-buyer')?.value?.trim() || '',
         master_qty: modal.querySelector('#f-master-qty-toggle')?.checked ? (parseFloat(modal.querySelector('#f-master-qty')?.value)||null) : null,
+        master_unit: modal.querySelector('#f-master-qty-toggle')?.checked ? (modal.querySelector('#f-master-unit')?.value||null) : null,
         sale_type: saleType === 'contract' ? 'against_contract' : 'cash',
         forward_contract_id: saleType === 'contract' ? contractId : null,
         line_items: lineRows,
