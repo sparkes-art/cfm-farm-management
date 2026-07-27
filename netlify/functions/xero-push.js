@@ -226,6 +226,49 @@ exports.handler = async (event) => {
     });
 
     console.log('Pushed invoice to Xero:', xeroInvoiceNumber);
+
+    // Upload attachments to Xero
+    if (xeroInvoiceId) {
+      const allFiles = [
+        ...(inv.rcti_files || (inv.rcti_url ? [{ url: inv.rcti_url, filename: inv.rcti_filename || 'RCTI.pdf' }] : [])),
+        ...(inv.gin_files || (inv.gin_url ? [{ url: inv.gin_url, filename: inv.gin_filename || 'GinAdvice.pdf' }] : [])),
+        ...(inv.other_files || []),
+      ];
+
+      for (const file of allFiles) {
+        try {
+          if (!file.url) continue;
+          // Fetch file from Supabase Storage
+          const fileRes = await fetch(file.url);
+          if (!fileRes.ok) { console.error('Could not fetch file:', file.url); continue; }
+          const fileBuffer = await fileRes.arrayBuffer();
+          const filename = (file.filename || 'attachment.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const mimeType = filename.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream';
+
+          // Upload to Xero
+          const attachRes = await fetch(
+            `https://api.xero.com/api.xro/2.0/Invoices/${xeroInvoiceId}/Attachments/${encodeURIComponent(filename)}`,
+            {
+              method: 'PUT',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Xero-tenant-id': tenantId,
+                'Content-Type': mimeType,
+              },
+              body: fileBuffer,
+            }
+          );
+          if (attachRes.ok) {
+            console.log('Attached to Xero:', filename);
+          } else {
+            console.error('Xero attachment failed:', filename, await attachRes.text());
+          }
+        } catch (attachErr) {
+          console.error('Attachment error:', file.filename, attachErr.message);
+        }
+      }
+    }
+
     return {
       statusCode: 200,
       headers,
@@ -233,6 +276,7 @@ exports.handler = async (event) => {
         success: true,
         xero_invoice_number: xeroInvoiceNumber,
         xero_invoice_id: xeroInvoiceId,
+        attachments_uploaded: (inv.rcti_files||[]).length + (inv.gin_files||[]).length + (inv.other_files||[]).length,
       }),
     };
 
