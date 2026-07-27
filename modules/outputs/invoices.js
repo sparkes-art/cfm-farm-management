@@ -749,7 +749,7 @@ export function openInvoiceForm(container, existing = null) {
       <td style="${tdStyle}min-width:70px;max-width:80px"><select class="f-line-season" style="${inStyle}">
         ${['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s=>`<option value="${s}" ${s===(data.season||getActiveSeason()||currentSeason())?'selected':''}>${s}</option>`).join('')}
       </select></td>
-      <td style="${tdStyle}min-width:55px"><input type="number" class="f-line-qty" style="${numStyle}" placeholder="0" value="${data.qty!=null&&data.qty!==''?data.qty:''}" step="0.001"></td>
+      <td style="${tdStyle}min-width:110px"><input type="number" class="f-line-qty" style="${numStyle}" placeholder="0" value="${data.qty!=null&&data.qty!==''?data.qty:''}" step="0.001"></td>
       <td style="${tdStyle}min-width:50px"><select class="f-line-unit" style="${inStyle}">
         ${['bale','t','kg','head','each'].map(u=>`<option${u===(data.unit||(modal.querySelector('#f-master-qty-toggle')?.checked?modal.querySelector('#f-master-unit')?.value:null)||'t')?' selected':''}>${u}</option>`).join('')}
       </select></td>
