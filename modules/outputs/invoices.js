@@ -484,7 +484,17 @@ export function openInvoiceForm(container, existing = null) {
       <div style="margin-bottom:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <p style="font-size:var(--text-sm);font-weight:600">Income — Line Items</p>
-          <button class="btn btn-secondary btn-sm" id="f-add-line">＋ Add line</button>
+          <div style="display:flex;align-items:center;gap:10px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--hint);cursor:pointer">
+              <input type="checkbox" id="f-master-qty-toggle" style="width:14px;height:14px;cursor:pointer" ${existing?.master_qty ? 'checked' : ''}>
+              Use master quantity
+            </label>
+            <div id="f-master-qty-wrap" style="display:${existing?.master_qty ? 'flex' : 'none'};align-items:center;gap:6px">
+              <input type="number" id="f-master-qty" class="form-input num" step="0.001" style="width:100px" value="${existing?.master_qty || ''}" placeholder="0">
+              <span style="font-size:12px;color:var(--hint)" id="f-master-qty-unit">${existing?.unit || ''}</span>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="f-add-line">＋ Add line</button>
+          </div>
         </div>
         <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:white">
           <table style="width:100%;border-collapse:collapse;min-width:780px" id="f-lines-table">
@@ -695,6 +705,14 @@ export function openInvoiceForm(container, existing = null) {
   // Add line
   let _lineCounter = 0;
   function addLine(data = {}) {
+    // Auto-fill from master qty if toggle is on and no explicit qty
+    if (!data.qty) {
+      const masterToggle = modal.querySelector('#f-master-qty-toggle');
+      const masterInput = modal.querySelector('#f-master-qty');
+      if (masterToggle?.checked && masterInput?.value) {
+        data = { ...data, qty: parseFloat(masterInput.value) };
+      }
+    }
     const tbody = modal.querySelector('#f-lines-body');
     const id = 'line-' + (++_lineCounter);
     lastEdited[id] = data.lastEdited || 'price';
@@ -924,6 +942,31 @@ export function openInvoiceForm(container, existing = null) {
 
   // Add/del buttons
   modal.querySelector('#f-add-line').addEventListener('click', () => addLine());
+
+  // Master qty toggle
+  const masterToggle = modal.querySelector('#f-master-qty-toggle');
+  const masterWrap = modal.querySelector('#f-master-qty-wrap');
+  const masterInput = modal.querySelector('#f-master-qty');
+
+  masterToggle?.addEventListener('change', () => {
+    masterWrap.style.display = masterToggle.checked ? 'flex' : 'none';
+    if (masterToggle.checked && masterInput?.value) applyMasterQty();
+  });
+
+  masterInput?.addEventListener('input', applyMasterQty);
+
+  function applyMasterQty() {
+    const qty = parseFloat(masterInput?.value) || 0;
+    if (!qty || !masterToggle?.checked) return;
+    modal.querySelectorAll('#f-lines-body tr').forEach(tr => {
+      const qtyInput = tr.querySelector('.f-line-qty');
+      if (qtyInput) qtyInput.value = qty;
+    });
+    // Trigger recalc on all rows
+    modal.querySelectorAll('#f-lines-body tr').forEach(tr => {
+      tr.querySelector('.f-line-qty')?.dispatchEvent(new Event('input'));
+    });
+  }
   modal.querySelector('#f-add-ded').addEventListener('click', () => addDeduction());
 
   // Load existing data
@@ -1010,6 +1053,7 @@ export function openInvoiceForm(container, existing = null) {
         invoice_date: modal.querySelector('#f-date')?.value,
         season: null, // Season is at line item level
         buyer: modal.querySelector('#f-buyer')?.value?.trim() || '',
+        master_qty: modal.querySelector('#f-master-qty-toggle')?.checked ? (parseFloat(modal.querySelector('#f-master-qty')?.value)||null) : null,
         sale_type: saleType === 'contract' ? 'against_contract' : 'cash',
         forward_contract_id: saleType === 'contract' ? contractId : null,
         line_items: lineRows,
