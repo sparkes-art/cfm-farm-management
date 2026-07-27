@@ -21,10 +21,9 @@ export async function mountInvoices(container) {
         <select id="inv-filter-season" class="form-select" style="width:120px">
           <option value="">All seasons</option>
         </select>
-        <select id="inv-filter-status" class="form-select" style="width:130px">
-          <option value="">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="complete">Complete</option>
+        <select id="inv-filter-commodity" class="form-select" style="width:160px">
+          <option value="">All commodities</option>
+          ${[...new Set(_invoices.flatMap(i => (i.line_items||[]).map(l => l.commodity).filter(Boolean)))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
         </select>
         <select id="inv-filter-contract" class="form-select" style="width:180px">
           <option value="">All contracts</option>
@@ -45,7 +44,7 @@ export async function mountInvoices(container) {
   _subscribeRealtime();
 
   qs('#btn-new-invoice', container)?.addEventListener('click', () => openInvoiceForm(container));
-  ['#inv-filter-season', '#inv-filter-status', '#inv-filter-contract'].forEach(sel => {
+  ['#inv-filter-season', '#inv-filter-commodity', '#inv-filter-contract'].forEach(sel => {
     qs(sel, container)?.addEventListener('change', () => _renderTable(container));
   });
 }
@@ -80,18 +79,18 @@ async function _loadData() {
 
 function _filtered() {
   const season = qs('#inv-filter-season')?.value || '';
-  const status = qs('#inv-filter-status')?.value || '';
+  const commodity = qs('#inv-filter-commodity')?.value || '';
   const contract = qs('#inv-filter-contract')?.value || '';
   return _invoices.filter(i => {
-    const statusMatch = !status || i.status === status;
+    const commodityMatch = !commodity || (i.line_items||[]).some(l => l.commodity === commodity);
     const contractMatch = !contract
       ? true
       : contract === 'cash'
         ? !i.forward_contract_id
         : i.forward_contract_id === contract;
-    if (!season) return statusMatch && contractMatch;
+    if (!season) return commodityMatch && contractMatch;
     const seasonMatch = i.season === season || (i.line_items || []).some(l => l.season === season);
-    return seasonMatch && statusMatch && contractMatch;
+    return seasonMatch && commodityMatch && contractMatch;
   });
 }
 
