@@ -119,26 +119,60 @@ exports.handler = async (event) => {
     // Build line items
     const isGst = inv.gst_type === 'inc';
     const taxType = isGst ? 'OUTPUT2' : 'BASEXCLUDED';
-    const lineItems = (inv.line_items || []).map(l => {
+    // Look up contract number for each line item
+    const contractMap = {};
+    if (inv.forward_contract_id) {
+      try {
+        const cRes = await fetch(`${SUPABASE_URL}/rest/v1/forward_contracts?id=eq.${inv.forward_contract_id}&select=id,contract_number`, {
+          headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` }
+        });
+        const contracts = cRes.ok ? await cRes.json() : [];
+        contracts.forEach(c => { contractMap[c.id] = c.contract_number; });
+      } catch(e) { console.error('Contract lookup failed:', e.message); }
+    }
+    const contractNumber = contractMap[inv.forward_contract_id] || '';
+
+    const lineItems = [];
+    (inv.line_items || []).map(l => {
       const qty = parseFloat(l.qty) || 1;
-      const lineTotal = parseFloat(l.total) || 0;
+      const price = parseFloat(l.price) || 0;
       const qualityAdj = parseFloat(l.quality_adj) || 0;
-      // Include quality adjustment in unit amount so Xero qty × unit = total
-      const effectiveTotal = lineTotal + qualityAdj;
-      const unitAmount = qty ? effectiveTotal / qty : 0;
-      return {
-        Description: [l.commodity, l.docket, l.season].filter(Boolean).join(' · '),
+
+      // Line 1: base price
+      const baseDesc = [
+        l.commodity,
+        l.season,
+        contractNumber ? `Contract ${contractNumber}` : '',
+        `${qty} ${l.unit||''}`.trim(),
+        `@ $${price.toFixed(2)}`,
+      ].filter(Boolean).join(', ');
+
+      lineItems.push({
+        Description: baseDesc,
         Quantity: qty,
-        UnitAmount: Math.round(unitAmount * 10000) / 10000,
+        UnitAmount: Math.round(price * 10000) / 10000,
         TaxType: taxType,
-      };
+      });
+
+      // Line 2: quality adjustment (only if non-zero)
+      if (qualityAdj !== 0) {
+        const qaDesc = `QUALITY ADJUSTMENT: ${l.commodity}, ${l.season}${contractNumber ? `, Contract ${contractNumber}` : ''}, ${qty} ${l.unit||''}`.trim();
+        const qaUnit = qty ? Math.round((qualityAdj / qty) * 10000) / 10000 : qualityAdj;
+        lineItems.push({
+          Description: qaDesc,
+          Quantity: qty,
+          UnitAmount: qaUnit,
+          TaxType: taxType,
+        });
+      }
     });
     (inv.deductions || []).forEach(d => {
       if (!d.value) return;
       const dedQty = parseFloat(d.qty) || 1;
       const dedTotal = -Math.abs(parseFloat(d.value));
+      const dedDesc = [d.description || 'Deduction', d.docket].filter(Boolean).join(', ');
       lineItems.push({
-        Description: d.description || 'Deduction',
+        Description: dedDesc,
         Quantity: dedQty,
         UnitAmount: Math.round((dedTotal / dedQty) * 10000) / 10000,
         TaxType: taxType,
