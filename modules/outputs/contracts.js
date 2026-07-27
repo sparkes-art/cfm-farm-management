@@ -126,18 +126,46 @@ function _renderStats() {
   const totalValue = rows.reduce((s, c) => s + ((parseFloat(c.quantity) || 0) * (parseFloat(c.price_per_unit) || 0)), 0);
   const commodities = [...new Set(rows.map(c => c.commodity).filter(Boolean))];
 
+  // Calculate totals invoiced across all filtered contracts
+  const totalInvoicedUnits = rows.reduce((s, c) => {
+    const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id);
+    return s + contractInvoices.reduce((ss, i) => ss + (i.line_items||[]).reduce((sss, l) => sss + (parseFloat(l.qty)||0), 0), 0);
+  }, 0);
+  const totalInvoicedValue = rows.reduce((s, c) => {
+    const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id);
+    return s + contractInvoices.reduce((ss, i) => ss + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0), 0);
+  }, 0);
+  const totalStillToGo = Math.max(0, totalUnits - totalInvoicedUnits);
+  const totalValueToGo = Math.max(0, totalValue - totalInvoicedValue);
+
   setContent('#con-stats', `
-    <div class="stat-card">
-      <div class="stat-label">Total contracts</div>
-      <div class="stat-value earth">${rows.length}</div>
-    </div>
     <div class="stat-card">
       <div class="stat-label">Total units sold</div>
       <div class="stat-value">${totalUnits.toLocaleString('en-AU', {maximumFractionDigits: 1})}</div>
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border-light)">
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+          <span style="color:var(--hint)">Invoiced</span>
+          <span style="font-weight:600;color:var(--green)">${totalInvoicedUnits.toLocaleString('en-AU', {maximumFractionDigits:1})}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px">
+          <span style="color:var(--hint)">Still to go</span>
+          <span style="font-weight:600;color:var(--amber)">${totalStillToGo.toLocaleString('en-AU', {maximumFractionDigits:1})}</span>
+        </div>
+      </div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Total contract value</div>
       <div class="stat-value grass">${formatCurrency(totalValue, 0)}</div>
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border-light)">
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+          <span style="color:var(--hint)">Invoiced</span>
+          <span style="font-weight:600;color:var(--green)">${formatCurrency(totalInvoicedValue, 0)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px">
+          <span style="color:var(--hint)">Still to go</span>
+          <span style="font-weight:600;color:var(--amber)">${formatCurrency(totalValueToGo, 0)}</span>
+        </div>
+      </div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Commodities</div>
