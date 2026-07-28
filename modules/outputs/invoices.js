@@ -665,6 +665,7 @@ export function openInvoiceForm(container, existing = null) {
     const unit = getUnit();
     const cropYears = CROP_YEARS;
 
+    const thStyle = 'padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:500';
     div.innerHTML = `
       <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:#f8f9fa;border-bottom:1px solid var(--border)">
         <span style="font-size:12px;font-weight:600;color:var(--hint)">BATCH ${bId}</span>
@@ -673,33 +674,68 @@ export function openInvoiceForm(container, existing = null) {
           <input type="number" class="form-input num b-qty" step="0.001" style="width:100px" value="${data.qty||''}" placeholder="0">
           <span class="b-unit-label" style="font-size:12px;color:var(--hint)">${unit}</span>
         </div>
-        <div style="display:flex;align-items:center;gap:6px">
-          <label style="font-size:11px;color:var(--hint)">Crop year</label>
-          <select class="form-select b-crop-year" style="width:100px">
-            ${cropYears.map(y=>`<option${y===(data.crop_year||getActiveSeason()||'2025-26')?' selected':''}>${y}</option>`).join('')}
-          </select>
-        </div>
         <div style="flex:1"></div>
         <button class="btn-remove-batch btn btn-ghost btn-sm" style="color:var(--red);font-size:13px" title="Remove batch">✕</button>
       </div>
-      <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;min-width:700px">
-          <thead>
-            <tr style="background:#fafafa;border-bottom:1px solid var(--border-light)">
-              <th style="padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:left;min-width:160px">Description</th>
-              <th style="padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:left;min-width:110px">Docket / ID</th>
-              <th style="padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:right;min-width:110px">Amount ($)</th>
-              <th style="padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:right;min-width:90px">Eff. $/unit</th>
-              <th style="padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:left;min-width:150px">Notes</th>
-              <th style="width:30px"></th>
-            </tr>
-          </thead>
-          <tbody class="b-lines"></tbody>
+
+      <!-- Income section -->
+      <div style="padding:8px 12px 0;background:#f0fdf4;border-bottom:1px solid #bbf7d0">
+        <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#166534">Income</span>
+      </div>
+      <div style="overflow-x:auto;background:#f0fdf4">
+        <table style="width:100%;border-collapse:collapse;min-width:600px">
+          <thead><tr style="border-bottom:1px solid #bbf7d0">
+            <th style="${thStyle};text-align:left;min-width:160px">Description</th>
+            <th style="${thStyle};text-align:left;min-width:110px">Docket / ID</th>
+            <th style="${thStyle};text-align:right;min-width:120px">Amount ($)</th>
+            <th style="${thStyle};text-align:right;min-width:90px">Eff. $/unit</th>
+            <th style="${thStyle};text-align:left;min-width:140px">Notes</th>
+            <th style="width:30px"></th>
+          </tr></thead>
+          <tbody class="b-income-lines"></tbody>
         </table>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-top:1px solid var(--border-light);background:#fafafa">
-        <button class="btn btn-ghost btn-sm b-add-line" style="font-size:12px">＋ Add line</button>
-        <div style="font-size:12px;color:var(--hint)">Net: <strong class="b-net" style="color:var(--ink)">$0.00</strong></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+        <button class="btn btn-ghost btn-sm b-add-income" style="font-size:12px;color:#166534">＋ Add income line</button>
+        <div style="font-size:12px;color:#166534">
+          Gross income: <strong class="b-gross" style="color:#166534">$0.00</strong>
+          <span style="color:#86efac;margin:0 6px">|</span>
+          <span class="b-gross-unit" style="color:#166534;font-weight:600">—</span>
+        </div>
+      </div>
+
+      <!-- Expenses section -->
+      <div style="padding:8px 12px 0;background:#fff7ed;border-bottom:1px solid #fed7aa">
+        <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#9a3412">Expenses</span>
+      </div>
+      <div style="overflow-x:auto;background:#fff7ed">
+        <table style="width:100%;border-collapse:collapse;min-width:600px">
+          <thead><tr style="border-bottom:1px solid #fed7aa">
+            <th style="${thStyle};text-align:left;min-width:160px">Description</th>
+            <th style="${thStyle};text-align:left;min-width:110px">Docket / ID</th>
+            <th style="${thStyle};text-align:right;min-width:120px">Amount ($)</th>
+            <th style="${thStyle};text-align:right;min-width:90px">Eff. $/unit</th>
+            <th style="${thStyle};text-align:left;min-width:140px">Notes</th>
+            <th style="width:30px"></th>
+          </tr></thead>
+          <tbody class="b-expense-lines"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:#fff7ed;border-bottom:1px solid var(--border)">
+        <button class="btn btn-ghost btn-sm b-add-expense" style="font-size:12px;color:#9a3412">＋ Add expense line</button>
+        <div style="font-size:12px;color:#9a3412">
+          Total expenses: <strong class="b-expenses" style="color:#9a3412">$0.00</strong>
+          <span style="color:#fed7aa;margin:0 6px">|</span>
+          <span class="b-expenses-unit" style="color:#9a3412;font-weight:600">—</span>
+        </div>
+      </div>
+
+      <!-- Net -->
+      <div style="display:flex;justify-content:flex-end;align-items:center;gap:16px;padding:8px 12px;background:#f8fafc">
+        <span style="font-size:12px;color:var(--hint)">Net:</span>
+        <strong class="b-net" style="font-size:14px;color:var(--ink)">$0.00</strong>
+        <span style="color:var(--border-light)">|</span>
+        <span class="b-net-unit" style="font-size:13px;font-weight:600;color:var(--blue)">—</span>
       </div>
     `;
 
@@ -711,14 +747,12 @@ export function openInvoiceForm(container, existing = null) {
       recalcTotals();
     });
 
-    // Wire qty change → update eff $/unit
-    div.querySelector('.b-qty').addEventListener('input', () => {
-      recalcBatch(div);
-      recalcTotals();
-    });
+    // Wire qty change
+    div.querySelector('.b-qty').addEventListener('input', () => { recalcBatch(div); recalcTotals(); });
 
-    // Wire add line
-    div.querySelector('.b-add-line').addEventListener('click', () => addBatchLine(div));
+    // Wire add income/expense buttons
+    div.querySelector('.b-add-income').addEventListener('click', () => addBatchLine(div, {}, 'income'));
+    div.querySelector('.b-add-expense').addEventListener('click', () => addBatchLine(div, {}, 'expense'));
 
     // Wire unit label update
     masterUnitSel?.addEventListener('change', () => {
@@ -726,74 +760,74 @@ export function openInvoiceForm(container, existing = null) {
     });
 
     // Load existing lines
-    (data.lines || []).forEach(l => addBatchLine(div, l));
-    if (!(data.lines||[]).length) addBatchLine(div);
+    (data.lines || []).forEach(l => addBatchLine(div, l, l.amount >= 0 ? 'income' : 'expense'));
+    if (!(data.lines||[]).length) { addBatchLine(div, {}, 'income'); addBatchLine(div, {}, 'expense'); }
 
     recalcBatch(div);
   }
 
-  function addBatchLine(batchDiv, data = {}) {
-    const tbody = batchDiv.querySelector('.b-lines');
+  function addBatchLine(batchDiv, data = {}, section = 'income') {
+    const tbody = batchDiv.querySelector(section === 'income' ? '.b-income-lines' : '.b-expense-lines');
     const tr = document.createElement('tr');
-    tr.style.borderBottom = '1px solid var(--border-light)';
-    const inS = 'border:1px solid var(--border-light);border-radius:4px;padding:4px 6px;font-size:12px;background:white;width:100%';
+    tr.style.borderBottom = '1px solid ' + (section === 'income' ? '#bbf7d0' : '#fed7aa');
+    const inS = 'border:none;border-bottom:1px solid var(--border-light);border-radius:0;padding:5px 6px;font-size:12px;background:transparent;width:100%';
     const numS = inS + ';text-align:right';
-    const isExpense = data.type === 'expense' || (data.amount < 0);
+    // For expenses, store absolute value and make negative on save
+    const displayAmount = data.amount != null ? Math.abs(data.amount) : '';
 
     tr.innerHTML = `
-      <td style="padding:4px 6px;min-width:160px">
-        <input type="text" class="bl-desc" style="${inS}" value="${data.description||''}" placeholder="e.g. Cotton Lint, Ginning…">
-      </td>
-      <td style="padding:4px 6px;min-width:110px">
-        <input type="text" class="bl-docket" style="${inS}" value="${data.docket||''}" placeholder="Docket">
-      </td>
-      <td style="padding:4px 6px;min-width:110px">
-        <input type="number" class="bl-amount" style="${numS}" step="0.01" value="${data.amount!=null?data.amount:''}" placeholder="0.00">
-      </td>
-      <td style="padding:4px 6px;min-width:90px;text-align:right;font-size:12px;color:var(--hint);font-weight:500">
-        <span class="bl-eff">—</span>
-      </td>
-      <td style="padding:4px 6px;min-width:150px">
-        <input type="text" class="bl-notes" style="${inS}" value="${data.notes||''}" placeholder="Notes…">
-      </td>
-      <td style="padding:4px 6px;text-align:center">
-        <button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:14px" onclick="this.closest('tr').remove();recalcBatch(this.closest('[data-batch-id]'));recalcTotals()">✕</button>
-      </td>
+      <td style="padding:3px 6px;min-width:160px"><input type="text" class="bl-desc" style="${inS}" value="${data.description||''}" placeholder="${section==='income'?'e.g. Cotton Lint, Quality Adj':'e.g. Ginning, CA Levy'}"></td>
+      <td style="padding:3px 6px;min-width:110px"><input type="text" class="bl-docket" style="${inS}" value="${data.docket||''}" placeholder="Docket"></td>
+      <td style="padding:3px 6px;min-width:120px"><input type="number" class="bl-amount" style="${numS}" step="0.01" value="${displayAmount}" placeholder="0.00"></td>
+      <td style="padding:3px 6px;min-width:90px;text-align:right;font-size:12px;font-weight:600"><span class="bl-eff" style="color:var(--hint)">—</span></td>
+      <td style="padding:3px 6px;min-width:140px"><input type="text" class="bl-notes" style="${inS}" value="${data.notes||''}" placeholder="Notes…"></td>
+      <td style="padding:3px 6px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:13px" onclick="this.closest('tr').remove();recalcBatch(this.closest('[data-batch-id]'));recalcTotals()">✕</button></td>
     `;
-
+    tr.dataset.section = section;
     tbody.appendChild(tr);
-
-    // Wire amount change
-    tr.querySelector('.bl-amount').addEventListener('input', () => {
-      recalcBatch(batchDiv);
-      recalcTotals();
-    });
-
+    tr.querySelector('.bl-amount').addEventListener('input', () => { recalcBatch(batchDiv); recalcTotals(); });
     recalcBatch(batchDiv);
   }
 
   function recalcBatch(batchDiv) {
     const qty = parseFloat(batchDiv.querySelector('.b-qty')?.value) || 0;
-    let net = 0;
-    batchDiv.querySelectorAll('.b-lines tr').forEach(tr => {
+    let gross = 0, expenses = 0;
+
+    // Income lines
+    batchDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
       const amount = parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
-      net += amount;
+      gross += amount;
       const effEl = tr.querySelector('.bl-eff');
       if (effEl) {
-        if (qty && amount !== 0) {
-          effEl.textContent = formatCurrency(amount / qty, 2);
-          effEl.style.color = amount < 0 ? 'var(--red)' : 'var(--green)';
-        } else {
-          effEl.textContent = '—';
-          effEl.style.color = 'var(--hint)';
-        }
+        if (qty && amount) { effEl.textContent = formatCurrency(amount/qty, 2); effEl.style.color = '#166534'; }
+        else { effEl.textContent = '—'; effEl.style.color = 'var(--hint)'; }
       }
     });
+
+    // Expense lines
+    batchDiv.querySelectorAll('.b-expense-lines tr').forEach(tr => {
+      const amount = parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
+      expenses += amount;
+      const effEl = tr.querySelector('.bl-eff');
+      if (effEl) {
+        if (qty && amount) { effEl.textContent = '-' + formatCurrency(amount/qty, 2); effEl.style.color = '#9a3412'; }
+        else { effEl.textContent = '—'; effEl.style.color = 'var(--hint)'; }
+      }
+    });
+
+    const net = gross - expenses;
+
+    // Update subtotals
+    const setEl = (cls, val) => { const el = batchDiv.querySelector(cls); if (el) el.textContent = val; };
+    setEl('.b-gross', formatCurrency(gross, 2));
+    setEl('.b-gross-unit', qty ? formatCurrency(gross/qty, 2) + ' / ' + getUnit() : '—');
+    setEl('.b-expenses', formatCurrency(expenses, 2));
+    setEl('.b-expenses-unit', qty ? '-' + formatCurrency(expenses/qty, 2) + ' / ' + getUnit() : '—');
+    setEl('.b-net', formatCurrency(net, 2));
+    setEl('.b-net-unit', qty ? formatCurrency(net/qty, 2) + ' / ' + getUnit() : '—');
+
     const netEl = batchDiv.querySelector('.b-net');
-    if (netEl) {
-      netEl.textContent = formatCurrency(net, 2);
-      netEl.style.color = net < 0 ? 'var(--red)' : 'var(--ink)';
-    }
+    if (netEl) netEl.style.color = net < 0 ? 'var(--red)' : 'var(--ink)';
   }
 
   function recalcTotals() {
@@ -879,22 +913,39 @@ export function openInvoiceForm(container, existing = null) {
 
       batchesWrap.querySelectorAll('[data-batch-id]').forEach(bDiv => {
         const qty = parseFloat(bDiv.querySelector('.b-qty')?.value) || 0;
-        const cropYear = bDiv.querySelector('.b-crop-year')?.value || '';
+        const cropYear = getActiveSeason() || '';
         const lines = [];
-        bDiv.querySelectorAll('.b-lines tr').forEach(tr => {
+
+        // Income lines (amounts are positive)
+        bDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
           const amount = parseFloat(tr.querySelector('.bl-amount')?.value);
-          if (!amount && amount !== 0) return;
-          const line = {
+          if (!amount) return;
+          lines.push({
             description: tr.querySelector('.bl-desc')?.value?.trim() || '',
             docket: tr.querySelector('.bl-docket')?.value?.trim() || '',
-            amount,
+            amount: Math.abs(amount),
             notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
             eff_per_unit: qty ? Math.round((amount / qty) * 10000) / 10000 : null,
-          };
-          lines.push(line);
-          if (amount >= 0) grossTotal += amount;
-          else expensesTotal += amount;
+            type: 'income',
+          });
+          grossTotal += Math.abs(amount);
         });
+
+        // Expense lines (stored as negative)
+        bDiv.querySelectorAll('.b-expense-lines tr').forEach(tr => {
+          const amount = parseFloat(tr.querySelector('.bl-amount')?.value);
+          if (!amount) return;
+          lines.push({
+            description: tr.querySelector('.bl-desc')?.value?.trim() || '',
+            docket: tr.querySelector('.bl-docket')?.value?.trim() || '',
+            amount: -Math.abs(amount),
+            notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
+            eff_per_unit: qty ? Math.round((-Math.abs(amount) / qty) * 10000) / 10000 : null,
+            type: 'expense',
+          });
+          expensesTotal += -Math.abs(amount);
+        });
+
         if (lines.length) batches.push({ qty, crop_year: cropYear, lines });
       });
 
