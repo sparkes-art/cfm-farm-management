@@ -304,9 +304,15 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
               <tr><td colspan="9" style="padding:10px 16px;font-style:italic;color:var(--muted)">No forward contracts</td></tr>
             ` : contractRows.map(row => {
               const contractValue = row.contractedQty * row.price;
-              const filledGross = paidLines
+              // filledGross = sale income + QA for this contract
+              const contractInvoices = paidLines
                 .filter(l => l.invoice?.forward_contract_id === row.c.id)
-                .reduce((s, l) => s + (parseFloat(l.total)||0), 0);
+                .map(l => l.invoice);
+              const uniqueInvoices = [...new Map(contractInvoices.map(i => [i?.id, i])).values()].filter(Boolean);
+              const filledGross = uniqueInvoices.reduce((s, inv) => {
+                // Use gross_amount + quality_adj from invoice totals
+                return s + (parseFloat(inv.gross_amount)||0) + (parseFloat(inv.total_quality_adj)||0);
+              }, 0);
               const stillToGoQty = row.qty;
               const stillToGoGross = stillToGoQty * row.price;
               return `
