@@ -726,17 +726,26 @@ export function openInvoiceForm(container, existing = null) {
       const btn = div.querySelector(btnCls);
       const inp = div.querySelector(inputCls);
       const list = div.querySelector(listCls);
-      btn?.addEventListener('click', () => inp?.click());
-      inp?.addEventListener('change', () => {
-        [...inp.files].forEach(f => {
+      const wrap = btn?.closest('.b-files-wrap');
+
+      function addFiles(fileList) {
+        [...fileList].forEach(f => {
           filesArr.push(f);
           const pill = document.createElement('span');
           pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:var(--page-bg);border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px';
-          pill.innerHTML = '📎 ' + f.name.slice(0,20) + (f.name.length>20?'…':'') + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest(\'span\').remove()">×</span>';
+          pill.innerHTML = '📎 ' + f.name.slice(0,24) + (f.name.length>24?'…':'') + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest(&quot;span&quot;).remove()">×</span>';
           list?.appendChild(pill);
         });
-        inp.value = '';
-      });
+      }
+
+      btn?.addEventListener('click', e => { e.stopPropagation(); inp?.click(); });
+      inp?.addEventListener('change', () => { addFiles(inp.files); inp.value = ''; });
+
+      if (wrap) {
+        wrap.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); wrap.style.borderColor = 'var(--blue)'; wrap.style.background = '#eff6ff'; });
+        wrap.addEventListener('dragleave', e => { wrap.style.borderColor = ''; wrap.style.background = ''; });
+        wrap.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); wrap.style.borderColor = ''; wrap.style.background = ''; addFiles(e.dataTransfer.files); });
+      }
     }
     // Each batch has its own file arrays
     div._incomeFiles = (data.income_files || []).slice();
