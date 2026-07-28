@@ -511,61 +511,15 @@ export function openInvoiceForm(container, existing = null) {
       <div id="f-batches-wrap" style="margin-bottom:16px"></div>
       <button class="btn btn-secondary btn-sm" id="f-add-batch" style="margin-bottom:16px">＋ Add batch</button>
 
-      <!-- Attachments -->
+      <!-- Other documents (for items not tied to a specific batch) -->
       <div style="margin-bottom:16px">
-        <p style="font-size:var(--text-sm);font-weight:600;margin-bottom:10px">Attachments</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-
-          <!-- Merchant RCTI -->
-          <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:10px">
-            <p style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📄 Merchant RCTI</p>
-            <div id="f-rcti-existing" style="margin-bottom:6px">
-              ${(existing?.rcti_files||[]).map((f,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-bottom:3px">
-                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${f.filename||'RCTI '+(i+1)}</span>
-                <a href="${f.url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a>
-              </div>`).join('')}
-              ${existing?.rcti_url&&!(existing?.rcti_files||[]).length?`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-bottom:3px"><span>${existing.rcti_filename||'RCTI'}</span><a href="${existing.rcti_url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a></div>`:''}
-            </div>
-            <div id="f-rcti-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:8px;text-align:center;cursor:pointer;background:var(--page-bg)">
-              <p style="color:var(--muted);font-size:11px">Drop or click to add</p>
-            </div>
-            <input type="file" id="f-rcti-input" multiple accept=".pdf,image/*" style="display:none">
-            <div id="f-rcti-list" style="margin-top:5px"></div>
+        <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border:1px solid var(--border);border-radius:8px;background:var(--page-bg)">
+          <span style="font-size:11px;font-weight:600;color:var(--hint)">📎 Other documents</span>
+          <button id="f-other-attach" class="btn btn-ghost btn-sm" style="font-size:11px">Attach</button>
+          <input type="file" id="f-file-input" multiple accept=".pdf,image/*" style="display:none">
+          <div id="f-file-list" style="display:flex;flex-wrap:wrap;gap:4px;flex:1">
+            ${(existing?.other_files||[]).map(f=>`<a href="${f.url}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;background:white;border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px;text-decoration:none;color:var(--blue)">📎 ${(f.filename||'file').slice(0,20)}</a>`).join('')}
           </div>
-
-          <!-- Ginning Advice -->
-          <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:10px">
-            <p style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">🧾 Ginning Advice / Invoice</p>
-            <div id="f-gin-existing" style="margin-bottom:6px">
-              ${(existing?.gin_files||[]).map((f,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-bottom:3px">
-                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${f.filename||'Gin '+(i+1)}</span>
-                <a href="${f.url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a>
-              </div>`).join('')}
-              ${existing?.gin_url&&!(existing?.gin_files||[]).length?`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-bottom:3px"><span>${existing.gin_filename||'Gin Advice'}</span><a href="${existing.gin_url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a></div>`:''}
-            </div>
-            <div id="f-gin-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:8px;text-align:center;cursor:pointer;background:var(--page-bg)">
-              <p style="color:var(--muted);font-size:11px">Drop or click to add</p>
-            </div>
-            <input type="file" id="f-gin-input" multiple accept=".pdf,image/*" style="display:none">
-            <div id="f-gin-list" style="margin-top:5px"></div>
-          </div>
-
-          <!-- Other -->
-          <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:10px">
-            <p style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">📎 Other documents</p>
-            <div id="f-other-existing" style="margin-bottom:6px">
-              ${(existing?.other_files||[]).map((f,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-bottom:3px">
-                <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${f.filename||'Doc '+(i+1)}</span>
-                <a href="${f.url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:4px">View</a>
-              </div>`).join('')}
-            </div>
-            <div id="f-drop-zone" style="border:1.5px dashed var(--border);border-radius:6px;padding:8px;text-align:center;cursor:pointer;background:var(--page-bg)">
-              <p style="color:var(--muted);font-size:11px">Drop or click to add</p>
-            </div>
-            <input type="file" id="f-file-input" multiple accept=".pdf,image/*" style="display:none">
-            <div id="f-file-list" style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px"></div>
-          </div>
-
         </div>
       </div>
 
@@ -667,6 +621,7 @@ export function openInvoiceForm(container, existing = null) {
 
     const thStyle = 'padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:500';
     div.innerHTML = `
+      <!-- Batch header -->
       <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:#f8f9fa;border-bottom:1px solid var(--border)">
         <span style="font-size:12px;font-weight:600;color:var(--hint)">BATCH ${bId}</span>
         <div style="display:flex;align-items:center;gap:6px">
@@ -679,17 +634,22 @@ export function openInvoiceForm(container, existing = null) {
       </div>
 
       <!-- Income section -->
-      <div style="padding:8px 12px 4px;border-bottom:1px solid var(--border-light)">
-        <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#166534">Income</span>
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--border-light)">
+        <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#166534;min-width:60px">Income</span>
+        <input type="text" class="b-income-docket form-input" style="width:130px;font-size:12px;padding:3px 8px" placeholder="Docket / ID" value="${data.income_docket||''}">
+        <div class="b-income-files-wrap" style="display:flex;align-items:center;gap:6px;flex:1">
+          <button class="b-income-attach btn btn-ghost btn-sm" style="font-size:11px">📄 Attach</button>
+          <input type="file" class="b-income-file-input" multiple accept=".pdf,image/*" style="display:none">
+          <div class="b-income-file-list" style="display:flex;flex-wrap:wrap;gap:4px;flex:1"></div>
+        </div>
       </div>
       <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;min-width:600px">
+        <table style="width:100%;border-collapse:collapse">
           <thead><tr style="border-bottom:1px solid var(--border-light);background:#fafafa">
-            <th style="${thStyle};text-align:left;min-width:160px">Description</th>
-            <th style="${thStyle};text-align:left;min-width:110px">Docket / ID</th>
-            <th style="${thStyle};text-align:right;min-width:120px">Amount ($)</th>
-            <th style="${thStyle};text-align:right;min-width:90px">Eff. $/unit</th>
-            <th style="${thStyle};text-align:left;min-width:140px">Notes</th>
+            <th style="${thStyle};text-align:left;min-width:180px">Description</th>
+            <th style="${thStyle};text-align:right;min-width:130px">Amount ($)</th>
+            <th style="${thStyle};text-align:right;min-width:100px">Eff. $/unit</th>
+            <th style="${thStyle};text-align:left;min-width:150px">Notes</th>
             <th style="width:30px"></th>
           </tr></thead>
           <tbody class="b-income-lines"></tbody>
@@ -699,23 +659,28 @@ export function openInvoiceForm(container, existing = null) {
         <button class="btn btn-ghost btn-sm b-add-income" style="font-size:12px;color:#166534">＋ Add income line</button>
         <div style="font-size:12px;color:#166534">
           Gross income: <strong class="b-gross" style="color:#166534">$0.00</strong>
-          <span style="color:#86efac;margin:0 6px">|</span>
+          <span style="color:var(--border);margin:0 6px">|</span>
           <span class="b-gross-unit" style="color:#166534;font-weight:600">—</span>
         </div>
       </div>
 
       <!-- Expenses section -->
-      <div style="padding:8px 12px 4px;border-bottom:1px solid var(--border-light)">
-        <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#9a3412">Expenses</span>
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--border-light)">
+        <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#9a3412;min-width:60px">Expenses</span>
+        <input type="text" class="b-expense-docket form-input" style="width:130px;font-size:12px;padding:3px 8px" placeholder="Docket / ID" value="${data.expense_docket||''}">
+        <div class="b-expense-files-wrap" style="display:flex;align-items:center;gap:6px;flex:1">
+          <button class="b-expense-attach btn btn-ghost btn-sm" style="font-size:11px">🧾 Attach</button>
+          <input type="file" class="b-expense-file-input" multiple accept=".pdf,image/*" style="display:none">
+          <div class="b-expense-file-list" style="display:flex;flex-wrap:wrap;gap:4px;flex:1"></div>
+        </div>
       </div>
       <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;min-width:600px">
+        <table style="width:100%;border-collapse:collapse">
           <thead><tr style="border-bottom:1px solid var(--border-light);background:#fafafa">
-            <th style="${thStyle};text-align:left;min-width:160px">Description</th>
-            <th style="${thStyle};text-align:left;min-width:110px">Docket / ID</th>
-            <th style="${thStyle};text-align:right;min-width:120px">Amount ($)</th>
-            <th style="${thStyle};text-align:right;min-width:90px">Eff. $/unit</th>
-            <th style="${thStyle};text-align:left;min-width:140px">Notes</th>
+            <th style="${thStyle};text-align:left;min-width:180px">Description</th>
+            <th style="${thStyle};text-align:right;min-width:130px">Amount ($)</th>
+            <th style="${thStyle};text-align:right;min-width:100px">Eff. $/unit</th>
+            <th style="${thStyle};text-align:left;min-width:150px">Notes</th>
             <th style="width:30px"></th>
           </tr></thead>
           <tbody class="b-expense-lines"></tbody>
@@ -725,7 +690,7 @@ export function openInvoiceForm(container, existing = null) {
         <button class="btn btn-ghost btn-sm b-add-expense" style="font-size:12px;color:#9a3412">＋ Add expense line</button>
         <div style="font-size:12px;color:#9a3412">
           Total expenses: <strong class="b-expenses" style="color:#9a3412">$0.00</strong>
-          <span style="color:#fed7aa;margin:0 6px">|</span>
+          <span style="color:var(--border);margin:0 6px">|</span>
           <span class="b-expenses-unit" style="color:#9a3412;font-weight:600">—</span>
         </div>
       </div>
@@ -734,7 +699,7 @@ export function openInvoiceForm(container, existing = null) {
       <div style="display:flex;justify-content:flex-end;align-items:center;gap:16px;padding:8px 12px;background:#f8fafc">
         <span style="font-size:12px;color:var(--hint)">Net:</span>
         <strong class="b-net" style="font-size:14px;color:var(--ink)">$0.00</strong>
-        <span style="color:var(--border-light)">|</span>
+        <span style="color:var(--border)">|</span>
         <span class="b-net-unit" style="font-size:13px;font-weight:600;color:var(--blue)">—</span>
       </div>
     `;
@@ -753,6 +718,42 @@ export function openInvoiceForm(container, existing = null) {
     // Wire add income/expense buttons
     div.querySelector('.b-add-income').addEventListener('click', () => addBatchLine(div, {}, 'income'));
     div.querySelector('.b-add-expense').addEventListener('click', () => addBatchLine(div, {}, 'expense'));
+
+    // Wire attach buttons
+    function wireAttach(btnCls, inputCls, listCls, filesArr) {
+      const btn = div.querySelector(btnCls);
+      const inp = div.querySelector(inputCls);
+      const list = div.querySelector(listCls);
+      btn?.addEventListener('click', () => inp?.click());
+      inp?.addEventListener('change', () => {
+        [...inp.files].forEach(f => {
+          filesArr.push(f);
+          const pill = document.createElement('span');
+          pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:var(--page-bg);border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px';
+          pill.innerHTML = '📎 ' + f.name.slice(0,20) + (f.name.length>20?'…':'') + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest('span').remove()">×</span>';
+          list?.appendChild(pill);
+        });
+        inp.value = '';
+      });
+    }
+    // Each batch has its own file arrays
+    div._incomeFiles = (data.income_files || []).slice();
+    div._expenseFiles = (data.expense_files || []).slice();
+    wireAttach('.b-income-attach', '.b-income-file-input', '.b-income-file-list', div._incomeFiles);
+    wireAttach('.b-expense-attach', '.b-expense-file-input', '.b-expense-file-list', div._expenseFiles);
+
+    // Show existing files
+    ['income','expense'].forEach(sec => {
+      const existing = data[sec+'_files'] || [];
+      const list = div.querySelector('.b-'+sec+'-file-list');
+      existing.forEach(f => {
+        const pill = document.createElement('a');
+        pill.href = f.url; pill.target = '_blank';
+        pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:var(--page-bg);border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px;text-decoration:none;color:var(--blue)';
+        pill.textContent = '📎 ' + (f.filename||'file').slice(0,20);
+        list?.appendChild(pill);
+      });
+    });
 
     // Wire unit label update
     masterUnitSel?.addEventListener('change', () => {
@@ -776,11 +777,10 @@ export function openInvoiceForm(container, existing = null) {
     const displayAmount = data.amount != null ? Math.abs(data.amount) : '';
 
     tr.innerHTML = `
-      <td style="padding:3px 6px;min-width:160px"><input type="text" class="bl-desc" style="${inS}" value="${data.description||''}" placeholder="${section==='income'?'e.g. Cotton Lint, Quality Adj':'e.g. Ginning, CA Levy'}"></td>
-      <td style="padding:3px 6px;min-width:110px"><input type="text" class="bl-docket" style="${inS}" value="${data.docket||''}" placeholder="Docket"></td>
-      <td style="padding:3px 6px;min-width:120px"><input type="number" class="bl-amount" style="${numS}" step="0.01" value="${displayAmount}" placeholder="0.00"></td>
+      <td style="padding:3px 6px;min-width:180px"><input type="text" class="bl-desc" style="${inS}" value="${data.description||''}" placeholder="${section==='income'?'e.g. Cotton Lint, Quality Adj':'e.g. Ginning, CA Levy'}"></td>
+      <td style="padding:3px 6px;min-width:130px"><input type="number" class="bl-amount" style="${numS}" step="0.01" value="${displayAmount}" placeholder="0.00"></td>
       <td style="padding:3px 6px;min-width:100px"><input type="number" class="bl-eff" style="${numS};color:var(--hint)" step="0.0001" value="${data.eff_per_unit!=null?Math.abs(data.eff_per_unit):''}" placeholder="0.00"></td>
-      <td style="padding:3px 6px;min-width:140px"><input type="text" class="bl-notes" style="${inS}" value="${data.notes||''}" placeholder="Notes…"></td>
+      <td style="padding:3px 6px;min-width:150px"><input type="text" class="bl-notes" style="${inS}" value="${data.notes||''}" placeholder="Notes…"></td>
       <td style="padding:3px 6px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:13px" onclick="this.closest('tr').remove();recalcBatch(this.closest('[data-batch-id]'));recalcTotals()">✕</button></td>
     `;
     tr.dataset.section = section;
@@ -846,19 +846,20 @@ export function openInvoiceForm(container, existing = null) {
   function recalcTotals() {
     let gross = 0, expenses = 0;
     batchesWrap.querySelectorAll('[data-batch-id]').forEach(bDiv => {
-      bDiv.querySelectorAll('.b-lines tr').forEach(tr => {
-        const amount = parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
-        if (amount >= 0) gross += amount;
-        else expenses += amount;
+      bDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
+        gross += parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
+      });
+      bDiv.querySelectorAll('.b-expense-lines tr').forEach(tr => {
+        expenses += parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
       });
     });
-    const net = gross + expenses;
+    const net = gross - expenses;
     const tg = modal.querySelector('#t-gross');
     const td = modal.querySelector('#t-ded');
     const tn = modal.querySelector('#t-net');
     const tt = modal.querySelector('#t-total');
     if (tg) tg.textContent = formatCurrency(gross, 2);
-    if (td) td.textContent = expenses ? formatCurrency(expenses, 2) : '—';
+    if (td) td.textContent = expenses ? '-' + formatCurrency(expenses, 2) : '—';
     if (tn) tn.textContent = formatCurrency(net, 2);
     if (tt) tt.textContent = formatCurrency(net, 2);
   }
@@ -901,16 +902,21 @@ export function openInvoiceForm(container, existing = null) {
     });
   }
 
-  wireMultiZone('f-rcti-zone', 'f-rcti-input', rctiFiles, 'f-rcti-list');
-  wireMultiZone('f-gin-zone', 'f-gin-input', ginFiles, 'f-gin-list');
-
-  const dropZone = modal.querySelector('#f-drop-zone');
+  // Wire other documents
+  const otherAttachBtn = modal.querySelector('#f-other-attach');
   const fileInput = modal.querySelector('#f-file-input');
-  dropZone?.addEventListener('click', () => fileInput.click());
-  dropZone?.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor='var(--blue)'; });
-  dropZone?.addEventListener('dragleave', () => dropZone.style.borderColor='');
-  dropZone?.addEventListener('drop', e => { e.preventDefault(); dropZone.style.borderColor=''; addToSection(e.dataTransfer.files, attachments, 'f-file-list'); });
-  fileInput?.addEventListener('change', () => { addToSection(fileInput.files, attachments, 'f-file-list'); fileInput.value=''; });
+  const fileList = modal.querySelector('#f-file-list');
+  otherAttachBtn?.addEventListener('click', () => fileInput?.click());
+  fileInput?.addEventListener('change', () => {
+    [...fileInput.files].forEach(f => {
+      attachments.push(f);
+      const pill = document.createElement('span');
+      pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:white;border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px';
+      pill.innerHTML = '📎 ' + f.name.slice(0,20) + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest('span').remove()">×</span>';
+      fileList?.appendChild(pill);
+    });
+    fileInput.value = '';
+  });
 
 
   modal.querySelector('#f-save').addEventListener('click', async () => {
@@ -924,43 +930,68 @@ export function openInvoiceForm(container, existing = null) {
       const batches = [];
       let grossTotal = 0, expensesTotal = 0;
 
-      batchesWrap.querySelectorAll('[data-batch-id]').forEach(bDiv => {
+      // Upload batch files
+      const uploadFile2 = async (file, prefix) => {
+        const path = `invoices/${farm.id}/${Date.now()}_${prefix}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+        const contentType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+        const res = await fetch(`https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/cfm-documents/${path}`, {
+          method: 'POST',
+          headers: { 'apikey': window.__CFM_ANON_KEY, 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': contentType, 'x-upsert': 'true' },
+          body: file,
+        });
+        if (!res.ok) { const e = await res.text(); throw new Error(`Upload failed (${res.status}): ${e}`); }
+        return { url: `https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/public/cfm-documents/${path}`, filename: file.name };
+      };
+
+      for (const bDiv of batchesWrap.querySelectorAll('[data-batch-id]')) {
         const qty = parseFloat(bDiv.querySelector('.b-qty')?.value) || 0;
         const cropYear = getActiveSeason() || '';
+        const incomeDocket = bDiv.querySelector('.b-income-docket')?.value?.trim() || '';
+        const expenseDocket = bDiv.querySelector('.b-expense-docket')?.value?.trim() || '';
         const lines = [];
 
-        // Income lines (amounts are positive)
+        // Upload income files
+        const existingIncomeFiles = (existing?.batches||[]).find((_,i)=>i===Array.from(batchesWrap.querySelectorAll('[data-batch-id]')).indexOf(bDiv))?.income_files || [];
+        const newIncomeUploads = await Promise.all((bDiv._incomeFiles||[]).map(f => uploadFile2(f, 'rcti')));
+        const allIncomeFiles = [...existingIncomeFiles, ...newIncomeUploads];
+
+        // Upload expense files
+        const existingExpenseFiles = (existing?.batches||[]).find((_,i)=>i===Array.from(batchesWrap.querySelectorAll('[data-batch-id]')).indexOf(bDiv))?.expense_files || [];
+        const newExpenseUploads = await Promise.all((bDiv._expenseFiles||[]).map(f => uploadFile2(f, 'gin')));
+        const allExpenseFiles = [...existingExpenseFiles, ...newExpenseUploads];
+
+        // Income lines
         bDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
           const amount = parseFloat(tr.querySelector('.bl-amount')?.value);
           if (!amount) return;
           lines.push({
             description: tr.querySelector('.bl-desc')?.value?.trim() || '',
-            docket: tr.querySelector('.bl-docket')?.value?.trim() || '',
+            docket: incomeDocket,
             amount: Math.abs(amount),
             notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
-            eff_per_unit: parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((amount / qty) * 10000) / 10000 : null),
+            eff_per_unit: parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((amount/qty)*10000)/10000 : null),
             type: 'income',
           });
           grossTotal += Math.abs(amount);
         });
 
-        // Expense lines (stored as negative)
+        // Expense lines
         bDiv.querySelectorAll('.b-expense-lines tr').forEach(tr => {
           const amount = parseFloat(tr.querySelector('.bl-amount')?.value);
           if (!amount) return;
           lines.push({
             description: tr.querySelector('.bl-desc')?.value?.trim() || '',
-            docket: tr.querySelector('.bl-docket')?.value?.trim() || '',
+            docket: expenseDocket,
             amount: -Math.abs(amount),
             notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
-            eff_per_unit: -(parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((Math.abs(amount) / qty) * 10000) / 10000 : null)),
+            eff_per_unit: -(parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((Math.abs(amount)/qty)*10000)/10000 : null)),
             type: 'expense',
           });
           expensesTotal += -Math.abs(amount);
         });
 
-        if (lines.length) batches.push({ qty, crop_year: cropYear, lines });
-      });
+        if (lines.length) batches.push({ qty, crop_year: cropYear, income_docket: incomeDocket, expense_docket: expenseDocket, income_files: allIncomeFiles, expense_files: allExpenseFiles, lines });
+      }
 
       const netAmount = grossTotal + expensesTotal;
       const masterUnit = modal.querySelector('#f-master-unit')?.value || 'bale';
@@ -1002,34 +1033,11 @@ export function openInvoiceForm(container, existing = null) {
       if (!row.invoice_date) throw new Error('Please enter a date');
       if (!batches.length) throw new Error('Please add at least one batch');
 
-      // Upload attachments
-      const uploadFile2 = async (file, prefix) => {
-        const path = `invoices/${farm.id}/${Date.now()}_${prefix}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
-        const contentType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
-        const res = await fetch(`https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/cfm-documents/${path}`, {
-          method: 'POST',
-          headers: { 'apikey': window.__CFM_ANON_KEY, 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': contentType, 'x-upsert': 'true' },
-          body: file,
-        });
-        if (!res.ok) {
-          const errText = await res.text();
-          console.error('Upload failed:', res.status, errText, 'Path:', path);
-          throw new Error(`Upload failed (${res.status}): ${errText}`);
-        }
-        return { url: `https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/public/cfm-documents/${path}`, filename: file.name };
-      };
-
-      const existingRctiFiles = existing?.rcti_files || (existing?.rcti_url ? [{ url: existing.rcti_url, filename: existing.rcti_filename }] : []);
-      const newRctiUploads = await Promise.all(rctiFiles.map(f => uploadFile2(f, 'rcti')));
-      const allRctiFiles = [...existingRctiFiles, ...newRctiUploads];
-
-      const existingGinFiles = existing?.gin_files || (existing?.gin_url ? [{ url: existing.gin_url, filename: existing.gin_filename }] : []);
-      const newGinUploads = await Promise.all(ginFiles.map(f => uploadFile2(f, 'gin')));
-      const allGinFiles = [...existingGinFiles, ...newGinUploads];
-
+      // Collect all files from batches for legacy fields
+      const allRctiFiles = batches.flatMap(b => b.income_files || []);
+      const allGinFiles = batches.flatMap(b => b.expense_files || []);
       const otherUploads = await Promise.all(attachments.map(f => uploadFile2(f, 'other')));
-      const existingOtherFiles = existing?.other_files || [];
-      const allOtherFiles = [...existingOtherFiles, ...otherUploads];
+      const allOtherFiles = [...(existing?.other_files||[]), ...otherUploads];
 
       row.rcti_files = allRctiFiles;
       row.gin_files = allGinFiles;
