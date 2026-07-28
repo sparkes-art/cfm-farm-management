@@ -637,10 +637,11 @@ export function openInvoiceForm(container, existing = null) {
       <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--border-light)">
         <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#166534;min-width:60px">Income</span>
         <input type="text" class="b-income-docket form-input" style="width:130px;font-size:12px;padding:3px 8px" placeholder="Docket / ID" value="${data.income_docket||''}">
-        <div class="b-income-files-wrap" style="display:flex;align-items:center;gap:6px;flex:1">
-          <button class="b-income-attach btn btn-ghost btn-sm" style="font-size:11px">📄 Attach</button>
+        <div class="b-income-files-wrap b-files-wrap" style="display:flex;align-items:center;gap:6px;flex:1;border:1.5px dashed var(--border);border-radius:6px;padding:4px 8px;min-height:32px;cursor:pointer" title="Drop files here or click Attach">
+          <button class="b-income-attach btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap">📄 Attach</button>
           <input type="file" class="b-income-file-input" multiple accept=".pdf,image/*" style="display:none">
           <div class="b-income-file-list" style="display:flex;flex-wrap:wrap;gap:4px;flex:1"></div>
+          <span style="font-size:10px;color:var(--hint);white-space:nowrap">Drop files here</span>
         </div>
       </div>
       <div style="overflow-x:auto">
@@ -668,10 +669,11 @@ export function openInvoiceForm(container, existing = null) {
       <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--border-light)">
         <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#9a3412;min-width:60px">Expenses</span>
         <input type="text" class="b-expense-docket form-input" style="width:130px;font-size:12px;padding:3px 8px" placeholder="Docket / ID" value="${data.expense_docket||''}">
-        <div class="b-expense-files-wrap" style="display:flex;align-items:center;gap:6px;flex:1">
-          <button class="b-expense-attach btn btn-ghost btn-sm" style="font-size:11px">🧾 Attach</button>
+        <div class="b-expense-files-wrap b-files-wrap" style="display:flex;align-items:center;gap:6px;flex:1;border:1.5px dashed var(--border);border-radius:6px;padding:4px 8px;min-height:32px;cursor:pointer" title="Drop files here or click Attach">
+          <button class="b-expense-attach btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap">🧾 Attach</button>
           <input type="file" class="b-expense-file-input" multiple accept=".pdf,image/*" style="display:none">
           <div class="b-expense-file-list" style="display:flex;flex-wrap:wrap;gap:4px;flex:1"></div>
+          <span style="font-size:10px;color:var(--hint);white-space:nowrap">Drop files here</span>
         </div>
       </div>
       <div style="overflow-x:auto">
