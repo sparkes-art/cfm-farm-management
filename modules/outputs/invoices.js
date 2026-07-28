@@ -411,8 +411,6 @@ export function openInvoiceForm(container, existing = null) {
   let saleType = existing?.sale_type === 'against_contract' ? 'contract' : (existing?.sale_type || 'contract');
   let lines = existing?.line_items ? JSON.parse(JSON.stringify(existing.line_items)) : [];
   let deductions = existing?.deductions ? JSON.parse(JSON.stringify(existing.deductions)) : [];
-  let lastEdited = {}; // per line: 'price' or 'total'
-  let attachments = [];
 
   const formEl = document.createElement('div');
   formEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:500;overflow-y:auto;padding:20px';
