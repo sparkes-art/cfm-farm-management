@@ -879,7 +879,9 @@ export function openInvoiceForm(container, existing = null) {
   modal.querySelector('#f-add-batch')?.addEventListener('click', () => addBatch());
 
   // Load existing batches or start with one empty
-  const existingBatches = existing?.batches;
+  const existingBatches = existing?.batches
+    ? (typeof existing.batches === 'string' ? JSON.parse(existing.batches) : existing.batches)
+    : null;
   if (existingBatches?.length) {
     existingBatches.forEach(b => addBatch(b));
   } else {
@@ -1042,7 +1044,7 @@ export function openInvoiceForm(container, existing = null) {
         gross_amount: grossTotal,
         total_deductions: Math.abs(expensesTotal),
         net_amount: netAmount,
-        total_quality_adj: 0,
+        total_quality_adj: batches.flatMap(b => b.lines.filter(l => l.type==='income' && /quality|adj/i.test(l.description||'')).map(l => l.amount)).reduce((s,v)=>s+v, 0) || 0,
         status: 'pending',
         notes: modal.querySelector('#f-notes')?.value?.trim() || '',
       };
