@@ -181,16 +181,36 @@ exports.handler = async (event) => {
       const commodityId = '2855dd1b-158e-4c03-93da-aa650c03fcf3';
 
       if (commodityId) {
-        // Use cottonRegion setting to pick the right region row, default to Darling Downs
-        const marketRows = rows.map(r => ({
-          commodity_id: commodityId,
-          farm_id: null,
-          price_date: r.price_date,
-          price_per_unit: r.price_aud,
-          region: r.region,
-          grade: r.crop_year,
-          source: 'LDC',
-        }));
+        // Look up all farms' cottonRegion settings to filter relevant prices
+        const farmsRes = await fetch(`${SUPABASE_URL}/rest/v1/farms?select=id,settings`, {
+          headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
+        });
+        const farms = farmsRes.ok ? await farmsRes.json() : [];
+        const farmRegions = farms
+          .map(f => ({ farm_id: f.id, region: (f.settings?.cottonRegion || '').toLowerCase().trim() }))
+          .filter(f => f.region);
+
+        // Build one market_prices row per farm per crop_year that matches their region
+        const marketRows = [];
+        for (const row of rows) {
+          const rowRegion = (row.region || '').toLowerCase().trim();
+          // Always store the row — but tag with matching farm_id if found
+          const matchingFarm = farmRegions.find(f =>
+            rowRegion.includes(f.region) || f.region.includes(rowRegion)
+          );
+          // Only store rows that match at least one farm's region
+          if (matchingFarm || farmRegions.length === 0) {
+            marketRows.push({
+              commodity_id: commodityId,
+              farm_id: matchingFarm?.farm_id || null,
+              price_date: row.price_date,
+              price_per_unit: row.price_aud,
+              region: row.region,
+              grade: String(row.crop_year),
+              source: 'LDC',
+            });
+          }
+        }
 
         const mpRes = await fetch(`${SUPABASE_URL}/rest/v1/market_prices`, {
           method: 'POST',
