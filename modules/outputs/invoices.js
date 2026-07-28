@@ -730,7 +730,7 @@ export function openInvoiceForm(container, existing = null) {
           filesArr.push(f);
           const pill = document.createElement('span');
           pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:var(--page-bg);border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px';
-          pill.innerHTML = '📎 ' + f.name.slice(0,20) + (f.name.length>20?'…':'') + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest('span').remove()">×</span>';
+          pill.innerHTML = '📎 ' + f.name.slice(0,20) + (f.name.length>20?'…':'') + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest(\'span\').remove()">×</span>';
           list?.appendChild(pill);
         });
         inp.value = '';
@@ -912,7 +912,7 @@ export function openInvoiceForm(container, existing = null) {
       attachments.push(f);
       const pill = document.createElement('span');
       pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:white;border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px';
-      pill.innerHTML = '📎 ' + f.name.slice(0,20) + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest('span').remove()">×</span>';
+      pill.innerHTML = '📎 ' + f.name.slice(0,20) + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest(&quot;span&quot;).remove()">×</span>';
       fileList?.appendChild(pill);
     });
     fileInput.value = '';
