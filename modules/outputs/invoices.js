@@ -157,7 +157,7 @@ function _renderTable(container) {
       <thead>
         <tr>
           <th>Date</th>
-          <th>Season</th>
+          <!-- Season hidden -->
           <th>Type</th>
           <th>Buyer</th>
           <th>Commodities</th>
@@ -192,9 +192,9 @@ function _renderTable(container) {
                   const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
                   const qty = b.reduce((s,x) => s+(parseFloat(x.qty)||0), 0);
                   const unit = inv.master_unit || '';
-                  return qty ? formatNumber(qty,3)+' '+unit : '—';
+                  return qty ? formatNumber(qty,2)+' '+unit : '—';
                 }
-                return inv.total_qty ? formatNumber(inv.total_qty,3)+' '+(inv.master_unit||'') : '—';
+                return inv.total_qty ? formatNumber(inv.total_qty,2)+' '+(inv.master_unit||'') : '—';
               })()}</td>
               <td class="num">${formatCurrency(inv.gross_amount, 0)}</td>
               <td class="num" style="color:${(inv.total_quality_adj||0)>0?'var(--green)':(inv.total_quality_adj||0)<0?'var(--red)':'inherit'}">${inv.total_quality_adj ? ((inv.total_quality_adj>0?'+':'')+formatCurrency(inv.total_quality_adj,0)) : '—'}</td>
@@ -214,13 +214,7 @@ function _renderTable(container) {
                 })()}
               </td>
               <td class="muted text-sm">
-                ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" 
-                  value="${inv.xero_invoice_number || ''}" 
-                  placeholder="—"
-                  style="border:none;background:transparent;color:var(--muted);font-size:var(--text-sm);width:100%;cursor:text;padding:0"
-                  onfocus="this.style.background='var(--white)';this.style.border='1px solid var(--blue)';this.style.borderRadius='4px';this.style.padding='2px 6px'"
-                  onblur="this.style.background='transparent';this.style.border='none';this.style.padding='0'"
-                >` : inv.xero_invoice_number || '—'}
+                ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" value="${inv.xero_invoice_number || ''}" style="border:none;background:transparent;width:80px;font-size:11px;color:var(--hint)" placeholder="—">` : inv.xero_invoice_number || '—'}
               </td>
               <td>
                 <span class="badge ${inv.status === 'complete' ? 'badge-paid' : 'badge-amber'}" style="${inv.status !== 'complete' ? 'background:var(--amber-light);color:var(--amber-text)' : ''}">
