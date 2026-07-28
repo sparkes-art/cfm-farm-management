@@ -473,11 +473,12 @@ export function openInvoiceForm(container, existing = null) {
             ${_contracts.map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" data-buyer="${c.counterparty||c.buyer||''}" ${existing?.forward_contract_id===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}</option>`).join('')}
           </select>
         </div>
-        <div id="f-contract-summary" style="display:none;grid-template-columns:repeat(4,1fr);gap:10px;background:var(--blue-light);border-radius:var(--radius-sm);padding:12px;margin-top:8px">
+        <div id="f-contract-summary" style="display:none;grid-template-columns:repeat(4,1fr) 1.2fr;gap:10px;background:var(--blue-light);border-radius:var(--radius-sm);padding:12px;margin-top:8px">
           <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Contract qty</p><p id="cs-qty" style="font-weight:600;color:var(--blue-text)">—</p></div>
           <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Already invoiced</p><p id="cs-invoiced" style="font-weight:600;color:var(--blue-text)">—</p></div>
           <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Remaining</p><p id="cs-remaining" style="font-weight:600;color:var(--blue)">—</p></div>
           <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Avg price to date</p><p id="cs-avg" style="font-weight:600;color:var(--blue-text)">—</p></div>
+          <div style="border-left:2px solid var(--blue);padding-left:10px"><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Contract price</p><p id="cs-price" style="font-size:18px;font-weight:700;color:var(--blue)">—</p></div>
         </div>
       </div>
 
@@ -635,6 +636,8 @@ export function openInvoiceForm(container, existing = null) {
     if (ci) ci.textContent = formatNumber(invoicedQty, 0) + ' ' + unit;
     if (cr) cr.textContent = formatNumber(Math.max(0, qty - invoicedQty), 0) + ' ' + unit;
     if (ca) ca.textContent = invoicedQty ? formatCurrency(invoicedVal / invoicedQty, 2) : '—';
+    const cp = modal.querySelector('#cs-price');
+    if (cp) cp.textContent = c.price_per_unit ? formatCurrency(c.price_per_unit, 2) + ' / ' + (c.unit||'unit') : '—';
     // Auto-fill buyer
     const buyerField = modal.querySelector('#f-buyer');
     const opt = contractSel.options[contractSel.selectedIndex];
@@ -899,6 +902,11 @@ export function openInvoiceForm(container, existing = null) {
       const masterUnit = modal.querySelector('#f-master-unit')?.value || 'bale';
       const totalQty = batches.reduce((s, b) => s + (b.qty || 0), 0);
 
+      // Get commodity from selected contract
+      const contractId = modal.querySelector('#f-contract')?.value;
+      const selectedContract = _contracts.find(c => c.id === contractId);
+      const contractCommodity = selectedContract?.commodity || null;
+
       const row = {
         farm_id: farm.id,
         buyer: modal.querySelector('#f-buyer')?.value?.trim() || '',
@@ -909,8 +917,9 @@ export function openInvoiceForm(container, existing = null) {
         master_unit: masterUnit,
         batches,
         // Keep legacy fields for display + filter compatibility
+        // Commodity comes from the contract, not the description
         line_items: batches.flatMap(b => b.lines.filter(l => l.amount >= 0).map(l => ({
-          commodity: l.description, docket: l.docket, qty: b.qty, unit: masterUnit,
+          commodity: contractCommodity || l.description, docket: l.docket, qty: b.qty, unit: masterUnit,
           season: b.crop_year, total: l.amount, price: b.qty ? l.amount/b.qty : 0, notes: l.notes,
         }))),
         deductions: batches.flatMap(b => b.lines.filter(l => l.amount < 0).map(l => ({
