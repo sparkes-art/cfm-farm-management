@@ -120,7 +120,7 @@ function _renderTable(container) {
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total qty</div>
         <div style="font-size:18px;font-weight:600;color:var(--ink)">${(() => {
           const qty = rows.reduce((s,i) => {
-            if (i.batches) { const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches; return s+b.reduce((ss,x)=>ss+(parseFloat(x.qty)||0),0); }
+            if (i.batches) { const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches; return s+b.filter(x=>(x.lines||[]).some(l=>l.type==='income')).reduce((ss,x)=>ss+(parseFloat(x.qty)||0),0); }
             return s+(parseFloat(i.total_qty)||0);
           }, 0);
           const units = [...new Set(rows.map(i=>i.master_unit).filter(Boolean))];
@@ -186,7 +186,7 @@ function _renderTable(container) {
               <td class="num text-sm">${(() => {
                 if (inv.batches && inv.batches.length) {
                   const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-                  const qty = b.reduce((s,x) => s+(parseFloat(x.qty)||0), 0);
+                  const qty = b.filter(x => (x.lines||[]).some(l => l.type==='income')).reduce((s,x) => s+(parseFloat(x.qty)||0), 0);
                   const unit = inv.master_unit || '';
                   return qty ? formatNumber(qty,2)+' '+unit : '—';
                 }
@@ -1048,7 +1048,7 @@ export function openInvoiceForm(container, existing = null) {
 
       const netAmount = grossTotal + expensesTotal;
       const masterUnit = modal.querySelector('#f-master-unit')?.value || 'bale';
-      const totalQty = batches.reduce((s, b) => s + (b.qty || 0), 0);
+
 
       // Get commodity from selected contract
       const contractId = modal.querySelector('#f-contract')?.value;
@@ -1074,7 +1074,7 @@ export function openInvoiceForm(container, existing = null) {
           description: l.description, docket: l.docket, qty: b.qty, unit: masterUnit,
           season: b.crop_year, value: Math.abs(l.amount), rate: b.qty ? Math.abs(l.amount)/b.qty : 0, notes: l.notes,
         }))),
-        total_qty: totalQty,
+        total_qty: batches.filter(b => b.lines.some(l => l.type === 'income')).reduce((s,b) => s+(parseFloat(b.qty)||0), 0),
         gross_amount: grossTotal,
         total_quality_adj: qaTotal || 0,
         total_deductions: Math.abs(expensesTotal),
