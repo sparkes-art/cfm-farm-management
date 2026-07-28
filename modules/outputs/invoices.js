@@ -679,12 +679,12 @@ export function openInvoiceForm(container, existing = null) {
       </div>
 
       <!-- Income section -->
-      <div style="padding:8px 12px 0;background:#f0fdf4;border-bottom:1px solid #bbf7d0">
+      <div style="padding:8px 12px 4px;border-bottom:1px solid var(--border-light)">
         <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#166534">Income</span>
       </div>
-      <div style="overflow-x:auto;background:#f0fdf4">
+      <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;min-width:600px">
-          <thead><tr style="border-bottom:1px solid #bbf7d0">
+          <thead><tr style="border-bottom:1px solid var(--border-light);background:#fafafa">
             <th style="${thStyle};text-align:left;min-width:160px">Description</th>
             <th style="${thStyle};text-align:left;min-width:110px">Docket / ID</th>
             <th style="${thStyle};text-align:right;min-width:120px">Amount ($)</th>
@@ -695,7 +695,7 @@ export function openInvoiceForm(container, existing = null) {
           <tbody class="b-income-lines"></tbody>
         </table>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:#f0fdf4;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:var(--page-bg);border-bottom:1px solid var(--border)">
         <button class="btn btn-ghost btn-sm b-add-income" style="font-size:12px;color:#166534">＋ Add income line</button>
         <div style="font-size:12px;color:#166534">
           Gross income: <strong class="b-gross" style="color:#166534">$0.00</strong>
@@ -705,12 +705,12 @@ export function openInvoiceForm(container, existing = null) {
       </div>
 
       <!-- Expenses section -->
-      <div style="padding:8px 12px 0;background:#fff7ed;border-bottom:1px solid #fed7aa">
+      <div style="padding:8px 12px 4px;border-bottom:1px solid var(--border-light)">
         <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#9a3412">Expenses</span>
       </div>
-      <div style="overflow-x:auto;background:#fff7ed">
+      <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;min-width:600px">
-          <thead><tr style="border-bottom:1px solid #fed7aa">
+          <thead><tr style="border-bottom:1px solid var(--border-light);background:#fafafa">
             <th style="${thStyle};text-align:left;min-width:160px">Description</th>
             <th style="${thStyle};text-align:left;min-width:110px">Docket / ID</th>
             <th style="${thStyle};text-align:right;min-width:120px">Amount ($)</th>
@@ -721,7 +721,7 @@ export function openInvoiceForm(container, existing = null) {
           <tbody class="b-expense-lines"></tbody>
         </table>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:#fff7ed;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:var(--page-bg);border-bottom:1px solid var(--border)">
         <button class="btn btn-ghost btn-sm b-add-expense" style="font-size:12px;color:#9a3412">＋ Add expense line</button>
         <div style="font-size:12px;color:#9a3412">
           Total expenses: <strong class="b-expenses" style="color:#9a3412">$0.00</strong>
@@ -769,8 +769,8 @@ export function openInvoiceForm(container, existing = null) {
   function addBatchLine(batchDiv, data = {}, section = 'income') {
     const tbody = batchDiv.querySelector(section === 'income' ? '.b-income-lines' : '.b-expense-lines');
     const tr = document.createElement('tr');
-    tr.style.borderBottom = '1px solid ' + (section === 'income' ? '#bbf7d0' : '#fed7aa');
-    const inS = 'border:none;border-bottom:1px solid var(--border-light);border-radius:0;padding:5px 6px;font-size:12px;background:transparent;width:100%';
+    tr.style.borderBottom = '1px solid var(--border-light)';
+    const inS = 'border:none;border-bottom:1px solid var(--border-light);border-radius:0;padding:5px 6px;font-size:12px;background:white;width:100%';
     const numS = inS + ';text-align:right';
     // For expenses, store absolute value and make negative on save
     const displayAmount = data.amount != null ? Math.abs(data.amount) : '';
@@ -779,13 +779,16 @@ export function openInvoiceForm(container, existing = null) {
       <td style="padding:3px 6px;min-width:160px"><input type="text" class="bl-desc" style="${inS}" value="${data.description||''}" placeholder="${section==='income'?'e.g. Cotton Lint, Quality Adj':'e.g. Ginning, CA Levy'}"></td>
       <td style="padding:3px 6px;min-width:110px"><input type="text" class="bl-docket" style="${inS}" value="${data.docket||''}" placeholder="Docket"></td>
       <td style="padding:3px 6px;min-width:120px"><input type="number" class="bl-amount" style="${numS}" step="0.01" value="${displayAmount}" placeholder="0.00"></td>
-      <td style="padding:3px 6px;min-width:90px;text-align:right;font-size:12px;font-weight:600"><span class="bl-eff" style="color:var(--hint)">—</span></td>
+      <td style="padding:3px 6px;min-width:100px"><input type="number" class="bl-eff" style="${numS};color:var(--hint)" step="0.0001" value="${data.eff_per_unit!=null?Math.abs(data.eff_per_unit):''}" placeholder="0.00"></td>
       <td style="padding:3px 6px;min-width:140px"><input type="text" class="bl-notes" style="${inS}" value="${data.notes||''}" placeholder="Notes…"></td>
       <td style="padding:3px 6px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:13px" onclick="this.closest('tr').remove();recalcBatch(this.closest('[data-batch-id]'));recalcTotals()">✕</button></td>
     `;
     tr.dataset.section = section;
     tbody.appendChild(tr);
-    tr.querySelector('.bl-amount').addEventListener('input', () => { recalcBatch(batchDiv); recalcTotals(); });
+    const amountInp = tr.querySelector('.bl-amount');
+    const effInp = tr.querySelector('.bl-eff');
+    amountInp.addEventListener('input', () => { tr.dataset.lastEdited = 'amount'; recalcBatch(batchDiv); recalcTotals(); });
+    effInp.addEventListener('input', () => { tr.dataset.lastEdited = 'eff'; recalcBatch(batchDiv); recalcTotals(); });
     recalcBatch(batchDiv);
   }
 
@@ -793,26 +796,36 @@ export function openInvoiceForm(container, existing = null) {
     const qty = parseFloat(batchDiv.querySelector('.b-qty')?.value) || 0;
     let gross = 0, expenses = 0;
 
+    function calcRow(tr, isExpense) {
+      const amountInp = tr.querySelector('.bl-amount');
+      const effInp = tr.querySelector('.bl-eff');
+      if (!amountInp || !effInp) return 0;
+      const lastEdited = tr.dataset.lastEdited || 'amount';
+      let amount = parseFloat(amountInp.value) || 0;
+      let eff = parseFloat(effInp.value) || 0;
+      if (lastEdited === 'eff' && eff && qty) {
+        // Eff edited → calculate amount
+        amount = Math.round(eff * qty * 100) / 100;
+        amountInp.value = amount;
+      } else if (lastEdited === 'amount' && amount && qty) {
+        // Amount edited → calculate eff
+        eff = Math.round((amount / qty) * 10000) / 10000;
+        effInp.value = eff;
+      }
+      effInp.style.color = isExpense ? '#9a3412' : '#166534';
+      return amount;
+    }
+
     // Income lines
     batchDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
-      const amount = parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
+      const amount = calcRow(tr, false);
       gross += amount;
-      const effEl = tr.querySelector('.bl-eff');
-      if (effEl) {
-        if (qty && amount) { effEl.textContent = formatCurrency(amount/qty, 2); effEl.style.color = '#166534'; }
-        else { effEl.textContent = '—'; effEl.style.color = 'var(--hint)'; }
-      }
     });
 
     // Expense lines
     batchDiv.querySelectorAll('.b-expense-lines tr').forEach(tr => {
-      const amount = parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
+      const amount = calcRow(tr, true);
       expenses += amount;
-      const effEl = tr.querySelector('.bl-eff');
-      if (effEl) {
-        if (qty && amount) { effEl.textContent = '-' + formatCurrency(amount/qty, 2); effEl.style.color = '#9a3412'; }
-        else { effEl.textContent = '—'; effEl.style.color = 'var(--hint)'; }
-      }
     });
 
     const net = gross - expenses;
@@ -925,7 +938,7 @@ export function openInvoiceForm(container, existing = null) {
             docket: tr.querySelector('.bl-docket')?.value?.trim() || '',
             amount: Math.abs(amount),
             notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
-            eff_per_unit: qty ? Math.round((amount / qty) * 10000) / 10000 : null,
+            eff_per_unit: parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((amount / qty) * 10000) / 10000 : null),
             type: 'income',
           });
           grossTotal += Math.abs(amount);
@@ -940,7 +953,7 @@ export function openInvoiceForm(container, existing = null) {
             docket: tr.querySelector('.bl-docket')?.value?.trim() || '',
             amount: -Math.abs(amount),
             notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
-            eff_per_unit: qty ? Math.round((-Math.abs(amount) / qty) * 10000) / 10000 : null,
+            eff_per_unit: -(parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((Math.abs(amount) / qty) * 10000) / 10000 : null)),
             type: 'expense',
           });
           expensesTotal += -Math.abs(amount);
