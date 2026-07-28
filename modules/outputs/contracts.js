@@ -64,7 +64,7 @@ async function _loadData() {
   try {
     [_contracts, _invoices] = await Promise.all([
       dbSelect('forward_contracts', `farm_id=eq.${farm.id}&select=*&order=sale_date.desc`),
-      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=id,forward_contract_id,line_items,gross_amount,total_quality_adj,status').catch(() => []),
+      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=id,forward_contract_id,line_items,batches,gross_amount,total_quality_adj,status').catch(() => []),
     ]);
   } catch (err) {
     console.error('Contracts load error:', err);
@@ -111,7 +111,19 @@ function _renderStats() {
   // Calculate totals invoiced across all filtered contracts
   const totalInvoicedUnits = rows.reduce((s, c) => {
     const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id);
-    return s + contractInvoices.reduce((ss, i) => ss + (i.line_items||[]).reduce((sss, l) => sss + (parseFloat(l.qty)||0), 0), 0);
+    return s + contractInvoices.reduce((ss, i) => {
+      if (i.batches && i.batches.length) {
+        const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
+        return ss + b.reduce((bss, batch) => bss + (parseFloat(batch.qty)||0), 0);
+      }
+      const seen = new Set();
+      return ss + (i.line_items||[]).reduce((sss, l) => {
+        const key = l.docket || l.commodity || JSON.stringify(l);
+        if (seen.has(key)) return sss;
+        seen.add(key);
+        return sss + (parseFloat(l.qty)||0);
+      }, 0);
+    }, 0);
   }, 0);
   const totalInvoicedValue = rows.reduce((s, c) => {
     const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id);
@@ -201,8 +213,20 @@ function _renderTable() {
           // Calculate invoiced units and avg price for this contract
           const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id);
           const invoicedQty = contractInvoices.reduce((s, i) => {
+            // Use batches if available (new format) — sum batch qtys
+            if (i.batches && i.batches.length) {
+              const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
+              return s + b.reduce((ss, batch) => ss + (parseFloat(batch.qty)||0), 0);
+            }
+            // Legacy: dedupe by docket to avoid counting same qty multiple times
             const lines = i.line_items || [];
-            return s + (lines.length ? lines.reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0) : 0);
+            const seen = new Set();
+            return s + lines.reduce((ss, l) => {
+              const key = l.docket || l.commodity || JSON.stringify(l);
+              if (seen.has(key)) return ss;
+              seen.add(key);
+              return ss + (parseFloat(l.qty)||0);
+            }, 0);
           }, 0);
           const invoicedValue = contractInvoices.reduce((s, i) => {
             const lines = i.line_items || [];
