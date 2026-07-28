@@ -854,6 +854,7 @@ export function openInvoiceForm(container, existing = null) {
     setEl('.b-gross', formatCurrency(gross, 2));
     setEl('.b-gross-unit', qty ? formatCurrency(gross/qty, 2) + ' / ' + getUnit() : '—');
     setEl('.b-qa', qa ? (qa>0?'+':'')+formatCurrency(qa,2) : '—');
+    setEl('.b-total-income', formatCurrency(gross+qa, 2));
     setEl('.b-qa-unit', qa && qty ? (qa>0?'+':'')+formatCurrency(qa/qty,2)+' / '+getUnit() : '');
     setEl('.b-expenses', formatCurrency(expenses, 2));
     setEl('.b-expenses-unit', qty ? '-' + formatCurrency(expenses/qty, 2) + ' / ' + getUnit() : '—');
@@ -1066,7 +1067,7 @@ export function openInvoiceForm(container, existing = null) {
         total_quality_adj: qaTotal || 0,
         total_deductions: Math.abs(expensesTotal),
         net_amount: netAmount,
-        status: 'pending',
+        status: existing?.xero_invoice_number ? 'complete' : (existing?.status || 'pending'),
         notes: modal.querySelector('#f-notes')?.value?.trim() || '',
       };
 
@@ -1079,6 +1080,10 @@ export function openInvoiceForm(container, existing = null) {
       const otherUploads = await Promise.all(attachments.map(f => uploadFile2(f, 'other')));
       const allOtherFiles = [...(existing?.other_files||[]), ...otherUploads];
 
+      // Preserve Xero ref on edit
+      if (existing?.xero_invoice_number) row.xero_invoice_number = existing.xero_invoice_number;
+      if (existing?.xero_invoice_id) row.xero_invoice_id = existing.xero_invoice_id;
+      if (existing?.xero_invoice_url) row.xero_invoice_url = existing.xero_invoice_url;
       row.rcti_files = allRctiFiles;
       row.gin_files = allGinFiles;
       row.other_files = allOtherFiles;
