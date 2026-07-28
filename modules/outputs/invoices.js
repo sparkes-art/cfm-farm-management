@@ -179,11 +179,7 @@ function _renderTable(container) {
           const commodities = [...new Set(lines.map(l => l.commodity))].join(', ') || inv.commodity_type || '—';
           return `
             <tr style="cursor:pointer" data-id="${inv.id}">
-              <td class="muted">${formatDate(inv.invoice_date)}</td>
-              <td class="muted">${(() => {
-                const seasons = [...new Set((inv.line_items||[]).map(l=>l.season).filter(Boolean))];
-                return seasons.length ? seasons.join(', ') : (inv.season || '—');
-              })()}</td>
+              <td class="muted" style="font-size:11px;white-space:nowrap">${inv.invoice_date ? new Date(inv.invoice_date+'T00:00:00').toLocaleDateString('en-AU',{day:'2-digit',month:'numeric',year:'2-digit'}) : '—'}</td>
               <td><span class="badge ${inv.sale_type === 'against_contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'against_contract' ? 'Contract' : 'Cash'}</span></td>
               <td><strong>${inv.buyer || '—'}</strong></td>
               <td class="muted text-sm">${commodities}</td>
