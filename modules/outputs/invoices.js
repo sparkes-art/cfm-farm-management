@@ -866,10 +866,11 @@ export function openInvoiceForm(container, existing = null) {
   }
 
   function recalcTotals() {
-    let gross = 0, expenses = 0;
+    let gross = 0, qa = 0, expenses = 0;
     batchesWrap.querySelectorAll('[data-batch-id]').forEach(bDiv => {
       bDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
-        gross += parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
+        const _a = parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
+        if ((tr.querySelector('.bl-type')?.value||'sale') === 'qa') qa += _a; else gross += _a;
       });
       bDiv.querySelectorAll('.b-expense-lines tr').forEach(tr => {
         expenses += parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
