@@ -210,6 +210,7 @@ function _renderTable(container) {
                 <td>
                   <div class="flex gap-2">
                     <button class="btn btn-ghost btn-sm edit-inv-btn" data-id="${inv.id}">Edit</button>
+                    <button class="btn btn-ghost btn-sm del-inv-btn" data-id="${inv.id}" style="color:var(--red)">Delete</button>
                     ${inv.status === 'pending' && !inv.xero_invoice_number ? `
                       <button class="btn btn-ghost btn-sm push-xero-btn" data-id="${inv.id}" style="color:var(--blue)">Push to Xero</button>
                       <button class="btn btn-ghost btn-sm xero-btn" data-id="${inv.id}" style="color:var(--muted)">+ Xero ref</button>
