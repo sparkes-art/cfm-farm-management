@@ -150,6 +150,7 @@ function _renderTable(container) {
           <th>Type</th>
           <th>Buyer</th>
           <th>Commodities</th>
+          <th class="num">Qty</th>
           <th class="num">Gross</th>
           <th class="num">Quality adj</th>
           <th class="num">Total income</th>
@@ -175,6 +176,15 @@ function _renderTable(container) {
               <td><span class="badge ${inv.sale_type === 'against_contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'against_contract' ? 'Contract' : 'Cash'}</span></td>
               <td><strong>${inv.buyer || '—'}</strong></td>
               <td class="muted text-sm">${commodities}</td>
+              <td class="num text-sm">${(() => {
+                if (inv.batches && inv.batches.length) {
+                  const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+                  const qty = b.reduce((s,x) => s+(parseFloat(x.qty)||0), 0);
+                  const unit = inv.master_unit || '';
+                  return qty ? formatNumber(qty,3)+' '+unit : '—';
+                }
+                return inv.total_qty ? formatNumber(inv.total_qty,3)+' '+(inv.master_unit||'') : '—';
+              })()}</td>
               <td class="num">${formatCurrency(inv.gross_amount, 0)}</td>
               <td class="num" style="color:${(inv.total_quality_adj||0)>0?'var(--green)':(inv.total_quality_adj||0)<0?'var(--red)':'inherit'}">${inv.total_quality_adj ? ((inv.total_quality_adj>0?'+':'')+formatCurrency(inv.total_quality_adj,0)) : '—'}</td>
               <td class="num">${formatCurrency((parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0), 0)}</td>
