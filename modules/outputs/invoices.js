@@ -660,8 +660,7 @@ export function openInvoiceForm(container, existing = null) {
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:var(--page-bg);border-bottom:1px solid var(--border)">
         <button class="btn btn-ghost btn-sm b-add-income" style="font-size:12px;color:#166534">＋ Add income line</button>
         <div style="display:flex;gap:16px;align-items:center;font-size:12px">
-          <span style="color:#166534">Sale: <strong class="b-gross" style="color:#166534">$0.00</strong> <span class="b-gross-unit" style="color:#86efac;font-size:11px"></span></span>
-          <span style="color:var(--blue)">QA: <strong class="b-qa" style="color:var(--blue)">—</strong> <span class="b-qa-unit" style="color:var(--blue);font-size:11px"></span></span>
+          <span style="color:#166534;font-weight:600">Total income: <strong class="b-total-income" style="color:#166534">$0.00</strong></span>
         </div>
       </div>
 
@@ -747,9 +746,9 @@ export function openInvoiceForm(container, existing = null) {
         wrap.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); wrap.style.borderColor = ''; wrap.style.background = ''; addFiles(e.dataTransfer.files); });
       }
     }
-    // Each batch has its own file arrays
-    div._incomeFiles = (data.income_files || []).slice();
-    div._expenseFiles = (data.expense_files || []).slice();
+    // Each batch has its own file arrays (only NEW files to upload)
+    div._incomeFiles = [];
+    div._expenseFiles = [];
     wireAttach('.b-income-attach', '.b-income-file-input', '.b-income-file-list', div._incomeFiles);
     wireAttach('.b-expense-attach', '.b-expense-file-input', '.b-expense-file-list', div._expenseFiles);
 
