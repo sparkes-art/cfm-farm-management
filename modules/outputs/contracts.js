@@ -114,10 +114,12 @@ function _renderStats() {
     return s + contractInvoices.reduce((ss, i) => {
       if (i.batches && i.batches.length) {
         const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
-        return ss + b.reduce((bss, batch) => bss + (parseFloat(batch.qty)||0), 0);
+        return ss + b.filter(batch => (batch.lines||[]).some(l => l.type==='income' && l.line_type!=='qa'))
+                      .reduce((bss, batch) => bss + (parseFloat(batch.qty)||0), 0);
       }
+      const lines = (i.line_items||[]).filter(l => l.type !== 'expense' && l.line_type !== 'qa');
       const seen = new Set();
-      return ss + (i.line_items||[]).reduce((sss, l) => {
+      return ss + lines.reduce((sss, l) => {
         const key = l.docket || l.commodity || JSON.stringify(l);
         if (seen.has(key)) return sss;
         seen.add(key);
@@ -213,13 +215,14 @@ function _renderTable() {
           // Calculate invoiced units and avg price for this contract
           const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id);
           const invoicedQty = contractInvoices.reduce((s, i) => {
-            // Use batches if available (new format) — sum batch qtys
+            // Use batches if available — only count income (sale) batches
             if (i.batches && i.batches.length) {
               const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
-              return s + b.reduce((ss, batch) => ss + (parseFloat(batch.qty)||0), 0);
+              return s + b.filter(batch => (batch.lines||[]).some(l => l.type==='income' && l.line_type!=='qa'))
+                          .reduce((ss, batch) => ss + (parseFloat(batch.qty)||0), 0);
             }
-            // Legacy: dedupe by docket to avoid counting same qty multiple times
-            const lines = i.line_items || [];
+            // Legacy: dedupe by docket, skip expense/qa lines
+            const lines = (i.line_items || []).filter(l => l.type !== 'expense' && l.line_type !== 'qa');
             const seen = new Set();
             return s + lines.reduce((ss, l) => {
               const key = l.docket || l.commodity || JSON.stringify(l);

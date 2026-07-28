@@ -124,12 +124,44 @@ async function _renderReconciliation(container, farm) {
     contracts.forEach(c => { addComm(c.commodity_id, c.commodity); commMap[c.commodity_id || c.commodity]?.contracts.push(c); });
     forecasts.forEach(f => { addComm(f.commodity_id, f.commodity); commMap[f.commodity_id || f.commodity]?.forecasts.push(f); });
 
-    // Match paid invoice lines to commodities
+    // Match paid invoice lines to commodities — only sale/income lines, not expenses or QA
     paidInvoices.forEach(inv => {
-      const lines = inv.line_items || [];
-      lines.filter(l => !l.season || l.season === season).forEach(l => {
+      // Use batches if available (new format)
+      if (inv.batches && inv.batches.length) {
+        const batches = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+        batches.forEach(b => {
+          const saleLines = (b.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa');
+          if (!saleLines.length) return;
+          const batchQty = parseFloat(b.qty) || 0;
+          const batchTotal = saleLines.reduce((s, l) => s + (parseFloat(l.amount)||0), 0);
+          const commodity = inv.commodity_type || (inv.line_items||[])[0]?.commodity || null;
+          const key = commodity ? Object.keys(commMap).find(k => commMap[k].name === commodity || commMap[k].id === inv.commodity_id) : null;
+          if (key) commMap[key].paidLines.push({
+            qty: batchQty,
+            total: batchTotal,
+            price: batchQty ? batchTotal / batchQty : 0,
+            docket: b.income_docket || '',
+            season: b.crop_year || season,
+            invoice: inv,
+          });
+        });
+        return;
+      }
+      // Legacy line_items — filter to sale lines only (not expenses, not qa)
+      const lines = (inv.line_items || []).filter(l =>
+        (!l.season || l.season === season) &&
+        l.type !== 'expense' &&
+        l.line_type !== 'qa'
+      );
+      // Deduplicate by docket to avoid counting same qty multiple times
+      const seen = new Set();
+      lines.forEach(l => {
         const key = Object.keys(commMap).find(k => commMap[k].name === l.commodity || commMap[k].id === l.commodity_id);
-        if (key) commMap[key].paidLines.push({ ...l, invoice: inv });
+        if (!key) return;
+        const dedupKey = (l.docket || '') + '_' + (l.commodity || '') + '_' + inv.id;
+        if (seen.has(dedupKey)) return;
+        seen.add(dedupKey);
+        commMap[key].paidLines.push({ ...l, invoice: inv });
       });
     });
 
@@ -212,6 +244,7 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
     const invoicedAgainstContract = paidLines
       .filter(l => l.invoice?.forward_contract_id === c.id)
       .reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
+    // paidLines already filtered to sale lines only
     const remainingQty = Math.max(0, contractedQtyTotal - invoicedAgainstContract);
     const gross = remainingQty * price;
     const pct = denominator ? (gross / (denominator * (unpricedPrice || price))) * 100 : 0;
