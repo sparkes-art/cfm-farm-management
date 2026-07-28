@@ -177,12 +177,8 @@ exports.handler = async (event) => {
       console.log('Stored', rows.length, 'price rows for', date);
 
       // Also write into market_prices so the UI can display them
-      // Look up Cotton Lint commodity_id
-      const commRes = await fetch(`${SUPABASE_URL}/rest/v1/commodities?name=ilike.Cotton%20Lint&select=id&limit=1`, {
-        headers: { 'apikey': SUPABASE_SERVICE_ROLE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
-      });
-      const comms = commRes.ok ? await commRes.json() : [];
-      const commodityId = comms[0]?.id;
+      // Use hardcoded Cotton Lint commodity_id (2855dd1b-158e-4c03-93da-aa650c03fcf3)
+      const commodityId = '2855dd1b-158e-4c03-93da-aa650c03fcf3';
 
       if (commodityId) {
         // Use cottonRegion setting to pick the right region row, default to Darling Downs
