@@ -800,7 +800,7 @@ export function openInvoiceForm(container, existing = null) {
     const incomeTypeHtml = section === 'income'
       ? `<td style="padding:3px 6px;min-width:90px"><select class="bl-type" style="${inS}">
           <option value="sale"${(data.line_type||'sale')==='sale'?' selected':''}>Sale</option>
-          <option value="qa"${(data.line_type||'')==='qa'?' selected':''}>Quality adj</option>
+          <option value="qa"${(data.line_type)==='qa'?' selected':''}>Quality adj</option>
         </select></td>`
       : '';
     tr.innerHTML = incomeTypeHtml + `
@@ -1014,17 +1014,18 @@ export function openInvoiceForm(container, existing = null) {
           const amount = parseFloat(tr.querySelector('.bl-amount')?.value);
           if (!amount) return;
           const lineType = tr.querySelector('.bl-type')?.value || 'sale';
+          const absAmount = Math.abs(amount);
           lines.push({
             description: tr.querySelector('.bl-desc')?.value?.trim() || '',
             docket: incomeDocket,
-            amount: Math.abs(amount),
+            amount: absAmount,
             notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
-            eff_per_unit: parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((amount/qty)*10000)/10000 : null),
+            eff_per_unit: parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((absAmount/qty)*10000)/10000 : null),
             type: 'income',
             line_type: lineType,
           });
-          if (lineType === 'qa') qaTotal += Math.abs(amount);
-          else grossTotal += Math.abs(amount);
+          if (lineType === 'qa') qaTotal += amount; // keep sign (amount before abs)
+          else grossTotal += absAmount;
         });
 
         // Expense lines
