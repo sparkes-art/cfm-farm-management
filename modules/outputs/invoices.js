@@ -234,6 +234,32 @@ function _renderTable(container) {
     });
   });
 
+  // Delete button
+  wrap.querySelectorAll('.del-inv-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      e.preventDefault();
+      const inv = _invoices.find(i => i.id === btn.dataset.id);
+      if (!inv) return;
+      openModal({
+        title: 'Delete invoice',
+        bodyHTML: '<p style="font-size:14px">Delete invoice for <strong>' + (inv.buyer || 'this buyer') + '</strong>' + (inv.invoice_date ? ' dated ' + formatDate(inv.invoice_date) : '') + '?</p><p style="color:var(--red);font-size:13px;margin-top:8px">This cannot be undone.</p>',
+        confirmLabel: 'Delete',
+        confirmClass: 'btn-danger',
+        onConfirm: async () => {
+          try {
+            await dbDelete('invoices', inv.id);
+            _invoices = _invoices.filter(i => i.id !== inv.id);
+            toast('Invoice deleted', 'success');
+            _renderTable(container);
+          } catch(err) {
+            toast('Delete failed: ' + err.message, 'error');
+          }
+        }
+      });
+    });
+  });
+
   // Edit button
   wrap.querySelectorAll('.edit-inv-btn').forEach(btn => {
     btn.addEventListener('click', () => {
