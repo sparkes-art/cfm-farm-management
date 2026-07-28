@@ -906,17 +906,23 @@ export function openInvoiceForm(container, existing = null) {
   const otherAttachBtn = modal.querySelector('#f-other-attach');
   const fileInput = modal.querySelector('#f-file-input');
   const fileList = modal.querySelector('#f-file-list');
-  otherAttachBtn?.addEventListener('click', () => fileInput?.click());
-  fileInput?.addEventListener('change', () => {
-    [...fileInput.files].forEach(f => {
+  function addOtherFiles(fileList_) {
+    [...fileList_].forEach(f => {
       attachments.push(f);
       const pill = document.createElement('span');
       pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:white;border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px';
-      pill.innerHTML = '📎 ' + f.name.slice(0,20) + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest(&quot;span&quot;).remove()">×</span>';
+      pill.innerHTML = '📎 ' + f.name.slice(0,24) + (f.name.length>24?'…':'') + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest(&quot;span&quot;).remove()">×</span>';
       fileList?.appendChild(pill);
     });
-    fileInput.value = '';
-  });
+  }
+  otherAttachBtn?.addEventListener('click', () => fileInput?.click());
+  fileInput?.addEventListener('change', () => { addOtherFiles(fileInput.files); fileInput.value = ''; });
+  const otherWrap = otherAttachBtn?.closest('div');
+  if (otherWrap) {
+    otherWrap.addEventListener('dragover', e => { e.preventDefault(); otherWrap.style.outline = '2px dashed var(--blue)'; otherWrap.style.borderRadius = '6px'; });
+    otherWrap.addEventListener('dragleave', () => { otherWrap.style.outline = ''; });
+    otherWrap.addEventListener('drop', e => { e.preventDefault(); otherWrap.style.outline = ''; addOtherFiles(e.dataTransfer.files); });
+  }
 
 
   modal.querySelector('#f-save').addEventListener('click', async () => {
