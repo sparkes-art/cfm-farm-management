@@ -647,7 +647,8 @@ export function openInvoiceForm(container, existing = null) {
       <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse">
           <thead><tr style="border-bottom:1px solid var(--border-light);background:#fafafa">
-            <th style="${thStyle};text-align:left;min-width:180px">Description</th>
+            <th style="${thStyle};text-align:left;min-width:90px">Type</th>
+            <th style="${thStyle};text-align:left;min-width:160px">Description</th>
             <th style="${thStyle};text-align:right;min-width:130px">Amount ($)</th>
             <th style="${thStyle};text-align:right;min-width:100px">Eff. $/unit</th>
             <th style="${thStyle};text-align:left;min-width:150px">Notes</th>
@@ -658,10 +659,9 @@ export function openInvoiceForm(container, existing = null) {
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:var(--page-bg);border-bottom:1px solid var(--border)">
         <button class="btn btn-ghost btn-sm b-add-income" style="font-size:12px;color:#166534">＋ Add income line</button>
-        <div style="font-size:12px;color:#166534">
-          Gross income: <strong class="b-gross" style="color:#166534">$0.00</strong>
-          <span style="color:var(--border);margin:0 6px">|</span>
-          <span class="b-gross-unit" style="color:#166534;font-weight:600">—</span>
+        <div style="display:flex;gap:16px;align-items:center;font-size:12px">
+          <span style="color:#166534">Sale: <strong class="b-gross" style="color:#166534">$0.00</strong> <span class="b-gross-unit" style="color:#86efac;font-size:11px"></span></span>
+          <span style="color:var(--blue)">QA: <strong class="b-qa" style="color:var(--blue)">—</strong> <span class="b-qa-unit" style="color:var(--blue);font-size:11px"></span></span>
         </div>
       </div>
 
@@ -787,8 +787,14 @@ export function openInvoiceForm(container, existing = null) {
     // For expenses, store absolute value and make negative on save
     const displayAmount = data.amount != null ? Math.abs(data.amount) : '';
 
-    tr.innerHTML = `
-      <td style="padding:3px 6px;min-width:180px"><input type="text" class="bl-desc" style="${inS}" value="${data.description||''}" placeholder="${section==='income'?'e.g. Cotton Lint, Quality Adj':'e.g. Ginning, CA Levy'}"></td>
+    const incomeTypeHtml = section === 'income'
+      ? `<td style="padding:3px 6px;min-width:90px"><select class="bl-type" style="${inS}">
+          <option value="sale"${(data.line_type||'sale')==='sale'?' selected':''}>Sale</option>
+          <option value="qa"${(data.line_type||'')==='qa'?' selected':''}>Quality adj</option>
+        </select></td>`
+      : '';
+    tr.innerHTML = incomeTypeHtml + `
+      <td style="padding:3px 6px;min-width:160px"><input type="text" class="bl-desc" style="${inS}" value="${data.description||''}" placeholder="${section==='income'?'e.g. Cotton Lint':'e.g. Ginning, CA Levy'}"></td>
       <td style="padding:3px 6px;min-width:130px"><input type="number" class="bl-amount" style="${numS}" step="0.01" value="${displayAmount}" placeholder="0.00"></td>
       <td style="padding:3px 6px;min-width:100px"><input type="number" class="bl-eff" style="${numS};color:var(--hint)" step="0.0001" value="${data.eff_per_unit!=null?Math.abs(data.eff_per_unit):''}" placeholder="0.00"></td>
       <td style="padding:3px 6px;min-width:150px"><input type="text" class="bl-notes" style="${inS}" value="${data.notes||''}" placeholder="Notes…"></td>
@@ -805,7 +811,7 @@ export function openInvoiceForm(container, existing = null) {
 
   function recalcBatch(batchDiv) {
     const qty = parseFloat(batchDiv.querySelector('.b-qty')?.value) || 0;
-    let gross = 0, expenses = 0;
+    let gross = 0, qa = 0, expenses = 0;
 
     function calcRow(tr, isExpense) {
       const amountInp = tr.querySelector('.bl-amount');
@@ -827,10 +833,12 @@ export function openInvoiceForm(container, existing = null) {
       return amount;
     }
 
-    // Income lines
+    // Income lines — split sale vs QA
     batchDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
       const amount = calcRow(tr, false);
-      gross += amount;
+      const lineType = tr.querySelector('.bl-type')?.value || 'sale';
+      if (lineType === 'qa') qa += amount;
+      else gross += amount;
     });
 
     // Expense lines
@@ -839,12 +847,15 @@ export function openInvoiceForm(container, existing = null) {
       expenses += amount;
     });
 
-    const net = gross - expenses;
+    const net = gross + qa - expenses;
 
     // Update subtotals
+    const totalIncome = gross + qa;
     const setEl = (cls, val) => { const el = batchDiv.querySelector(cls); if (el) el.textContent = val; };
     setEl('.b-gross', formatCurrency(gross, 2));
     setEl('.b-gross-unit', qty ? formatCurrency(gross/qty, 2) + ' / ' + getUnit() : '—');
+    setEl('.b-qa', qa ? (qa>0?'+':'')+formatCurrency(qa,2) : '—');
+    setEl('.b-qa-unit', qa && qty ? (qa>0?'+':'')+formatCurrency(qa/qty,2)+' / '+getUnit() : '');
     setEl('.b-expenses', formatCurrency(expenses, 2));
     setEl('.b-expenses-unit', qty ? '-' + formatCurrency(expenses/qty, 2) + ' / ' + getUnit() : '—');
     setEl('.b-net', formatCurrency(net, 2));
@@ -864,12 +875,14 @@ export function openInvoiceForm(container, existing = null) {
         expenses += parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
       });
     });
-    const net = gross - expenses;
+    const net = gross + qa - expenses;
     const tg = modal.querySelector('#t-gross');
     const td = modal.querySelector('#t-ded');
     const tn = modal.querySelector('#t-net');
     const tt = modal.querySelector('#t-total');
     if (tg) tg.textContent = formatCurrency(gross, 2);
+    const tqa = modal.querySelector('#t-qa');
+    if (tqa) tqa.textContent = qa ? (qa>0?'+':'')+formatCurrency(qa,2) : '—';
     if (td) td.textContent = expenses ? '-' + formatCurrency(expenses, 2) : '—';
     if (tn) tn.textContent = formatCurrency(net, 2);
     if (tt) tt.textContent = formatCurrency(net, 2);
@@ -947,7 +960,7 @@ export function openInvoiceForm(container, existing = null) {
 
       // Collect batches
       const batches = [];
-      let grossTotal = 0, expensesTotal = 0;
+      let grossTotal = 0, qaTotal = 0, expensesTotal = 0;
 
       // Upload batch files
       const uploadFile2 = async (file, prefix) => {
@@ -983,6 +996,7 @@ export function openInvoiceForm(container, existing = null) {
         bDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
           const amount = parseFloat(tr.querySelector('.bl-amount')?.value);
           if (!amount) return;
+          const lineType = tr.querySelector('.bl-type')?.value || 'sale';
           lines.push({
             description: tr.querySelector('.bl-desc')?.value?.trim() || '',
             docket: incomeDocket,
@@ -990,8 +1004,10 @@ export function openInvoiceForm(container, existing = null) {
             notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
             eff_per_unit: parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((amount/qty)*10000)/10000 : null),
             type: 'income',
+            line_type: lineType,
           });
-          grossTotal += Math.abs(amount);
+          if (lineType === 'qa') qaTotal += Math.abs(amount);
+          else grossTotal += Math.abs(amount);
         });
 
         // Expense lines
@@ -1042,9 +1058,9 @@ export function openInvoiceForm(container, existing = null) {
         }))),
         total_qty: totalQty,
         gross_amount: grossTotal,
+        total_quality_adj: qaTotal || 0,
         total_deductions: Math.abs(expensesTotal),
         net_amount: netAmount,
-        total_quality_adj: batches.flatMap(b => b.lines.filter(l => l.type==='income' && /quality|adj/i.test(l.description||'')).map(l => l.amount)).reduce((s,v)=>s+v, 0) || 0,
         status: 'pending',
         notes: modal.querySelector('#f-notes')?.value?.trim() || '',
       };
