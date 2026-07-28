@@ -897,7 +897,12 @@ export function openInvoiceForm(container, existing = null) {
     ? (typeof existing.batches === 'string' ? JSON.parse(existing.batches) : existing.batches)
     : null;
   if (existingBatches?.length) {
-    existingBatches.forEach(b => addBatch(b));
+    try {
+      existingBatches.forEach(b => addBatch(b));
+    } catch(e) {
+      console.error('Error loading batches:', e);
+      addBatch();
+    }
   } else {
     addBatch();
   }
