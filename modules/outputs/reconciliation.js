@@ -255,99 +255,62 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
         <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
           <thead>
             <tr style="background:var(--page-bg)">
-              <th style="${thStyle()}">Section</th>
-              <th style="${thStyle()}">Detail</th>
-              <th style="${thStyle('r')}">Units</th>
-              <th style="${thStyle('r')}">$/unit</th>
-              <th style="${thStyle('r')}">Gross $</th>
-              <th style="${thStyle('r')}">Deductions</th>
-              <th style="${thStyle('r')}">Net $</th>
-              <th style="${thStyle('r')}">% Total</th>
+              <th style="${thStyle()}">Contract #</th>
+              <th style="${thStyle()}">Buyer</th>
+              <th style="${thStyle('r')}">${unit}s</th>
+              <th style="${thStyle('r')}">Price $/${unit}</th>
+              <th style="${thStyle('r')}">Contract Value</th>
+              <th style="${thStyle('r')}">Filled ${unit}s</th>
+              <th style="${thStyle('r')}">Filled Gross $</th>
+              <th style="${thStyle('r')}">Still to go ${unit}s</th>
+              <th style="${thStyle('r')}">Still to go $</th>
             </tr>
           </thead>
           <tbody>
-
-            <!-- PAID TO DATE -->
-            <tr>
-              <td colspan="8" style="${sectionHeaderStyle('#1a2535')}">
-                <strong>Paid to date</strong>
-                <span style="font-size:11px;font-weight:400;color:#9aacbf;margin-left:8px">(RCTIs &amp; cash sales on or before ${formatDate(asAt)})</span>
-              </td>
-            </tr>
-            ${paidLines.length === 0 ? `
-              <tr>
-                <td colspan="8" style="padding:10px 16px;font-style:italic;color:var(--muted);border-bottom:1px solid var(--border-light)">
-                  No payments recorded to ${formatDate(asAt)}
-                </td>
-              </tr>
-            ` : paidLines.map(l => `
-              <tr>
-                <td style="${tdStyle()}"></td>
-                <td style="${tdStyle()}">${l.invoice?.xero_invoice_number || l.invoice?.buyer || 'Invoice'} — ${l.docket || ''}</td>
-                <td style="${tdStyle('r')}">${fmtN(l.qty, 0)} ${unit}</td>
-                <td style="${tdStyle('r')}">${fmtC(l.price, 2)}</td>
-                <td style="${tdStyle('r')}">${fmtC(l.total, 0)}</td>
-                <td style="${tdStyle('r')}">—</td>
-                <td style="${tdStyle('r')}">${fmtC(l.total, 0)}</td>
-                <td style="${tdStyle('r')}">${pctOf(parseFloat(l.total)||0)}</td>
-              </tr>
-            `).join('')}
-            ${paidLines.length > 0 ? `
-              <tr style="background:var(--blue-light)">
-                <td style="${tdStyle()}"></td>
-                <td style="${tdStyle()}"><strong>Paid to date subtotal</strong></td>
-                <td style="${tdStyle('r')}"><strong>${fmtN(paidQty, 2)} ${unit}</strong></td>
-                <td style="${tdStyle('r')}"><strong>${fmtC(paidAvgUnit, 2)}</strong></td>
-                <td style="${tdStyle('r')}"><strong>${fmtC(paidGross, 0)}</strong></td>
-                <td style="${tdStyle('r')}">—</td>
-                <td style="${tdStyle('r')}"><strong>${fmtC(paidGross, 0)}</strong></td>
-                <td style="${tdStyle('r')}"><strong>${pctOf(paidGross)}</strong></td>
-              </tr>
-            ` : ''}
-
-            <!-- CONTRACTED BALANCE -->
-            <tr>
-              <td colspan="8" style="${sectionHeaderStyle('#1a4a7a')}">
-                <strong>Contracted balance</strong>
-                <span style="font-size:11px;font-weight:400;color:#9aacbf;margin-left:8px">(committed, not yet paid)</span>
-              </td>
-            </tr>
             ${contracts.length === 0 ? `
-              <tr><td colspan="8" style="padding:10px 16px;font-style:italic;color:var(--muted);border-bottom:1px solid var(--border-light)">No forward contracts</td></tr>
-            ` : contractRows.map((row, i) => `
+              <tr><td colspan="9" style="padding:10px 16px;font-style:italic;color:var(--muted)">No forward contracts</td></tr>
+            ` : contractRows.map(row => {
+              const contractValue = row.contractedQty * row.price;
+              const filledGross = paidLines
+                .filter(l => l.invoice?.forward_contract_id === row.c.id)
+                .reduce((s, l) => s + (parseFloat(l.total)||0), 0);
+              const stillToGoQty = row.qty;
+              const stillToGoGross = stillToGoQty * row.price;
+              return `
               <tr>
-                <td style="${tdStyle()}">${String(i+1).padStart(2,'0')} · ${row.c.counterparty || row.c.buyer || 'Contract'}</td>
-                <td style="${tdStyle()}">${row.c.contract_number || ''} — ${fmtN(row.contractedQty, 0)} ${unit} total${row.invoicedQty > 0 ? ' · ' + fmtN(row.invoicedQty, 0) + ' invoiced' : ''}</td>
-                <td style="${tdStyle('r')}">${fmtN(row.qty, 0)} ${unit}</td>
-                <td style="${tdStyle('r')}">${fmtC(row.price, 2)}</td>
-                <td style="${tdStyle('r')}">${fmtC(row.gross, 0)}</td>
-                <td style="${tdStyle('r')}">est.</td>
-                <td style="${tdStyle('r')}">${fmtC(row.gross, 0)}</td>
-                <td style="${tdStyle('r')}">${pctOf(row.gross)}</td>
-              </tr>
-            `).join('')}
+                <td style="${tdStyle()}"><strong>${row.c.contract_number || '—'}</strong></td>
+                <td style="${tdStyle()}">${row.c.counterparty || row.c.buyer || '—'}</td>
+                <td style="${tdStyle('r')}">${fmtN(row.contractedQty, 2)}</td>
+                <td style="${tdStyle('r')}">${fmtC(row.price, 0)}</td>
+                <td style="${tdStyle('r')}">${fmtC(contractValue, 0)}</td>
+                <td style="${tdStyle('r')}">${row.invoicedQty ? fmtN(row.invoicedQty, 2) : '—'}</td>
+                <td style="${tdStyle('r')}">${filledGross ? fmtC(filledGross, 0) : '—'}</td>
+                <td style="${tdStyle('r')}" class="${stillToGoQty > 0 ? 'text-amber' : ''}">${stillToGoQty > 0 ? fmtN(stillToGoQty, 2) : '✓'}</td>
+                <td style="${tdStyle('r')}" class="${stillToGoGross > 0 ? 'text-amber' : ''}">${stillToGoGross > 0 ? fmtC(stillToGoGross, 0) : '—'}</td>
+              </tr>`;
+            }).join('')}
             ${contracts.length > 0 ? `
-              <tr style="background:var(--blue-light)">
-                <td style="${tdStyle()}"></td>
-                <td style="${tdStyle()}"><strong>Contracted balance subtotal</strong></td>
-                <td style="${tdStyle('r')}"><strong>${fmtN(contractedRemainingQty, 2)} ${unit}</strong></td>
-                <td style="${tdStyle('r')}"><strong>${fmtC(contractedAvgPriceCalc, 2)}</strong></td>
-                <td style="${tdStyle('r')}"><strong>${fmtC(contractedGross, 0)}</strong></td>
-                <td style="${tdStyle('r')}">est.</td>
-                <td style="${tdStyle('r')}"><strong>${fmtC(contractedGross, 0)}</strong></td>
-                <td style="${tdStyle('r')}"><strong>${pctOf(contractedGross)}</strong></td>
+              <tr style="background:var(--page-bg);font-weight:600;border-top:2px solid var(--border)">
+                <td style="${tdStyle()}" colspan="2"><strong>TOTAL</strong></td>
+                <td style="${tdStyle('r')}">${fmtN(contractRows.reduce((s,r)=>s+r.contractedQty,0), 2)}</td>
+                <td style="${tdStyle('r')}">—</td>
+                <td style="${tdStyle('r')}">${fmtC(contractRows.reduce((s,r)=>s+r.contractedQty*r.price,0), 0)}</td>
+                <td style="${tdStyle('r')}">${fmtN(paidQty, 2)}</td>
+                <td style="${tdStyle('r')}">${fmtC(paidGross, 0)}</td>
+                <td style="${tdStyle('r')}">${fmtN(contractedRemainingQty, 2)}</td>
+                <td style="${tdStyle('r')}">${fmtC(contractedGross, 0)}</td>
               </tr>
             ` : ''}
 
             <!-- UNPRICED -->
             <tr>
-              <td colspan="8" style="${sectionHeaderStyle('#4a1a7a')}">
+              <td colspan="9" style="${sectionHeaderStyle('#4a1a7a')}">
                 <strong>Unpriced / Uncontracted</strong>
                 <span style="font-size:11px;font-weight:400;color:#c9aaf0;margin-left:8px">(forecast balance × market price)</span>
               </td>
             </tr>
             ${unpricedQty <= 0 ? `
-              <tr><td colspan="8" style="padding:10px 16px;font-style:italic;color:var(--muted);border-bottom:1px solid var(--border-light)">No unpriced balance</td></tr>
+              <tr><td colspan="9" style="padding:10px 16px;font-style:italic;color:var(--muted);border-bottom:1px solid var(--border-light)">No unpriced balance</td></tr>
             ` : `
               <tr>
                 <td style="${tdStyle()}"></td>
