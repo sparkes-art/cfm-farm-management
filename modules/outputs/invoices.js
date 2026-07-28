@@ -115,7 +115,18 @@ function _renderTable(container) {
   const totalComplete = rows.filter(i => i.status === 'complete').reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
 
   wrap.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:0;border-bottom:1px solid var(--border-light)">
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:0;border-bottom:1px solid var(--border-light)">
+      <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total qty</div>
+        <div style="font-size:18px;font-weight:600;color:var(--ink)">${(() => {
+          const qty = rows.reduce((s,i) => {
+            if (i.batches) { const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches; return s+b.reduce((ss,x)=>ss+(parseFloat(x.qty)||0),0); }
+            return s+(parseFloat(i.total_qty)||0);
+          }, 0);
+          const units = [...new Set(rows.map(i=>i.master_unit).filter(Boolean))];
+          return formatNumber(qty,3) + (units.length===1?' '+units[0]:'');
+        })()}</div>
+      </div>
       <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Gross</div>
         <div style="font-size:18px;font-weight:600;color:var(--ink)">${formatCurrency(totalGross, 0)}</div>
