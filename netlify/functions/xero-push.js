@@ -133,51 +133,110 @@ exports.handler = async (event) => {
     const contractNumber = contractMap[inv.forward_contract_id] || '';
 
     const lineItems = [];
-    (inv.line_items || []).map(l => {
-      const qty = parseFloat(l.qty) || 1;
-      const price = parseFloat(l.price) || 0;
-      const qualityAdj = parseFloat(l.quality_adj) || 0;
+    const commodity = inv.commodity_type || (inv.line_items||[])[0]?.commodity || 'Cotton Lint';
+    const masterUnit = inv.master_unit || 'bale';
 
-      // Line 1: base price
-      const baseDesc = [
-        l.commodity,
-        l.season,
-        contractNumber ? `Contract ${contractNumber}` : '',
-        `${qty} ${l.unit||''}`.trim(),
-        `@ $${price.toFixed(2)}`,
-      ].filter(Boolean).join(', ');
+    // Use batches (new format) if available
+    const batches = inv.batches
+      ? (typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches)
+      : null;
 
-      lineItems.push({
-        Description: baseDesc,
-        Quantity: qty,
-        UnitAmount: Math.round(price * 10000) / 10000,
-        TaxType: taxType,
+    if (batches && batches.length) {
+      batches.forEach(batch => {
+        const batchQty = parseFloat(batch.qty) || 0;
+        const cropYear = batch.crop_year || '';
+        const incomeDocket = batch.income_docket || '';
+        const expenseDocket = batch.expense_docket || '';
+
+        (batch.lines || []).forEach(line => {
+          const amount = parseFloat(line.amount) || 0;
+          if (!amount) return;
+
+          if (line.type === 'income' && line.line_type !== 'qa') {
+            // Sale income line
+            // Description: [Commodity], [Crop Year], Contract [Contract Number], [Qty] [unit] @ $[eff $/unit]
+            const effPrice = batchQty ? amount / batchQty : 0;
+            const desc = [
+              commodity,
+              cropYear,
+              contractNumber ? `Contract ${contractNumber}` : '',
+              `${batchQty} ${masterUnit}`,
+              `@ $${effPrice.toFixed(2)}`,
+              incomeDocket ? `Docket ${incomeDocket}` : '',
+            ].filter(Boolean).join(', ');
+            lineItems.push({
+              Description: desc,
+              Quantity: batchQty,
+              UnitAmount: Math.round((amount / batchQty) * 10000) / 10000,
+              TaxType: taxType,
+            });
+
+          } else if (line.type === 'income' && line.line_type === 'qa') {
+            // Quality adjustment line
+            const desc = [
+              'QUALITY ADJUSTMENT:',
+              commodity,
+              cropYear,
+              contractNumber ? `Contract ${contractNumber}` : '',
+              `${batchQty} ${masterUnit}`,
+              incomeDocket ? `Docket ${incomeDocket}` : '',
+            ].filter(Boolean).join(' ');
+            lineItems.push({
+              Description: desc,
+              Quantity: batchQty,
+              UnitAmount: Math.round((amount / batchQty) * 10000) / 10000,
+              TaxType: taxType,
+            });
+
+          } else if (line.type === 'expense') {
+            // Expense line
+            // Description: [Description], [Docket/ID]
+            const desc = [line.description || 'Expense', expenseDocket || line.docket].filter(Boolean).join(', ');
+            const expQty = batchQty || 1;
+            lineItems.push({
+              Description: desc,
+              Quantity: expQty,
+              UnitAmount: -Math.round((Math.abs(amount) / expQty) * 10000) / 10000,
+              TaxType: taxType,
+            });
+          }
+        });
       });
 
-      // Line 2: quality adjustment (only if non-zero)
-      if (qualityAdj !== 0) {
-        const qaDesc = `QUALITY ADJUSTMENT: ${l.commodity}, ${l.season}${contractNumber ? `, Contract ${contractNumber}` : ''}, ${qty} ${l.unit||''}`.trim();
-        const qaUnit = qty ? Math.round((qualityAdj / qty) * 10000) / 10000 : qualityAdj;
+    } else {
+      // Legacy line_items/deductions format
+      (inv.line_items || []).forEach(l => {
+        const qty = parseFloat(l.qty) || 1;
+        const price = parseFloat(l.price) || 0;
+        const desc = [
+          l.commodity || commodity,
+          l.season,
+          contractNumber ? `Contract ${contractNumber}` : '',
+          `${qty} ${l.unit||masterUnit}`,
+          `@ $${price.toFixed(2)}`,
+          l.docket ? `Docket ${l.docket}` : '',
+        ].filter(Boolean).join(', ');
         lineItems.push({
-          Description: qaDesc,
+          Description: desc,
           Quantity: qty,
-          UnitAmount: qaUnit,
+          UnitAmount: Math.round(price * 10000) / 10000,
           TaxType: taxType,
         });
-      }
-    });
-    (inv.deductions || []).forEach(d => {
-      if (!d.value) return;
-      const dedQty = parseFloat(d.qty) || 1;
-      const dedTotal = -Math.abs(parseFloat(d.value));
-      const dedDesc = [d.description || 'Deduction', d.docket].filter(Boolean).join(', ');
-      lineItems.push({
-        Description: dedDesc,
-        Quantity: dedQty,
-        UnitAmount: Math.round((dedTotal / dedQty) * 10000) / 10000,
-        TaxType: taxType,
       });
-    });
+      (inv.deductions || []).forEach(d => {
+        if (!d.value) return;
+        const dedQty = parseFloat(d.qty) || 1;
+        const dedTotal = -Math.abs(parseFloat(d.value));
+        const dedDesc = [d.description || 'Deduction', d.docket].filter(Boolean).join(', ');
+        lineItems.push({
+          Description: dedDesc,
+          Quantity: dedQty,
+          UnitAmount: Math.round((dedTotal / dedQty) * 10000) / 10000,
+          TaxType: taxType,
+        });
+      });
+    }
+
     if (!lineItems.length) lineItems.push({
       Description: inv.notes || 'Sale',
       Quantity: parseFloat(inv.total_qty) || 1,
@@ -229,9 +288,15 @@ exports.handler = async (event) => {
 
     // Upload attachments to Xero
     if (xeroInvoiceId) {
+      // Collect all attachments from batches (new format) + legacy fields
+      const batchFiles = batches ? batches.flatMap(b => [
+        ...(b.income_files || []),
+        ...(b.expense_files || []),
+      ]) : [];
       const allFiles = [
-        ...(inv.rcti_files || (inv.rcti_url ? [{ url: inv.rcti_url, filename: inv.rcti_filename || 'RCTI.pdf' }] : [])),
-        ...(inv.gin_files || (inv.gin_url ? [{ url: inv.gin_url, filename: inv.gin_filename || 'GinAdvice.pdf' }] : [])),
+        ...batchFiles,
+        ...(batchFiles.length ? [] : (inv.rcti_files || (inv.rcti_url ? [{ url: inv.rcti_url, filename: inv.rcti_filename || 'RCTI.pdf' }] : []))),
+        ...(batchFiles.length ? [] : (inv.gin_files || (inv.gin_url ? [{ url: inv.gin_url, filename: inv.gin_filename || 'GinAdvice.pdf' }] : []))),
         ...(inv.other_files || []),
       ];
 
@@ -252,7 +317,7 @@ exports.handler = async (event) => {
               method: 'PUT',
               headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'Xero-tenant-id': tenantId,
+                'Xero-Tenant-Id': tenantId,
                 'Content-Type': mimeType,
               },
               body: fileBuffer,
