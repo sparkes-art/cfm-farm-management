@@ -33,7 +33,12 @@ async function getXeroToken() {
   const [token] = await res.json();
   if (!token) throw new Error('No Xero token found');
 
-  // Refresh if needed
+  // Only refresh if expired or missing expiry
+  const expiresAt = token.expires_at ? new Date(token.expires_at) : new Date(0);
+  if (expiresAt - Date.now() > 5 * 60 * 1000) {
+    return { accessToken: token.access_token, tenantId: token.tenant_id };
+  }
+
   const refreshRes = await fetch('https://identity.xero.com/connect/token', {
     method: 'POST',
     headers: {
@@ -52,7 +57,7 @@ async function getXeroToken() {
   await sbFetch('xero_tokens?order=id.desc&limit=1', {
     method: 'PATCH',
     headers: { 'Prefer': 'return=minimal' },
-    body: JSON.stringify({ access_token: refreshed.access_token, refresh_token: refreshed.refresh_token }),
+    body: JSON.stringify({ access_token: refreshed.access_token, refresh_token: refreshed.refresh_token, expires_at: new Date(Date.now() + (refreshed.expires_in||1800) * 1000).toISOString() }),
   });
 
   return { accessToken: refreshed.access_token, tenantId: token.tenant_id };
@@ -117,7 +122,7 @@ exports.handler = async (event) => {
       const xeroInvRes = await fetch(`https://api.xero.com/api.xro/2.0/Invoices/${xeroInvoiceId}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
-          'Xero-tenant-id': tenantId,
+          'Xero-Tenant-Id': tenantId,
           'Accept': 'application/json',
         },
       });
@@ -140,7 +145,7 @@ exports.handler = async (event) => {
       const pdfRes = await fetch(`https://api.xero.com/api.xro/2.0/Invoices/${xeroInvoiceId}`, {
         headers: {
           'Authorization': `Bearer ${accessToken}`,
-          'Xero-tenant-id': tenantId,
+          'Xero-Tenant-Id': tenantId,
           'Accept': 'application/pdf',
         },
       });
