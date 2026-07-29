@@ -21,7 +21,6 @@ export async function mountInvoices(container) {
 
         <select id="inv-filter-commodity" class="form-select" style="width:160px">
           <option value="">All commodities</option>
-          ${[...new Set(_invoices.flatMap(i => (i.line_items||[]).map(l => l.commodity).filter(Boolean)))].sort().map(c => `<option value="${c}">${c}</option>`).join('')}
         </select>
         <select id="inv-filter-contract" class="form-select" style="width:180px">
           <option value="">All contracts</option>
@@ -92,6 +91,24 @@ function _subscribeRealtime() {
 function _renderTable(container) {
   const wrap = qs('#inv-table-wrap', container || document);
   if (!wrap) return;
+  // Rebuild commodity filter with live data
+  const _commodSel = document.getElementById('inv-filter-commodity');
+  if (_commodSel) {
+    const _cv2 = _commodSel.value;
+    const commodities = [...new Set([
+      ..._invoices.flatMap(i => (i.line_items||[]).map(l => l.commodity).filter(Boolean)),
+      ..._invoices.flatMap(i => {
+        if (!i.batches) return [];
+        const b = typeof i.batches==='string' ? JSON.parse(i.batches) : i.batches;
+        return b.flatMap(batch => (batch.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa').map(l=>l.description).filter(Boolean));
+      }),
+      ..._contracts.map(c => c.commodity).filter(Boolean),
+    ])].sort();
+    _commodSel.innerHTML = '<option value="">All commodities</option>' +
+      commodities.map(c => `<option value="${c}" ${_cv2===c?'selected':''}>${c}</option>`).join('');
+    _commodSel.addEventListener('change', () => _renderTable(container));
+  }
+
   // Rebuild contract filter with live data
   const _csel = document.getElementById('inv-filter-contract');
   if (_csel && _contracts.length) {
@@ -99,7 +116,11 @@ function _renderTable(container) {
     _csel.innerHTML = '<option value="">All contracts</option><option value="cash">Cash sales only</option>' +
       _contracts.map(c => `<option value="${c.id}" ${_cv===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''}</option>`).join('');
   }
-  const rows = _filtered();
+  const rows = _filtered().sort((a,b) => {
+    if (a.status === 'pending' && b.status !== 'pending') return -1;
+    if (a.status !== 'pending' && b.status === 'pending') return 1;
+    return 0;
+  });
 
   if (!rows.length) {
     wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">📄</div><p>No invoices yet.</p><p>Click "＋ New invoice" to record your first sale.</p></div>';
@@ -124,7 +145,7 @@ function _renderTable(container) {
             return s+(parseFloat(i.total_qty)||0);
           }, 0);
           const units = [...new Set(rows.map(i=>i.master_unit).filter(Boolean))];
-          return formatNumber(qty,3) + (units.length===1?' '+units[0]:'');
+          return formatNumber(qty,0) + (units.length===1?' '+units[0]:'');
         })()}</div>
       </div>
       <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
