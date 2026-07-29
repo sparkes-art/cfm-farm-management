@@ -305,6 +305,8 @@ exports.handler = async (event) => {
         ...(inv.other_files || []),
       ];
 
+      // Refresh token before attachments to ensure it's still valid
+      const { accessToken: attachToken, tenantId: attachTenantId } = await getAccessToken(farm_id);
       console.log('allFiles to attach:', allFiles.length, allFiles.map(f => f.filename));
       for (const file of allFiles) {
         try {
@@ -332,8 +334,8 @@ exports.handler = async (event) => {
           const attachRes = await fetch(attachUrl, {
             method: 'PUT',
             headers: {
-              'Authorization': `Bearer ${accessToken}`,
-              'Xero-Tenant-Id': tenantId,
+              'Authorization': `Bearer ${attachToken}`,
+              'Xero-Tenant-Id': attachTenantId,
               'Content-Type': mimeType,
             },
             body: fileBuffer,
