@@ -8,7 +8,7 @@ import {
   commodityBadge, statusBadge, qs, setContent, currentSeason, formatNumber
 } from '../../js/ui.js';
 import { mountContracts, unmountContracts } from './contracts.js';
-import { mountInvoices, unmountInvoices } from './invoices.js';
+import { mountInvoices, unmountInvoices, openInvoiceForm } from './invoices.js';
 import { mountReconciliation, unmountReconciliation } from './reconciliation.js';
 import { mountMarketPrices, unmountMarketPrices } from './market-prices.js';
 import { buildCommodityCards, drawMiniCharts } from './commodity-card.js';
@@ -248,7 +248,7 @@ async function _mountInvoices(container) {
   _subscribeRealtime();
 
   if (canWrite()) {
-    qs('#btn-new-invoice', container)?.addEventListener('click', () => openInvoiceModal());
+    qs('#btn-new-invoice', container)?.addEventListener('click', () => openInvoiceForm(container));
   }
 }
 
@@ -370,7 +370,7 @@ function _renderTable() {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const inv = _invoices.find(i => i.id === btn.dataset.id);
-      if (inv) openInvoiceModal(inv);
+      if (inv) openInvoiceForm(container, inv);
     });
   });
 }
@@ -560,7 +560,7 @@ function _openInvoiceDetail(inv) {
   openModal({
     title: 'Invoice ' + inv.invoice_number,
     confirmLabel: canWrite() ? 'Edit' : null,
-    onConfirm: canWrite() ? async () => openInvoiceModal(inv) : null,
+    onConfirm: canWrite() ? async () => openInvoiceForm(container, inv) : null,
     confirmClass: 'btn-secondary',
     bodyHTML: `
       <div class="form-row">
