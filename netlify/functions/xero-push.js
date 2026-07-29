@@ -164,10 +164,12 @@ exports.handler = async (event) => {
               `@ $${effPrice.toFixed(2)}`,
               incomeDocket ? `Docket ${incomeDocket}` : '',
             ].filter(Boolean).join(', ');
+            // Use Qty:1 + full LineAmount to avoid Xero rounding on recalc
             lineItems.push({
               Description: desc,
-              Quantity: batchQty,
-              UnitAmount: Math.round((amount / batchQty) * 10000) / 10000,
+              Quantity: 1,
+              UnitAmount: Math.round(amount * 100) / 100,
+              LineAmount: Math.round(amount * 100) / 100,
               TaxType: taxType,
             });
 
@@ -183,20 +185,21 @@ exports.handler = async (event) => {
             ].filter(Boolean).join(' ');
             lineItems.push({
               Description: desc,
-              Quantity: batchQty,
-              UnitAmount: Math.round((amount / batchQty) * 10000) / 10000,
+              Quantity: 1,
+              UnitAmount: Math.round(amount * 100) / 100,
+              LineAmount: Math.round(amount * 100) / 100,
               TaxType: taxType,
             });
 
           } else if (line.type === 'expense') {
-            // Expense line
-            // Description: [Description], [Docket/ID]
+            // Expense line — Qty:1 prevents rounding on tax recalc
             const desc = [line.description || 'Expense', expenseDocket || line.docket].filter(Boolean).join(', ');
-            const expQty = batchQty || 1;
+            const expAmount = -Math.abs(amount);
             lineItems.push({
               Description: desc,
-              Quantity: expQty,
-              UnitAmount: -Math.round((Math.abs(amount) / expQty) * 10000) / 10000,
+              Quantity: 1,
+              UnitAmount: Math.round(expAmount * 100) / 100,
+              LineAmount: Math.round(expAmount * 100) / 100,
               TaxType: taxType,
             });
           }
@@ -220,6 +223,7 @@ exports.handler = async (event) => {
           Description: desc,
           Quantity: qty,
           UnitAmount: Math.round(price * 10000) / 10000,
+          LineAmount: Math.round(qty * price * 100) / 100,
           TaxType: taxType,
         });
       });
@@ -232,6 +236,7 @@ exports.handler = async (event) => {
           Description: dedDesc,
           Quantity: dedQty,
           UnitAmount: Math.round((dedTotal / dedQty) * 10000) / 10000,
+          LineAmount: Math.round(dedTotal * 100) / 100,
           TaxType: taxType,
         });
       });
@@ -302,31 +307,42 @@ exports.handler = async (event) => {
 
       for (const file of allFiles) {
         try {
-          if (!file.url) continue;
+          if (!file.url || !file.filename) { console.log('Skipping file - missing url or filename:', file); continue; }
+          console.log('Attaching to Xero:', file.filename, file.url);
+
           // Fetch file from Supabase Storage
           const fileRes = await fetch(file.url);
-          if (!fileRes.ok) { console.error('Could not fetch file:', file.url); continue; }
+          if (!fileRes.ok) {
+            console.error('Could not fetch file:', file.url, fileRes.status, await fileRes.text());
+            continue;
+          }
           const fileBuffer = await fileRes.arrayBuffer();
-          const filename = (file.filename || 'attachment.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
-          const mimeType = filename.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream';
+          console.log('File fetched, size:', fileBuffer.byteLength);
 
-          // Upload to Xero
-          const attachRes = await fetch(
-            `https://api.xero.com/api.xro/2.0/Invoices/${xeroInvoiceId}/Attachments/${encodeURIComponent(filename)}`,
-            {
-              method: 'PUT',
-              headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Xero-Tenant-Id': tenantId,
-                'Content-Type': mimeType,
-              },
-              body: fileBuffer,
-            }
-          );
+          const filename = file.filename.replace(/[^a-zA-Z0-9._\- ]/g, '_');
+          const ext = filename.split('.').pop().toLowerCase();
+          const mimeType = ext === 'pdf' ? 'application/pdf'
+            : ext === 'png' ? 'image/png'
+            : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+            : 'application/octet-stream';
+
+          // Upload to Xero using IncludeOnline=false to avoid email attachment issues
+          const attachUrl = `https://api.xero.com/api.xro/2.0/Invoices/${xeroInvoiceId}/Attachments/${encodeURIComponent(filename)}`;
+          const attachRes = await fetch(attachUrl, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Xero-Tenant-Id': tenantId,
+              'Content-Type': mimeType,
+            },
+            body: fileBuffer,
+          });
+
           if (attachRes.ok) {
             console.log('Attached to Xero:', filename);
           } else {
-            console.error('Xero attachment failed:', filename, await attachRes.text());
+            const errText = await attachRes.text();
+            console.error('Xero attachment failed:', filename, attachRes.status, errText);
           }
         } catch (attachErr) {
           console.error('Attachment error:', file.filename, attachErr.message);
