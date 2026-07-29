@@ -305,6 +305,7 @@ exports.handler = async (event) => {
         ...(inv.other_files || []),
       ];
 
+      console.log('Attaching files to Xero invoice ID:', xeroInvoiceId);
       // Refresh token before attachments to ensure it's still valid
       const { accessToken: attachToken, tenantId: attachTenantId } = await getAccessToken(farm_id);
       console.log('allFiles to attach:', allFiles.length, allFiles.map(f => f.filename));
@@ -322,7 +323,7 @@ exports.handler = async (event) => {
           const fileBuffer = await fileRes.arrayBuffer();
           console.log('File fetched, size:', fileBuffer.byteLength);
 
-          const filename = file.filename.replace(/[^a-zA-Z0-9._\- ]/g, '_');
+          const filename = file.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
           const ext = filename.split('.').pop().toLowerCase();
           const mimeType = ext === 'pdf' ? 'application/pdf'
             : ext === 'png' ? 'image/png'
