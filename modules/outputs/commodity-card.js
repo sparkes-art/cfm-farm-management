@@ -175,17 +175,25 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
   // This gives the effective commodity price before deductions
   const completeInvoices = invoices.filter(i => i.status === 'complete' || i.status === 'paid');
   const totalPaidQty = completeInvoices.reduce((s, i) => {
-    const lines = (i.line_items || []).filter(l => !l.commodity || l.commodity === com.name);
-    // If line items exist use qty from them, otherwise fall back to total_qty
-    return s + (lines.length ? lines.reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0) : (parseFloat(i.total_qty)||0));
-  }, 0);
-  // Paid avg = line total / qty (line total already includes quality adj)
-  const totalPaidValue = completeInvoices.reduce((s, i) => {
-    const lines = (i.line_items || []).filter(l => !l.commodity || l.commodity === com.name);
-    if (lines.length) {
-      return s + lines.reduce((ss, l) => ss + (parseFloat(l.total)||0), 0);
+    // Use batches if available — only count income (sale, not QA) batches
+    if (i.batches && i.batches.length) {
+      const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
+      return s + b.filter(batch => (batch.lines||[]).some(l => l.type==='income' && l.line_type!=='qa'))
+                  .reduce((ss, batch) => ss + (parseFloat(batch.qty)||0), 0);
     }
-    // Fallback: gross_amount + total_quality_adj
+    // Legacy: use total_qty stored on invoice, or dedupe line_items by docket
+    if (i.total_qty) return s + parseFloat(i.total_qty);
+    const lines = (i.line_items || []).filter(l => (!l.commodity || l.commodity === com.name) && l.type !== 'expense' && l.line_type !== 'qa');
+    const seen = new Set();
+    return s + lines.reduce((ss, l) => {
+      const key = l.docket || l.commodity || JSON.stringify(l);
+      if (seen.has(key)) return ss;
+      seen.add(key);
+      return ss + (parseFloat(l.qty)||0);
+    }, 0);
+  }, 0);
+  // Paid value = gross + QA (not selling costs)
+  const totalPaidValue = completeInvoices.reduce((s, i) => {
     return s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
   }, 0);
   const paidAvg = (totalPaidQty && totalPaidValue) ? totalPaidValue / totalPaidQty : null;
@@ -325,10 +333,10 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
               ' style="font-size:12px;font-weight:600;color:var(--blue);background:none;border:none;border-bottom:1px dashed var(--blue);width:70px;text-align:right;font-variant-numeric:tabular-nums;outline:none;padding:0;cursor:text">' +
             '</div>' +
             '<div style="height:1px;background:var(--border-light);margin:6px 0"></div>' +
-            priceRow('Produced', totalHarvest ? formatNumber(totalHarvest,0)+' '+unit : '—') +
+            priceRow('Produced', (totalHarvest ? formatNumber(totalHarvest,0)+' '+unit : '—') + (status === 'harvesting' ? ' <span style="font-size:10px;background:var(--amber);color:white;border-radius:10px;padding:1px 7px;margin-left:6px;font-weight:600">Harvesting</span>' : status === 'harvested' ? ' <span style="font-size:10px;background:var(--green);color:white;border-radius:10px;padding:1px 7px;margin-left:6px;font-weight:600">Complete</span>' : '')) +
             priceRow('Invoiced qty', totalPaidQty ? formatNumber(totalPaidQty,0)+' '+unit : '—') +
             priceRow('Invoiced $', totalInvoicedDollars ? formatCurrency(totalInvoicedDollars,0) : '—', 'var(--green)') +
-            priceRow('On hand', onHand !== null ? formatNumber(onHand,0)+' '+unit : '—', 'var(--blue)') +
+            priceRow('On hand', status === 'harvesting' ? 'Harvesting' : (onHand !== null ? formatNumber(onHand,0)+' '+unit : '—'), status === 'harvesting' ? 'var(--amber)' : 'var(--blue)') +
             '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0">' +
               '<span style="font-size:11px;color:var(--hint)">Value on hand</span>' +
               '<span class="value-on-hand-display" data-commodity="' + com.id + '" style="font-size:12px;font-weight:600;color:var(--blue);font-variant-numeric:tabular-nums">' + (valueOnHand ? formatCurrency(valueOnHand,0) : '—') + '</span>' +
