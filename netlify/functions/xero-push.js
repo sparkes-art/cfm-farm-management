@@ -305,6 +305,7 @@ exports.handler = async (event) => {
         ...(inv.other_files || []),
       ];
 
+      console.log('allFiles to attach:', allFiles.length, allFiles.map(f => f.filename));
       for (const file of allFiles) {
         try {
           if (!file.url || !file.filename) { console.log('Skipping file - missing url or filename:', file); continue; }
