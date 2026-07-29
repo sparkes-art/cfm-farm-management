@@ -306,8 +306,11 @@ exports.handler = async (event) => {
       ];
 
       console.log('Attaching files to Xero invoice ID:', xeroInvoiceId);
-      // Refresh token before attachments to ensure it's still valid
-      const { accessToken: attachToken, tenantId: attachTenantId } = await getAccessToken(farm_id);
+      console.log('Push token (first 20):', accessToken?.slice(0,20));
+      // Use same token as invoice push - no refresh
+      const attachToken = accessToken;
+      const attachTenantId = tenantId;
+      console.log('Attach token (first 20):', attachToken?.slice(0,20));
       console.log('allFiles to attach:', allFiles.length, allFiles.map(f => f.filename));
       for (const file of allFiles) {
         try {
