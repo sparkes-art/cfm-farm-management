@@ -311,6 +311,12 @@ exports.handler = async (event) => {
       const attachToken = accessToken;
       const attachTenantId = tenantId;
       console.log('Attach token (first 20):', attachToken?.slice(0,20));
+      // Verify token works for this invoice
+      const verifyRes = await fetch(`https://api.xero.com/api.xro/2.0/Invoices/${xeroInvoiceId}`, {
+        headers: { 'Authorization': `Bearer ${attachToken}`, 'Xero-tenant-id': attachTenantId, 'Accept': 'application/json' }
+      });
+      console.log('Invoice GET verify:', verifyRes.status);
+
       console.log('allFiles to attach:', allFiles.length, allFiles.map(f => f.filename));
       for (const file of allFiles) {
         try {
@@ -335,6 +341,14 @@ exports.handler = async (event) => {
 
           // Upload to Xero - try both with and without encodeURIComponent
           const safeFilename = filename.replace(/ /g, '_');
+          // Use POST with multipart form data
+          const boundary = '----XeroBoundary' + Date.now();
+          const uint8 = new Uint8Array(fileBuffer);
+          const header = Buffer.from(
+            `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${safeFilename}"\r\nContent-Type: ${mimeType}\r\n\r\n`
+          );
+          const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+          const body = Buffer.concat([header, Buffer.from(uint8), footer]);
           const attachUrl = `https://api.xero.com/api.xro/2.0/Invoices/${xeroInvoiceId}/Attachments/${safeFilename}`;
           console.log('PUT URL:', attachUrl);
           const attachRes = await fetch(attachUrl, {
@@ -343,7 +357,6 @@ exports.handler = async (event) => {
               'Authorization': `Bearer ${attachToken}`,
               'Xero-tenant-id': attachTenantId,
               'Content-Type': mimeType,
-              'Accept': 'application/json',
             },
             body: fileBuffer,
           });
