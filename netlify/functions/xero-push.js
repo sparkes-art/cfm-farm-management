@@ -333,14 +333,17 @@ exports.handler = async (event) => {
             : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
             : 'application/octet-stream';
 
-          // Upload to Xero using IncludeOnline=false to avoid email attachment issues
-          const attachUrl = `https://api.xero.com/api.xro/2.0/Invoices/${xeroInvoiceId}/Attachments/${encodeURIComponent(filename)}`;
+          // Upload to Xero - try both with and without encodeURIComponent
+          const safeFilename = filename.replace(/ /g, '_');
+          const attachUrl = `https://api.xero.com/api.xro/2.0/Invoices/${xeroInvoiceId}/Attachments/${safeFilename}`;
+          console.log('PUT URL:', attachUrl);
           const attachRes = await fetch(attachUrl, {
             method: 'PUT',
             headers: {
               'Authorization': `Bearer ${attachToken}`,
-              'Xero-Tenant-Id': attachTenantId,
+              'Xero-tenant-id': attachTenantId,
               'Content-Type': mimeType,
+              'Accept': 'application/json',
             },
             body: fileBuffer,
           });
