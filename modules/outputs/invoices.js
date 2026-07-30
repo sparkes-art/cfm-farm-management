@@ -830,7 +830,7 @@ export function openInvoiceForm(container, existing = null) {
     });
 
     // Load existing lines
-    (data.lines || []).forEach(l => addBatchLine(div, l, l.amount >= 0 ? 'income' : 'expense'));
+    (data.lines || []).forEach(l => addBatchLine(div, l, l.type === 'expense' ? 'expense' : 'income'));
     if (!(data.lines||[]).length) { addBatchLine(div, {}, 'income'); addBatchLine(div, {}, 'expense'); }
 
     recalcBatch(div);
