@@ -65,17 +65,18 @@ async function _loadData() {
 
 function _filtered() {
   const season = getActiveSeason() || '';
-  const commodity = qs('#inv-filter-commodity')?.value || '';
-  const contract = qs('#inv-filter-contract')?.value || '';
+  const commodity = document.getElementById('inv-filter-commodity')?.value || '';
+  const contract = document.getElementById('inv-filter-contract')?.value || '';
+  const month = document.getElementById('inv-filter-month')?.value || '';
   return _invoices.filter(i => {
     const commodityMatch = !commodity || (i.line_items||[]).some(l => l.commodity === commodity);
-    const monthMatch = !month || (inv.invoice_date && inv.invoice_date.slice(0,7) === month);
+    const monthMatch = !month || (i.invoice_date && i.invoice_date.slice(0,7) === month);
     const contractMatch = !contract
       ? true
       : contract === 'cash'
         ? !i.forward_contract_id
         : i.forward_contract_id === contract;
-    if (!season) return commodityMatch && contractMatch;
+    if (!season) return commodityMatch && contractMatch && monthMatch;
     const seasonMatch = i.season === season || (i.line_items || []).some(l => l.season === season);
     return seasonMatch && commodityMatch && contractMatch && monthMatch;
   });
