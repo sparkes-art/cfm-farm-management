@@ -47,25 +47,36 @@ async function _render(container) {
   );
 
   // Build commodity map
+  // Build commodity map keyed by name (normalised) to avoid duplicates
   const commMap = {};
-  const addComm = (id, name) => {
-    const key = id || name;
-    if (!key) return;
-    if (!commMap[key]) commMap[key] = { id, name: name || id, contracts: [], invoices: [], budgets: [], forecasts: [], harvests: [] };
+  const normName = n => (n||'').trim().toLowerCase();
+
+  const findOrCreate = (id, name) => {
+    if (!name && !id) return null;
+    // Try find by name first
+    const existing = Object.values(commMap).find(c =>
+      (name && normName(c.name) === normName(name)) ||
+      (id && c.id === id)
+    );
+    if (existing) {
+      if (id && !existing.id) existing.id = id;
+      return existing;
+    }
+    const entry = { id: id||null, name: name||id, contracts: [], invoices: [], budgets: [], forecasts: [], harvests: [] };
+    commMap[name||id] = entry;
+    return entry;
   };
 
-  commodities.forEach(c => addComm(c.id, c.name));
-  contracts.forEach(c => { addComm(c.commodity_id, c.commodity); commMap[c.commodity_id||c.commodity]?.contracts.push(c); });
-  budgets.forEach(b => { addComm(b.commodity_id, b.commodity); commMap[b.commodity_id||b.commodity]?.budgets.push(b); });
-  harvests.forEach(h => { addComm(h.commodity_id, h.commodity); commMap[h.commodity_id||h.commodity]?.harvests.push(h); });
-  forecasts.forEach(f => { addComm(f.commodity_id, f.commodity); commMap[f.commodity_id||f.commodity]?.forecasts.push(f); });
+  commodities.forEach(c => findOrCreate(c.id, c.name));
+  contracts.forEach(c => findOrCreate(c.commodity_id, c.commodity)?.contracts.push(c));
+  budgets.forEach(b => findOrCreate(b.commodity_id, b.commodity)?.budgets.push(b));
+  harvests.forEach(h => findOrCreate(h.commodity_id, h.commodity)?.harvests.push(h));
+  forecasts.forEach(f => findOrCreate(f.commodity_id, f.commodity)?.forecasts.push(f));
   seasonInvoices.forEach(i => {
-    const commodity = i.commodity_type || (i.line_items||[])[0]?.commodity;
-    if (commodity) { addComm(null, commodity); commMap[commodity]?.invoices.push(i); }
-    else {
-      const key = Object.keys(commMap).find(k => contracts.find(c => c.id === i.forward_contract_id && (c.commodity_id === k || c.commodity === commMap[k]?.name)));
-      if (key) commMap[key].invoices.push(i);
-    }
+    // Find commodity from contract link
+    const linkedContract = contracts.find(c => c.id === i.forward_contract_id);
+    const commodity = linkedContract?.commodity || i.commodity_type || (i.line_items||[])[0]?.commodity;
+    if (commodity) findOrCreate(linkedContract?.commodity_id||null, commodity)?.invoices.push(i);
   });
 
   const thS = 'padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right;border-bottom:2px solid var(--border)';
@@ -81,20 +92,26 @@ async function _render(container) {
   const commodityRows = Object.values(commMap)
     .filter(com => com.contracts.length || com.budgets.length || com.harvests.length || com.invoices.length)
     .map(com => {
-      const unit = contracts.find(c => c.commodity_id === com.id || c.commodity === com.name)?.unit || budgets.find(b => b.commodity_id === com.id)?.unit || 'bale';
+      const unit = com.contracts[0]?.unit || com.budgets[0]?.unit || 'bale';
 
       // Budget
+      // Sum area across all crop types (Cotton Flood + Cotton Lateral both = Cotton Lint)
       const budgetArea = com.budgets.reduce((s,b) => s+(parseFloat(b.area_ha)||0), 0);
-      const budgetYield = com.budgets.reduce((s,b) => s+(parseFloat(b.yield_per_ha)||0), 0) / (com.budgets.length||1);
-      const budgetProd = com.budgets.reduce((s,b) => s+(parseFloat(b.budget_production)||0), 0);
-      const budgetPrice = com.budgets.reduce((s,b) => s+(parseFloat(b.price_per_unit)||0), 0) / (com.budgets.length||1);
-      const budgetIncome = budgetProd * budgetPrice;
+      // Weighted avg yield
+      const budgetYield = budgetArea ? com.budgets.reduce((s,b) => s+(parseFloat(b.yield_per_ha)||0)*(parseFloat(b.area_ha)||0), 0) / budgetArea : 0;
+      const budgetProd = budgetArea && budgetYield ? Math.round(budgetArea * budgetYield) : null;
+      // Weighted avg price
+      const budgetPrice = budgetProd ? com.budgets.reduce((s,b) => {
+        const rowProd = (parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0);
+        return s + (parseFloat(b.price)||0) * rowProd;
+      }, 0) / budgetProd : null;
+      const budgetIncome = budgetProd && budgetPrice ? Math.round(budgetProd * budgetPrice) : null;
 
       // Forecast (latest)
       const latestForecast = com.forecasts[0];
-      const forecastProd = latestForecast ? parseFloat(latestForecast.forecast_production) || null : null;
-      const forecastPrice = latestForecast ? parseFloat(latestForecast.forecast_price) || budgetPrice : budgetPrice;
-      const forecastIncome = forecastProd ? forecastProd * forecastPrice : null;
+      const forecastProd = latestForecast ? parseFloat(latestForecast.forecast_production||latestForecast.total_production) || null : null;
+      const forecastPrice = latestForecast ? parseFloat(latestForecast.forecast_price||latestForecast.price_per_unit) || budgetPrice || null : budgetPrice || null;
+      const forecastIncome = forecastProd && forecastPrice ? forecastProd * forecastPrice : null;
 
       // Actual harvest
       const actualProd = com.harvests.reduce((s,h) => s+(parseFloat(h.actual_production)||0), 0);
@@ -134,12 +151,12 @@ async function _render(container) {
         <!-- Production row -->
         <tr>
           <td style="padding:6px 12px;font-size:12px;color:var(--hint);padding-left:20px">Production (${unit})</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px">${fmtN(budgetProd)}</td>
+          <td style="padding:6px 12px;text-align:right;font-size:12px">${budgetProd ? fmtN(budgetProd) : '—'}</td>
           <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--blue)">${fmtN(forecastProd)}</td>
           <td style="padding:6px 12px;text-align:right;font-size:12px;color:${varColor(prodVar)}">${prodVar != null ? varArrow(prodVar)+' '+fmtN(Math.abs(prodVar)) : '—'}</td>
           <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--green)">${fmtN(actualProd)}${actualProd && forecastProd ? ' <span style="font-size:10px;color:var(--hint)">('+Math.round(actualProd/forecastProd*100)+'%)</span>' : ''}</td>
           <td style="padding:6px 12px;text-align:right;font-size:12px">${fmtN(contracted)}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--green)">${fmtN(invQty, 2)}</td>
+          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--green)">${invQty ? fmtN(invQty, 2) : '—'}</td>
           <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
         </tr>
 
@@ -158,8 +175,8 @@ async function _render(container) {
         <!-- Income row -->
         <tr>
           <td style="padding:6px 12px 10px;font-size:12px;font-weight:600;padding-left:20px">Total Income</td>
-          <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600">${fmtC(budgetIncome)}</td>
-          <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600;color:var(--blue)">${fmtC(forecastIncome)}</td>
+          <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600">${budgetIncome ? fmtC(budgetIncome) : '—'}</td>
+          <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600;color:var(--blue)">${forecastIncome ? fmtC(forecastIncome) : '—'}</td>
           <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600;color:${varColor(incomeVar)}">${incomeVar != null ? varArrow(incomeVar)+' '+fmtC(Math.abs(incomeVar)) : '—'}</td>
           <td style="padding:6px 12px 10px;text-align:right;font-size:12px"></td>
           <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600">${fmtC(contracted * (avgContractPrice||0))}</td>
