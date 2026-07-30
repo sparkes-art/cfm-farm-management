@@ -87,7 +87,7 @@ async function _render(container) {
   const varColor = (v) => v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--hint)';
   const varArrow = (v) => v > 0 ? '▲' : v < 0 ? '▼' : '';
 
-  let totalBudgetIncome = 0, totalForecastIncome = 0, totalActualIncome = 0;
+  let totalBudgetIncome = 0, totalForecastIncome = 0, totalActualIncome = 0, totalSellingCosts = 0, totalBudgetCosts = 0;
 
   const commodityRows = Object.values(commMap)
     .filter(com => com.contracts.length || com.budgets.length || com.harvests.length || com.invoices.length)
@@ -118,6 +118,10 @@ async function _render(container) {
       const actualArea = com.harvests.reduce((s,h) => s+(parseFloat(h.area_ha)||0), 0);
       const actualYield = actualArea ? actualProd / actualArea : null;
 
+      // Selling costs from invoices
+      const sellingCosts = com.invoices.reduce((s,i) => s + (parseFloat(i.total_deductions)||0), 0);
+      const budgetSellingCost = com.budgets.reduce((s,b) => s + (parseFloat(b.budgeted_inputs_per_ha)||0) * (parseFloat(b.area_ha)||0), 0);
+
       // Invoiced (actual income)
       const invQty = com.invoices.reduce((s,i) => {
         if (i.batches) {
@@ -141,6 +145,8 @@ async function _render(container) {
       totalBudgetIncome += budgetIncome || 0;
       totalForecastIncome += forecastIncome || 0;
       totalActualIncome += invIncome || 0;
+      totalSellingCosts += sellingCosts || 0;
+      totalBudgetCosts += budgetSellingCost || 0;
 
       return `
         <!-- Commodity header -->
@@ -172,7 +178,19 @@ async function _render(container) {
           <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
         </tr>
 
-        <!-- Income row -->
+        <!-- Selling costs row -->
+        <tr style="background:#fff8f8">
+          <td style="padding:6px 12px;font-size:12px;color:var(--hint);padding-left:20px">Selling costs</td>
+          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--red)">${budgetSellingCost ? '-'+fmtC(budgetSellingCost) : '—'}</td>
+          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
+          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
+          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
+          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
+          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--red)">${sellingCosts ? '-'+fmtC(sellingCosts) : '—'}</td>
+          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
+        </tr>
+
+        <!-- Net income row -->
         <tr>
           <td style="padding:6px 12px 10px;font-size:12px;font-weight:600;padding-left:20px">Total Income</td>
           <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600">${budgetIncome ? fmtC(budgetIncome) : '—'}</td>
@@ -233,14 +251,34 @@ async function _render(container) {
           ${commodityRows}
           <!-- Totals -->
           <tr style="background:var(--page-bg);border-top:2px solid var(--border)">
-            <td style="padding:10px 12px;font-size:13px;font-weight:700">Total Income</td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px;font-weight:700">${fmtC(totalBudgetIncome)}</td>
+            <td style="padding:8px 12px;font-size:13px;font-weight:700">Gross Income</td>
+            <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:700">${fmtC(totalBudgetIncome)}</td>
+            <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--blue)">${fmtC(totalForecastIncome)}</td>
+            <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:700;color:${varColor(totalForecastIncome-totalBudgetIncome)}">${varArrow(totalForecastIncome-totalBudgetIncome)} ${fmtC(Math.abs(totalForecastIncome-totalBudgetIncome))}</td>
+            <td style="padding:8px 12px;text-align:right;font-size:13px"></td>
+            <td style="padding:8px 12px;text-align:right;font-size:13px"></td>
+            <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--green)">${fmtC(totalActualIncome)}</td>
+            <td style="padding:8px 12px;text-align:right;font-size:13px;color:var(--hint)">${totalActualIncome && totalForecastIncome ? Math.round(totalActualIncome/totalForecastIncome*100)+'%' : ''}</td>
+          </tr>
+          <tr style="background:var(--page-bg)">
+            <td style="padding:8px 12px;font-size:12px;color:var(--hint)">Selling costs</td>
+            <td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--red)">${totalBudgetCosts ? '-'+fmtC(totalBudgetCosts) : '—'}</td>
+            <td style="padding:8px 12px;text-align:right;font-size:12px"></td>
+            <td style="padding:8px 12px;text-align:right;font-size:12px"></td>
+            <td style="padding:8px 12px;text-align:right;font-size:12px"></td>
+            <td style="padding:8px 12px;text-align:right;font-size:12px"></td>
+            <td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--red)">${totalSellingCosts ? '-'+fmtC(totalSellingCosts) : '—'}</td>
+            <td style="padding:8px 12px;text-align:right;font-size:12px"></td>
+          </tr>
+          <tr style="background:var(--page-bg);border-top:1px solid var(--border)">
+            <td style="padding:10px 12px;font-size:13px;font-weight:700">Net Income</td>
+            <td style="padding:10px 12px;text-align:right;font-size:13px;font-weight:700">${fmtC(totalBudgetIncome - totalBudgetCosts)}</td>
             <td style="padding:10px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--blue)">${fmtC(totalForecastIncome)}</td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px;font-weight:700;color:${varColor(totalForecastIncome-totalBudgetIncome)}">${varArrow(totalForecastIncome-totalBudgetIncome)} ${fmtC(Math.abs(totalForecastIncome-totalBudgetIncome))}</td>
             <td style="padding:10px 12px;text-align:right;font-size:13px"></td>
             <td style="padding:10px 12px;text-align:right;font-size:13px"></td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--green)">${fmtC(totalActualIncome)}</td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px;color:var(--hint)">${totalActualIncome && totalForecastIncome ? Math.round(totalActualIncome/totalForecastIncome*100)+'%' : ''}</td>
+            <td style="padding:10px 12px;text-align:right;font-size:13px"></td>
+            <td style="padding:10px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--green)">${fmtC(totalActualIncome - totalSellingCosts)}</td>
+            <td style="padding:10px 12px;text-align:right;font-size:13px;color:var(--hint)">${(totalActualIncome-totalSellingCosts) && totalForecastIncome ? Math.round((totalActualIncome-totalSellingCosts)/totalForecastIncome*100)+'%' : ''}</td>
           </tr>
         </tbody>
       </table>
