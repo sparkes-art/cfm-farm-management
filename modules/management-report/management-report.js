@@ -76,7 +76,9 @@ async function _render(container) {
 
   // Months elapsed for YTD budget proration
   // Months elapsed since July start of season
-  const monthsElapsed = Math.max(1, ((parseInt(y) - seasonYear) * 12 + (parseInt(mo) - 7)) + 1);
+  // Months elapsed since Jul season start — cap at 12 for full year
+  const rawMonths = ((parseInt(y) - seasonYear) * 12 + (parseInt(mo) - 7)) + 1;
+  const monthsElapsed = Math.min(12, Math.max(1, rawMonths));
 
   // Helpers
   const fC = (n, dp=0) => n != null && !isNaN(n) && n !== 0 ? formatCurrency(n, dp) : '—';
