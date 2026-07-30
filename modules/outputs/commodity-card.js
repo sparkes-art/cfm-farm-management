@@ -325,28 +325,44 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
               '<span style="font-size:12px;font-weight:600;color:' + color + ';font-variant-numeric:tabular-nums">' + val + '</span>' +
             '</div>';
           return '<div style="padding:14px 16px;background:var(--surface-2,white);display:flex;flex-direction:column;border-right:1px solid var(--border-light)">' +
-            '<p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0 0 8px">Prices &amp; Position</p>' +
-            priceRow('Budget', budgetPrice ? formatCurrency(budgetPrice,0) : '—') +
-            priceRow('Market', marketPrice ? formatCurrency(marketPrice,0) : '—', marketVsBudget !== null ? (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') +
-            priceRow('Fwd avg', avgFwdPrice ? formatCurrency(avgFwdPrice,0) : '—', 'var(--blue)') +
-            priceRow('Paid avg', paidAvg ? formatCurrency(paidAvg,0) : '—', paidVsBudget !== null ? (paidVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') +
-            '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border-light)">' +
-              '<span style="font-size:11px;color:var(--hint)">Value $/unit<br><span style="font-size:9px">mkt less 5%</span></span>' +
-              '<input class="value-per-unit-input" data-commodity="' + com.id + '" data-default="' + (defaultValuePerUnit||'') + '" value="' + (defaultValuePerUnit ? formatCurrency(defaultValuePerUnit,0) : '—') + '"' +
-              ' style="font-size:12px;font-weight:600;color:var(--blue);background:none;border:none;border-bottom:1px dashed var(--blue);width:70px;text-align:right;font-variant-numeric:tabular-nums;outline:none;padding:0;cursor:text">' +
+            '<p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0 0 8px">Position</p>' +
+
+            // --- COMMITMENT ---
+            '<p style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:0 0 4px;font-weight:600">Commitment</p>' +
+            priceRow('Forecast', hedgeDenominator ? formatNumber(hedgeDenominator,0)+' '+unit : '—') +
+            priceRow('Contracted', totalContracted ? formatNumber(totalContracted,0)+' '+unit : '—', 'var(--blue)') +
+            '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:2px solid var(--border-light);margin-bottom:8px">' +
+              '<span style="font-size:11px;color:var(--hint)">Open</span>' +
+              '<span style="font-size:12px;font-weight:600;color:' + (unhedged > 0 ? 'var(--amber)' : 'var(--green)') + ';font-variant-numeric:tabular-nums">' + formatNumber(unhedged,0) + ' ' + unit + '</span>' +
             '</div>' +
-            '<div style="height:1px;background:var(--border-light);margin:6px 0"></div>' +
-            priceRow('Produced', (totalHarvest ? formatNumber(totalHarvest,0)+' '+unit : '—') + (status === 'harvesting' ? ' <span style="font-size:10px;background:var(--amber);color:white;border-radius:10px;padding:1px 7px;margin-left:6px;font-weight:600">Harvesting</span>' : status === 'harvested' ? ' <span style="font-size:10px;background:var(--green);color:white;border-radius:10px;padding:1px 7px;margin-left:6px;font-weight:600">Complete</span>' : '')) +
+
+            // --- PROGRESS ---
+            '<p style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:0 0 4px;font-weight:600">Progress</p>' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--border-light)">' +
+              '<span style="font-size:11px;color:var(--hint)">Harvested' + (status==='harvesting'?' <span style="font-size:9px;background:var(--amber);color:white;border-radius:8px;padding:1px 5px">In progress</span>':status==='harvested'?' <span style="font-size:9px;background:var(--green);color:white;border-radius:8px;padding:1px 5px">Complete</span>':'') + '</span>' +
+              '<span style="font-size:12px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums">' + (totalHarvest ? formatNumber(totalHarvest,0)+' '+unit : '—') + '</span>' +
+            '</div>' +
+            (totalHarvest && hedgeDenominator ? '<div style="height:3px;background:var(--border);border-radius:2px;margin:3px 0 6px"><div style="height:100%;width:' + Math.min(100,Math.round(totalHarvest/hedgeDenominator*100)) + '%;background:var(--amber);border-radius:2px"></div></div>' : '') +
             priceRow('Invoiced qty', totalPaidQty ? formatNumber(totalPaidQty,0)+' '+unit : '—') +
+            (totalPaidQty && hedgeDenominator ? '<div style="height:3px;background:var(--border);border-radius:2px;margin:3px 0 6px"><div style="height:100%;width:' + Math.min(100,Math.round(totalPaidQty/hedgeDenominator*100)) + '%;background:var(--green);border-radius:2px"></div></div>' : '') +
             priceRow('Invoiced $', totalInvoicedDollars ? formatCurrency(totalInvoicedDollars,0) : '—', 'var(--green)') +
             priceRow('On hand', status === 'harvesting' ? 'Harvesting' : (onHand !== null ? formatNumber(onHand,0)+' '+unit : '—'), status === 'harvesting' ? 'var(--amber)' : 'var(--blue)') +
             '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0">' +
               '<span style="font-size:11px;color:var(--hint)">Value on hand</span>' +
               '<span class="value-on-hand-display" data-commodity="' + com.id + '" style="font-size:12px;font-weight:600;color:var(--blue);font-variant-numeric:tabular-nums">' + (valueOnHand ? formatCurrency(valueOnHand,0) : '—') + '</span>' +
             '</div>' +
-            '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border-light);display:flex;justify-content:space-between">' +
-              '<span style="font-size:10px;color:var(--hint)">Prior yr on hand</span>' +
-              '<span style="font-size:10px;color:var(--hint)">—</span>' +
+
+            // --- PRICES ---
+            '<div style="height:1px;background:var(--border-light);margin:8px 0"></div>' +
+            '<p style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:0 0 4px;font-weight:600">Prices</p>' +
+            priceRow('Budget', budgetPrice ? formatCurrency(budgetPrice,0) : '—') +
+            priceRow('Market', marketPrice ? formatCurrency(marketPrice,0) : '—', marketVsBudget !== null ? (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') +
+            priceRow('Fwd avg', avgFwdPrice ? formatCurrency(avgFwdPrice,0) : '—', 'var(--blue)') +
+            priceRow('Paid avg', paidAvg ? formatCurrency(paidAvg,0) : '—', paidVsBudget !== null ? (paidVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') +
+            '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0">' +
+              '<span style="font-size:11px;color:var(--hint)">Value $/unit<br><span style="font-size:9px">mkt less 5%</span></span>' +
+              '<input class="value-per-unit-input" data-commodity="' + com.id + '" data-default="' + (defaultValuePerUnit||'') + '" value="' + (defaultValuePerUnit ? formatCurrency(defaultValuePerUnit,0) : '—') + '"' +
+              ' style="font-size:12px;font-weight:600;color:var(--blue);background:none;border:none;border-bottom:1px dashed var(--blue);width:70px;text-align:right;font-variant-numeric:tabular-nums;outline:none;padding:0;cursor:text">' +
             '</div>' +
           '</div>';
         })()}
