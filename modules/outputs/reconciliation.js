@@ -42,7 +42,7 @@ export async function mountReconciliation(container) {
   qs('#btn-rec-print', container)?.addEventListener('click', () => _print(container, farm));
 
   qs('#rec-commodity', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
-  window.addEventListener('cfm:seasonchange', async () => {
+  document.addEventListener('cfm:seasonchange', async () => {
     await _populateCommodities(container, farm.id, getActiveSeason());
     await _renderReconciliation(container, farm);
   });

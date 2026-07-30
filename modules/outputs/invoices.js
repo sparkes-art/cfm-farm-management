@@ -69,7 +69,14 @@ function _filtered() {
   const contract = document.getElementById('inv-filter-contract')?.value || '';
   const month = document.getElementById('inv-filter-month')?.value || '';
   return _invoices.filter(i => {
-    const commodityMatch = !commodity || (i.line_items||[]).some(l => l.commodity === commodity);
+    const commodityMatch = !commodity || 
+      (i.line_items||[]).some(l => l.commodity === commodity) ||
+      (() => {
+        if (!i.batches) return false;
+        const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
+        return b.some(batch => (batch.lines||[]).some(l => l.description === commodity));
+      })() ||
+      _contracts.find(c => c.id === i.forward_contract_id)?.commodity === commodity;
     const monthMatch = !month || (i.invoice_date && i.invoice_date.slice(0,7) === month);
     const contractMatch = !contract
       ? true
@@ -107,7 +114,7 @@ function _renderTable(container) {
         const label = new Date(y, mo-1).toLocaleDateString('en-AU',{month:'short',year:'numeric'});
         return `<option value="${m}" ${_mv===m?'selected':''}>${label}</option>`;
       }).join('');
-    _monthSel.addEventListener('change', () => _renderTable(container));
+    if (!_monthSel.dataset.wired) { _monthSel.dataset.wired = '1'; _monthSel.addEventListener('change', () => _renderTable(container)); }
   }
 
   // Rebuild commodity filter with live data
@@ -115,6 +122,7 @@ function _renderTable(container) {
   if (_commodSel) {
     const _cv2 = _commodSel.value;
     const commodities = [...new Set([
+      ..._invoices.map(i => _contracts.find(c => c.id === i.forward_contract_id)?.commodity).filter(Boolean),
       ..._invoices.flatMap(i => (i.line_items||[]).map(l => l.commodity).filter(Boolean)),
       ..._invoices.flatMap(i => {
         if (!i.batches) return [];
@@ -125,7 +133,7 @@ function _renderTable(container) {
     ])].sort();
     _commodSel.innerHTML = '<option value="">All commodities</option>' +
       commodities.map(c => `<option value="${c}" ${_cv2===c?'selected':''}>${c}</option>`).join('');
-    _commodSel.addEventListener('change', () => _renderTable(container));
+    if (!_commodSel.dataset.wired) { _commodSel.dataset.wired = '1'; _commodSel.addEventListener('change', () => _renderTable(container)); }
   }
 
   // Rebuild contract filter with live data
@@ -134,6 +142,10 @@ function _renderTable(container) {
     const _cv = _csel.value;
     _csel.innerHTML = '<option value="">All contracts</option><option value="cash">Cash sales only</option>' +
       _contracts.map(c => `<option value="${c.id}" ${_cv===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''}</option>`).join('');
+    if (!_csel.dataset.wired) {
+      _csel.dataset.wired = '1';
+      _csel.addEventListener('change', () => _renderTable(container));
+    }
   }
   const rows = _filtered().sort((a,b) => {
     if (a.status === 'pending' && b.status !== 'pending') return -1;
@@ -216,7 +228,16 @@ function _renderTable(container) {
       <tbody>
         ${rows.map(inv => {
           const lines = inv.line_items || [];
-          const commodities = [...new Set(lines.map(l => l.commodity))].join(', ') || inv.commodity_type || '—';
+          // For batch invoices get commodity from linked contract
+          const contractCommodity = _contracts.find(c => c.id === inv.forward_contract_id)?.commodity;
+          const commodities = contractCommodity || 
+            [...new Set(lines.map(l => l.commodity).filter(Boolean))].join(', ') || 
+            (() => {
+              if (!inv.batches) return null;
+              const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;
+              const descs = [...new Set(b.flatMap(batch => (batch.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa').map(l=>l.description).filter(Boolean)))];
+              return descs.join(', ');
+            })() || inv.commodity_type || '—';
           return `
             <tr style="cursor:pointer" data-id="${inv.id}">
               <td class="muted" style="font-size:11px;white-space:nowrap">${inv.invoice_date ? new Date(inv.invoice_date+'T00:00:00').toLocaleDateString('en-AU',{day:'2-digit',month:'numeric',year:'2-digit'}) : '—'}</td>
@@ -294,7 +315,7 @@ function _renderTable(container) {
       if (!inv) return;
       openModal({
         title: 'Delete invoice',
-        bodyHTML: '<p style="font-size:14px">Delete invoice for <strong>' + (inv.buyer || 'this buyer') + '</strong>' + (inv.invoice_date ? ' dated ' + formatDate(inv.invoice_date) : '') + '?</p><p style="color:var(--red);font-size:13px;margin-top:8px">This cannot be undone.</p>',
+        bodyHTML: '<p style="font-size:14px">Delete invoice for <strong>' + (inv.buyer || 'this buyer') + '</strong>' + (inv.invoice_date ? ' dated ' + formatDate(inv.invoice_date) : '') + '?</p>' + (inv.xero_invoice_number ? '<p style="color:var(--amber);font-size:13px;margin-top:6px">⚠️ This invoice has been pushed to Xero as <strong>' + inv.xero_invoice_number + '</strong>. Deleting here will not remove it from Xero.</p>' : '') + '<p style="color:var(--red);font-size:13px;margin-top:8px">This cannot be undone.</p>',
         confirmLabel: 'Delete',
         confirmClass: 'btn-danger',
         onConfirm: async () => {
