@@ -75,7 +75,8 @@ async function _render(container) {
   });
 
   // Months elapsed for YTD budget proration
-  const monthsElapsed = ((parseInt(y) - seasonYear) * 12 + (parseInt(mo) - 7)) + 1;
+  // Months elapsed since July start of season
+  const monthsElapsed = Math.max(1, ((parseInt(y) - seasonYear) * 12 + (parseInt(mo) - 7)) + 1);
 
   // Helpers
   const fC = (n, dp=0) => n != null && !isNaN(n) && n !== 0 ? formatCurrency(n, dp) : '—';
@@ -98,7 +99,8 @@ async function _render(container) {
     let qty = 0, income = 0, qa = 0, costs = 0;
     invList.forEach(inv => {
       const c = contracts.find(x => x.id === inv.forward_contract_id);
-      if (commName && c?.commodity !== commName) return;
+      const invComm = c?.commodity || inv.commodity_type || (inv.line_items||[])[0]?.commodity;
+      if (commName && invComm !== commName) return;
       if (inv.batches) {
         const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;
         qty += b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((s,x)=>s+(parseFloat(x.qty)||0),0);
@@ -141,8 +143,8 @@ async function _render(container) {
   let grandMonthCosts = 0, grandYtdCosts = 0;
 
   const commodityBlocks = Object.values(groups)
-    .filter(g => g.budgets.length || g.harvests.length ||
-      allInvoices.some(i => contracts.find(c=>c.id===i.forward_contract_id)?.commodity === g.commName))
+    .filter(g => g.commName && (g.budgets.length || g.harvests.length ||
+      allInvoices.some(i => contracts.find(c=>c.id===i.forward_contract_id)?.commodity === g.commName)))
     .sort((a,b) => a.commName.localeCompare(b.commName))
     .map(g => {
       const unit = g.budgets[0]?.unit || contracts.find(c=>c.commodity===g.commName)?.unit || 'bale';
@@ -150,9 +152,14 @@ async function _render(container) {
       // Budget — sum all budgets for this commodity
       const bArea = g.budgets.reduce((s,b)=>s+(parseFloat(b.area_ha)||0),0);
       const bYield = bArea ? g.budgets.reduce((s,b)=>s+(parseFloat(b.yield_per_ha)||0)*(parseFloat(b.area_ha)||0),0)/bArea : 0;
-      const bProd = Math.round(bArea * bYield);
+      const bProd = bArea && bYield ? Math.round(bArea * bYield) : null;
       const bPrice = g.budgets.length ? g.budgets.reduce((s,b)=>s+(parseFloat(b.price)||0),0)/g.budgets.length : null;
-      const bIncome = bProd && bPrice ? bProd * bPrice : null;
+      // Fallback: derive budget from contracts if no budget entries
+      const contractBudgetQty = !bProd ? contracts.filter(c=>c.commodity===g.commName).reduce((s,c)=>s+(parseFloat(c.quantity)||0),0) : null;
+      const contractBudgetPrice = !bPrice ? contracts.filter(c=>c.commodity===g.commName).reduce((s,c)=>s+(parseFloat(c.price_per_unit)||0),0)/(contracts.filter(c=>c.commodity===g.commName).length||1) : null;
+      const effProd = bProd || contractBudgetQty || null;
+      const effPrice = bPrice || contractBudgetPrice || null;
+      const bIncome = effProd && effPrice ? effProd * effPrice : null;
       const bIncomeYtd = bIncome ? bIncome * (monthsElapsed/12) : null;
       const bIncomeMonth = bIncome ? bIncome / 12 : null;
 
@@ -179,12 +186,12 @@ async function _render(container) {
           <td style="${tdr}">${fN(harvested)}</td>
           <td style="${tdr};color:var(--blue)">—</td>
           <td style="${tdr}">—</td>
-          <td style="${tdr}">${bProd ? fN(bProd)+' '+unit : '—'}</td>
+          <td style="${tdr}">${effProd ? fN(effProd)+' '+unit : '—'}</td>
           <td style="${tdr}">${fN(ytd.qty,2) !== '—' ? fN(ytd.qty,2)+' '+unit : '—'}</td>
           <td style="${tdr};color:var(--blue)">—</td>
-          <td style="${tdr}">${bProd ? fN(bProd)+' '+unit : '—'}</td>
-          <td style="${tdr}">${varPct(ytd.qty, bProd)}</td>
-          <td style="${tdr}">${bProd ? fN(bProd)+' '+unit : '—'}</td>
+          <td style="${tdr}">${effProd ? fN(effProd)+' '+unit : '—'}</td>
+          <td style="${tdr}">${varPct(ytd.qty, effProd)}</td>
+          <td style="${tdr}">${effProd ? fN(effProd)+' '+unit : '—'}</td>
         </tr>
 
         <tr style="background:var(--page-bg)">
@@ -192,11 +199,11 @@ async function _render(container) {
           <td style="${tdr}">—</td>
           <td style="${tdr};color:var(--blue)">${month.avgPrice ? fC(month.avgPrice,2) : '—'}</td>
           <td style="${tdr}">${bPrice ? fC(bPrice,2) : '—'}</td>
-          <td style="${tdr}">${varAmt(month.avgPrice, bPrice)}</td>
+          <td style="${tdr}">${varAmt(month.avgPrice, effPrice)}</td>
           <td style="${tdr}">${ytd.avgPrice ? fC(ytd.avgPrice,2) : '—'}</td>
           <td style="${tdr};color:var(--blue)">—</td>
           <td style="${tdr}">${bPrice ? fC(bPrice,2) : '—'}</td>
-          <td style="${tdr}">${varPct(ytd.avgPrice, bPrice)}</td>
+          <td style="${tdr}">${varPct(ytd.avgPrice, effPrice)}</td>
           <td style="${tdr}">${bPrice ? fC(bPrice,2) : '—'}</td>
         </tr>
 
