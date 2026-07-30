@@ -1,291 +1,378 @@
-// modules/outputs/management-report.js
-// Management P&L — production-based, season-centric, no Xero dependency
+// modules/management-report/management-report.js
+// Management P&L — Option B: Units-first layout
 
-import { dbSelect } from '../../js/supabase-client.js';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js';
-import { formatCurrency, formatNumber, formatDate, qs } from '../../js/ui.js';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js';
 
-let _unsub = null;
-
-export function unmountManagementReport() {
-  _unsub?.();
-  _unsub = null;
-}
+export function unmountManagementReport() {}
 
 export async function mountManagementReport(container) {
   container.innerHTML = `
-    <div style="padding:24px;max-width:1100px;margin:0 auto">
-      <div id="mgmt-report-body">
-        <div style="display:flex;align-items:center;justify-content:center;padding:60px;color:var(--hint)">
-          Loading...
-        </div>
+    <div style="padding:20px 24px;max-width:1200px;margin:0 auto">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+        <select id="mgmt-month" class="form-select" style="width:170px">
+          <option value="">Select month...</option>
+        </select>
+        <span id="mgmt-ytd-label" style="font-size:12px;color:var(--hint)"></span>
+        <div style="flex:1"></div>
+        ${canWrite() ? '<button class="btn btn-ghost btn-sm" id="mgmt-comment-btn">💬 Add comment</button>' : ''}
+      </div>
+      <div id="mgmt-body">
+        <div style="padding:60px;text-align:center;color:var(--hint)">Select a month to view the report</div>
       </div>
     </div>
   `;
-  await _render(container);
+
+  await _populateMonths(container);
+  qs('#mgmt-month', container)?.addEventListener('change', () => _render(container));
+  qs('#mgmt-comment-btn', container)?.addEventListener('click', () => _addComment(container));
+}
+
+async function _populateMonths(container) {
+  const farm = getActiveFarm();
+  if (!farm) return;
+  const invoices = await dbSelect('invoices', `farm_id=eq.${farm.id}&select=invoice_date`);
+  const months = [...new Set(invoices.map(i => i.invoice_date?.slice(0,7)).filter(Boolean))].sort().reverse();
+  const sel = qs('#mgmt-month', container);
+  months.forEach(m => {
+    const [y, mo] = m.split('-');
+    sel.innerHTML += `<option value="${m}">${new Date(y, mo-1).toLocaleDateString('en-AU',{month:'long',year:'numeric'})}</option>`;
+  });
+  if (months.length) { sel.value = months[0]; _render(container); }
 }
 
 async function _render(container) {
   const farm = getActiveFarm();
   const season = getActiveSeason();
-  if (!farm || !season) return;
+  const selectedMonth = qs('#mgmt-month', container)?.value;
+  if (!farm || !season || !selectedMonth) return;
 
-  const [contracts, invoices, budgets, forecasts, harvests, commodities] = await Promise.all([
+  const [y, mo] = selectedMonth.split('-');
+  const monthLabel = new Date(y, mo-1).toLocaleDateString('en-AU', {month:'long', year:'numeric'});
+  const seasonYear = parseInt(season.split('-')[0]);
+  const ytdStart = `${seasonYear}-07`;
+
+  qs('#mgmt-ytd-label', container).textContent = `YTD: Jul ${seasonYear} – ${monthLabel}`;
+
+  const body = qs('#mgmt-body', container);
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--hint)">Loading...</div>';
+
+  const [contracts, allInvoices, budgets, cropTypes, harvests, comments] = await Promise.all([
     dbSelect('forward_contracts', `farm_id=eq.${farm.id}&crop_year=eq.${season}&select=*`),
-    dbSelect('invoices', `farm_id=eq.${farm.id}&select=*`),
+    dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`),
     dbSelect('budgets', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`),
-    dbSelect('forecasts', `farm_id=eq.${farm.id}&season=eq.${season}&select=*&order=forecast_date.desc`),
+    dbSelect('crop_types', `select=id,name`),
     dbSelect('harvest_entries', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`),
-    dbSelect('commodities', `select=id,name`),
+    dbSelect('management_comments', `farm_id=eq.${farm.id}&season=eq.${season}&select=*,user_profiles(full_name)&order=created_at.desc`).catch(()=>[]),
   ]);
 
-  // Filter invoices to this season
-  const seasonInvoices = invoices.filter(i =>
-    i.season === season ||
-    (i.line_items||[]).some(l => l.season === season) ||
-    (i.batches && (typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches).some(b => b.crop_year === season))
-  );
-
-  // Build commodity map
-  // Build commodity map keyed by name (normalised) to avoid duplicates
-  const commMap = {};
-  const normName = n => (n||'').trim().toLowerCase();
-
-  const findOrCreate = (id, name) => {
-    if (!name && !id) return null;
-    // Try find by name first
-    const existing = Object.values(commMap).find(c =>
-      (name && normName(c.name) === normName(name)) ||
-      (id && c.id === id)
-    );
-    if (existing) {
-      if (id && !existing.id) existing.id = id;
-      return existing;
-    }
-    const entry = { id: id||null, name: name||id, contracts: [], invoices: [], budgets: [], forecasts: [], harvests: [] };
-    commMap[name||id] = entry;
-    return entry;
-  };
-
-  commodities.forEach(c => findOrCreate(c.id, c.name));
-  contracts.forEach(c => findOrCreate(c.commodity_id, c.commodity)?.contracts.push(c));
-  budgets.forEach(b => findOrCreate(b.commodity_id, b.commodity)?.budgets.push(b));
-  harvests.forEach(h => findOrCreate(h.commodity_id, h.commodity)?.harvests.push(h));
-  forecasts.forEach(f => findOrCreate(f.commodity_id, f.commodity)?.forecasts.push(f));
-  seasonInvoices.forEach(i => {
-    // Find commodity from contract link
-    const linkedContract = contracts.find(c => c.id === i.forward_contract_id);
-    const commodity = linkedContract?.commodity || i.commodity_type || (i.line_items||[])[0]?.commodity;
-    if (commodity) findOrCreate(linkedContract?.commodity_id||null, commodity)?.invoices.push(i);
+  // Period filters
+  const monthInv = allInvoices.filter(i => i.invoice_date?.slice(0,7) === selectedMonth);
+  const ytdInv = allInvoices.filter(i => {
+    const m = i.invoice_date?.slice(0,7);
+    return m && m >= ytdStart && m <= selectedMonth;
   });
 
-  const thS = 'padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right;border-bottom:2px solid var(--border)';
-  const thL = thS + ';text-align:left';
+  // Months elapsed for YTD budget proration
+  const monthsElapsed = ((parseInt(y) - seasonYear) * 12 + (parseInt(mo) - 7)) + 1;
 
-  const fmtN = (n, dp=0) => n != null && !isNaN(n) ? formatNumber(n, dp) : '—';
-  const fmtC = (n, dp=0) => n != null && !isNaN(n) && n !== 0 ? formatCurrency(n, dp) : '—';
-  const varColor = (v) => v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--hint)';
-  const varArrow = (v) => v > 0 ? '▲' : v < 0 ? '▼' : '';
+  // Helpers
+  const fC = (n, dp=0) => n != null && !isNaN(n) && n !== 0 ? formatCurrency(n, dp) : '—';
+  const fN = (n, dp=0) => n != null && !isNaN(n) && n !== 0 ? formatNumber(n, dp) : '—';
+  const varPct = (actual, budget) => {
+    if (!budget || !actual) return '<span style="color:var(--hint)">—</span>';
+    const pct = Math.round((actual - budget) / Math.abs(budget) * 100);
+    const color = pct >= 0 ? 'var(--green)' : 'var(--red)';
+    return `<span style="color:${color};font-weight:600">${pct > 0 ? '+' : ''}${pct}%</span>`;
+  };
+  const varAmt = (actual, budget) => {
+    if (!budget || actual == null) return '—';
+    const v = actual - budget;
+    const color = v >= 0 ? 'var(--green)' : 'var(--red)';
+    return `<span style="color:${color}">${v > 0 ? '+' : ''}${fC(v)}</span>`;
+  };
 
-  let totalBudgetIncome = 0, totalForecastIncome = 0, totalActualIncome = 0, totalSellingCosts = 0, totalBudgetCosts = 0;
+  // Invoice totals helper
+  const invTotals = (invList, commName) => {
+    let qty = 0, income = 0, qa = 0, costs = 0;
+    invList.forEach(inv => {
+      const c = contracts.find(x => x.id === inv.forward_contract_id);
+      if (commName && c?.commodity !== commName) return;
+      if (inv.batches) {
+        const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;
+        qty += b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((s,x)=>s+(parseFloat(x.qty)||0),0);
+      } else {
+        qty += parseFloat(inv.total_qty)||0;
+      }
+      income += parseFloat(inv.gross_amount)||0;
+      qa += parseFloat(inv.total_quality_adj)||0;
+      costs += parseFloat(inv.total_deductions)||0;
+    });
+    return { qty, income, qa, totalIncome: income+qa, costs, net: income+qa-costs,
+             avgPrice: qty ? (income+qa)/qty : null };
+  };
 
-  const commodityRows = Object.values(commMap)
-    .filter(com => com.contracts.length || com.budgets.length || com.harvests.length || com.invoices.length)
-    .map(com => {
-      const unit = com.contracts[0]?.unit || com.budgets[0]?.unit || 'bale';
+  // Build commodity groups
+  const normName = n => (n||'').trim();
+  const groups = {};
+  const getOrCreate = (commName, commId, cropTypeId) => {
+    const key = normName(commName);
+    if (!groups[key]) groups[key] = { commName: key, commId, cropTypeId, budgets:[], harvests:[] };
+    return groups[key];
+  };
 
-      // Budget
-      // Sum area across all crop types (Cotton Flood + Cotton Lateral both = Cotton Lint)
-      const budgetArea = com.budgets.reduce((s,b) => s+(parseFloat(b.area_ha)||0), 0);
-      // Weighted avg yield
-      const budgetYield = budgetArea ? com.budgets.reduce((s,b) => s+(parseFloat(b.yield_per_ha)||0)*(parseFloat(b.area_ha)||0), 0) / budgetArea : 0;
-      const budgetProd = budgetArea && budgetYield ? Math.round(budgetArea * budgetYield) : null;
-      // Weighted avg price
-      const budgetPrice = budgetProd ? com.budgets.reduce((s,b) => {
-        const rowProd = (parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0);
-        return s + (parseFloat(b.price)||0) * rowProd;
-      }, 0) / budgetProd : null;
-      const budgetIncome = budgetProd && budgetPrice ? Math.round(budgetProd * budgetPrice) : null;
+  budgets.forEach(b => getOrCreate(b.commodity, b.commodity_id, b.crop_type_id).budgets.push(b));
+  harvests.forEach(h => getOrCreate(h.commodity, h.commodity_id, h.crop_type_id).harvests.push(h));
+  contracts.forEach(c => getOrCreate(c.commodity, c.commodity_id, null));
+  allInvoices.forEach(inv => {
+    const c = contracts.find(x => x.id === inv.forward_contract_id);
+    if (c) getOrCreate(c.commodity, c.commodity_id, null);
+  });
 
-      // Forecast (latest)
-      const latestForecast = com.forecasts[0];
-      const forecastProd = latestForecast ? parseFloat(latestForecast.forecast_production||latestForecast.total_production) || null : null;
-      const forecastPrice = latestForecast ? parseFloat(latestForecast.forecast_price||latestForecast.price_per_unit) || budgetPrice || null : budgetPrice || null;
-      const forecastIncome = forecastProd && forecastPrice ? forecastProd * forecastPrice : null;
+  // Table styles
+  const th = `padding:7px 10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);border-bottom:2px solid var(--border)`;
+  const td = `padding:6px 10px;font-size:12px;border-bottom:1px solid var(--border-light)`;
+  const tdr = td + ';text-align:right;font-variant-numeric:tabular-nums';
+  const secHdr = (label) => `<tr style="background:#1a3a5c"><td colspan="10" style="padding:7px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:white">${label}</td></tr>`;
+  const totHdr = (label) => `<tr style="background:#1a3a5c"><td colspan="10" style="padding:7px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:white">${label}</td></tr>`;
 
-      // Actual harvest
-      const actualProd = com.harvests.reduce((s,h) => s+(parseFloat(h.actual_production)||0), 0);
-      const actualArea = com.harvests.reduce((s,h) => s+(parseFloat(h.area_ha)||0), 0);
-      const actualYield = actualArea ? actualProd / actualArea : null;
+  let grandMonthIncome = 0, grandYtdIncome = 0, grandBudget = 0;
+  let grandMonthCosts = 0, grandYtdCosts = 0;
 
-      // Selling costs from invoices
-      const sellingCosts = com.invoices.reduce((s,i) => s + (parseFloat(i.total_deductions)||0), 0);
-      const budgetSellingCost = com.budgets.reduce((s,b) => s + (parseFloat(b.budgeted_inputs_per_ha)||0) * (parseFloat(b.area_ha)||0), 0);
+  const commodityBlocks = Object.values(groups)
+    .filter(g => g.budgets.length || g.harvests.length ||
+      allInvoices.some(i => contracts.find(c=>c.id===i.forward_contract_id)?.commodity === g.commName))
+    .sort((a,b) => a.commName.localeCompare(b.commName))
+    .map(g => {
+      const unit = g.budgets[0]?.unit || contracts.find(c=>c.commodity===g.commName)?.unit || 'bale';
 
-      // Invoiced (actual income)
-      const invQty = com.invoices.reduce((s,i) => {
-        if (i.batches) {
-          const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
-          return s + b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((ss,x)=>ss+(parseFloat(x.qty)||0),0);
-        }
-        return s + (parseFloat(i.total_qty)||0);
-      }, 0);
-      const invIncome = com.invoices.reduce((s,i) => s+(parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0), 0);
-      const invAvgPrice = invQty ? invIncome / invQty : null;
+      // Budget — sum all budgets for this commodity
+      const bArea = g.budgets.reduce((s,b)=>s+(parseFloat(b.area_ha)||0),0);
+      const bYield = bArea ? g.budgets.reduce((s,b)=>s+(parseFloat(b.yield_per_ha)||0)*(parseFloat(b.area_ha)||0),0)/bArea : 0;
+      const bProd = Math.round(bArea * bYield);
+      const bPrice = g.budgets.length ? g.budgets.reduce((s,b)=>s+(parseFloat(b.price)||0),0)/g.budgets.length : null;
+      const bIncome = bProd && bPrice ? bProd * bPrice : null;
+      const bIncomeYtd = bIncome ? bIncome * (monthsElapsed/12) : null;
+      const bIncomeMonth = bIncome ? bIncome / 12 : null;
 
-      // Contracted
-      const contracted = com.contracts.reduce((s,c) => s+(parseFloat(c.quantity)||0), 0);
-      const avgContractPrice = contracted ? com.contracts.reduce((s,c) => s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0) / contracted : null;
+      // Harvest
+      const harvested = g.harvests.reduce((s,h)=>s+(parseFloat(h.actual_production)||0),0);
 
-      // Variances
-      const prodVar = forecastProd && budgetProd ? forecastProd - budgetProd : null;
-      const priceVar = forecastPrice && budgetPrice ? forecastPrice - budgetPrice : null;
-      const incomeVar = forecastIncome && budgetIncome ? forecastIncome - budgetIncome : null;
+      // Invoiced
+      const month = invTotals(monthInv, g.commName);
+      const ytd = invTotals(ytdInv, g.commName);
 
-      totalBudgetIncome += budgetIncome || 0;
-      totalForecastIncome += forecastIncome || 0;
-      totalActualIncome += invIncome || 0;
-      totalSellingCosts += sellingCosts || 0;
-      totalBudgetCosts += budgetSellingCost || 0;
+      grandMonthIncome += month.totalIncome;
+      grandYtdIncome += ytd.totalIncome;
+      grandBudget += bIncome || 0;
+      grandMonthCosts += month.costs;
+      grandYtdCosts += ytd.costs;
 
       return `
-        <!-- Commodity header -->
+        <tr style="background:#e8f0fe">
+          <td colspan="10" style="${td};font-weight:600;color:#1a3a5c;background:#e8f0fe">${g.commName}</td>
+        </tr>
+
+        <tr>
+          <td style="${td};padding-left:20px;color:var(--hint)">Harvested (${unit})</td>
+          <td style="${tdr}">${fN(harvested)}</td>
+          <td style="${tdr};color:var(--blue)">—</td>
+          <td style="${tdr}">—</td>
+          <td style="${tdr}">${bProd ? fN(bProd)+' '+unit : '—'}</td>
+          <td style="${tdr}">${fN(ytd.qty,2) !== '—' ? fN(ytd.qty,2)+' '+unit : '—'}</td>
+          <td style="${tdr};color:var(--blue)">—</td>
+          <td style="${tdr}">${bProd ? fN(bProd)+' '+unit : '—'}</td>
+          <td style="${tdr}">${varPct(ytd.qty, bProd)}</td>
+          <td style="${tdr}">${bProd ? fN(bProd)+' '+unit : '—'}</td>
+        </tr>
+
         <tr style="background:var(--page-bg)">
-          <td colspan="8" style="padding:10px 12px 4px;font-size:13px;font-weight:700;color:var(--ink);border-top:2px solid var(--border)">${com.name}</td>
+          <td style="${td};padding-left:20px;color:var(--hint)">Price ($/unit)</td>
+          <td style="${tdr}">—</td>
+          <td style="${tdr};color:var(--blue)">${month.avgPrice ? fC(month.avgPrice,2) : '—'}</td>
+          <td style="${tdr}">${bPrice ? fC(bPrice,2) : '—'}</td>
+          <td style="${tdr}">${varAmt(month.avgPrice, bPrice)}</td>
+          <td style="${tdr}">${ytd.avgPrice ? fC(ytd.avgPrice,2) : '—'}</td>
+          <td style="${tdr};color:var(--blue)">—</td>
+          <td style="${tdr}">${bPrice ? fC(bPrice,2) : '—'}</td>
+          <td style="${tdr}">${varPct(ytd.avgPrice, bPrice)}</td>
+          <td style="${tdr}">${bPrice ? fC(bPrice,2) : '—'}</td>
         </tr>
 
-        <!-- Production row -->
+        <tr style="border-top:1px solid var(--border)">
+          <td style="${td};padding-left:20px;font-weight:600;color:var(--ink)">Income</td>
+          <td style="${tdr}">—</td>
+          <td style="${tdr};color:${month.totalIncome?'var(--green)':'var(--hint)'};font-weight:600">${fC(month.totalIncome)}</td>
+          <td style="${tdr}">${fC(bIncomeMonth)}</td>
+          <td style="${tdr}">${varAmt(month.totalIncome, bIncomeMonth)}</td>
+          <td style="${tdr}">—</td>
+          <td style="${tdr};color:${ytd.totalIncome?'var(--green)':'var(--hint)'};font-weight:600">${fC(ytd.totalIncome)}</td>
+          <td style="${tdr}">${fC(bIncomeYtd)}</td>
+          <td style="${tdr}">${varPct(ytd.totalIncome, bIncomeYtd)}</td>
+          <td style="${tdr};font-weight:600">${fC(bIncome)}</td>
+        </tr>
+
+        ${month.costs || ytd.costs ? `
         <tr>
-          <td style="padding:6px 12px;font-size:12px;color:var(--hint);padding-left:20px">Production (${unit})</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px">${budgetProd ? fmtN(budgetProd) : '—'}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--blue)">${fmtN(forecastProd)}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px;color:${varColor(prodVar)}">${prodVar != null ? varArrow(prodVar)+' '+fmtN(Math.abs(prodVar)) : '—'}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--green)">${fmtN(actualProd)}${actualProd && forecastProd ? ' <span style="font-size:10px;color:var(--hint)">('+Math.round(actualProd/forecastProd*100)+'%)</span>' : ''}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px">${fmtN(contracted)}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--green)">${invQty ? fmtN(invQty, 2) : '—'}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
-        </tr>
-
-        <!-- Price row -->
-        <tr style="background:#fafafa">
-          <td style="padding:6px 12px;font-size:12px;color:var(--hint);padding-left:20px">Price ($/unit)</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px">${fmtC(budgetPrice, 2)}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--blue)">${fmtC(forecastPrice, 2)}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px;color:${varColor(priceVar)}">${priceVar != null ? varArrow(priceVar)+' '+fmtC(Math.abs(priceVar),2) : '—'}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px">${fmtC(avgContractPrice, 2)}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--green)">${fmtC(invAvgPrice, 2)}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
-        </tr>
-
-        <!-- Selling costs row -->
-        <tr style="background:#fff8f8">
-          <td style="padding:6px 12px;font-size:12px;color:var(--hint);padding-left:20px">Selling costs</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--red)">${budgetSellingCost ? '-'+fmtC(budgetSellingCost) : '—'}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--red)">${sellingCosts ? '-'+fmtC(sellingCosts) : '—'}</td>
-          <td style="padding:6px 12px;text-align:right;font-size:12px"></td>
-        </tr>
-
-        <!-- Net income row -->
-        <tr>
-          <td style="padding:6px 12px 10px;font-size:12px;font-weight:600;padding-left:20px">Total Income</td>
-          <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600">${budgetIncome ? fmtC(budgetIncome) : '—'}</td>
-          <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600;color:var(--blue)">${forecastIncome ? fmtC(forecastIncome) : '—'}</td>
-          <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600;color:${varColor(incomeVar)}">${incomeVar != null ? varArrow(incomeVar)+' '+fmtC(Math.abs(incomeVar)) : '—'}</td>
-          <td style="padding:6px 12px 10px;text-align:right;font-size:12px"></td>
-          <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600">${fmtC(contracted * (avgContractPrice||0))}</td>
-          <td style="padding:6px 12px 10px;text-align:right;font-size:12px;font-weight:600;color:var(--green)">${fmtC(invIncome)}</td>
-          <td style="padding:6px 12px 10px;text-align:right;font-size:12px;color:var(--hint)">${invIncome && forecastIncome ? Math.round(invIncome/forecastIncome*100)+'%' : ''}</td>
-        </tr>
+          <td style="${td};padding-left:28px;color:var(--hint);font-size:11px">↳ Selling costs</td>
+          <td style="${tdr}">—</td>
+          <td style="${tdr};color:var(--red)">${month.costs ? '-'+fC(month.costs) : '—'}</td>
+          <td colspan="2" style="${tdr}"></td>
+          <td style="${tdr}">—</td>
+          <td style="${tdr};color:var(--red)">${ytd.costs ? '-'+fC(ytd.costs) : '—'}</td>
+          <td colspan="2" style="${tdr}"></td>
+          <td style="${tdr}"></td>
+        </tr>` : ''}
       `;
     }).join('');
 
-  const body = qs('#mgmt-report-body', container);
+  // Comments section
+  const commentRows = comments.length
+    ? comments.map(c => `
+        <tr>
+          <td style="${td};color:var(--hint);font-size:11px;white-space:nowrap;width:90px">${formatDate(c.created_at?.slice(0,10))}</td>
+          <td style="${td};font-size:11px;color:var(--hint);white-space:nowrap;width:120px">${c.user_profiles?.full_name||'User'}</td>
+          <td style="${td};font-size:11px;color:var(--hint);white-space:nowrap;width:80px">${c.month ? new Date(c.month+'-01').toLocaleDateString('en-AU',{month:'short',year:'numeric'}) : '—'}</td>
+          <td style="${td};font-size:12px">${c.comment}</td>
+        </tr>`).join('')
+    : `<tr><td colspan="4" style="${td};color:var(--hint);font-style:italic">No comments yet — add one above</td></tr>`;
+
   body.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+    <!-- Header -->
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:16px">
       <div>
-        <h2 style="font-size:16px;font-weight:700;margin:0">${farm.name} — Management Report</h2>
-        <p style="font-size:12px;color:var(--hint);margin:4px 0 0">Season ${season} · Production-based income</p>
-      </div>
-      <div style="font-size:11px;color:var(--hint)">As at ${formatDate(new Date().toISOString().slice(0,10))}</div>
-    </div>
-
-    <!-- Summary cards -->
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px">
-      <div style="background:white;border:1px solid var(--border);border-radius:8px;padding:16px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Budget Income</div>
-        <div style="font-size:22px;font-weight:700">${fmtC(totalBudgetIncome)}</div>
-      </div>
-      <div style="background:white;border:1px solid var(--border);border-radius:8px;padding:16px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Forecast Income</div>
-        <div style="font-size:22px;font-weight:700;color:var(--blue)">${fmtC(totalForecastIncome)}</div>
-        ${totalForecastIncome && totalBudgetIncome ? `<div style="font-size:11px;color:${varColor(totalForecastIncome-totalBudgetIncome)};margin-top:3px">${varArrow(totalForecastIncome-totalBudgetIncome)} ${fmtC(Math.abs(totalForecastIncome-totalBudgetIncome))} vs budget</div>` : ''}
-      </div>
-      <div style="background:white;border:1px solid var(--border);border-radius:8px;padding:16px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Invoiced to Date</div>
-        <div style="font-size:22px;font-weight:700;color:var(--green)">${fmtC(totalActualIncome)}</div>
-        ${totalActualIncome && totalForecastIncome ? `<div style="font-size:11px;color:var(--hint);margin-top:3px">${Math.round(totalActualIncome/totalForecastIncome*100)}% of forecast</div>` : ''}
+        <div style="font-size:20px;font-weight:700;color:var(--ink)">${farm.name} — Management Report</div>
+        <div style="font-size:12px;color:var(--hint);margin-top:3px">Season ${season} · Production-based income · As at ${formatDate(new Date().toISOString().slice(0,10))}</div>
       </div>
     </div>
 
-    <!-- Detail table -->
+    <!-- Summary strip -->
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:20px">
+      ${[
+        ['Month income', grandMonthIncome, 'var(--green)'],
+        ['Month selling costs', grandMonthCosts, 'var(--red)'],
+        ['Month net', grandMonthIncome-grandMonthCosts, 'var(--blue)'],
+        ['YTD income', grandYtdIncome, 'var(--green)'],
+        ['YTD net income', grandYtdIncome-grandYtdCosts, 'var(--blue)'],
+      ].map(([label,val,color])=>`
+        <div style="background:white;border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">${label}</div>
+          <div style="font-size:18px;font-weight:700;color:${color}">${formatCurrency(val||0,0)}</div>
+        </div>`).join('')}
+    </div>
+
+    <!-- Main table -->
+    <div style="background:white;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px">
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:950px">
+          <thead>
+            <tr style="background:var(--page-bg)">
+              <th style="${th};text-align:left;min-width:180px" rowspan="2">Item</th>
+              <th style="${th};text-align:right;min-width:90px" rowspan="2">Harvested</th>
+              <th colspan="3" style="${th};text-align:center;background:#eff6ff;color:var(--blue);border-left:2px solid var(--blue)">${monthLabel}</th>
+              <th style="${th};text-align:right;min-width:90px;border-left:2px solid var(--border)" rowspan="2">YTD harvested</th>
+              <th colspan="3" style="${th};text-align:center;background:#f0fdf4;color:var(--green);border-left:2px solid var(--green)">Year to date</th>
+              <th style="${th};text-align:right;min-width:100px;border-left:2px solid var(--border)" rowspan="2">Full year budget</th>
+            </tr>
+            <tr style="background:var(--page-bg)">
+              <th style="${th};text-align:right;background:#eff6ff;border-left:2px solid var(--blue)">Actual</th>
+              <th style="${th};text-align:right;background:#eff6ff">Budget</th>
+              <th style="${th};text-align:right;background:#eff6ff">Var</th>
+              <th style="${th};text-align:right;background:#f0fdf4;border-left:2px solid var(--green)">Actual</th>
+              <th style="${th};text-align:right;background:#f0fdf4">Budget YTD</th>
+              <th style="${th};text-align:right;background:#f0fdf4">Var %</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${secHdr('CROP & LIVESTOCK INCOME')}
+            ${commodityBlocks}
+
+            <!-- Income total -->
+            <tr style="background:#f0fdf4;border-top:2px solid var(--border)">
+              <td style="${td};font-weight:700;font-size:13px">Total income</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr};color:var(--green);font-weight:700;font-size:13px;border-left:2px solid var(--blue)">${fC(grandMonthIncome)}</td>
+              <td style="${tdr}">${fC(grandBudget/12)}</td>
+              <td style="${tdr}">${varAmt(grandMonthIncome, grandBudget/12)}</td>
+              <td style="${tdr};border-left:2px solid var(--border)">—</td>
+              <td style="${tdr};color:var(--green);font-weight:700;font-size:13px;border-left:2px solid var(--green)">${fC(grandYtdIncome)}</td>
+              <td style="${tdr}">${fC(grandBudget*monthsElapsed/12)}</td>
+              <td style="${tdr}">${varPct(grandYtdIncome, grandBudget*monthsElapsed/12)}</td>
+              <td style="${tdr};font-weight:700;border-left:2px solid var(--border)">${fC(grandBudget)}</td>
+            </tr>
+
+            ${secHdr('DIRECT COSTS')}
+            <tr>
+              <td style="${td};padding-left:20px">Selling costs (ginning, levies)</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr};color:var(--red);border-left:2px solid var(--blue)">${grandMonthCosts?'-'+fC(grandMonthCosts):'—'}</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr};border-left:2px solid var(--border)">—</td>
+              <td style="${tdr};color:var(--red);border-left:2px solid var(--green)">${grandYtdCosts?'-'+fC(grandYtdCosts):'—'}</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr};border-left:2px solid var(--border)">—</td>
+            </tr>
+            <tr style="background:var(--page-bg)">
+              <td style="${td};padding-left:20px;color:var(--hint);font-style:italic">Fertiliser, chemicals, water, fuel</td>
+              <td colspan="9" style="${td};color:var(--hint);font-style:italic;font-size:11px">Available when cost modules are built</td>
+            </tr>
+
+            <!-- Net income -->
+            <tr style="background:#eff6ff;border-top:2px solid var(--border)">
+              <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">Net income</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr};color:var(--blue);font-weight:700;font-size:13px;border-left:2px solid var(--blue)">${fC(grandMonthIncome-grandMonthCosts)}</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr};border-left:2px solid var(--border)">—</td>
+              <td style="${tdr};color:var(--blue);font-weight:700;font-size:13px;border-left:2px solid var(--green)">${fC(grandYtdIncome-grandYtdCosts)}</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr}">—</td>
+              <td style="${tdr};font-weight:700;border-left:2px solid var(--border)">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Comments -->
     <div style="background:white;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      <div style="padding:10px 16px;background:var(--page-bg);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:12px;font-weight:600;color:var(--ink)">Comments & notes</span>
+        <span style="font-size:11px;color:var(--hint)">${comments.length} comment${comments.length!==1?'s':''}</span>
+      </div>
       <table style="width:100%;border-collapse:collapse">
-        <thead>
-          <tr>
-            <th style="${thL}">Income</th>
-            <th style="${thS}">Budget</th>
-            <th style="${thS}">Forecast</th>
-            <th style="${thS}">Var vs Bud</th>
-            <th style="${thS}">Actual (harvest)</th>
-            <th style="${thS}">Contracted</th>
-            <th style="${thS}">Invoiced</th>
-            <th style="${thS}">% of fcst</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${commodityRows}
-          <!-- Totals -->
-          <tr style="background:var(--page-bg);border-top:2px solid var(--border)">
-            <td style="padding:8px 12px;font-size:13px;font-weight:700">Gross Income</td>
-            <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:700">${fmtC(totalBudgetIncome)}</td>
-            <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--blue)">${fmtC(totalForecastIncome)}</td>
-            <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:700;color:${varColor(totalForecastIncome-totalBudgetIncome)}">${varArrow(totalForecastIncome-totalBudgetIncome)} ${fmtC(Math.abs(totalForecastIncome-totalBudgetIncome))}</td>
-            <td style="padding:8px 12px;text-align:right;font-size:13px"></td>
-            <td style="padding:8px 12px;text-align:right;font-size:13px"></td>
-            <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--green)">${fmtC(totalActualIncome)}</td>
-            <td style="padding:8px 12px;text-align:right;font-size:13px;color:var(--hint)">${totalActualIncome && totalForecastIncome ? Math.round(totalActualIncome/totalForecastIncome*100)+'%' : ''}</td>
-          </tr>
-          <tr style="background:var(--page-bg)">
-            <td style="padding:8px 12px;font-size:12px;color:var(--hint)">Selling costs</td>
-            <td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--red)">${totalBudgetCosts ? '-'+fmtC(totalBudgetCosts) : '—'}</td>
-            <td style="padding:8px 12px;text-align:right;font-size:12px"></td>
-            <td style="padding:8px 12px;text-align:right;font-size:12px"></td>
-            <td style="padding:8px 12px;text-align:right;font-size:12px"></td>
-            <td style="padding:8px 12px;text-align:right;font-size:12px"></td>
-            <td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--red)">${totalSellingCosts ? '-'+fmtC(totalSellingCosts) : '—'}</td>
-            <td style="padding:8px 12px;text-align:right;font-size:12px"></td>
-          </tr>
-          <tr style="background:var(--page-bg);border-top:1px solid var(--border)">
-            <td style="padding:10px 12px;font-size:13px;font-weight:700">Net Income</td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px;font-weight:700">${fmtC(totalBudgetIncome - totalBudgetCosts)}</td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--blue)">${fmtC(totalForecastIncome)}</td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px"></td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px"></td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px"></td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--green)">${fmtC(totalActualIncome - totalSellingCosts)}</td>
-            <td style="padding:10px 12px;text-align:right;font-size:13px;color:var(--hint)">${(totalActualIncome-totalSellingCosts) && totalForecastIncome ? Math.round((totalActualIncome-totalSellingCosts)/totalForecastIncome*100)+'%' : ''}</td>
-          </tr>
-        </tbody>
+        <tbody>${commentRows}</tbody>
       </table>
     </div>
-
-    <p style="font-size:11px;color:var(--hint);margin-top:12px">
-      Income is production-period based. Forecast uses latest agronomist forecast. Invoiced reflects gross income + quality adjustments from paid invoices. Costs not yet included.
-    </p>
   `;
+}
+
+async function _addComment(container) {
+  const farm = getActiveFarm();
+  const season = getActiveSeason();
+  const month = qs('#mgmt-month', container)?.value;
+  const session = getSession();
+  if (!farm || !season) return;
+
+  const text = prompt('Add a comment or note:');
+  if (!text?.trim()) return;
+
+  try {
+    await dbInsert('management_comments', {
+      farm_id: farm.id,
+      season,
+      month,
+      comment: text.trim(),
+      created_by: session?.user?.id,
+    });
+    toast('Comment saved', 'success');
+    _render(container);
+  } catch(e) {
+    toast('Could not save — run SQL to create comments table first', 'error');
+    console.error(e);
+  }
 }
