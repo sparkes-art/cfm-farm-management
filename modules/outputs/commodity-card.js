@@ -207,9 +207,10 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
   const hedgeDenominator = forecastProd !== null ? forecastProd : totalBudgetProd;
   const denominator = isHarvested ? totalHarvest : hedgeDenominator;
   // Hedged = contracted + already sold (paid invoices)
+  // During harvesting, open = forecast - contracted (not capped by paid)
   const totalHedged = Math.min(hedgeDenominator || 0, totalContracted + totalPaidQty);
   const pctHedged = hedgeDenominator && totalHedged ? Math.round((totalHedged / hedgeDenominator) * 100) : 0;
-  const unhedged = Math.max(0, (hedgeDenominator || 0) - totalHedged);
+  const unhedged = Math.max(0, (hedgeDenominator || 0) - totalContracted);
   // Harvest progress as % of forecast (for bar only, doesn't affect hedging %)
   const harvestPct = hedgeDenominator && totalHarvest ? Math.min(100, Math.round((totalHarvest / hedgeDenominator) * 100)) : 0;
 
@@ -222,6 +223,8 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
   const manualStatus = com.id ? commodityStatuses[com.id] : null;
   const autoStatus = isHarvested ? 'harvested' : latestForecast ? 'growing' : 'budget';
   const status = manualStatus || autoStatus;
+  const isFullyHarvested = status === 'harvested';
+  const isCurrentlyHarvesting = status === 'harvesting';
 
   // Production bar width
   const budgetBarW = 100;
