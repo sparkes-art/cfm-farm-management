@@ -843,7 +843,7 @@ export function openInvoiceForm(container, existing = null) {
     const inS = 'border:none;border-bottom:1px solid var(--border-light);border-radius:0;padding:5px 6px;font-size:12px;background:white;width:100%';
     const numS = inS + ';text-align:right';
     // For expenses, store absolute value and make negative on save
-    const displayAmount = data.amount != null ? Math.abs(data.amount) : '';
+    const displayAmount = data.amount != null ? data.amount : '';
 
     const incomeTypeHtml = section === 'income'
       ? `<td style="padding:3px 6px;min-width:90px"><select class="bl-type" style="${inS}">
@@ -1062,18 +1062,17 @@ export function openInvoiceForm(container, existing = null) {
           const amount = parseFloat(tr.querySelector('.bl-amount')?.value);
           if (!amount) return;
           const lineType = tr.querySelector('.bl-type')?.value || 'sale';
-          const absAmount = Math.abs(amount);
           lines.push({
             description: tr.querySelector('.bl-desc')?.value?.trim() || '',
             docket: incomeDocket,
-            amount: absAmount,
+            amount: amount,
             notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
             eff_per_unit: parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((absAmount/qty)*10000)/10000 : null),
             type: 'income',
             line_type: lineType,
           });
-          if (lineType === 'qa') qaTotal += amount; // keep sign (amount before abs)
-          else grossTotal += absAmount;
+          if (lineType === 'qa') qaTotal += amount;
+          else grossTotal += amount;
         });
 
         // Expense lines
@@ -1083,12 +1082,12 @@ export function openInvoiceForm(container, existing = null) {
           lines.push({
             description: tr.querySelector('.bl-desc')?.value?.trim() || '',
             docket: expenseDocket,
-            amount: -Math.abs(amount),
+            amount: amount,
             notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
             eff_per_unit: -(parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((Math.abs(amount)/qty)*10000)/10000 : null)),
             type: 'expense',
           });
-          expensesTotal += -Math.abs(amount);
+          expensesTotal += amount;
         });
 
         if (lines.length) batches.push({ qty, crop_year: cropYear, income_docket: incomeDocket, expense_docket: expenseDocket, income_files: allIncomeFiles, expense_files: allExpenseFiles, lines });
