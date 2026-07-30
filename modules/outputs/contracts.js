@@ -242,7 +242,10 @@ function _renderTable() {
             : '—';
           return `
             <tr data-id="${c.id}" style="cursor:pointer">
-              <td><strong>${c.contract_number || '—'}</strong></td>
+              <td>
+                <strong>${c.contract_number || '—'}</strong>
+                ${c.is_complete ? '<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:600;color:white;background:var(--green);border-radius:10px;padding:1px 7px">✓ Complete</span>' : ''}
+              </td>
               <td class="muted">${c.crop_year || '—'}</td>
               <td><span class="badge badge-${c.commodity}">${_cap(c.commodity || 'other')}</span></td>
               <td>${c.counterparty || '—'}</td>
@@ -289,6 +292,23 @@ function _renderTable() {
   });
 
   // Edit
+  // Complete buttons
+  wrap.querySelectorAll('.complete-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      e.preventDefault();
+      const isComplete = btn.dataset.complete === 'true';
+      try {
+        await dbUpdate('forward_contracts', btn.dataset.id, { is_complete: !isComplete });
+        const idx = _contracts.findIndex(c => c.id === btn.dataset.id);
+        if (idx >= 0) _contracts[idx].is_complete = !isComplete;
+        toast(!isComplete ? 'Contract marked complete' : 'Contract reopened', 'success');
+        _renderTable(container);
+        _renderStats();
+      } catch(err) { toast('Error: ' + err.message, 'error'); }
+    });
+  });
+
   wrap.querySelectorAll('.edit-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
