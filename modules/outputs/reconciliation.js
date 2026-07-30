@@ -313,7 +313,9 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
                 // Use gross_amount + quality_adj from invoice totals
                 return s + (parseFloat(inv.gross_amount)||0) + (parseFloat(inv.total_quality_adj)||0);
               }, 0);
-              const isComplete = row.c.is_complete;
+              // Only show complete if it was completed on or before the as-at date
+              const isComplete = row.c.is_complete && 
+                (!row.c.completed_at || row.c.completed_at.slice(0,10) <= asAt);
               const stillToGoQty = isComplete ? 0 : row.qty;
               const stillToGoGross = stillToGoQty * row.price;
               return `

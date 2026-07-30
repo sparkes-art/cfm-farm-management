@@ -299,7 +299,7 @@ function _renderTable() {
       e.preventDefault();
       const isComplete = btn.dataset.complete === 'true';
       try {
-        await dbUpdate('forward_contracts', btn.dataset.id, { is_complete: !isComplete });
+        await dbUpdate('forward_contracts', btn.dataset.id, { is_complete: !isComplete, completed_at: !isComplete ? new Date().toISOString() : null });
         const idx = _contracts.findIndex(c => c.id === btn.dataset.id);
         if (idx >= 0) _contracts[idx].is_complete = !isComplete;
         toast(!isComplete ? 'Contract marked complete' : 'Contract reopened', 'success');
