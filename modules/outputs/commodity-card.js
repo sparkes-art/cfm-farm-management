@@ -345,12 +345,9 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
             (totalHarvest && hedgeDenominator ? '<div style="height:3px;background:var(--border);border-radius:2px;margin:3px 0 6px"><div style="height:100%;width:' + Math.min(100,Math.round(totalHarvest/hedgeDenominator*100)) + '%;background:var(--amber);border-radius:2px"></div></div>' : '') +
             priceRow('Invoiced qty', totalPaidQty ? formatNumber(totalPaidQty,0)+' '+unit : '—') +
             (totalPaidQty && hedgeDenominator ? '<div style="height:3px;background:var(--border);border-radius:2px;margin:3px 0 6px"><div style="height:100%;width:' + Math.min(100,Math.round(totalPaidQty/hedgeDenominator*100)) + '%;background:var(--green);border-radius:2px"></div></div>' : '') +
-            priceRow('Invoiced $', totalInvoicedDollars ? formatCurrency(totalInvoicedDollars,0) : '—', 'var(--green)') +
+
             priceRow('On hand', status === 'harvesting' ? 'Harvesting' : (onHand !== null ? formatNumber(onHand,0)+' '+unit : '—'), status === 'harvesting' ? 'var(--amber)' : 'var(--blue)') +
-            '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0">' +
-              '<span style="font-size:11px;color:var(--hint)">Value on hand</span>' +
-              '<span class="value-on-hand-display" data-commodity="' + com.id + '" style="font-size:12px;font-weight:600;color:var(--blue);font-variant-numeric:tabular-nums">' + (valueOnHand ? formatCurrency(valueOnHand,0) : '—') + '</span>' +
-            '</div>' +
+
 
             // --- PRICES ---
             '<div style="height:1px;background:var(--border-light);margin:8px 0"></div>' +
@@ -359,11 +356,7 @@ function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = 
             priceRow('Market', marketPrice ? formatCurrency(marketPrice,0) : '—', marketVsBudget !== null ? (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') +
             priceRow('Fwd avg', avgFwdPrice ? formatCurrency(avgFwdPrice,0) : '—', 'var(--blue)') +
             priceRow('Paid avg', paidAvg ? formatCurrency(paidAvg,0) : '—', paidVsBudget !== null ? (paidVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') +
-            '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0">' +
-              '<span style="font-size:11px;color:var(--hint)">Value $/unit<br><span style="font-size:9px">mkt less 5%</span></span>' +
-              '<input class="value-per-unit-input" data-commodity="' + com.id + '" data-default="' + (defaultValuePerUnit||'') + '" value="' + (defaultValuePerUnit ? formatCurrency(defaultValuePerUnit,0) : '—') + '"' +
-              ' style="font-size:12px;font-weight:600;color:var(--blue);background:none;border:none;border-bottom:1px dashed var(--blue);width:70px;text-align:right;font-variant-numeric:tabular-nums;outline:none;padding:0;cursor:text">' +
-            '</div>' +
+
           '</div>';
         })()}
 
