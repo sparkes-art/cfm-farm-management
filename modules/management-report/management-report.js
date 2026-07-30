@@ -36,7 +36,7 @@ async function _render(container) {
     dbSelect('budgets', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`),
     dbSelect('forecasts', `farm_id=eq.${farm.id}&season=eq.${season}&select=*&order=forecast_date.desc`),
     dbSelect('harvest_entries', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`),
-    dbSelect('commodities', `select=id,name,unit`),
+    dbSelect('commodities', `select=id,name`),
   ]);
 
   // Filter invoices to this season
@@ -81,7 +81,7 @@ async function _render(container) {
   const commodityRows = Object.values(commMap)
     .filter(com => com.contracts.length || com.budgets.length || com.harvests.length || com.invoices.length)
     .map(com => {
-      const unit = commodities.find(c => c.id === com.id)?.unit || 'bale';
+      const unit = contracts.find(c => c.commodity_id === com.id || c.commodity === com.name)?.unit || budgets.find(b => b.commodity_id === com.id)?.unit || 'bale';
 
       // Budget
       const budgetArea = com.budgets.reduce((s,b) => s+(parseFloat(b.area_ha)||0), 0);
