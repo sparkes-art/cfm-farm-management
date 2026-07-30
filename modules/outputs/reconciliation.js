@@ -325,7 +325,7 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
                 <td style="${tdStyle('r')}">${fmtC(contractValue, 0)}</td>
                 <td style="${tdStyle('r')}">${row.invoicedQty ? fmtN(row.invoicedQty, 2) : '—'}</td>
                 <td style="${tdStyle('r')}">${filledGross ? fmtC(filledGross, 0) : '—'}</td>
-                <td style="${tdStyle('r')}" class="${stillToGoQty > 0 ? 'text-amber' : ''}">${isComplete ? '<span style="color:var(--green);font-size:11px">✓ Complete</span>' : stillToGoQty > 0 ? fmtN(stillToGoQty, 2) : '✓'}</td>
+                <td style="${tdStyle('r')}" class="${!isComplete && stillToGoQty > 0 ? 'text-amber' : ''}">${isComplete ? '<span style="color:var(--green);font-size:11px">✓ Complete</span>' : stillToGoQty > 0 ? fmtN(stillToGoQty, 2) : fmtN(0, 2)}</td>
                 <td style="${tdStyle('r')}">${isComplete ? '—' : stillToGoGross > 0 ? fmtC(stillToGoGross, 0) : '—'}</td>
               </tr>`;
             }).join('')}
