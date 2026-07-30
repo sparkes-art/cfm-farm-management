@@ -313,7 +313,8 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
                 // Use gross_amount + quality_adj from invoice totals
                 return s + (parseFloat(inv.gross_amount)||0) + (parseFloat(inv.total_quality_adj)||0);
               }, 0);
-              const stillToGoQty = row.qty;
+              const isComplete = row.c.is_complete;
+              const stillToGoQty = isComplete ? 0 : row.qty;
               const stillToGoGross = stillToGoQty * row.price;
               return `
               <tr>
@@ -324,8 +325,8 @@ function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm
                 <td style="${tdStyle('r')}">${fmtC(contractValue, 0)}</td>
                 <td style="${tdStyle('r')}">${row.invoicedQty ? fmtN(row.invoicedQty, 2) : '—'}</td>
                 <td style="${tdStyle('r')}">${filledGross ? fmtC(filledGross, 0) : '—'}</td>
-                <td style="${tdStyle('r')}" class="${stillToGoQty > 0 ? 'text-amber' : ''}">${stillToGoQty > 0 ? fmtN(stillToGoQty, 2) : '✓'}</td>
-                <td style="${tdStyle('r')}" class="${stillToGoGross > 0 ? 'text-amber' : ''}">${stillToGoGross > 0 ? fmtC(stillToGoGross, 0) : '—'}</td>
+                <td style="${tdStyle('r')}" class="${stillToGoQty > 0 ? 'text-amber' : ''}">${isComplete ? '<span style="color:var(--green);font-size:11px">✓ Complete</span>' : stillToGoQty > 0 ? fmtN(stillToGoQty, 2) : '✓'}</td>
+                <td style="${tdStyle('r')}">${isComplete ? '—' : stillToGoGross > 0 ? fmtC(stillToGoGross, 0) : '—'}</td>
               </tr>`;
             }).join('')}
             ${contracts.length > 0 ? `

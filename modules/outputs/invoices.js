@@ -19,6 +19,9 @@ export async function mountInvoices(container) {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
       <div style="display:flex;gap:8px">
 
+        <select id="inv-filter-month" class="form-select" style="width:130px">
+          <option value="">All months</option>
+        </select>
         <select id="inv-filter-commodity" class="form-select" style="width:160px">
           <option value="">All commodities</option>
         </select>
@@ -66,6 +69,7 @@ function _filtered() {
   const contract = qs('#inv-filter-contract')?.value || '';
   return _invoices.filter(i => {
     const commodityMatch = !commodity || (i.line_items||[]).some(l => l.commodity === commodity);
+    const monthMatch = !month || (inv.invoice_date && inv.invoice_date.slice(0,7) === month);
     const contractMatch = !contract
       ? true
       : contract === 'cash'
@@ -73,7 +77,7 @@ function _filtered() {
         : i.forward_contract_id === contract;
     if (!season) return commodityMatch && contractMatch;
     const seasonMatch = i.season === season || (i.line_items || []).some(l => l.season === season);
-    return seasonMatch && commodityMatch && contractMatch;
+    return seasonMatch && commodityMatch && contractMatch && monthMatch;
   });
 }
 
@@ -91,6 +95,20 @@ function _subscribeRealtime() {
 function _renderTable(container) {
   const wrap = qs('#inv-table-wrap', container || document);
   if (!wrap) return;
+  // Rebuild month filter
+  const _monthSel = document.getElementById('inv-filter-month');
+  if (_monthSel) {
+    const _mv = _monthSel.value;
+    const months = [...new Set(_invoices.map(i => i.invoice_date?.slice(0,7)).filter(Boolean))].sort().reverse();
+    _monthSel.innerHTML = '<option value="">All months</option>' +
+      months.map(m => {
+        const [y,mo] = m.split('-');
+        const label = new Date(y, mo-1).toLocaleDateString('en-AU',{month:'short',year:'numeric'});
+        return `<option value="${m}" ${_mv===m?'selected':''}>${label}</option>`;
+      }).join('');
+    _monthSel.addEventListener('change', () => _renderTable(container));
+  }
+
   // Rebuild commodity filter with live data
   const _commodSel = document.getElementById('inv-filter-commodity');
   if (_commodSel) {
@@ -189,7 +207,7 @@ function _renderTable(container) {
           <th class="num">Selling costs</th>
           <th class="num">Net</th>
           <th>Documents</th>
-          <th>Xero ref</th>
+          <th style="min-width:70px;max-width:90px">Xero ref</th>
           <th>Status</th>
           ${canWrite() ? '<th></th>' : ''}
         </tr>
@@ -231,7 +249,7 @@ function _renderTable(container) {
                 })()}
               </td>
               <td class="muted text-sm">
-                ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" value="${inv.xero_invoice_number || ''}" style="border:none;background:transparent;width:80px;font-size:11px;color:var(--hint)" placeholder="—">` : inv.xero_invoice_number || '—'}
+                ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" value="${inv.xero_invoice_number || ''}" style="border:none;background:transparent;width:65px;font-size:11px;color:var(--hint)" placeholder="—">` : inv.xero_invoice_number || '—'}
               </td>
               <td>
                 <span class="badge ${inv.status === 'complete' ? 'badge-paid' : 'badge-amber'}" style="${inv.status !== 'complete' ? 'background:var(--amber-light);color:var(--amber-text)' : ''}">
@@ -609,9 +627,17 @@ export function openInvoiceForm(container, existing = null) {
     const unit = c.unit || '';
     const existing_invs = _invoices.filter(i => i.forward_contract_id === cId && i.id !== existing?.id);
     const invoicedQty = existing_invs.reduce((s, i) => {
-      const batches = i.batches || [];
-      if (batches.length) return s + batches.reduce((ss, b) => ss + (parseFloat(b.qty)||0), 0);
-      return s + (i.line_items||[]).reduce((ss, l) => ss + (parseFloat(l.qty)||0), 0);
+      if (i.batches && i.batches.length) {
+        const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
+        return s + b.filter(batch=>(batch.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((ss,batch)=>ss+(parseFloat(batch.qty)||0),0);
+      }
+      const lines = (i.line_items||[]).filter(l=>l.type!=='expense'&&l.line_type!=='qa');
+      const seen = new Set();
+      return s + lines.reduce((ss,l)=>{
+        const key=l.docket||l.commodity||JSON.stringify(l);
+        if(seen.has(key))return ss; seen.add(key);
+        return ss+(parseFloat(l.qty)||0);
+      },0);
     }, 0);
     const invoicedVal = existing_invs.reduce((s, i) => s + (parseFloat(i.gross_amount)||0), 0);
     const cs = modal.querySelector('#cs-qty');
@@ -627,7 +653,7 @@ export function openInvoiceForm(container, existing = null) {
     // Auto-fill buyer
     const buyerField = modal.querySelector('#f-buyer');
     const opt = contractSel.options[contractSel.selectedIndex];
-    if (buyerField && opt?.dataset?.buyer && !buyerField.value) buyerField.value = opt.dataset.buyer;
+    if (buyerField && opt?.dataset?.buyer) buyerField.value = opt.dataset.buyer;
   }
   contractSel?.addEventListener('change', updateContractSummary);
   if (contractSel?.value) updateContractSummary();
