@@ -268,7 +268,7 @@ function _renderTable() {
                 <td>
                   <div class="flex gap-2">
                     <button class="btn btn-ghost btn-sm edit-btn" data-id="${c.id}">Edit</button>
-                    <button class="btn btn-ghost btn-sm complete-btn" data-id="${c.id}" data-complete="${c.is_complete||false}" style="color:${c.is_complete?'var(--green)':'var(--hint)';font-size:11px">${c.is_complete?'✓ Complete':'Mark complete'}</button>
+                    <button class="btn btn-ghost btn-sm complete-btn" data-id="${c.id}" data-complete="${c.is_complete||false}" style="color:${c.is_complete?'var(--green)':'var(--hint)'};font-size:11px">${c.is_complete?'✓ Complete':'Mark complete'}</button>
                     <button class="btn btn-ghost btn-sm delete-btn" data-id="${c.id}" style="color:#DC2626">Delete</button>
                   </div>
                 </td>` : ''}
