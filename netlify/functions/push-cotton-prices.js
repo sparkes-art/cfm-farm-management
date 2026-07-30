@@ -144,17 +144,20 @@ exports.handler = async (event) => {
     const audusd = extracted.audusd;
 
     for (const [region, prices] of Object.entries(extracted.regions || {})) {
-      for (const [cropYear, price] of Object.entries(prices)) {
-        if (price === null) continue;
-        rows.push({
-          price_date: date,
-          region,
-          crop_year: cropYear,
-          price_aud: price,
-          audusd,
-          source: 'LDC',
-        });
-      }
+      // Only take the first (lowest/current) crop year per region
+      const cropYears = Object.entries(prices)
+        .filter(([, price]) => price !== null)
+        .sort(([a], [b]) => parseInt(a) - parseInt(b));
+      if (!cropYears.length) continue;
+      const [cropYear, price] = cropYears[0];
+      rows.push({
+        price_date: date,
+        region,
+        crop_year: cropYear,
+        price_aud: price,
+        audusd,
+        source: 'LDC',
+      });
     }
 
     if (rows.length) {
