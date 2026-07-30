@@ -285,7 +285,7 @@ function _renderTable() {
   // Row click → detail view
   wrap.querySelectorAll('tbody tr').forEach(row => {
     row.addEventListener('click', (e) => {
-      if (e.target.closest('.edit-btn') || e.target.closest('.delete-btn')) return;
+      if (e.target.closest('.edit-btn') || e.target.closest('.delete-btn') || e.target.closest('.complete-btn')) return;
       const contract = _contracts.find(c => c.id === row.dataset.id);
       if (contract) _openDetailModal(contract);
     });
@@ -303,7 +303,7 @@ function _renderTable() {
         const idx = _contracts.findIndex(c => c.id === btn.dataset.id);
         if (idx >= 0) _contracts[idx].is_complete = !isComplete;
         toast(!isComplete ? 'Contract marked complete' : 'Contract reopened', 'success');
-        _renderTable(container);
+        _renderTable();
         _renderStats();
       } catch(err) { toast('Error: ' + err.message, 'error'); }
     });
