@@ -572,7 +572,17 @@ async function _extractFromPDF(overlay) {
 
     if (extracted.commodity) {
       const sel = qs('#f-commodity', overlay);
-      if (sel) sel.value = extracted.commodity;
+      if (sel) {
+        // Match extracted name to canonical commodity list (case-insensitive)
+        const comms = getCommodities();
+        const match = comms.find(c =>
+          c.name.toLowerCase().trim() === extracted.commodity.toLowerCase().trim() ||
+          c.name.toLowerCase().includes(extracted.commodity.toLowerCase().trim()) ||
+          extracted.commodity.toLowerCase().includes(c.name.toLowerCase().trim())
+        );
+        if (match) sel.value = match.id;
+        else console.warn('Could not match extracted commodity:', extracted.commodity);
+      }
     }
     if (extracted.unit) {
       const sel = qs('#f-unit', overlay);
