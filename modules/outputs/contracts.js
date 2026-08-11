@@ -19,8 +19,8 @@ export async function mountContracts(container) {
         <p class="page-subtitle">Sales contracts by crop year and commodity</p>
       </div>
       <div class="flex gap-2">
-        <select id="con-commodity-filter" class="form-select" multiple style="min-width:160px;max-width:220px;height:auto" title="Hold Ctrl/Cmd to select multiple">
-          ${[...new Set(_contracts.map(c=>c.commodity).filter(Boolean))].sort().map(name => `<option value="${name}">${name}</option>`).join('')}
+        <select id="con-commodity-filter" class="form-select" style="width:160px">
+          <option value="">All commodities</option>
         </select>
         ${canWrite() ? '<button class="btn btn-primary" id="btn-new-contract">＋ New contract</button>' : ''}
       </div>
@@ -74,11 +74,10 @@ async function _loadData() {
 
 function _filtered() {
   const year = getActiveSeason() || '';
-  const sel = qs('#con-commodity-filter');
-  const selectedCommodities = sel ? [...sel.selectedOptions].map(o => o.value) : [];
+  const commodity = qs('#con-commodity-filter')?.value || '';
   return _contracts.filter(c =>
     (!year || c.crop_year === year) &&
-    (!selectedCommodities.length || selectedCommodities.includes(c.commodity))
+    (!commodity || c.commodity === commodity)
   );
 }
 
@@ -172,6 +171,18 @@ function _renderStats() {
 
 // ── Render table ──────────────────────────────────────────────
 function _renderTable() {
+  // Rebuild commodity filter
+  const _cf = document.getElementById('con-commodity-filter');
+  if (_cf) {
+    const _cv = _cf.value;
+    const comms = [...new Set(_contracts.map(c=>c.commodity).filter(Boolean))].sort();
+    _cf.innerHTML = '<option value="">All commodities</option>' +
+      comms.map(n => `<option value="${n}" ${_cv===n?'selected':''}>${n}</option>`).join('');
+    if (!_cf.dataset.wired) {
+      _cf.dataset.wired = '1';
+      _cf.addEventListener('change', () => { _renderStats(); _renderTable(); });
+    }
+  }
   const rows = _filtered();
   const wrap = qs('#con-table-wrap');
   if (!wrap) return;
