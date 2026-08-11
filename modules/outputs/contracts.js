@@ -19,9 +19,8 @@ export async function mountContracts(container) {
         <p class="page-subtitle">Sales contracts by crop year and commodity</p>
       </div>
       <div class="flex gap-2">
-        <select id="con-commodity-filter" class="form-select" style="width:130px">
-          <option value="">All commodities</option>
-          ${getCommodities().map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+        <select id="con-commodity-filter" class="form-select" multiple style="min-width:160px;max-width:220px;height:auto" title="Hold Ctrl/Cmd to select multiple">
+          ${[...new Set(_contracts.map(c=>c.commodity).filter(Boolean))].sort().map(name => `<option value="${name}">${name}</option>`).join('')}
         </select>
         ${canWrite() ? '<button class="btn btn-primary" id="btn-new-contract">＋ New contract</button>' : ''}
       </div>
@@ -75,10 +74,11 @@ async function _loadData() {
 
 function _filtered() {
   const year = getActiveSeason() || '';
-  const commodity = qs('#con-commodity-filter')?.value || '';
+  const sel = qs('#con-commodity-filter');
+  const selectedCommodities = sel ? [...sel.selectedOptions].map(o => o.value) : [];
   return _contracts.filter(c =>
     (!year || c.crop_year === year) &&
-    (!commodity || c.commodity === commodity)
+    (!selectedCommodities.length || selectedCommodities.includes(c.commodity))
   );
 }
 

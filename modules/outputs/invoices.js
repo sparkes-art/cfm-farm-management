@@ -504,6 +504,25 @@ function _xeroRefModal(inv, container) {
 }
 
 // ── Invoice form ──────────────────────────────────────────────
+// Get past line descriptions scoped to current farm+season
+function _getPastDescriptions(type) {
+  const season = getActiveSeason();
+  const descs = new Set();
+  _invoices.forEach(inv => {
+    if (season && inv.season && inv.season !== season) return;
+    if (inv.batches) {
+      const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;
+      b.forEach(batch => (batch.lines||[]).forEach(l => {
+        if (l.type === type && l.description?.trim()) descs.add(l.description.trim());
+      }));
+    }
+    (inv.line_items||[]).forEach(l => {
+      if (l.type === type && l.description?.trim()) descs.add(l.description.trim());
+    });
+  });
+  return [...descs].sort();
+}
+
 export function openInvoiceForm(container, existing = null) {
   const farm = getActiveFarm();
   const isEdit = !!existing;
@@ -829,6 +848,16 @@ export function openInvoiceForm(container, existing = null) {
     // Each batch has its own file arrays (only NEW files to upload)
     div._incomeFiles = [];
     div._expenseFiles = [];
+
+    // Datalists for description autocomplete (farm+season scoped)
+    const _dlIncome = document.createElement('datalist');
+    _dlIncome.id = `bl-inc-desc-${bId}`;
+    _getPastDescriptions('income').forEach(d => { const o = document.createElement('option'); o.value = d; _dlIncome.appendChild(o); });
+    div.appendChild(_dlIncome);
+    const _dlExpense = document.createElement('datalist');
+    _dlExpense.id = `bl-exp-desc-${bId}`;
+    _getPastDescriptions('expense').forEach(d => { const o = document.createElement('option'); o.value = d; _dlExpense.appendChild(o); });
+    div.appendChild(_dlExpense);
     wireAttach('.b-income-attach', '.b-income-file-input', '.b-income-file-list', div._incomeFiles);
     wireAttach('.b-expense-attach', '.b-expense-file-input', '.b-expense-file-list', div._expenseFiles);
 
