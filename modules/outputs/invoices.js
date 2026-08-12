@@ -818,8 +818,9 @@ export function openInvoiceForm(container, existing = null) {
     // Wire add income/expense buttons
     div.querySelector('.b-add-income').addEventListener('click', () => {
       const contractSel = modal.querySelector('#f-contract');
-      const selectedOpt = contractSel?.options[contractSel?.selectedIndex];
-      const defaultDesc = selectedOpt?.dataset?.commodity || '';
+      const cId = contractSel?.value;
+      const cMatch = _contracts.find(c => c.id === cId);
+      const defaultDesc = cMatch?.commodity || contractSel?.options[contractSel?.selectedIndex]?.dataset?.commodity || '';
       addBatchLine(div, { description: defaultDesc }, 'income');
     });
     div.querySelector('.b-add-expense').addEventListener('click', () => addBatchLine(div, {}, 'expense'));
@@ -888,8 +889,9 @@ export function openInvoiceForm(container, existing = null) {
     (data.lines || []).forEach(l => addBatchLine(div, l, l.type === 'expense' ? 'expense' : 'income'));
     if (!(data.lines||[]).length) {
       const contractSel = modal.querySelector('#f-contract');
-      const selectedOpt = contractSel?.options[contractSel?.selectedIndex];
-      const defaultDesc = selectedOpt?.dataset?.commodity || '';
+      const cId = contractSel?.value;
+      const cMatch = _contracts.find(c => c.id === cId);
+      const defaultDesc = cMatch?.commodity || contractSel?.options[contractSel?.selectedIndex]?.dataset?.commodity || '';
       addBatchLine(div, { description: defaultDesc }, 'income');
       addBatchLine(div, {}, 'expense');
     }
