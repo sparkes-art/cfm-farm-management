@@ -698,7 +698,7 @@ export function openInvoiceForm(container, existing = null) {
 
     // Pre-fill income line descriptions with commodity name when contract changes
     if (opt?.dataset?.commodity) {
-      const batchesWrap = modal.querySelector('#inv-batches-wrap');
+      const batchesWrap = modal.querySelector('#f-batches-wrap');
       batchesWrap?.querySelectorAll('[data-batch-id]').forEach(bDiv => {
         bDiv.querySelectorAll('.b-income-lines tr').forEach((tr, idx) => {
           const descInput = tr.querySelector('.bl-desc');
