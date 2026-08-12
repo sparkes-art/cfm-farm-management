@@ -816,7 +816,14 @@ export function openInvoiceForm(container, existing = null) {
     div.querySelector('.b-qty').addEventListener('input', () => { recalcBatch(div); recalcTotals(); });
 
     // Wire add income/expense buttons
-    div.querySelector('.b-add-income').addEventListener('click', () => addBatchLine(div, {}, 'income'));
+    div.querySelector('.b-add-income').addEventListener('click', () => {
+      // Pre-fill description from linked contract commodity
+      const contractSel = modal.querySelector('#f-contract');
+      const contractId = contractSel?.value;
+      const contract = _contracts.find(c => c.id === contractId);
+      const defaultDesc = contract?.commodity || '';
+      addBatchLine(div, { description: defaultDesc }, 'income');
+    });
     div.querySelector('.b-add-expense').addEventListener('click', () => addBatchLine(div, {}, 'expense'));
 
     // Wire attach buttons
@@ -881,7 +888,14 @@ export function openInvoiceForm(container, existing = null) {
 
     // Load existing lines
     (data.lines || []).forEach(l => addBatchLine(div, l, l.type === 'expense' ? 'expense' : 'income'));
-    if (!(data.lines||[]).length) { addBatchLine(div, {}, 'income'); addBatchLine(div, {}, 'expense'); }
+    if (!(data.lines||[]).length) {
+      const contractSel = modal.querySelector('#f-contract');
+      const contractId = contractSel?.value;
+      const contract = _contracts.find(c => c.id === contractId);
+      const defaultDesc = contract?.commodity || '';
+      addBatchLine(div, { description: defaultDesc }, 'income');
+      addBatchLine(div, {}, 'expense');
+    }
 
     recalcBatch(div);
   }
