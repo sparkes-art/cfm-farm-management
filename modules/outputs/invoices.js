@@ -695,6 +695,20 @@ export function openInvoiceForm(container, existing = null) {
     const buyerField = modal.querySelector('#f-buyer');
     const opt = contractSel.options[contractSel.selectedIndex];
     if (buyerField && opt?.dataset?.buyer) buyerField.value = opt.dataset.buyer;
+
+    // Pre-fill income line descriptions with commodity name when contract changes
+    if (opt?.dataset?.commodity) {
+      const batchesWrap = modal.querySelector('#inv-batches-wrap');
+      batchesWrap?.querySelectorAll('[data-batch-id]').forEach(bDiv => {
+        bDiv.querySelectorAll('.b-income-lines tr').forEach((tr, idx) => {
+          const descInput = tr.querySelector('.bl-desc');
+          if (descInput && (!descInput.value || descInput.value === descInput.dataset.prevCommodity)) {
+            descInput.value = opt.dataset.commodity;
+            descInput.dataset.prevCommodity = opt.dataset.commodity;
+          }
+        });
+      });
+    }
   }
   contractSel?.addEventListener('change', updateContractSummary);
   if (contractSel?.value) updateContractSummary();
