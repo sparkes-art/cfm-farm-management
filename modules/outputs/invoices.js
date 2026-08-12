@@ -561,7 +561,7 @@ export function openInvoiceForm(container, existing = null) {
           <label class="form-label">Forward contract</label>
           <select class="form-select" id="f-contract">
             <option value="">— select a contract —</option>
-            ${_contracts.map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" data-buyer="${c.counterparty||c.buyer||''}" ${existing?.forward_contract_id===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}</option>`).join('')}
+            ${_contracts.map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" data-buyer="${c.counterparty||c.buyer||''}" data-commodity="${c.commodity||''}" ${existing?.forward_contract_id===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}</option>`).join('')}
           </select>
         </div>
         <div id="f-contract-summary" style="display:none;grid-template-columns:repeat(4,1fr) 1.2fr;gap:10px;background:var(--blue-light);border-radius:var(--radius-sm);padding:12px;margin-top:8px">
@@ -817,11 +817,9 @@ export function openInvoiceForm(container, existing = null) {
 
     // Wire add income/expense buttons
     div.querySelector('.b-add-income').addEventListener('click', () => {
-      // Pre-fill description from linked contract commodity
       const contractSel = modal.querySelector('#f-contract');
-      const contractId = contractSel?.value;
-      const contract = _contracts.find(c => c.id === contractId);
-      const defaultDesc = contract?.commodity || '';
+      const selectedOpt = contractSel?.options[contractSel?.selectedIndex];
+      const defaultDesc = selectedOpt?.dataset?.commodity || '';
       addBatchLine(div, { description: defaultDesc }, 'income');
     });
     div.querySelector('.b-add-expense').addEventListener('click', () => addBatchLine(div, {}, 'expense'));
@@ -890,9 +888,8 @@ export function openInvoiceForm(container, existing = null) {
     (data.lines || []).forEach(l => addBatchLine(div, l, l.type === 'expense' ? 'expense' : 'income'));
     if (!(data.lines||[]).length) {
       const contractSel = modal.querySelector('#f-contract');
-      const contractId = contractSel?.value;
-      const contract = _contracts.find(c => c.id === contractId);
-      const defaultDesc = contract?.commodity || '';
+      const selectedOpt = contractSel?.options[contractSel?.selectedIndex];
+      const defaultDesc = selectedOpt?.dataset?.commodity || '';
       addBatchLine(div, { description: defaultDesc }, 'income');
       addBatchLine(div, {}, 'expense');
     }
