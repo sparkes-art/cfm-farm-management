@@ -116,7 +116,10 @@ function _renderTabContent(container) {
 // doesn't loosely match an existing crop type name. Rather than silently
 // creating a near-duplicate, this asks once per unmatched label.
 function _showCropTypeResolution(container, parsed, skippedTotals, sheetName, unmatchedLabels) {
-  const cotton = getCommodities().find(c => c.name.toLowerCase().includes('cotton'));
+  const cotton = getCommodities().find(c => {
+    const n = c.name.toLowerCase();
+    return n.includes('cotton') && !n.includes('seed');
+  });
   const cropTypes = getCropTypes(cotton.id);
 
   const rowsHTML = unmatchedLabels.map((label, i) => `

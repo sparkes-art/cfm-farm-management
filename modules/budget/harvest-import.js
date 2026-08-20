@@ -22,16 +22,23 @@ import { getActiveFarm } from '../../js/app-state.js';
 import { toast } from '../../js/ui.js';
 
 // The workbook doesn't carry a commodity name at all — this is always a
-// cotton picking sheet. Matched loosely against whatever your commodity is
-// actually called (e.g. "Cotton Lint") rather than hardcoding it, since
-// that's account-specific setup, not something the sheet tells us.
+// cotton picking sheet, and it reports lint bales (Total 227kg Bales), not
+// seed cotton. Matched loosely against whatever your commodity is actually
+// called (e.g. "Cotton Lint") rather than hardcoding it, since that's
+// account-specific setup, not something the sheet tells us — but "Cotton
+// Seed" is excluded, the same way budget.js's own lint-source matching
+// already excludes it when picking a commodity for lint-derived rows.
 function _findCottonCommodity() {
-  const matches = getCommodities().filter(c => c.name.toLowerCase().includes('cotton'));
+  const all = getCommodities();
+  const matches = all.filter(c => {
+    const n = c.name.toLowerCase();
+    return n.includes('cotton') && !n.includes('seed');
+  });
   if (matches.length === 0) {
-    throw new Error('No commodity with "Cotton" in the name is set up — add one under Settings → Commodities first.');
+    throw new Error('No lint commodity with "Cotton" in the name is set up — add one under Settings → Commodities first.');
   }
   if (matches.length > 1) {
-    throw new Error('More than one commodity matches "Cotton" (' + matches.map(c => c.name).join(', ') + ') — rename one so the import knows which to use.');
+    throw new Error('More than one lint commodity matches "Cotton" (' + matches.map(c => c.name).join(', ') + ') — rename one so the import knows which to use.');
   }
   return matches[0];
 }
