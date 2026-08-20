@@ -35,12 +35,10 @@ const MODULE_LOADERS = {
       unmount: () => m.unmountPaddocks()
     };
   },
-  stocktake: async () => ({
-    mount: (container) => {
-      container.innerHTML = '<div class="page-header"><h1>Stocktake</h1></div><div class="card" style="padding:40px;text-align:center"><p style="color:var(--hint)">Stocktake module coming soon.</p></div>';
-    },
-    unmount: () => {}
-  }),
+  stocktake: async () => {
+    const m = await import('../modules/stocktake/stocktake-dashboard.js');
+    return { mount: m.mountStocktakeDashboard, unmount: m.unmountStocktakeDashboard };
+  },
 
   recommendations: async () => {
     const m = await import('../modules/agronomy/recommendations.js?v=1784683108967');
