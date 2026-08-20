@@ -5,6 +5,7 @@ import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client
 import { getActiveFarm, getSession, canWrite, getFarms, getActiveSeason } from '../../js/app-state.js';
 import { loadCommodities, getCommodities, getCropTypes, commoditySelectHTML, initCommoditySelect, cropTypeSelectHTML, initCropTypeSelect, refreshCropTypeSelect } from '../../js/commodities.js';
 import { toast, openModal, formatNumber, formatCurrency, qs, currentSeason } from '../../js/ui.js';
+import { parseHarvestExcel, resolveCropTypes, diffHarvestImport, commitHarvestImport } from './harvest-import.js';
 
 let _budgets = [];
 let _forecasts = [];
@@ -74,8 +75,12 @@ function _renderTabContent(container) {
     _renderTable(container);
   } else {
     content.innerHTML = `
-      <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-        ${canWrite() ? '<button class="btn btn-secondary" id="btn-add-harvest">＋ Add harvest</button>' : ''}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
+        ${canWrite() ? `
+          <button class="btn btn-secondary" id="btn-add-harvest">＋ Add harvest</button>
+          <button class="btn btn-secondary" id="btn-upload-harvest">📤 Upload picking summary</button>
+          <input type="file" id="harvest-file-input" accept=".xlsx,.xls" style="display:none">
+        ` : ''}
       </div>
       <div class="card">
         <div id="harvest-table-wrap">
@@ -83,9 +88,109 @@ function _renderTabContent(container) {
         </div>
       </div>
     `;
-    if (canWrite()) qs('#btn-add-harvest', content)?.addEventListener('click', () => _harvestModal(container));
+    if (canWrite()) {
+      qs('#btn-add-harvest', content)?.addEventListener('click', () => _harvestModal(container));
+      qs('#btn-upload-harvest', content)?.addEventListener('click', () => qs('#harvest-file-input', content)?.click());
+      qs('#harvest-file-input', content)?.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        e.target.value = ''; // allow re-selecting the same file next time
+        if (!file) return;
+        try {
+          const { parsed, skippedTotals, sheetName, unmatchedCropTypes } = await parseHarvestExcel(file, _season);
+          if (unmatchedCropTypes.length) {
+            _showCropTypeResolution(container, parsed, skippedTotals, sheetName, unmatchedCropTypes);
+          } else {
+            _showHarvestImportPreview(container, parsed, skippedTotals, sheetName);
+          }
+        } catch (err) {
+          toast('Import failed: ' + err.message, 'error');
+        }
+      });
+    }
     _renderHarvest(container);
   }
+}
+
+// ── Harvest import: crop-type resolution ────────────────────────
+// Shown only when the sheet's "Crop" column (e.g. "Cotton Lateral IRR")
+// doesn't loosely match an existing crop type name. Rather than silently
+// creating a near-duplicate, this asks once per unmatched label.
+function _showCropTypeResolution(container, parsed, skippedTotals, sheetName, unmatchedLabels) {
+  const cotton = getCommodities().find(c => c.name.toLowerCase().includes('cotton'));
+  const cropTypes = getCropTypes(cotton.id);
+
+  const rowsHTML = unmatchedLabels.map((label, i) => `
+    <div class="form-group">
+      <label class="form-label">"${label}" maps to</label>
+      <select class="form-select" id="ct-resolve-${i}" data-label="${label}">
+        <option value="__new__">＋ Create new crop type "${label}"</option>
+        ${cropTypes.map(ct => `<option value="${ct.id}">${ct.name}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
+
+  openModal({
+    title: 'Match crop types',
+    confirmLabel: 'Continue',
+    bodyHTML: `<p style="margin-bottom:10px">The sheet uses crop labels that don't exactly match your existing crop types. Choose what each one means:</p>${rowsHTML}`,
+    onConfirm: async (modal) => {
+      const resolutions = {};
+      unmatchedLabels.forEach((label, i) => {
+        resolutions[label] = qs(`#ct-resolve-${i}`, modal)?.value;
+      });
+      const resolved = await resolveCropTypes(parsed, resolutions, cotton.id);
+      _showHarvestImportPreview(container, resolved, skippedTotals, sheetName);
+    },
+  });
+}
+
+// ── Harvest import: preview & commit ────────────────────────────
+// Diffs the parsed sheet against what's already recorded and shows exactly
+// what will change before writing anything — nothing is imported silently.
+function _showHarvestImportPreview(container, parsed, skippedTotals, sheetName) {
+  const diffed = diffHarvestImport(parsed, _harvests);
+  const toWrite = diffed.filter(d => d.status !== 'unchanged');
+  const unchanged = diffed.filter(d => d.status === 'unchanged').length;
+
+  const rowsHTML = diffed.map(d => `
+    <tr style="${d.status === 'unchanged' ? 'color:var(--hint)' : ''}">
+      <td>${d.row.paddock_name}</td>
+      <td>${d.status === 'new'
+        ? '<span style="color:var(--green);font-weight:600">New</span>'
+        : d.status === 'update'
+          ? '<span style="color:var(--amber);font-weight:600">Update — ' + d.changes.join(', ') + '</span>'
+          : 'Unchanged'}</td>
+      <td class="num">${d.row.actual_production ?? '—'}</td>
+      <td class="num">${d.row.area_ha ?? '—'}</td>
+      <td>${d.row.harvest_date ?? '—'}</td>
+    </tr>
+  `).join('');
+
+  openModal({
+    title: `Import from ${sheetName}`,
+    confirmLabel: `Import ${toWrite.length} field${toWrite.length === 1 ? '' : 's'}`,
+    bodyHTML: `
+      <p style="margin-bottom:10px">
+        ${toWrite.filter(d => d.status === 'new').length} new,
+        ${toWrite.filter(d => d.status === 'update').length} updated,
+        ${unchanged} unchanged.
+        ${skippedTotals.length ? ` Skipped subtotal row${skippedTotals.length === 1 ? '' : 's'}: ${skippedTotals.join(', ')}.` : ''}
+      </p>
+      <div style="max-height:340px;overflow:auto;border:1px solid var(--border-light);border-radius:6px">
+        <table class="data-table" style="width:100%">
+          <thead><tr><th>Field</th><th>Change</th><th class="num">Bales</th><th class="num">Area (ha)</th><th>Picking date</th></tr></thead>
+          <tbody>${rowsHTML}</tbody>
+        </table>
+      </div>
+    `,
+    onConfirm: async () => {
+      if (!toWrite.length) { toast("Nothing to import — sheet matches what's already recorded"); return; }
+      await commitHarvestImport(toWrite.map(d => d.row));
+      const farm = getActiveFarm();
+      _harvests = await dbSelect('harvest_entries', `farm_id=eq.${farm.id}&season=eq.${_season}&select=*&order=created_at.asc`);
+      _renderHarvest(container);
+    },
+  });
 }
 
 export function unmountBudget() {
