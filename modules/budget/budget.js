@@ -188,7 +188,7 @@ function _showHarvestImportPreview(container, parsed, skippedTotals, sheetName) 
     `,
     onConfirm: async () => {
       if (!toWrite.length) { toast("Nothing to import — sheet matches what's already recorded"); return; }
-      await commitHarvestImport(toWrite.map(d => d.row));
+      await commitHarvestImport(toWrite);
       const farm = getActiveFarm();
       _harvests = await dbSelect('harvest_entries', `farm_id=eq.${farm.id}&season=eq.${_season}&select=*&order=created_at.asc`);
       _renderHarvest(container);

@@ -9,16 +9,16 @@
 // rows 22, 37, 38, but this doesn't hardcode row numbers because a manager
 // inserting or deleting a field row would shift them).
 //
-// Matching key: farm_id + season + paddock_name (see
-// 001_harvest_entries_upsert_key.sql — must be run once in Supabase before
-// this will work). Re-uploading mid-season updates existing rows for
+// Matching key: farm_id + season + paddock_name, resolved in JS against
+// what's already loaded (see diffHarvestImport) rather than a database
+// ON CONFLICT clause. Re-uploading mid-season updates existing rows for
 // fields that changed and leaves everything else untouched; it never
 // deletes a row, since a field missing from a partial re-upload just means
 // "not re-typed this time," not "no longer exists."
 
-import { dbUpsert } from '../../js/supabase-client.js';
+import { dbInsert, dbUpdate } from '../../js/supabase-client.js';
 import { getCommodities, getCropTypes, addCropType } from '../../js/commodities.js';
-import { getActiveFarm } from '../../js/app-state.js';
+import { getActiveFarm, getSession } from '../../js/app-state.js';
 import { toast } from '../../js/ui.js';
 
 // The workbook doesn't carry a commodity name at all — this is always a
@@ -246,24 +246,36 @@ export function diffHarvestImport(parsed, existingHarvests) {
     delete row._cropLabel; // internal-only; never written to harvest_entries
     row.notes = _mergeNotes(existing?.notes, sheetNotes);
 
-    if (!existing) return { row, status: 'new', changes: [] };
+    if (!existing) return { row, status: 'new', changes: [], existingId: null };
     const changes = FIELDS.filter(f => String(existing[f] ?? '') !== String(row[f] ?? ''));
     if (row.notes !== (existing.notes || null)) changes.push('notes');
-    return { row, status: changes.length ? 'update' : 'unchanged', changes };
+    return { row, status: changes.length ? 'update' : 'unchanged', changes, existingId: existing.id };
   });
 }
 
 /**
- * Write the parsed rows to Supabase. Requires the unique constraint from
- * 001_harvest_entries_upsert_key.sql (farm_id, season, paddock_name) —
- * without it this silently falls back to plain inserts and will duplicate
- * every row on a second upload.
+ * Write the diffed rows to Supabase — updating existing rows by id and
+ * inserting new ones, the same way every other part of the app writes to
+ * harvest_entries. Deliberately avoids a bulk ON CONFLICT upsert: PostgREST
+ * requires it to target an exact unique constraint and can throw a raw
+ * 23505 on rows that should have matched, which update-or-insert by id
+ * (already known from the diff) sidesteps entirely.
+ *
+ * @param {Array<{row: object, existingId: string|null}>} diffedToWrite
  */
-export async function commitHarvestImport(parsed) {
-  // Strip internal-only fields defensively — diffHarvestImport already
-  // removes them, but the schema-cache error this caused (PGRST204) is bad
-  // enough that this shouldn't depend on the caller having run the diff first.
-  const rows = parsed.map(({ _cropLabel, _sheetNotes, ...row }) => row);
-  await dbUpsert('harvest_entries', rows, 'farm_id,season,paddock_name');
-  toast(`Imported ${rows.length} field${rows.length === 1 ? '' : 's'}`, 'success');
+export async function commitHarvestImport(diffedToWrite) {
+  let updated = 0, inserted = 0;
+  for (const { row, existingId } of diffedToWrite) {
+    // Strip internal-only fields defensively, regardless of caller.
+    const { _cropLabel, _sheetNotes, ...clean } = row;
+    if (existingId) {
+      await dbUpdate('harvest_entries', existingId, clean);
+      updated++;
+    } else {
+      clean.created_by = getSession()?.user?.id;
+      await dbInsert('harvest_entries', clean);
+      inserted++;
+    }
+  }
+  toast(`Imported: ${inserted} new, ${updated} updated`, 'success');
 }
