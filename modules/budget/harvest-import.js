@@ -243,6 +243,7 @@ export function diffHarvestImport(parsed, existingHarvests) {
     const existing = existingHarvests.find(h => h.paddock_name === row.paddock_name);
     const sheetNotes = row._sheetNotes;
     delete row._sheetNotes;
+    delete row._cropLabel; // internal-only; never written to harvest_entries
     row.notes = _mergeNotes(existing?.notes, sheetNotes);
 
     if (!existing) return { row, status: 'new', changes: [] };
@@ -259,6 +260,10 @@ export function diffHarvestImport(parsed, existingHarvests) {
  * every row on a second upload.
  */
 export async function commitHarvestImport(parsed) {
-  await dbUpsert('harvest_entries', parsed, 'farm_id,season,paddock_name');
-  toast(`Imported ${parsed.length} field${parsed.length === 1 ? '' : 's'}`, 'success');
+  // Strip internal-only fields defensively — diffHarvestImport already
+  // removes them, but the schema-cache error this caused (PGRST204) is bad
+  // enough that this shouldn't depend on the caller having run the diff first.
+  const rows = parsed.map(({ _cropLabel, _sheetNotes, ...row }) => row);
+  await dbUpsert('harvest_entries', rows, 'farm_id,season,paddock_name');
+  toast(`Imported ${rows.length} field${rows.length === 1 ? '' : 's'}`, 'success');
 }
