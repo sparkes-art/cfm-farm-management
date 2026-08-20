@@ -151,6 +151,16 @@ export async function parseHarvestExcel(file, season) {
   const skippedTotals = [];
   const unmatchedCropTypes = new Set();
 
+  // The fields table isn't the last thing on the sheet — "Production by Seed
+  // Wet Date" and other summary tables follow further down, with their own
+  // headers and numeric columns that would otherwise be misread as field
+  // rows once the subtotal rows are skipped. Two guards stop that: a real
+  // field row always has a numeric Area (ha), which those later tables'
+  // rows don't; and once we've reached the subtotal rows and then hit a row
+  // that isn't a valid field or another subtotal, the fields table is over
+  // — stop entirely rather than keep scanning the rest of the sheet.
+  let reachedTotals = false;
+
   for (const row of dataRows) {
     const field = row[COL.FIELD];
     if (field === null || field === undefined || String(field).trim() === '') continue;
@@ -158,7 +168,14 @@ export async function parseHarvestExcel(file, season) {
     const fieldName = String(field).trim();
     if (fieldName.toLowerCase().startsWith('total')) {
       skippedTotals.push(fieldName);
+      reachedTotals = true;
       continue;
+    }
+
+    const area = row[COL.AREA];
+    if (typeof area !== 'number' || Number.isNaN(area)) {
+      if (reachedTotals) break; // past the fields table entirely
+      continue; // stray row within the table (rare) — skip, don't stop
     }
 
     const cropLabel = row[COL.CROP] ? String(row[COL.CROP]).trim() : null;
