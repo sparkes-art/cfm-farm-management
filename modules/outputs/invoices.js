@@ -559,10 +559,15 @@ export function openInvoiceForm(container, existing = null) {
       <div id="f-contract-section" style="margin-bottom:16px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Forward contract</label>
-          <select class="form-select" id="f-contract">
-            <option value="">— select a contract —</option>
-            ${_contracts.map(c => `<option value="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" data-buyer="${c.counterparty||c.buyer||''}" data-commodity="${c.commodity||''}" ${existing?.forward_contract_id===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}</option>`).join('')}
-          </select>
+          <div style="position:relative" id="f-contract-wrap">
+            <input type="text" id="f-contract-search" class="form-input" placeholder="Search contracts..." autocomplete="off"
+              value="${existing?.forward_contract_id ? (() => { const c = _contracts.find(x=>x.id===existing.forward_contract_id); return c ? (c.contract_number||'Contract')+' — '+(c.commodity||'')+' — '+formatNumber(c.quantity,0)+' '+(c.unit||'')+' @ '+formatCurrency(c.price_per_unit,2) : ''; })() : ''}"
+              style="width:100%">
+            <input type="hidden" id="f-contract" value="${existing?.forward_contract_id||''}">
+            <div id="f-contract-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:white;border:1px solid var(--border);border-radius:var(--radius-md);margin-top:2px;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1)">
+              <div id="f-contract-opts"></div>
+            </div>
+          </div>
         </div>
         <div id="f-contract-summary" style="display:none;grid-template-columns:repeat(4,1fr) 1.2fr;gap:10px;background:var(--blue-light);border-radius:var(--radius-sm);padding:12px;margin-top:8px">
           <div><p style="font-size:10px;color:var(--blue-text);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px">Contract qty</p><p id="cs-qty" style="font-weight:600;color:var(--blue-text)">—</p></div>
@@ -710,8 +715,85 @@ export function openInvoiceForm(container, existing = null) {
       });
     }
   }
+  // Searchable contract dropdown
+  const searchInput = modal.querySelector('#f-contract-search');
+  const hiddenInput = modal.querySelector('#f-contract');
+  const dropdown = modal.querySelector('#f-contract-dropdown');
+  const optsWrap = modal.querySelector('#f-contract-opts');
+
+  const renderOpts = (filter='') => {
+    const lower = filter.toLowerCase();
+    const filtered = _contracts.filter(c =>
+      !lower ||
+      (c.contract_number||'').toLowerCase().includes(lower) ||
+      (c.commodity||'').toLowerCase().includes(lower) ||
+      (c.counterparty||c.buyer||'').toLowerCase().includes(lower)
+    );
+    optsWrap.innerHTML = filtered.length
+      ? filtered.map(c => {
+          const label = `${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}`;
+          const isSelected = hiddenInput.value === c.id;
+          return `<div class="f-contract-opt" data-id="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" data-buyer="${c.counterparty||c.buyer||''}" data-commodity="${c.commodity||''}"
+            style="padding:8px 12px;cursor:pointer;font-size:13px;color:var(--ink);${isSelected?'background:var(--blue-light);font-weight:600':''}">${label}</div>`;
+        }).join('')
+      : '<div style="padding:10px 12px;font-size:13px;color:var(--hint)">No contracts found</div>';
+
+    optsWrap.querySelectorAll('.f-contract-opt').forEach(opt => {
+      opt.addEventListener('mouseenter', () => opt.style.background='var(--page-bg)');
+      opt.addEventListener('mouseleave', () => opt.style.background = hiddenInput.value===opt.dataset.id?'var(--blue-light)':'');
+      opt.addEventListener('mousedown', e => {
+        e.preventDefault();
+        hiddenInput.value = opt.dataset.id;
+        searchInput.value = opt.textContent.trim();
+        dropdown.style.display = 'none';
+        // Trigger contract summary update
+        const fakeOpt = { dataset: opt.dataset, value: opt.dataset.id };
+        updateContractSummaryFromOpt(fakeOpt);
+      });
+    });
+  };
+
+  searchInput?.addEventListener('focus', () => { renderOpts(searchInput.value); dropdown.style.display='block'; });
+  searchInput?.addEventListener('input', () => { hiddenInput.value=''; renderOpts(searchInput.value); dropdown.style.display='block'; });
+  searchInput?.addEventListener('blur', () => setTimeout(()=>{ dropdown.style.display='none'; }, 150));
+  document.addEventListener('keydown', e => { if(e.key==='Escape') dropdown.style.display='none'; });
+
+  // Rewrite updateContractSummary to accept an opt object
+  const updateContractSummaryFromOpt = (opt) => {
+    const cId = opt?.dataset?.id || opt?.value || hiddenInput.value;
+    if (!cId) { contractSummary.style.display='none'; return; }
+    contractSummary.style.display='grid';
+    const qty = parseFloat(opt?.dataset?.qty||0);
+    const price = parseFloat(opt?.dataset?.price||0);
+    const unit = opt?.dataset?.unit||'unit';
+    const buyer = opt?.dataset?.buyer||'';
+    const commodity = opt?.dataset?.commodity||'';
+    const contractInvoices = _invoices.filter(i => i.forward_contract_id===cId && i.id!==existing?.id);
+    const invoicedQty = contractInvoices.reduce((s,i)=>{
+      if(i.batches){const b=typeof i.batches==='string'?JSON.parse(i.batches):i.batches;return s+b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((ss,x)=>ss+(parseFloat(x.qty)||0),0);}
+      const lines=(i.line_items||[]).filter(l=>l.type!=='expense'&&l.line_type!=='qa');const seen=new Set();
+      return s+lines.reduce((ss,l)=>{const k=l.docket||l.commodity||JSON.stringify(l);if(seen.has(k))return ss;seen.add(k);return ss+(parseFloat(l.qty)||0);},0);
+    },0);
+    const invoicedValue = contractInvoices.reduce((s,i)=>s+(parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0),0);
+    const remaining = Math.max(0, qty - invoicedQty);
+    modal.querySelector('#cs-qty').textContent = formatNumber(qty,0)+' '+unit;
+    modal.querySelector('#cs-invoiced').textContent = formatNumber(invoicedQty,2)+' '+unit;
+    modal.querySelector('#cs-remaining').textContent = formatNumber(remaining,2)+' '+unit;
+    modal.querySelector('#cs-avg').textContent = invoicedQty ? formatCurrency(invoicedValue/invoicedQty,2) : '—';
+    modal.querySelector('#cs-price').textContent = formatCurrency(price,2)+' / '+unit;
+    const buyerField = modal.querySelector('#f-buyer');
+    if (buyerField && buyer) buyerField.value = buyer;
+    // Pre-fill income descriptions
+    if (commodity) {
+      modal.querySelector('#f-batches-wrap')?.querySelectorAll('.b-income-lines tr').forEach(tr => {
+        const d = tr.querySelector('.bl-desc');
+        if (d && (!d.value || d.value===d.dataset.prevCommodity)) { d.value=commodity; d.dataset.prevCommodity=commodity; }
+      });
+    }
+  };
+
   contractSel?.addEventListener('change', updateContractSummary);
-  if (contractSel?.value) updateContractSummary();
+  if (hiddenInput?.value) updateContractSummaryFromOpt({dataset:{id:hiddenInput.value,...(() => { const c=_contracts.find(x=>x.id===hiddenInput.value); return c?{qty:c.quantity||0,price:c.price_per_unit||0,unit:c.unit||'t',buyer:c.counterparty||c.buyer||'',commodity:c.commodity||''}:{}; })()}});
 
   // ── Batch system ──────────────────────────────────────────
   let _batchCounter = 0;
