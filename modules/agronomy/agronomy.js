@@ -2,6 +2,7 @@
 // CFM Agronomy Module — Paddocks, Map, Visits & Recommendations, Spray Records
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
+import { mountAgronomyVisits, unmountAgronomyVisits } from './agronomy-visits.js';
 import { getActiveFarm, getActiveSeason } from '../../js/app-state.js';
 import { toast, openModal, formatDate } from '../../js/ui.js';
 
@@ -58,11 +59,13 @@ function buildShell() {
       <button class="tab-btn" data-tab="paddocks">🟩 Paddocks</button>
       <button class="tab-btn" data-tab="visits">📋 Visits &amp; Recs</button>
       <button class="tab-btn" data-tab="spray">🧪 Spray Records</button>
+      <button class="tab-btn" data-tab="inspections">📋 Inspection Visits</button>
     </div>
     <div id="agro-tab-map"      class="agro-tab"></div>
     <div id="agro-tab-paddocks" class="agro-tab" style="display:none"></div>
     <div id="agro-tab-visits"   class="agro-tab" style="display:none"></div>
     <div id="agro-tab-spray"    class="agro-tab" style="display:none"></div>
+    <div id="agro-tab-inspections" class="agro-tab" style="display:none"></div>
   `;
 }
 
@@ -97,6 +100,15 @@ function bindTabNav() {
 }
 
 function switchTab(tab) {
+  if (tab === 'inspections') {
+    document.querySelectorAll('.agro-tab').forEach(t => t.style.display = 'none');
+    const el = document.getElementById('agro-tab-inspections');
+    if (el) { el.style.display = ''; mountAgronomyVisits(el); }
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    activeTab = tab;
+    return;
+  }
+
   activeTab = tab;
   document.querySelectorAll('#agronomy-tabs .tab-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === tab));
