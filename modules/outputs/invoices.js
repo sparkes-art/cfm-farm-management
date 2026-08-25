@@ -524,7 +524,7 @@ async function _callExtractAPI(file, farm, documentType) {
   return json;
 }
 
-async function _extractFromGinReceipt(batchDiv, file, modal) {
+async function _extractFromGinReceipt(batchDiv, file, modal, addBatchLine, recalcBatch) {
   const farm = getActiveFarm();
   const btn = batchDiv.querySelector('.b-extract-gin');
   const origText = btn?.textContent;
@@ -564,7 +564,7 @@ async function _extractFromGinReceipt(batchDiv, file, modal) {
   }
 }
 
-async function _extractFromRCTI(batchDiv, file, modal) {
+async function _extractFromRCTI(batchDiv, file, modal, addBatchLine, recalcBatch) {
   const farm = getActiveFarm();
   const btn = batchDiv.querySelector('.b-extract-rcti');
   const origText = btn?.textContent;
@@ -581,7 +581,7 @@ async function _extractFromRCTI(batchDiv, file, modal) {
       pill.textContent = 'PDF: ' + file.name.slice(0, 25);
       list.appendChild(pill);
     }
-    _showRCTIReview(extracted, extraction_id, examples_used || 0, batchDiv, modal, farm);
+    _showRCTIReview(extracted, extraction_id, examples_used || 0, batchDiv, modal, farm, addBatchLine, recalcBatch);
   } catch(e) {
     console.error('RCTI extraction error:', e);
     toast('Extraction failed: ' + e.message, 'error');
@@ -590,7 +590,7 @@ async function _extractFromRCTI(batchDiv, file, modal) {
   }
 }
 
-function _showRCTIReview(data, extractionId, examplesUsed, batchDiv, parentModal, farm) {
+function _showRCTIReview(data, extractionId, examplesUsed, batchDiv, parentModal, farm, addBatchLine, recalcBatch) {
   const issues = (data._confidence_issues?.length || 0) + (data._unfound_fields?.length || 0);
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2000;overflow-y:auto;padding:20px';
@@ -1112,7 +1112,7 @@ export function openInvoiceForm(container, existing = null) {
       tempInput.type = 'file'; tempInput.accept = '.pdf'; tempInput.style.display = 'none';
       document.body.appendChild(tempInput);
       tempInput.addEventListener('change', async () => {
-        if (tempInput.files[0]) await _extractFromGinReceipt(div, tempInput.files[0], modal);
+        if (tempInput.files[0]) await _extractFromGinReceipt(div, tempInput.files[0], modal, addBatchLine, recalcBatch);
         tempInput.remove();
       });
       tempInput.click();
@@ -1123,14 +1123,14 @@ export function openInvoiceForm(container, existing = null) {
       const fileInput = div.querySelector('.b-income-file-input');
       // Check if files already attached, or prompt user to select
       if (div._incomeFiles?.length) {
-        await _extractFromRCTI(div, div._incomeFiles[0], modal);
+        await _extractFromRCTI(div, div._incomeFiles[0], modal, addBatchLine, recalcBatch);
       } else {
         // Trigger file picker then extract
         const tempInput = document.createElement('input');
         tempInput.type = 'file'; tempInput.accept = '.pdf'; tempInput.style.display = 'none';
         document.body.appendChild(tempInput);
         tempInput.addEventListener('change', async () => {
-          if (tempInput.files[0]) await _extractFromRCTI(div, tempInput.files[0], modal);
+          if (tempInput.files[0]) await _extractFromRCTI(div, tempInput.files[0], modal, addBatchLine, recalcBatch);
           tempInput.remove();
         });
         tempInput.click();
