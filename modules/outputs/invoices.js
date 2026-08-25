@@ -951,6 +951,37 @@ export function openInvoiceForm(container, existing = null) {
     div._incomeFiles = [];
     div._expenseFiles = [];
 
+    // Gin receipt extraction button
+    div.querySelector('.b-extract-gin')?.addEventListener('click', async () => {
+      const tempInput = document.createElement('input');
+      tempInput.type = 'file'; tempInput.accept = '.pdf'; tempInput.style.display = 'none';
+      document.body.appendChild(tempInput);
+      tempInput.addEventListener('change', async () => {
+        if (tempInput.files[0]) await _extractFromGinReceipt(div, tempInput.files[0], modal);
+        tempInput.remove();
+      });
+      tempInput.click();
+    });
+
+    // RCTI extraction button
+    div.querySelector('.b-extract-rcti')?.addEventListener('click', async () => {
+      const fileInput = div.querySelector('.b-income-file-input');
+      // Check if files already attached, or prompt user to select
+      if (div._incomeFiles?.length) {
+        await _extractFromRCTI(div, div._incomeFiles[0], modal);
+      } else {
+        // Trigger file picker then extract
+        const tempInput = document.createElement('input');
+        tempInput.type = 'file'; tempInput.accept = '.pdf'; tempInput.style.display = 'none';
+        document.body.appendChild(tempInput);
+        tempInput.addEventListener('change', async () => {
+          if (tempInput.files[0]) await _extractFromRCTI(div, tempInput.files[0], modal);
+          tempInput.remove();
+        });
+        tempInput.click();
+      }
+    });
+
     // Datalists for description autocomplete (farm+season scoped)
     const _dlIncome = document.createElement('datalist');
     _dlIncome.id = `bl-inc-desc-${bId}`;
