@@ -835,6 +835,7 @@ export function openInvoiceForm(container, existing = null) {
         <div class="b-income-files-wrap b-files-wrap" style="display:flex;align-items:center;gap:6px;flex:1;border:1.5px dashed var(--border);border-radius:6px;padding:4px 8px;min-height:32px;cursor:pointer" title="Drop files here or click Attach">
           <button class="b-income-attach btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap">📄 Attach</button>
           <input type="file" class="b-income-file-input" multiple accept=".pdf,image/*" style="display:none">
+          <button class="b-extract-rcti btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap;color:var(--blue)">✨ Extract RCTI</button>
           <div class="b-income-file-list" style="display:flex;flex-wrap:wrap;gap:4px;flex:1"></div>
           <span style="font-size:10px;color:var(--hint);white-space:nowrap">Drop files here</span>
         </div>
@@ -866,6 +867,7 @@ export function openInvoiceForm(container, existing = null) {
         <div class="b-expense-files-wrap b-files-wrap" style="display:flex;align-items:center;gap:6px;flex:1;border:1.5px dashed var(--border);border-radius:6px;padding:4px 8px;min-height:32px;cursor:pointer" title="Drop files here or click Attach">
           <button class="b-expense-attach btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap">🧾 Attach</button>
           <input type="file" class="b-expense-file-input" multiple accept=".pdf,image/*" style="display:none">
+          <button class="b-extract-gin btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap;color:var(--red)">✨ Extract gin receipt</button>
           <div class="b-expense-file-list" style="display:flex;flex-wrap:wrap;gap:4px;flex:1"></div>
           <span style="font-size:10px;color:var(--hint);white-space:nowrap">Drop files here</span>
         </div>
