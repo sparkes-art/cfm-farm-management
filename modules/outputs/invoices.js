@@ -504,6 +504,159 @@ function _xeroRefModal(inv, container) {
 }
 
 // ── Invoice form ──────────────────────────────────────────────
+
+// ── RCTI / Gin receipt extraction ────────────────────────────
+
+async function _callExtractAPI(file, farm, documentType) {
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+  const res = await fetch('/api/extract-rcti', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pdf_base64: base64, farm_id: farm.id, document_type: documentType }),
+  });
+  const json = await res.json();
+  if (!res.ok || json.error) throw new Error(json.error || 'Extraction failed');
+  return json;
+}
+
+async function _extractFromGinReceipt(batchDiv, file, modal) {
+  const farm = getActiveFarm();
+  const btn = batchDiv.querySelector('.b-extract-gin');
+  const origText = btn?.textContent;
+  if (btn) { btn.textContent = 'Extracting...'; btn.disabled = true; }
+  try {
+    const { extracted } = await _callExtractAPI(file, farm, 'gin_receipt');
+    if (!extracted) throw new Error('No data returned');
+    batchDiv._expenseFiles = batchDiv._expenseFiles || [];
+    batchDiv._expenseFiles.push(file);
+    const list = batchDiv.querySelector('.b-expense-file-list');
+    if (list) {
+      const pill = document.createElement('span');
+      pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:var(--page-bg);border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px;color:var(--ink)';
+      pill.textContent = 'PDF: ' + file.name.slice(0, 25);
+      list.appendChild(pill);
+    }
+    const docketInput = batchDiv.querySelector('.b-expense-docket');
+    if (docketInput && extracted.receipt_number && !docketInput.value) docketInput.value = extracted.receipt_number;
+    const expLines = batchDiv.querySelector('.b-expense-lines');
+    if (expLines) {
+      const rows = expLines.querySelectorAll('tr');
+      if (rows.length === 1 && !rows[0].querySelector('.bl-desc')?.value && !rows[0].querySelector('.bl-amount')?.value) rows[0].remove();
+    }
+    const charges = extracted.charges || [];
+    if (!charges.length) { toast('No charge lines found in document', 'error'); return; }
+    charges.forEach(c => {
+      if (!c.description || c.total_amount == null) return;
+      addBatchLine(batchDiv, { description: c.description, amount: -Math.abs(c.total_amount), type: 'expense' }, 'expense');
+    });
+    recalcBatch(batchDiv);
+    toast(charges.length + ' expense line' + (charges.length !== 1 ? 's' : '') + ' extracted', 'success');
+  } catch(e) {
+    console.error('Gin extraction error:', e);
+    toast('Extraction failed: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.textContent = origText; btn.disabled = false; }
+  }
+}
+
+async function _extractFromRCTI(batchDiv, file, modal) {
+  const farm = getActiveFarm();
+  const btn = batchDiv.querySelector('.b-extract-rcti');
+  const origText = btn?.textContent;
+  if (btn) { btn.textContent = 'Extracting...'; btn.disabled = true; }
+  try {
+    const { extracted, extraction_id, examples_used } = await _callExtractAPI(file, farm, 'rcti');
+    if (!extracted) throw new Error('No data returned');
+    batchDiv._incomeFiles = batchDiv._incomeFiles || [];
+    batchDiv._incomeFiles.push(file);
+    const list = batchDiv.querySelector('.b-income-file-list');
+    if (list) {
+      const pill = document.createElement('span');
+      pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:var(--page-bg);border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px;color:var(--ink)';
+      pill.textContent = 'PDF: ' + file.name.slice(0, 25);
+      list.appendChild(pill);
+    }
+    _showRCTIReview(extracted, extraction_id, examples_used || 0, batchDiv, modal, farm);
+  } catch(e) {
+    console.error('RCTI extraction error:', e);
+    toast('Extraction failed: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.textContent = origText; btn.disabled = false; }
+  }
+}
+
+function _showRCTIReview(data, extractionId, examplesUsed, batchDiv, parentModal, farm) {
+  const issues = (data._confidence_issues?.length || 0) + (data._unfound_fields?.length || 0);
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2000;overflow-y:auto;padding:20px';
+  const fieldDefs = [
+    ['RCTI number','rcti_number'],['Gin / buyer','gin_name'],['Invoice date','invoice_date'],
+    ['Crop year','crop_year'],['Docket numbers','docket_numbers'],['Bale count','bale_count'],
+    ['Gross proceeds','gross_proceeds'],['Net payment','net_payment'],['GST','gst_amount'],['Notes','notes']
+  ];
+  let html = '<div style="background:white;border-radius:12px;max-width:680px;margin:0 auto">';
+  html += '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">';
+  html += '<div><div style="font-size:15px;font-weight:700">RCTI extraction results</div>';
+  html += '<div style="font-size:11px;color:var(--hint);margin-top:2px">' + (examplesUsed ? 'Using ' + examplesUsed + ' training examples' : 'First extraction for this farm') + '</div></div>';
+  html += '<div style="display:flex;gap:8px"><button id="rcti-cancel" class="btn btn-ghost btn-sm">Cancel</button><button id="rcti-apply" class="btn btn-primary btn-sm">Apply</button></div></div>';
+  if (issues) {
+    html += '<div style="margin:12px 16px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e"><strong>Flagged:</strong>';
+    if (data._confidence_issues?.length) html += '<div>Low confidence: ' + data._confidence_issues.join(', ') + '</div>';
+    if (data._unfound_fields?.length) html += '<div>Not found: ' + data._unfound_fields.join(', ') + '</div>';
+    html += '</div>';
+  }
+  html += '<div style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:10px">';
+  fieldDefs.forEach(function(fd) {
+    var label = fd[0]; var key = fd[1];
+    var val = data[key];
+    if (Array.isArray(val)) val = val.join(', ');
+    if (val == null) val = '';
+    html += '<div class="form-group" style="margin:0"><label class="form-label" style="font-size:10px">' + label + '</label>';
+    html += '<input class="form-input rcti-field" data-key="' + key + '" type="text" value="' + String(val).replace(/"/g, '&quot;') + '" style="font-size:12px"></div>';
+  });
+  html += '</div></div>';
+  overlay.innerHTML = html;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#rcti-cancel')?.addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#rcti-apply')?.addEventListener('click', () => {
+    const corrected = Object.assign({}, data);
+    overlay.querySelectorAll('.rcti-field').forEach(inp => { corrected[inp.dataset.key] = inp.value; });
+    const docketInput = batchDiv.querySelector('.b-income-docket');
+    if (docketInput && corrected.docket_numbers && !docketInput.value)
+      docketInput.value = Array.isArray(corrected.docket_numbers) ? corrected.docket_numbers.join(', ') : corrected.docket_numbers;
+    const masterQtyInput = parentModal.querySelector('#f-master-qty');
+    if (masterQtyInput && corrected.bale_count && !masterQtyInput.value) masterQtyInput.value = corrected.bale_count;
+    const dateInput = parentModal.querySelector('#f-date');
+    if (dateInput && !dateInput.value && corrected.invoice_date) dateInput.value = corrected.invoice_date;
+    const buyerInput = parentModal.querySelector('#f-buyer');
+    if (buyerInput && !buyerInput.value && corrected.gin_name) buyerInput.value = corrected.gin_name;
+    if (corrected.gross_proceeds) {
+      const incLines = batchDiv.querySelector('.b-income-lines');
+      if (incLines) {
+        const rows = incLines.querySelectorAll('tr');
+        if (rows.length === 1 && !rows[0].querySelector('.bl-amount')?.value) rows[0].remove();
+      }
+      const contractSel = parentModal.querySelector('#f-contract');
+      const cMatch = _contracts.find(c => c.id === contractSel?.value);
+      addBatchLine(batchDiv, { description: cMatch?.commodity || 'Cotton Lint', amount: parseFloat(corrected.gross_proceeds)||0, type: 'income', line_type: 'sale' }, 'income');
+    }
+    if (data.quality_premiums_discounts && data.quality_premiums_discounts.length) {
+      const totalQA = data.quality_premiums_discounts.reduce((s, q) => s + (q.total_amount || 0), 0);
+      if (totalQA !== 0) addBatchLine(batchDiv, { description: 'Quality adjustment', amount: totalQA, type: 'income', line_type: 'qa' }, 'income');
+    }
+    if (extractionId) fetch('/api/extract-rcti', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ farm_id: farm.id, save_example: true, extraction_id: extractionId, correction: corrected }) }).catch(() => {});
+    recalcBatch(batchDiv);
+    overlay.remove();
+    toast('RCTI data applied - please review', 'success');
+  });
+}
+
 // Get past line descriptions scoped to current farm+season
 function _getPastDescriptions(type) {
   const season = getActiveSeason();
