@@ -1,23 +1,49 @@
 // modules/outputs/commodity-card.js
-// Commodity position card — matches the data card design from old system
-// Shows budget vs forecast vs actual, hedging position, price summary
+// Sales dashboard — Option A: Revenue scorecard
+// Season totals as hero, tight crop table below, summer/winter split
 
-import { dbSelect } from '../../js/supabase-client.js?v=1783290066771';
-import { getActiveFarm } from '../../js/app-state.js?v=1783290066771';
-import { formatCurrency, formatNumber, formatDate } from '../../js/ui.js?v=1783290066771';
-import { getCommodities, getCropTypes } from '../../js/commodities.js?v=1783290066771';
+import { dbSelect } from '../../js/supabase-client.js';
+import { getActiveFarm } from '../../js/app-state.js';
+import { formatCurrency, formatNumber } from '../../js/ui.js';
+import { getCommodities } from '../../js/commodities.js';
 
+// ── Crop season classification ─────────────────────────────────
+const SUMMER_CROPS = ['cotton lint', 'cotton', 'cotton seed', 'sweet corn', 'maize', 'sorghum', 'sunflower', 'mung bean', 'cowpea', 'soybean'];
+const WINTER_CROPS = ['wheat', 'barley', 'chickpea', 'chickpeas', 'durum', 'canola', 'oats', 'lentil', 'field pea', 'faba bean', 'lupins'];
+const PERMANENT_CROPS = ['almonds', 'pistachios', 'olives', 'grapes', 'citrus'];
+const LIVESTOCK = ['wool', 'sheep', 'cattle', 'lamb', 'beef', 'merino', 'prime lamb', 'bobby', 'pig', 'goat'];
+
+function getCropSeason(name) {
+  const n = (name || '').toLowerCase();
+  if (SUMMER_CROPS.some(c => n.includes(c) || c.includes(n))) return 'summer';
+  if (WINTER_CROPS.some(c => n.includes(c) || c.includes(n))) return 'winter';
+  if (PERMANENT_CROPS.some(c => n.includes(c) || c.includes(n))) return 'permanent';
+  if (LIVESTOCK.some(c => n.includes(c) || c.includes(n))) return 'livestock';
+  return 'other';
+}
+
+const fC = (n, dp = 0) => n != null ? formatCurrency(n, dp) : '—';
+const fN = (n, dp = 0) => n != null && n !== 0 ? formatNumber(n, dp) : '—';
+const fM = (n) => {
+  if (n == null) return '—';
+  const abs = Math.abs(n);
+  if (abs >= 1000000) return (n < 0 ? '-' : '') + '$' + (abs / 1000000).toFixed(1) + 'm';
+  if (abs >= 1000) return (n < 0 ? '-' : '') + '$' + Math.round(abs / 1000) + 'k';
+  return fC(n);
+};
+const varColor = (v) => v == null ? 'var(--hint)' : v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--muted)';
+const varSign = (v) => v > 0 ? '+' : '';
+
+// ── Main export ────────────────────────────────────────────────
 export async function buildCommodityCards(season) {
   const farm = getActiveFarm();
-  if (!farm) return '<div class="empty-state"><p>No farm selected.</p></div>';
+  if (!farm) return { html: _empty('No farm selected.'), commodityMap: {} };
 
-  // Load all data in parallel
-  // Load commodity statuses (manual override: budget/growing/harvesting/harvested)
   let commodityStatuses = {};
   try {
     const statuses = await dbSelect('commodity_status', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*');
     statuses.forEach(s => { commodityStatuses[s.commodity_id] = s.status; });
-  } catch { /* table may not exist yet */ }
+  } catch {}
 
   const [contracts, invoices, budgets, forecasts, harvests] = await Promise.all([
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
@@ -27,19 +53,15 @@ export async function buildCommodityCards(season) {
     dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
   ]);
 
-  // Get all unique commodities across contracts, budgets and invoices
-  // Use commodity_id as primary key when available, fall back to name
-  const commodityMap = {};
-  const nameToKey = {}; // map commodity name -> key for merging
-
-  // Build a lookup from commodity ID to name using the master list
   const masterCommodities = getCommodities();
   const idToName = {};
   masterCommodities.forEach(c => { idToName[c.id] = c.name; });
 
+  const commodityMap = {};
+  const nameToKey = {};
+
   const addCommodity = (id, name) => {
     if (!id && !name) return null;
-    // Resolve name from master list if we only have an id
     const resolvedName = name || (id ? idToName[id] : null);
     let key = id || nameToKey[resolvedName?.toLowerCase()] || resolvedName;
     if (!commodityMap[key]) {
@@ -51,346 +73,208 @@ export async function buildCommodityCards(season) {
     return key;
   };
 
-  contracts.forEach(c => {
-    const key = addCommodity(c.commodity_id, c.commodity);
-    if (key) commodityMap[key].contracts.push(c);
-  });
-  budgets.forEach(b => {
-    const key = addCommodity(b.commodity_id, b.commodity);
-    if (key) commodityMap[key].budgets.push(b);
-  });
+  contracts.forEach(c => { const k = addCommodity(c.commodity_id, c.commodity); if (k) commodityMap[k].contracts.push(c); });
+  budgets.forEach(b => { const k = addCommodity(b.commodity_id, b.commodity); if (k) commodityMap[k].budgets.push(b); });
   invoices.forEach(i => {
-    const lines = i.line_items || [];
-    if (lines.length) {
-      // Filter lines to those matching the selected season
-      const seasonLines = lines.filter(l => !l.season || l.season === season);
+    if (i.batches && (typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches).length) {
+      const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
       const seen = new Set();
-      seasonLines.forEach(l => {
-        if (!l.commodity) return;
-        const k = addCommodity(null, l.commodity);
-        if (k && !seen.has(k)) {
-          // Store a season-filtered version of the invoice
-          const filteredInvoice = { ...i, line_items: seasonLines };
-          commodityMap[k].invoices.push(filteredInvoice);
-          seen.add(k);
-        }
+      b.forEach(batch => {
+        (batch.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa').forEach(l => {
+          const desc = l.description?.trim();
+          if (!desc) return;
+          const k = addCommodity(null, desc);
+          if (k && !seen.has(k)) { commodityMap[k].invoices.push({ ...i, _batch: batch }); seen.add(k); }
+        });
       });
     } else if (i.commodity_type && (!i.season || i.season === season)) {
-      // Old format fallback — filter by invoice season
-      const key = addCommodity(null, i.commodity_type);
-      if (key) commodityMap[key].invoices.push(i);
+      const k = addCommodity(null, i.commodity_type);
+      if (k) commodityMap[k].invoices.push(i);
     }
   });
   forecasts.forEach(f => { addCommodity(f.commodity_id, f.commodity); });
   harvests.forEach(h => { addCommodity(h.commodity_id, null); });
 
-  // Store budget price on each commodity entry
-  Object.values(commodityMap).forEach(com => {
-    const budgets = com.budgets || [];
-    const pricesWithVal = budgets.filter(b => b.price);
-    com.budgetPrice = pricesWithVal.length
-      ? pricesWithVal.reduce((s, b) => s + parseFloat(b.price), 0) / pricesWithVal.length
-      : null;
-  });
-
-  // Also get latest market price for each commodity
-  // Get farm's grain site settings for price filtering
+  // Market prices
+  const commodityList = getCommodities();
   const farmSettings = farm.settings || {};
   const grainSites = farmSettings.grainSites || {};
-  const commodityList = getCommodities();
-
-  const pricePromises = Object.entries(commodityMap).map(async ([key, com]) => {
+  await Promise.all(Object.entries(commodityMap).map(async ([key, com]) => {
     if (!com.id) return;
     try {
-      // Find this commodity's name to look up its delivery site
       const commodityObj = commodityList.find(c => c.id === com.id);
       const commodityName = commodityObj?.name || com.name || '';
       const deliverySite = grainSites[commodityName] || null;
-
-      // Build query — filter by delivery site if configured
-      let query = 'commodity_id=eq.' + com.id + '&select=price_per_unit,price_date&order=price_date.desc&limit=1';
-      if (deliverySite) query += '&region=eq.' + encodeURIComponent(deliverySite);
-
-      const prices = await dbSelect('market_prices', query);
+      let q = 'commodity_id=eq.' + com.id + '&select=price_per_unit,price_date&order=price_date.desc&limit=1';
+      if (deliverySite) q += '&region=eq.' + encodeURIComponent(deliverySite);
+      const prices = await dbSelect('market_prices', q);
       com.latestPrice = prices[0] || null;
     } catch { com.latestPrice = null; }
-  });
-  await Promise.all(pricePromises);
+  }));
 
   const cards = Object.values(commodityMap);
-  if (!cards.length) return {
-    html: '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">📦</div><p>No commodity data for ' + season + ' yet.</p><p>Add contracts or budgets to see the position dashboard.</p></div></div></div>',
-    commodityMap: {}
-  };
+  if (!cards.length) return { html: _empty('No commodity data for ' + season + ' yet.<br>Add contracts or budgets to see the position dashboard.'), commodityMap: {} };
 
-  return {
-    html: cards.map(com => _buildCard(com, forecasts, harvests, season, commodityStatuses)).join(''),
-    commodityMap
-  };
+  // Build computed stats per commodity
+  const computed = cards.map(com => _computeCom(com, forecasts, harvests, season, commodityStatuses));
+
+  // Group by season
+  const groups = { summer: [], winter: [], permanent: [], livestock: [], other: [] };
+  computed.forEach(c => { const s = getCropSeason(c.name); groups[s].push(c); });
+
+  // Build HTML
+  let html = '<div style="display:flex;flex-direction:column;gap:16px">';
+
+  ['summer', 'winter', 'permanent', 'livestock', 'other'].forEach(grp => {
+    const items = groups[grp];
+    if (!items.length) return;
+
+    const label = { summer: 'Summer crops', winter: 'Winter crops', permanent: 'Permanent crops', livestock: 'Livestock', other: 'Other' }[grp];
+    const cropNames = items.map(c => c.name).join(' · ');
+
+    // Season totals
+    const budgetRev = items.reduce((s, c) => s + (c.budgetProd && c.budgetPrice ? c.budgetProd * c.budgetPrice : 0), 0);
+    const soldRev = items.reduce((s, c) => s + c.soldRevenue, 0);
+    const unsoldRev = items.reduce((s, c) => s + Math.max(0, (c.unsoldQty || 0) * (c.budgetPrice || 0)), 0);
+    const priceVar = items.reduce((s, c) => s + (c.priceVariance || 0), 0);
+    const priceVarPct = soldRev > 0 && budgetRev > 0 ? ((soldRev - (budgetRev - unsoldRev)) / (budgetRev - unsoldRev) * 100) : null;
+
+    html += `
+    <div class="card" style="overflow:hidden">
+
+      <!-- Section header -->
+      <div style="padding:8px 16px;background:#1a2535;display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:11px;font-weight:600;color:white;text-transform:uppercase;letter-spacing:.08em">${label}</span>
+        <span style="font-size:10px;color:rgba(255,255,255,.4)">${cropNames}</span>
+      </div>
+
+      <!-- Hero totals -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-bottom:1px solid var(--border)">
+        <div style="padding:16px 18px;border-right:1px solid var(--border)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:6px">Budget revenue</div>
+          <div style="font-size:28px;font-weight:600;color:var(--ink);letter-spacing:-.02em">${fM(budgetRev)}</div>
+        </div>
+        <div style="padding:16px 18px;border-right:1px solid var(--border)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:6px">Sold revenue</div>
+          <div style="font-size:28px;font-weight:600;color:var(--green);letter-spacing:-.02em">${fM(soldRev)}</div>
+          <div style="font-size:10px;color:var(--hint);margin-top:4px">${budgetRev > 0 ? Math.round(soldRev / budgetRev * 100) + '% of budget' : ''}</div>
+        </div>
+        <div style="padding:16px 18px;border-right:1px solid var(--border)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:6px">Unsold at budget price</div>
+          <div style="font-size:28px;font-weight:600;color:var(--blue);letter-spacing:-.02em">${fM(unsoldRev)}</div>
+          <div style="font-size:10px;color:var(--hint);margin-top:4px">Remaining to sell</div>
+        </div>
+        <div style="padding:16px 18px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:6px">Price variance on sold</div>
+          <div style="font-size:28px;font-weight:600;letter-spacing:-.02em;color:${varColor(priceVar)}">${priceVar > 0 ? '+' : ''}${fM(priceVar)}</div>
+          <div style="font-size:10px;margin-top:4px;color:${varColor(priceVar)}">${priceVar > 0 ? 'Above' : priceVar < 0 ? 'Below' : 'On'} budget price</div>
+        </div>
+      </div>
+
+      <!-- Column headers -->
+      <div style="display:grid;grid-template-columns:150px 80px 70px 70px 55px 70px 80px 80px 65px;gap:0;padding:5px 14px;background:var(--page-bg);border-bottom:1px solid var(--border)">
+        ${['Crop', 'Est prod', 'Bud price', 'Sold', '% sold', 'Unsold', 'Avg sold $', 'vs budget', 'Mkt price']
+          .map((h, i) => `<div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;${i > 0 ? 'text-align:right' : ''}">${h}</div>`)
+          .join('')}
+      </div>
+
+      <!-- Crop rows -->
+      ${items.map((c, idx) => _buildRow(c, idx % 2 === 1)).join('')}
+    </div>`;
+  });
+
+  html += '</div>';
+  return { html, commodityMap };
 }
 
-function _buildCard(com, allForecasts, allHarvests, season, commodityStatuses = {}) {
+// ── Compute per-commodity stats ────────────────────────────────
+function _computeCom(com, allForecasts, allHarvests, season, commodityStatuses) {
   const name = com.name || 'Unknown';
   const contracts = com.contracts || [];
   const invoices = com.invoices || [];
   const budgets = com.budgets || [];
 
-  // Budget totals (sum across crop types)
-  const totalBudgetProd = budgets.reduce((s, b) => s + (parseFloat(b.budgeted_production) || ((parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0))), 0);
-  const totalBudgetArea = budgets.reduce((s, b) => s + (parseFloat(b.area_ha) || 0), 0);
-  const budgetYield = (totalBudgetArea > 0 && totalBudgetProd > 0) ? totalBudgetProd / totalBudgetArea : null;
+  // Budget
+  const budgetProd = budgets.reduce((s, b) => s + (parseFloat(b.budgeted_production) || ((parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0))), 0) || null;
   const budgetsWithPrice = budgets.filter(b => b.price);
   const budgetPrice = budgetsWithPrice.length ? budgetsWithPrice.reduce((s, b) => s + parseFloat(b.price), 0) / budgetsWithPrice.length : null;
 
-  // Forecasts — sum across ALL crop types for this commodity
-  // Get the latest forecast per budget_id (one forecast per crop type row)
+  // Forecast
   const comForecasts = allForecasts.filter(f => f.commodity_id === com.id || f.commodity?.toLowerCase() === com.name?.toLowerCase());
-  
-  // Group by budget_id and take the latest per group
   const latestPerBudget = {};
-  comForecasts.forEach(f => {
-    const key = f.budget_id || f.crop_type_id || 'default';
-    if (!latestPerBudget[key] || f.forecast_date > latestPerBudget[key].forecast_date) {
-      latestPerBudget[key] = f;
-    }
-  });
+  comForecasts.forEach(f => { const k = f.budget_id || 'def'; if (!latestPerBudget[k] || f.forecast_date > latestPerBudget[k].forecast_date) latestPerBudget[k] = f; });
   const latestForecasts = Object.values(latestPerBudget);
-  const latestForecast = latestForecasts.length > 0 ? latestForecasts[0] : null; // for status check
-
-  // Sum production and area across all crop type forecasts
-  const forecastProd = latestForecasts.length > 0
-    ? latestForecasts.reduce((s, f) => s + (parseFloat(f.forecast_production) || (parseFloat(f.area_ha)||0) * (parseFloat(f.yield_per_ha)||0)), 0)
-    : null;
-  const forecastArea = latestForecasts.length > 0
-    ? latestForecasts.reduce((s, f) => s + (parseFloat(f.area_ha) || 0), 0)
-    : null;
-  const forecastYield = (forecastArea > 0 && forecastProd) ? forecastProd / forecastArea : null;
+  const forecastProd = latestForecasts.length ? latestForecasts.reduce((s, f) => s + (parseFloat(f.forecast_production) || (parseFloat(f.area_ha)||0) * (parseFloat(f.yield_per_ha)||0)), 0) : null;
 
   // Harvest
   const comHarvests = allHarvests.filter(h => h.commodity_id === com.id);
   const totalHarvest = comHarvests.reduce((s, h) => s + (parseFloat(h.actual_production) || 0), 0);
-  const isHarvested = totalHarvest > 0;
 
-  // Paid average — gross amount + quality adj (not selling costs) divided by qty
-  // This gives the effective commodity price before deductions
-  const completeInvoices = invoices.filter(i => i.status === 'complete' || i.status === 'paid');
-  const totalPaidQty = completeInvoices.reduce((s, i) => {
-    // Use batches if available — only count income (sale, not QA) batches
-    if (i.batches && i.batches.length) {
-      const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
-      return s + b.filter(batch => (batch.lines||[]).some(l => l.type==='income' && l.line_type!=='qa'))
-                  .reduce((ss, batch) => ss + (parseFloat(batch.qty)||0), 0);
+  // Sold qty + revenue from invoices
+  let soldQty = 0, soldRevenue = 0;
+  invoices.forEach(i => {
+    if (i._batch) {
+      const batch = i._batch;
+      const saleLine = (batch.lines || []).find(l => l.type === 'income' && l.line_type !== 'qa');
+      soldQty += parseFloat(batch.qty) || 0;
+      soldRevenue += (parseFloat(batch.qty) || 0) * (parseFloat(saleLine?.eff_per_unit) || 0) || parseFloat(saleLine?.amount) || 0;
+    } else {
+      soldQty += parseFloat(i.total_qty) || parseFloat(i.master_qty) || 0;
+      soldRevenue += (parseFloat(i.gross_amount) || 0) + (parseFloat(i.total_quality_adj) || 0);
     }
-    // Legacy: use total_qty stored on invoice, or dedupe line_items by docket
-    if (i.total_qty) return s + parseFloat(i.total_qty);
-    const lines = (i.line_items || []).filter(l => (!l.commodity || l.commodity === com.name) && l.type !== 'expense' && l.line_type !== 'qa');
-    const seen = new Set();
-    return s + lines.reduce((ss, l) => {
-      const key = l.docket || l.commodity || JSON.stringify(l);
-      if (seen.has(key)) return ss;
-      seen.add(key);
-      return ss + (parseFloat(l.qty)||0);
-    }, 0);
-  }, 0);
-  // Paid value = gross + QA (not selling costs)
-  const totalPaidValue = completeInvoices.reduce((s, i) => {
-    return s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
-  }, 0);
-  const paidAvg = (totalPaidQty && totalPaidValue) ? totalPaidValue / totalPaidQty : null;
-  const totalPaid = completeInvoices.reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
+  });
 
-  // Contracts / hedging position
-  const totalContracted = contracts.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0);
-  const totalContractValue = contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
-  const avgFwdPrice = totalContracted ? totalContractValue / totalContracted : null;
-  // Denominator is always forecast (or budget) — never harvest for hedging purposes
-  const hedgeDenominator = forecastProd !== null ? forecastProd : totalBudgetProd;
-  const denominator = isHarvested ? totalHarvest : hedgeDenominator;
-  // Hedged = contracted + already sold (paid invoices)
-  // During harvesting, open = forecast - contracted (not capped by paid)
-  const totalHedged = Math.min(hedgeDenominator || 0, totalContracted + totalPaidQty);
-  const pctHedged = hedgeDenominator && totalHedged ? Math.round((totalHedged / hedgeDenominator) * 100) : 0;
-  const unhedged = Math.max(0, (hedgeDenominator || 0) - totalContracted);
-  // Harvest progress as % of forecast (for bar only, doesn't affect hedging %)
-  const harvestPct = hedgeDenominator && totalHarvest ? Math.min(100, Math.round((totalHarvest / hedgeDenominator) * 100)) : 0;
+  const avgSoldPrice = soldQty > 0 ? soldRevenue / soldQty : null;
+  const estProd = forecastProd || budgetProd;
+  const unsoldQty = estProd != null ? Math.max(0, estProd - soldQty) : null;
+  const pctSold = estProd ? Math.round(soldQty / estProd * 100) : null;
+  const priceVariance = avgSoldPrice && budgetPrice && soldQty ? (avgSoldPrice - budgetPrice) * soldQty : null;
+  const vsbudgetPct = avgSoldPrice && budgetPrice ? Math.round((avgSoldPrice - budgetPrice) / budgetPrice * 100) : null;
 
-  // Market price
+  const unit = contracts[0]?.unit || budgets[0]?.unit || invoices[0]?.master_unit || 'unit';
   const marketPrice = com.latestPrice ? parseFloat(com.latestPrice.price_per_unit) : null;
-  const marketVsBudget = marketPrice && budgetPrice ? ((marketPrice - budgetPrice) / budgetPrice * 100) : null;
-  const fwdVsBudget = avgFwdPrice && budgetPrice ? ((avgFwdPrice - budgetPrice) / budgetPrice * 100) : null;
 
-  // Status — use manual override if set, otherwise auto-detect
-  const manualStatus = com.id ? commodityStatuses[com.id] : null;
-  const autoStatus = isHarvested ? 'harvested' : latestForecast ? 'growing' : 'budget';
-  const status = manualStatus || autoStatus;
-  const isFullyHarvested = status === 'harvested';
-  const isCurrentlyHarvesting = status === 'harvesting';
-
-  // Production bar width
-  const budgetBarW = 100;
-  const forecastBarW = (forecastProd !== null && totalBudgetProd) ? Math.min(100, (forecastProd / totalBudgetProd) * 100) : 0;
-  const harvestBarW = totalBudgetProd ? Math.min(100, (totalHarvest / totalBudgetProd) * 100) : 0;
-  const forecastVsBudget = (forecastProd !== null && totalBudgetProd) ? Math.round((forecastProd / totalBudgetProd) * 100) : null;
-
-  // Unit
-  const unit = contracts[0]?.unit || budgets[0]?.unit || 'bale';
-  // Harvest area
-  const totalHarvestArea = comHarvests.reduce((s, h) => s + (parseFloat(h.area_ha)||0), 0);
-
-  return `
-    <div class="card" style="margin-bottom:16px">
-
-      <!-- Card top bar -->
-      <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border-light);background:#fafbfc;border-radius:var(--radius-lg) var(--radius-lg) 0 0">
-        <span style="font-size:var(--text-md);font-weight:600;color:var(--ink)">${name}</span>
-        <div class="status-toggle" style="display:flex;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;font-size:10px">
-          ${['budget','growing','harvesting','harvested'].map(s => `
-            <button class="status-opt-btn" data-commodity="${com.id}" data-season="${season}" data-status="${s}"
-              style="padding:3px 8px;border:none;cursor:pointer;font-size:10px;font-weight:${status===s?'600':'400'};
-              background:${status===s ? (s==='harvested'?'var(--green)':s==='harvesting'?'var(--amber)':s==='growing'?'var(--blue)':'var(--border)') : 'transparent'};
-              color:${status===s ? (s==='budget'?'var(--ink)':'white') : 'var(--hint)'};
-              transition:all .15s">
-              ${s.charAt(0).toUpperCase()+s.slice(1)}
-            </button>
-          `).join('')}
-        </div>
-
-        ${denominator ? `
-          <div style="flex:1;margin:0 12px">
-            <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
-              <div style="display:flex;gap:8px;flex-wrap:wrap">
-                ${totalContracted ? '<span style="color:var(--blue);font-weight:500">' + formatNumber(totalContracted, 0) + ' ' + unit + ' contracted</span>' : ''}
-                ${totalPaidQty ? '<span style="color:var(--green);font-weight:500">' + formatNumber(totalPaidQty, 0) + ' ' + unit + ' paid</span>' : ''}
-                ${status === 'harvesting' && totalHarvest ? '<span style="color:var(--hint)">| ' + formatNumber(totalHarvest, 0) + ' ' + unit + ' harvested so far</span>' : ''}
-              </div>
-              <span style="color:var(--hint)">${formatNumber(unhedged, 0)} ${unit} open</span>
-            </div>
-            <div style="height:7px;background:var(--border);border-radius:4px;overflow:hidden;display:flex;position:relative">
-              <div style="height:100%;width:${hedgeDenominator ? Math.min(100, Math.round((totalPaidQty/hedgeDenominator)*100)) : 0}%;background:var(--green);transition:width .3s;z-index:2"></div>
-              <div style="height:100%;width:${hedgeDenominator ? Math.min(100 - Math.round((totalPaidQty/hedgeDenominator)*100), Math.round((totalContracted/hedgeDenominator)*100)) : 0}%;background:var(--blue);transition:width .3s;z-index:2"></div>
-              ${status === 'harvesting' && harvestPct > 0 ? `<div style="position:absolute;left:0;top:0;height:100%;width:${harvestPct}%;border-right:2px dashed rgba(255,255,255,0.6);z-index:3;pointer-events:none" title="Harvested ${formatNumber(totalHarvest,0)} ${unit} (${harvestPct}% of forecast)"></div>` : ''}
-            </div>
-          </div>
-          <span style="font-size:var(--text-sm);font-weight:600;color:var(--blue);white-space:nowrap">${pctHedged}% covered</span>
-        ` : ''}
-      </div>
-
-      <!-- Card body: Production | Chart | Prices & Position -->
-      <div class="commodity-card-body" style="display:grid;grid-template-columns:1fr 26% 36%;min-height:220px">
-
-        <!-- Col 1: Production (yield + production merged) -->
-        <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:4px">
-          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0 0 8px">Production</p>
-          ${budgets.filter(b => !b.is_derived).map(b => {
-            const budYield = b.area_ha && b.yield_per_ha ? parseFloat(b.yield_per_ha) : null;
-            const lf = latestForecasts.find(f => f.budget_id === b.id);
-            const fcastYield = lf && lf.yield_per_ha ? parseFloat(lf.yield_per_ha) : null;
-            const allCropTypes = getCropTypes();
-            const bCropType = allCropTypes.find(ct => ct.id === b.crop_type_id);
-            const cropTypeLabel = bCropType?.name || b.crop_type || b.commodity || '';
-            const ctHarvests = comHarvests.filter(h => h.crop_type_id === b.crop_type_id || (!h.crop_type_id && !b.crop_type_id));
-            const ctHarvestProd = ctHarvests.reduce((s,h)=>s+(parseFloat(h.actual_production)||0),0);
-            const ctHarvestArea = ctHarvests.reduce((s,h)=>s+(parseFloat(h.area_ha)||0),0);
-            const actualYield = ctHarvestArea && ctHarvestProd ? ctHarvestProd/ctHarvestArea : null;
-            const budProd = parseFloat(b.budgeted_production) || ((parseFloat(b.area_ha)||0)*(parseFloat(b.yield_per_ha)||0));
-            const lfProd = lf ? (parseFloat(lf.forecast_production)||(parseFloat(lf.area_ha)||0)*(parseFloat(lf.yield_per_ha)||0)) : null;
-            const fcastVsBud = lfProd && budProd ? Math.round((lfProd/budProd)*100) : null;
-            const actVsBud = ctHarvestProd && budProd ? Math.round((ctHarvestProd/budProd)*100) : null;
-            return '<div style="padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--border-light)">' +
-              '<p style="font-size:11px;font-weight:600;color:var(--ink);margin:0 0 8px">' + cropTypeLabel + '</p>' +
-              '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px">' +
-                '<div><p style="font-size:10px;color:var(--hint);margin:0 0 1px">Bud yld</p><p style="font-size:16px;font-weight:600;color:var(--ink);margin:0;line-height:1.1">' + (budYield ? formatNumber(budYield,2) : '—') + '</p><p style="font-size:10px;color:var(--hint);margin:1px 0 0">' + (b.area_ha ? formatNumber(b.area_ha,0)+' ha' : '') + '</p></div>' +
-                '<div><p style="font-size:10px;color:var(--hint);margin:0 0 1px">Fcast yld</p><p style="font-size:16px;font-weight:600;color:var(--blue);margin:0;line-height:1.1">' + (fcastYield ? formatNumber(fcastYield,2) : '—') + '</p><p style="font-size:10px;color:var(--hint);margin:1px 0 0">' + (lf?.area_ha ? formatNumber(lf.area_ha,0)+' ha' : '') + '</p></div>' +
-                '<div><p style="font-size:10px;color:var(--hint);margin:0 0 1px">Actual yld</p><p style="font-size:16px;font-weight:600;color:var(--green);margin:0;line-height:1.1">' + (actualYield ? formatNumber(actualYield,2) : '—') + '</p><p style="font-size:10px;color:var(--hint);margin:1px 0 0">' + (ctHarvestArea ? formatNumber(ctHarvestArea,0)+' ha' : '') + '</p></div>' +
-              '</div>' +
-              '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">' +
-                '<div><p style="font-size:10px;color:var(--hint);margin:0 0 1px">Bud prod</p><p style="font-size:13px;font-weight:600;color:var(--ink);margin:0;font-variant-numeric:tabular-nums">' + (budProd ? formatNumber(budProd,0) : '—') + '</p></div>' +
-                '<div><p style="font-size:10px;color:var(--hint);margin:0 0 1px">Fcast prod</p><p style="font-size:13px;font-weight:600;color:var(--blue);margin:0;font-variant-numeric:tabular-nums">' + (lfProd ? formatNumber(lfProd,0) : '—') + '</p>' + (fcastVsBud !== null ? '<p style="font-size:9px;color:' + (fcastVsBud>=100?'var(--green)':'var(--red)') + ';margin:1px 0 0">' + (fcastVsBud>=100?'▲':'▼') + Math.abs(100-fcastVsBud) + '% vs bud</p>' : '') + '</div>' +
-                '<div><p style="font-size:10px;color:var(--hint);margin:0 0 1px">Actual</p><p style="font-size:13px;font-weight:600;color:var(--green);margin:0;font-variant-numeric:tabular-nums">' + (ctHarvestProd ? formatNumber(ctHarvestProd,0) : '—') + '</p>' + (actVsBud !== null ? '<p style="font-size:9px;color:' + (actVsBud>=100?'var(--green)':'var(--red)') + ';margin:1px 0 0">' + (actVsBud>=100?'▲':'▼') + Math.abs(100-actVsBud) + '% vs bud</p>' : '') + '</div>' +
-              '</div>' +
-            '</div>';
-          }).join('')}
-        </div>
-
-        <!-- Col 2: Prices & Position (26%) -->
-        ${(() => {
-          const paidVsBudget = paidAvg && budgetPrice ? ((paidAvg - budgetPrice) / budgetPrice * 100) : null;
-          const onHand = totalHarvest ? Math.max(0, totalHarvest - totalPaidQty) : null;
-          const defaultValuePerUnit = marketPrice ? marketPrice * 0.95 : null;
-          const valueOnHand = onHand && defaultValuePerUnit ? onHand * defaultValuePerUnit : null;
-          const totalInvoicedDollars = completeInvoices.reduce((s,i) => s + (parseFloat(i.net_amount)||0), 0);
-          const priceRow = (label, val, color='var(--ink)', sub='') =>
-            '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px solid var(--border-light)">' +
-              '<span style="font-size:11px;color:var(--hint)">' + label + (sub ? '<br><span style="font-size:9px">' + sub + '</span>' : '') + '</span>' +
-              '<span style="font-size:12px;font-weight:600;color:' + color + ';font-variant-numeric:tabular-nums">' + val + '</span>' +
-            '</div>';
-          return '<div style="padding:14px 16px;background:var(--surface-2,white);display:flex;flex-direction:column;border-right:1px solid var(--border-light)">' +
-            '<p style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--hint);margin:0 0 8px">Position</p>' +
-
-            // --- COMMITMENT ---
-            '<p style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:0 0 4px;font-weight:600">Commitment</p>' +
-            priceRow('Forecast', hedgeDenominator ? formatNumber(hedgeDenominator,0)+' '+unit : '—') +
-            priceRow('Contracted', totalContracted ? formatNumber(totalContracted,0)+' '+unit : '—', 'var(--blue)') +
-            '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:2px solid var(--border-light);margin-bottom:8px">' +
-              '<span style="font-size:11px;color:var(--hint)">Open</span>' +
-              '<span style="font-size:12px;font-weight:600;color:' + (unhedged > 0 ? 'var(--amber)' : 'var(--green)') + ';font-variant-numeric:tabular-nums">' + formatNumber(unhedged,0) + ' ' + unit + '</span>' +
-            '</div>' +
-
-            // --- PROGRESS ---
-            '<p style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:0 0 4px;font-weight:600">Progress</p>' +
-            '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--border-light)">' +
-              '<span style="font-size:11px;color:var(--hint)">Harvested' + (status==='harvesting'?' <span style="font-size:9px;background:var(--amber);color:white;border-radius:8px;padding:1px 5px">In progress</span>':status==='harvested'?' <span style="font-size:9px;background:var(--green);color:white;border-radius:8px;padding:1px 5px">Complete</span>':'') + '</span>' +
-              '<span style="font-size:12px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums">' + (totalHarvest ? formatNumber(totalHarvest,0)+' '+unit : '—') + '</span>' +
-            '</div>' +
-            (totalHarvest && hedgeDenominator ? '<div style="height:3px;background:var(--border);border-radius:2px;margin:3px 0 6px"><div style="height:100%;width:' + Math.min(100,Math.round(totalHarvest/hedgeDenominator*100)) + '%;background:var(--amber);border-radius:2px"></div></div>' : '') +
-            priceRow('Invoiced qty', totalPaidQty ? formatNumber(totalPaidQty,0)+' '+unit : '—') +
-            (totalPaidQty && hedgeDenominator ? '<div style="height:3px;background:var(--border);border-radius:2px;margin:3px 0 6px"><div style="height:100%;width:' + Math.min(100,Math.round(totalPaidQty/hedgeDenominator*100)) + '%;background:var(--green);border-radius:2px"></div></div>' : '') +
-
-            priceRow('On hand', status === 'harvesting' ? 'Harvesting' : (onHand !== null ? formatNumber(onHand,0)+' '+unit : '—'), status === 'harvesting' ? 'var(--amber)' : 'var(--blue)') +
-
-
-            // --- PRICES ---
-            '<div style="height:1px;background:var(--border-light);margin:8px 0"></div>' +
-            '<p style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:0 0 4px;font-weight:600">Prices</p>' +
-            priceRow('Budget', budgetPrice ? formatCurrency(budgetPrice,0) : '—') +
-            priceRow('Market', marketPrice ? formatCurrency(marketPrice,0) : '—', marketVsBudget !== null ? (marketVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') +
-            priceRow('Fwd avg', avgFwdPrice ? formatCurrency(avgFwdPrice,0) : '—', 'var(--blue)') +
-            priceRow('Paid avg', paidAvg ? formatCurrency(paidAvg,0) : '—', paidVsBudget !== null ? (paidVsBudget >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--ink)') +
-
-          '</div>';
-        })()}
-
-        <!-- Col 3: Price chart (36%) -->
-        <div style="padding:14px 16px;border-right:1px solid var(--border-light);display:flex;flex-direction:column;gap:6px">
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <div style="display:flex;gap:3px">
-              <button class="mini-range-btn active" data-months="6" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:var(--blue);color:white;cursor:pointer">6m</button>
-              <button class="mini-range-btn" data-months="12" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">12m</button>
-              <button class="mini-range-btn" data-months="24" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">24m</button>
-              <button class="mini-range-btn" data-months="999" data-chart="${com.id}" style="padding:2px 8px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">All</button>
-            </div>
-            <button class="btn btn-ghost btn-sm" onclick="document.querySelector('[data-tab=prices]')?.click()" style="font-size:11px">Full chart →</button>
-          </div>
-          <div style="display:flex;gap:10px;align-items:center">
-            <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:2px;background:var(--blue)"></div>Market</div>
-            ${avgFwdPrice ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:0;border-top:2px dashed #b86e00"></div>Fwd avg</div>' : ''}
-            ${budgetPrice ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:16px;height:0;border-top:2px dashed #0f766e"></div>Budget</div>' : ''}
-            ${contracts.length ? '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:8px;height:8px;border-radius:50%;background:var(--green)"></div>Fwd sale</div>' : ''}
-          </div>
-          <div id="card-chart-${com.id || name.replace(/\s/g,'-')}" style="flex:1;min-height:160px;display:flex;align-items:center;justify-content:center">
-            <p style="font-size:12px;color:var(--hint)">Price chart loading…</p>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px">
-            ${marketPrice ? '<div style="background:#fafbfc;border-radius:6px;padding:5px 10px"><p style="font-size:10px;color:var(--hint);margin-bottom:1px">Current market</p><p style="font-size:13px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums">' + formatCurrency(marketPrice,0) + '</p></div>' : ''}
-            ${avgFwdPrice ? '<div style="background:#fafbfc;border-radius:6px;padding:5px 10px"><p style="font-size:10px;color:var(--hint);margin-bottom:1px">Fwd avg</p><p style="font-size:13px;font-weight:600;color:var(--blue);font-variant-numeric:tabular-nums">' + formatCurrency(avgFwdPrice,0) + '</p></div>' : ''}
-          </div>
-        </div>
-
-      </div>
-    </div>`;
+  return { name, budgetProd, budgetPrice, soldQty, soldRevenue, avgSoldPrice, unsoldQty, pctSold, priceVariance, vsbudgetPct, marketPrice, unit };
 }
 
-// Draw mini charts after cards are in DOM
+// ── Single crop row ────────────────────────────────────────────
+function _buildRow(c, alt) {
+  const arrow = (v) => {
+    if (v == null) return '';
+    if (v > 2) return '<span style="display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid var(--green);vertical-align:middle;margin-right:3px"></span>';
+    if (v < -2) return '<span style="display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:7px solid var(--red);vertical-align:middle;margin-right:3px"></span>';
+    return '<span style="display:inline-block;width:9px;height:3px;background:var(--amber);vertical-align:middle;margin-right:3px;border-radius:1px"></span>';
+  };
+
+  const col = `font-size:11px;text-align:right;font-variant-numeric:tabular-nums;padding:9px 14px`;
+  const pctColor = c.pctSold == null ? 'var(--hint)' : c.pctSold >= 100 ? 'var(--green)' : c.pctSold >= 80 ? 'var(--ink-mid)' : 'var(--blue)';
+
+  return `
+  <div style="display:grid;grid-template-columns:150px 80px 70px 70px 55px 70px 80px 80px 65px;gap:0;align-items:center;border-bottom:1px solid var(--border-light);${alt ? 'background:var(--page-bg)' : ''}"
+    onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background='${alt ? 'var(--page-bg)' : ''}'">
+    <div style="padding:9px 14px;font-size:12px;font-weight:600;color:var(--ink)">
+      ${c.name}
+      <span style="font-size:10px;font-weight:400;color:var(--hint);margin-left:4px">${c.unit}</span>
+    </div>
+    <div style="${col};color:var(--ink-mid)">${c.budgetProd ? fN(c.budgetProd) : '—'}</div>
+    <div style="${col};color:var(--ink-mid)">${c.budgetPrice ? fC(c.budgetPrice) : '—'}</div>
+    <div style="${col};font-weight:600;color:var(--ink)">${c.soldQty ? fN(c.soldQty) : '—'}</div>
+    <div style="${col};color:${pctColor};font-weight:500">${c.pctSold != null ? c.pctSold + '%' : '—'}</div>
+    <div style="${col};color:var(--blue)">${c.unsoldQty != null && c.unsoldQty > 0 ? fN(c.unsoldQty) : c.unsoldQty === 0 ? '<span style=\'color:var(--hint)\'>—</span>' : '—'}</div>
+    <div style="${col};font-weight:600;color:var(--ink)">${c.avgSoldPrice ? fC(c.avgSoldPrice) : '—'}</div>
+    <div style="${col}">
+      ${c.vsbudgetPct != null ? arrow(c.vsbudgetPct) + '<span style="color:' + varColor(c.vsbudgetPct) + ';font-weight:600">' + varSign(c.vsbudgetPct) + c.vsbudgetPct + '%</span>' : '—'}
+    </div>
+    <div style="${col};color:var(--ink-mid)">${c.marketPrice ? fC(c.marketPrice) : '—'}</div>
+  </div>`;
+}
+
+function _empty(msg) {
+  return '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">📦</div><p>' + msg + '</p></div></div></div>';
+}
+
+// ── Mini charts (preserved exactly) ───────────────────────────
+export async function drawMiniCharts(commodityMap, season) {
 export async function drawMiniCharts(commodityMap, season) {
   if (!window.Chart) {
     await new Promise((resolve, reject) => {
@@ -634,4 +518,3 @@ function _drawMiniChart(container, allPrices, contracts, avgFwd, budgetPrice, mo
       }
     }
   });
-}
