@@ -98,7 +98,6 @@ function _filtered() {
       return b.some(batch => batch.crop_year === season);
     })();
     const seasonMatch = i.season === season
-      || (i.line_items||[]).some(l => l.season === season)
       || batchSeasonMatch
       || (linkedContract && linkedContract.crop_year === season);
     return seasonMatch && commodityMatch && contractMatch && monthMatch;
