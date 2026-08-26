@@ -100,6 +100,28 @@ function _subscribeRealtime() {
   });
 }
 
+// ── Season invoice filter ─────────────────────────────────────
+function __invoiceInSeason(inv) {
+  const season = getActiveSeason() || '';
+  const seasonStartYear = parseInt(season.split('-')[0]) || new Date().getFullYear();
+  const seasonStart = `${seasonStartYear}-07-01`;
+  const seasonEnd = `${seasonStartYear+1}-06-30`;
+  // Primary: batch crop_year
+  if (inv.batches) {
+    const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+    if (b.length) return b.some(batch => !batch.crop_year || batch.crop_year === season);
+  }
+  // Secondary: invoice.season field
+  if (inv.season) return inv.season === season;
+  // Tertiary: linked contract crop_year — invoice date alone is unreliable
+  const linkedContract = inv.forward_contract_id
+    ? _contracts.find(c => c.id === inv.forward_contract_id)
+    : null;
+  if (linkedContract?.crop_year) return linkedContract.crop_year === season;
+  // Last resort: invoice_date
+  return inv.invoice_date >= seasonStart && inv.invoice_date <= seasonEnd;
+}
+
 // ── Render stats ──────────────────────────────────────────────
 function _renderStats() {
   const rows = _filtered();
@@ -107,32 +129,12 @@ function _renderStats() {
   const totalValue = rows.reduce((s, c) => s + ((parseFloat(c.quantity) || 0) * (parseFloat(c.price_per_unit) || 0)), 0);
   const commodities = [...new Set(rows.map(c => c.commodity).filter(Boolean))];
 
-  // Season filter for invoices — batch crop_year or invoice_date must match season
+  // Season filter defined at module level — see _invoiceInSeason()
   const season = getActiveSeason() || '';
-  const seasonStartYear = parseInt(season.split('-')[0]) || new Date().getFullYear();
-  const seasonStart = `${seasonStartYear}-07-01`;
-  const seasonEnd = `${seasonStartYear+1}-06-30`;
-  const invoiceInSeason = (inv) => {
-    // Primary: batch crop_year
-    if (inv.batches) {
-      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-      if (b.length) return b.some(batch => !batch.crop_year || batch.crop_year === season);
-    }
-    // Secondary: invoice.season field
-    if (inv.season) return inv.season === season;
-    // Tertiary: linked contract crop_year (invoice date alone is NOT reliable — payments
-    // for a 2025-26 crop can arrive in July-Aug 2026)
-    const linkedContract = inv.forward_contract_id
-      ? _contracts.find(c => c.id === inv.forward_contract_id)
-      : null;
-    if (linkedContract?.crop_year) return linkedContract.crop_year === season;
-    // Last resort: invoice_date
-    return inv.invoice_date >= seasonStart && inv.invoice_date <= seasonEnd;
-  };
 
   // Calculate totals invoiced across all filtered contracts
   const totalInvoicedUnits = rows.reduce((s, c) => {
-    const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id && invoiceInSeason(i));
+    const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id && _invoiceInSeason(i));
     return s + contractInvoices.reduce((ss, i) => {
       if (i.batches && i.batches.length) {
         const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
@@ -150,7 +152,7 @@ function _renderStats() {
     }, 0);
   }, 0);
   const totalInvoicedValue = rows.reduce((s, c) => {
-    const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id && invoiceInSeason(i));
+    const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id && _invoiceInSeason(i));
     return s + contractInvoices.reduce((ss, i) => ss + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0), 0);
   }, 0);
   const totalStillToGo = Math.max(0, totalUnits - totalInvoicedUnits);
@@ -247,7 +249,7 @@ function _renderTable() {
         ${rows.map(c => {
           const value = (parseFloat(c.quantity) || 0) * (parseFloat(c.price_per_unit) || 0);
           // Calculate invoiced units and avg price for this contract
-          const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id && invoiceInSeason(i));
+          const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id && _invoiceInSeason(i));
           const invoicedQty = contractInvoices.reduce((s, i) => {
             // Use batches if available — only count income (sale) batches
             if (i.batches && i.batches.length) {
