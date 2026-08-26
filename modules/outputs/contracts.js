@@ -38,11 +38,11 @@ export async function mountContracts(container) {
       </div>
 
       <!-- Slicer rows -->
-      <div style="display:grid;grid-template-columns:80px 1fr;border-bottom:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:110px 1fr;border-bottom:1px solid var(--border)">
         <div style="padding:10px 16px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);border-right:1px solid var(--border);display:flex;align-items:center">Commodity</div>
         <div id="con-commodity-pills" style="padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
       </div>
-      <div style="display:grid;grid-template-columns:80px 1fr;border-bottom:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:110px 1fr;border-bottom:1px solid var(--border)">
         <div style="padding:10px 16px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);border-right:1px solid var(--border);display:flex;align-items:center">Status</div>
         <div style="padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
           <button class="con-status-pill con-slicer-btn active" data-val="" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--blue);color:white;border-color:var(--blue);cursor:pointer;font-weight:500">All</button>
@@ -51,7 +51,7 @@ export async function mountContracts(container) {
           <button class="con-status-pill con-slicer-btn" data-val="complete" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:white;color:var(--ink-mid);cursor:pointer">Complete</button>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:80px 1fr">
+      <div style="display:grid;grid-template-columns:110px 1fr">
         <div style="padding:10px 16px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);border-right:1px solid var(--border);display:flex;align-items:center">Delivery</div>
         <div id="con-month-pills" style="padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
       </div>
@@ -317,7 +317,22 @@ function _renderTable() {
   const sortIcon = (col) => sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ⇅';
 
   wrap.innerHTML = `
-    <table class="data-table">
+    <table class="data-table" style="table-layout:fixed;width:100%">
+      <colgroup>
+        <col style="width:110px">
+        <col style="width:120px">
+        <col style="width:140px">
+        <col style="width:90px">
+        <col style="width:90px">
+        <col style="width:90px">
+        <col style="width:100px">
+        <col style="width:90px">
+        <col style="width:80px">
+        <col style="width:110px">
+        <col style="width:120px">
+        <col style="width:50px">
+        ${canWrite() ? '<col style="width:60px">' : ''}
+      </colgroup>
       <thead>
         <tr>
           <th class="con-sort" data-col="contract_number" style="${thStyle}">Contract #${sortIcon('contract_number')}</th>
