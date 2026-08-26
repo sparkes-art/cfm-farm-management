@@ -262,7 +262,7 @@ function _renderTable() {
   if (_cpWrap && !_cpWrap.dataset.built) {
     _cpWrap.dataset.built = '1';
     const commodities = [...new Set(_contracts.map(c=>c.commodity).filter(Boolean))].sort();
-    const activeComms = new Set([...(container.querySelectorAll('.con-commodity-pill.active')||[])].map(el=>el.dataset.val).filter(Boolean));
+    const activeComms = new Set([...(_container?.querySelectorAll('.con-commodity-pill.active')||[])].map(el=>el.dataset.val).filter(Boolean));
     const slicerStyle = 'font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);cursor:pointer';
     _cpWrap.innerHTML = `<button class="con-commodity-pill con-slicer-btn ${activeComms.size===0?'active':''}" data-val="" style="${slicerStyle};background:${activeComms.size===0?'var(--blue)':'white'};color:${activeComms.size===0?'white':'var(--ink-mid)'};border-color:${activeComms.size===0?'var(--blue)':'var(--border)'};font-weight:500">All</button>` +
       commodities.map(c => `<button class="con-commodity-pill con-slicer-btn ${activeComms.has(c)?'active':''}" data-val="${c}" style="${slicerStyle};background:${activeComms.has(c)?'var(--blue)':'white'};color:${activeComms.has(c)?'white':'var(--ink-mid)'};border-color:${activeComms.has(c)?'var(--blue)':'var(--border)'}">${c}</button>`).join('');
@@ -274,7 +274,7 @@ function _renderTable() {
   if (_mpWrap && !_mpWrap.dataset.built) {
     _mpWrap.dataset.built = '1';
     const months = [...new Set(_contracts.filter(c=>c.delivery_start).map(c=>c.delivery_start.slice(0,7)))].sort();
-    const activeMonths = new Set([...(container.querySelectorAll('.con-month-pill.active')||[])].map(el=>el.dataset.val).filter(Boolean));
+    const activeMonths = new Set([...(_container?.querySelectorAll('.con-month-pill.active')||[])].map(el=>el.dataset.val).filter(Boolean));
     const slicerStyle2 = 'font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);cursor:pointer';
     _mpWrap.innerHTML = `<button class="con-month-pill con-slicer-btn ${activeMonths.size===0?'active':''}" data-val="" style="${slicerStyle2};background:${activeMonths.size===0?'var(--blue)':'white'};color:${activeMonths.size===0?'white':'var(--ink-mid)'};border-color:${activeMonths.size===0?'var(--blue)':'var(--border)'};font-weight:500">All</button>` +
       months.map(m => {
