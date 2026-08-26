@@ -518,3 +518,192 @@ function _drawMiniChart(container, allPrices, contracts, avgFwd, budgetPrice, mo
     }
   });
 }
+
+// ── Contract position — Concept B ─────────────────────────────
+// Commodity-first with buyer breakdown and delivery timeline
+
+export async function buildContractPosition(season) {
+  const farm = getActiveFarm();
+  if (!farm) return '';
+
+  const [contracts, invoices] = await Promise.all([
+    dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*&order=sale_date.asc'),
+    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=id,forward_contract_id,batches,master_qty,total_qty,gross_amount,total_quality_adj&order=invoice_date.desc'),
+  ]);
+
+  if (!contracts.length) return '';
+
+  // Group contracts by commodity name
+  const byCommodity = {};
+  contracts.forEach(c => {
+    const key = (c.commodity || 'Unknown').trim();
+    if (!byCommodity[key]) byCommodity[key] = { name: key, unit: c.unit || 'unit', contracts: [] };
+    byCommodity[key].contracts.push(c);
+  });
+
+  // Compute invoiced qty + revenue per contract
+  const invByContract = {};
+  invoices.forEach(inv => {
+    if (!inv.forward_contract_id) return;
+    if (!invByContract[inv.forward_contract_id]) invByContract[inv.forward_contract_id] = { qty: 0, revenue: 0 };
+    let qty = 0, revenue = 0;
+    if (inv.batches) {
+      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+      b.forEach(batch => {
+        const saleLines = (batch.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa');
+        qty += parseFloat(batch.qty) || 0;
+        revenue += saleLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+      });
+    } else {
+      qty = parseFloat(inv.master_qty || inv.total_qty) || 0;
+      revenue = (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0);
+    }
+    invByContract[inv.forward_contract_id].qty += qty;
+    invByContract[inv.forward_contract_id].revenue += revenue;
+  });
+
+  // Colour per commodity (cycling)
+  const COLORS = ['#1a6b3c','#185FA5','#7B3EA5','#BA7517','#2D7A5E','#993C1D','#1a5f92'];
+  const colorMap = {};
+  Object.keys(byCommodity).forEach((k, i) => { colorMap[k] = COLORS[i % COLORS.length]; });
+
+  // Delivery month bar — given start/end dates, which months are active
+  const monthBar = (start, end) => {
+    // Season months Jul→Jun
+    const months = ['Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun'];
+    const startYear = parseInt(season.split('-')[0]);
+    const monthDates = months.map((m, i) => {
+      const yr = i < 6 ? startYear : startYear + 1;
+      return new Date(yr, (i + 6) % 12, 1);
+    });
+    const s = start ? new Date(start) : null;
+    const e = end ? new Date(end) : (s ? new Date(s.getFullYear(), s.getMonth() + 1, 0) : null);
+    return months.map((m, i) => {
+      const d = monthDates[i];
+      const active = s && e && d >= new Date(s.getFullYear(), s.getMonth(), 1) && d <= new Date(e.getFullYear(), e.getMonth(), 1);
+      return `<div title="${m}" style="height:14px;border-radius:2px;background:${active ? colorMap[Object.keys(byCommodity)[0]] : 'var(--border-light)'};flex:1;min-width:0"></div>`;
+    }).join('');
+  };
+
+  const fC2 = (n) => n ? '$' + (Math.abs(n) >= 1000000 ? (n/1000000).toFixed(1)+'m' : Math.abs(n) >= 1000 ? Math.round(n/1000)+'k' : Math.round(n)) : '—';
+  const fN2 = (n) => n ? formatNumber(n, 0) : '—';
+
+  let html = `
+  <div style="margin-top:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h2 style="font-size:var(--text-md);font-weight:600">Contract position — ${season}</h2>
+      <div style="font-size:11px;color:var(--hint)">${contracts.length} contract${contracts.length !== 1 ? 's' : ''} · ${Object.keys(byCommodity).length} commodit${Object.keys(byCommodity).length !== 1 ? 'ies' : 'y'}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">`;
+
+  // Season month labels row
+  const months = ['Jul','Aug','Sep','Oct','Nov','Dec','Jan','Feb','Mar','Apr','May','Jun'];
+
+  Object.entries(byCommodity).forEach(([commName, com]) => {
+    const color = colorMap[commName];
+    const totalQty = com.contracts.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0);
+    const totalValue = com.contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
+    const totalInvoicedQty = com.contracts.reduce((s, c) => s + (invByContract[c.id]?.qty || 0), 0);
+    const totalInvoicedRev = com.contracts.reduce((s, c) => s + (invByContract[c.id]?.revenue || 0), 0);
+    const totalRemaining = Math.max(0, totalQty - totalInvoicedQty);
+    const avgPrice = totalQty > 0 ? totalValue / totalQty : 0;
+    const pctInvoiced = totalQty > 0 ? Math.round(totalInvoicedQty / totalQty * 100) : 0;
+    const complete = pctInvoiced >= 100;
+
+    html += `
+    <div class="card" style="overflow:hidden">
+      <!-- Commodity header -->
+      <div style="padding:10px 16px;background:#1a2535;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
+          <span style="font-size:13px;font-weight:600;color:white">${commName}</span>
+          <span style="font-size:10px;color:rgba(255,255,255,.4)">${com.contracts.length} contract${com.contracts.length !== 1 ? 's' : ''} · ${com.unit}</span>
+        </div>
+        <div style="display:flex;gap:20px;font-size:11px;flex-wrap:wrap">
+          <span style="color:rgba(255,255,255,.55)">Contracted <strong style="color:white">${fN2(totalQty)} ${com.unit} · ${fC2(totalValue)}</strong></span>
+          <span style="color:rgba(255,255,255,.55)">Invoiced <strong style="color:#86efac">${fN2(totalInvoicedQty)} ${com.unit} · ${fC2(totalInvoicedRev)}</strong></span>
+          <span style="color:rgba(255,255,255,.55)">Remaining <strong style="color:#93c5fd">${totalRemaining > 0 ? fN2(totalRemaining) + ' ' + com.unit : '—'}</strong></span>
+          <span style="color:rgba(255,255,255,.55)">Avg <strong style="color:white">${avgPrice ? fC(avgPrice) : '—'}/${com.unit}</strong></span>
+          ${complete ? `<span style="background:#15803d;color:white;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px">Complete</span>` : ''}
+        </div>
+      </div>
+
+      <!-- Month labels -->
+      <div style="display:grid;grid-template-columns:160px 80px 70px 80px 80px 1fr;gap:0;padding:4px 14px;background:var(--page-bg);border-bottom:1px solid var(--border)">
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Buyer · Contract</div>
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right">Qty</div>
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right">Price</div>
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right">Invoiced</div>
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right">Remaining</div>
+        <div style="padding-left:10px">
+          <div style="display:flex;gap:2px;margin-bottom:1px">
+            ${months.map(m => `<div style="flex:1;font-size:8px;color:var(--hint);text-align:center;min-width:0">${m}</div>`).join('')}
+          </div>
+        </div>
+      </div>
+
+      <!-- Contract rows -->
+      ${com.contracts.map((c, idx) => {
+        const invoiced = invByContract[c.id] || { qty: 0, revenue: 0 };
+        const contractQty = parseFloat(c.quantity) || 0;
+        const contractPrice = parseFloat(c.price_per_unit) || 0;
+        const remaining = Math.max(0, contractQty - invoiced.qty);
+        const pct = contractQty > 0 ? Math.min(100, Math.round(invoiced.qty / contractQty * 100)) : 0;
+        const isComplete = pct >= 100;
+        const buyer = c.counterparty || c.buyer || '—';
+        const startYear = parseInt(season.split('-')[0]);
+
+        // Per-month active calculation
+        const s = c.delivery_start ? new Date(c.delivery_start) : (c.sale_date ? new Date(c.sale_date) : null);
+        const e = c.delivery_end ? new Date(c.delivery_end) : (s ? new Date(s.getFullYear(), s.getMonth() + 1, 0) : null);
+        const monthCells = months.map((m, i) => {
+          const yr = i < 6 ? startYear : startYear + 1;
+          const d = new Date(yr, (i + 6) % 12, 1);
+          const active = s && e && d >= new Date(s.getFullYear(), s.getMonth(), 1) && d <= new Date(e.getFullYear(), e.getMonth(), 1);
+          return `<div style="flex:1;min-width:0;height:20px;border-radius:2px;background:${active ? color : 'var(--border-light)'};opacity:${active ? 1 : 0.4}"></div>`;
+        }).join('');
+
+        // Delivery label
+        const delivLabel = s ? (e && s.getMonth() !== e.getMonth()
+          ? s.toLocaleDateString('en-AU',{month:'short',year:'2-digit'}) + '–' + e.toLocaleDateString('en-AU',{month:'short',year:'2-digit'})
+          : s.toLocaleDateString('en-AU',{month:'short',year:'2-digit'})) : '—';
+
+        const statusBadge = isComplete
+          ? `<span style="font-size:9px;font-weight:600;color:#15803d;background:#dcfce7;padding:2px 7px;border-radius:10px">Done</span>`
+          : pct > 0
+          ? `<span style="font-size:9px;font-weight:600;color:#185FA5;background:#e4f0fa;padding:2px 7px;border-radius:10px">${pct}%</span>`
+          : `<span style="font-size:9px;font-weight:600;color:var(--hint);background:var(--border-light);padding:2px 7px;border-radius:10px">Pending</span>`;
+
+        return `
+        <div style="display:grid;grid-template-columns:160px 80px 70px 80px 80px 1fr;gap:0;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border-light);${idx % 2 === 1 ? 'background:var(--page-bg)' : ''}"
+          onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background='${idx % 2 === 1 ? 'var(--page-bg)' : ''}'">
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--ink)">${buyer}</div>
+            <div style="font-size:10px;color:var(--hint);margin-top:1px">${c.contract_number || '—'} &nbsp;${statusBadge}</div>
+          </div>
+          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-mid)">${fN2(contractQty)}</div>
+          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-mid)">${contractPrice ? fC(contractPrice) : '—'}</div>
+          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:${invoiced.qty > 0 ? 'var(--green)' : 'var(--hint)'}">${invoiced.qty > 0 ? fN2(invoiced.qty) : '—'}</div>
+          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:${remaining > 0 ? 'var(--blue)' : 'var(--hint)'}">${remaining > 0 ? fN2(remaining) : '—'}</div>
+          <div style="padding-left:10px">
+            <div style="display:flex;gap:2px;margin-bottom:3px">${monthCells}</div>
+            <div style="font-size:10px;color:var(--hint)">${delivLabel}</div>
+          </div>
+        </div>`;
+      }).join('')}
+
+      <!-- Commodity total row -->
+      <div style="display:grid;grid-template-columns:160px 80px 70px 80px 80px 1fr;gap:0;align-items:center;padding:8px 14px;background:var(--page-bg);border-top:2px solid var(--border)">
+        <div style="font-size:11px;font-weight:600;color:var(--ink)">${commName} total</div>
+        <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)">${fN2(totalQty)}</div>
+        <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:var(--hint)">${avgPrice ? fC(avgPrice) : '—'} avg</div>
+        <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--green)">${fN2(totalInvoicedQty)}</div>
+        <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:${totalRemaining > 0 ? 'var(--blue)' : 'var(--hint)'}">${totalRemaining > 0 ? fN2(totalRemaining) : '—'}</div>
+        <div style="padding-left:10px;font-size:11px;color:var(--hint)">${fC2(totalValue)} contracted · ${fC2(totalInvoicedRev)} invoiced</div>
+      </div>
+    </div>`;
+  });
+
+  html += `</div></div>`;
+  return html;
+}
