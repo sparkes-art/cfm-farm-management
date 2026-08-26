@@ -21,26 +21,38 @@ export async function mountContracts(container) {
       ${canWrite() ? '<button class="btn btn-primary" id="btn-new-contract">＋ New contract</button>' : ''}
     </div>
 
-    <!-- Filter bar -->
-    <div class="card" style="padding:12px 16px;margin-bottom:12px">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <select id="con-commodity-filter" class="form-select" style="width:160px">
-          <option value="">All commodities</option>
-        </select>
-        <select id="con-status-filter" class="form-select" style="width:160px">
-          <option value="">All statuses</option>
-          <option value="not_started">Not started</option>
-          <option value="filling">Filling</option>
-          <option value="complete">Complete</option>
-        </select>
-        <select id="con-month-filter" class="form-select" style="width:160px">
-          <option value="">All delivery months</option>
-        </select>
-        <div style="flex:1;min-width:160px">
-          <input type="text" id="con-search" class="form-input" placeholder="Search contract #, buyer..." style="width:100%">
+    <!-- Filter panel — Excel slicer style -->
+    <div class="card" style="margin-bottom:12px;overflow:hidden">
+
+      <!-- Contract # search — like invoice contract picker -->
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
+        <div style="position:relative;width:320px">
+          <input type="text" id="con-search" class="form-input" placeholder="Search contract number…" autocomplete="off" style="width:100%;padding-right:32px">
+          <div id="con-search-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:white;border:1px solid var(--border);border-radius:var(--radius-md);margin-top:2px;max-height:200px;overflow-y:auto;box-shadow:var(--shadow-md)">
+            <div id="con-search-opts"></div>
+          </div>
         </div>
-        <span id="con-count" class="text-muted text-sm" style="white-space:nowrap"></span>
-        <button id="con-clear-filters" class="btn btn-ghost btn-sm" style="display:none">✕ Clear filters</button>
+        <span id="con-count" style="font-size:11px;color:var(--hint)"></span>
+        <button id="con-clear-filters" class="btn btn-ghost btn-sm" style="display:none;margin-left:auto">✕ Clear all</button>
+      </div>
+
+      <!-- Slicer rows -->
+      <div style="display:grid;grid-template-columns:80px 1fr;border-bottom:1px solid var(--border)">
+        <div style="padding:10px 16px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);border-right:1px solid var(--border);display:flex;align-items:center">Commodity</div>
+        <div id="con-commodity-pills" style="padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:80px 1fr;border-bottom:1px solid var(--border)">
+        <div style="padding:10px 16px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);border-right:1px solid var(--border);display:flex;align-items:center">Status</div>
+        <div style="padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <button class="con-status-pill con-slicer-btn active" data-val="" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--blue);color:white;border-color:var(--blue);cursor:pointer;font-weight:500">All</button>
+          <button class="con-status-pill con-slicer-btn" data-val="not_started" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:white;color:var(--ink-mid);cursor:pointer">Not started</button>
+          <button class="con-status-pill con-slicer-btn" data-val="filling" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:white;color:var(--ink-mid);cursor:pointer">Filling</button>
+          <button class="con-status-pill con-slicer-btn" data-val="complete" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:white;color:var(--ink-mid);cursor:pointer">Complete</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:80px 1fr">
+        <div style="padding:10px 16px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);border-right:1px solid var(--border);display:flex;align-items:center">Delivery</div>
+        <div id="con-month-pills" style="padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
       </div>
     </div>
 
@@ -87,7 +99,8 @@ function _getFilterState() {
   const activeCommodityPills = [...document.querySelectorAll('.con-commodity-pill.active')].map(el => el.dataset.val).filter(Boolean);
   const activeStatusPill = document.querySelector('.con-status-pill.active')?.dataset.val || '';
   const activeMonthPills = [...document.querySelectorAll('.con-month-pill.active')].map(el => el.dataset.val).filter(Boolean);
-  const search = (document.getElementById('con-search')?.value || '').toLowerCase().trim();
+  const searchRaw = document.getElementById('con-search')?.value || '';
+  const search = searchRaw.toLowerCase().trim();
   return { activeCommodityPills, activeStatusPill, activeMonthPills, search };
 }
 
@@ -102,7 +115,8 @@ function _filtered() {
     if (activeCommodityPills.length && !activeCommodityPills.includes(c.commodity)) return false;
     // Search
     if (search && !((c.contract_number||'').toLowerCase().includes(search) ||
-      (c.counterparty||c.buyer||'').toLowerCase().includes(search))) return false;
+      (c.counterparty||c.buyer||'').toLowerCase().includes(search) ||
+      (c.commodity||'').toLowerCase().includes(search))) return false;
     // Delivery month pills
     if (activeMonthPills.length) {
       const delivMonth = c.delivery_start ? c.delivery_start.slice(0,7) : null;
@@ -247,8 +261,9 @@ function _renderTable() {
     _cpWrap.dataset.built = '1';
     const commodities = [...new Set(_contracts.map(c=>c.commodity).filter(Boolean))].sort();
     const activeComms = new Set([...(container.querySelectorAll('.con-commodity-pill.active')||[])].map(el=>el.dataset.val).filter(Boolean));
-    _cpWrap.innerHTML = `<button class="con-commodity-pill con-pill ${activeComms.size===0?'active':''}" data-val="" style="font-size:11px;padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:${activeComms.size===0?'var(--ink)':'white'};color:${activeComms.size===0?'white':'var(--ink-mid)'};cursor:pointer;font-weight:500">All</button>` +
-      commodities.map(c => `<button class="con-commodity-pill con-pill ${activeComms.has(c)?'active':''}" data-val="${c}" style="font-size:11px;padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:${activeComms.has(c)?'var(--ink)':'white'};color:${activeComms.has(c)?'white':'var(--ink-mid)'};cursor:pointer">${c}</button>`).join('');
+    const slicerStyle = 'font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);cursor:pointer';
+    _cpWrap.innerHTML = `<button class="con-commodity-pill con-slicer-btn ${activeComms.size===0?'active':''}" data-val="" style="${slicerStyle};background:${activeComms.size===0?'var(--blue)':'white'};color:${activeComms.size===0?'white':'var(--ink-mid)'};border-color:${activeComms.size===0?'var(--blue)':'var(--border)'};font-weight:500">All</button>` +
+      commodities.map(c => `<button class="con-commodity-pill con-slicer-btn ${activeComms.has(c)?'active':''}" data-val="${c}" style="${slicerStyle};background:${activeComms.has(c)?'var(--blue)':'white'};color:${activeComms.has(c)?'white':'var(--ink-mid)'};border-color:${activeComms.has(c)?'var(--blue)':'var(--border)'}">${c}</button>`).join('');
     _wirePillGroup(container, '.con-commodity-pill');
   }
 
@@ -258,11 +273,12 @@ function _renderTable() {
     _mpWrap.dataset.built = '1';
     const months = [...new Set(_contracts.filter(c=>c.delivery_start).map(c=>c.delivery_start.slice(0,7)))].sort();
     const activeMonths = new Set([...(container.querySelectorAll('.con-month-pill.active')||[])].map(el=>el.dataset.val).filter(Boolean));
-    _mpWrap.innerHTML = `<button class="con-month-pill con-pill ${activeMonths.size===0?'active':''}" data-val="" style="font-size:11px;padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:${activeMonths.size===0?'var(--ink)':'white'};color:${activeMonths.size===0?'white':'var(--ink-mid)'};cursor:pointer;font-weight:500">All</button>` +
+    const slicerStyle2 = 'font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);cursor:pointer';
+    _mpWrap.innerHTML = `<button class="con-month-pill con-slicer-btn ${activeMonths.size===0?'active':''}" data-val="" style="${slicerStyle2};background:${activeMonths.size===0?'var(--blue)':'white'};color:${activeMonths.size===0?'white':'var(--ink-mid)'};border-color:${activeMonths.size===0?'var(--blue)':'var(--border)'};font-weight:500">All</button>` +
       months.map(m => {
         const [y,mo] = m.split('-');
         const label = new Date(y,mo-1).toLocaleDateString('en-AU',{month:'short',year:'numeric'});
-        return `<button class="con-month-pill con-pill ${activeMonths.has(m)?'active':''}" data-val="${m}" style="font-size:11px;padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:${activeMonths.has(m)?'var(--ink)':'white'};color:${activeMonths.has(m)?'white':'var(--ink-mid)'};cursor:pointer">${label}</button>`;
+        return `<button class="con-month-pill con-slicer-btn ${activeMonths.has(m)?'active':''}" data-val="${m}" style="${slicerStyle2};background:${activeMonths.has(m)?'var(--blue)':'white'};color:${activeMonths.has(m)?'white':'var(--ink-mid)'};border-color:${activeMonths.has(m)?'var(--blue)':'var(--border)'}">${label}</button>`;
       }).join('');
     _wirePillGroup(container, '.con-month-pill');
   }
@@ -435,48 +451,97 @@ function _renderTable() {
 }
 
 function _bindFilters(container) {
-  // Live search on contract #
-  document.getElementById('con-search')?.addEventListener('input', () => {
+  // ── Contract # search with live dropdown ─────────────────────
+  const searchInput = document.getElementById('con-search');
+  const searchDropdown = document.getElementById('con-search-dropdown');
+  const searchOpts = document.getElementById('con-search-opts');
+
+  const renderSearchOpts = (filter = '') => {
+    const season = getActiveSeason();
+    const lower = filter.toLowerCase();
+    const matches = _contracts.filter(c => {
+      if (season && c.crop_year && c.crop_year !== season) return false;
+      return !lower ||
+        (c.contract_number||'').toLowerCase().includes(lower) ||
+        (c.counterparty||c.buyer||'').toLowerCase().includes(lower);
+    });
+    searchOpts.innerHTML = matches.length
+      ? matches.map(c => {
+          const label = `${c.contract_number||'—'} — ${c.commodity||''} — ${c.counterparty||c.buyer||''}`;
+          return `<div class="con-search-opt" data-val="${c.contract_number||''}"
+            style="padding:8px 12px;cursor:pointer;font-size:13px;color:var(--ink);border-bottom:1px solid var(--border-light)"
+            onmouseenter="this.style.background='var(--page-bg)'" onmouseleave="this.style.background=''">${label}</div>`;
+        }).join('')
+      : '<div style="padding:10px 12px;font-size:13px;color:var(--hint)">No contracts found</div>';
+
+    searchOpts.querySelectorAll('.con-search-opt').forEach(opt => {
+      opt.addEventListener('mousedown', e => {
+        e.preventDefault();
+        searchInput.value = opt.dataset.val;
+        searchDropdown.style.display = 'none';
+        _updateClearBtn();
+        _renderTable();
+      });
+    });
+  };
+
+  searchInput?.addEventListener('input', () => {
+    searchDropdown.style.display = '';
+    renderSearchOpts(searchInput.value);
     _updateClearBtn();
     _renderTable();
   });
+  searchInput?.addEventListener('focus', () => {
+    renderSearchOpts(searchInput.value);
+    searchDropdown.style.display = '';
+  });
+  searchInput?.addEventListener('blur', () => {
+    setTimeout(() => { searchDropdown.style.display = 'none'; }, 150);
+  });
 
-  // Status pills
+  // ── Status pills (single select) ─────────────────────────────
   container.querySelectorAll('.con-status-pill').forEach(btn => {
     btn.addEventListener('click', () => {
-      container.querySelectorAll('.con-status-pill').forEach(b => {
-        b.classList.remove('active');
-        b.style.background = 'white'; b.style.color = 'var(--ink-mid)'; b.style.borderColor = 'var(--border)';
-      });
-      btn.classList.add('active');
-      btn.style.background = 'var(--ink)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--ink)';
+      container.querySelectorAll('.con-status-pill').forEach(b => _slicerDeactivate(b));
+      _slicerActivate(btn);
       _updateClearBtn();
       _renderTable();
     });
   });
 
-  // Clear all
+  // ── Clear all ─────────────────────────────────────────────────
   document.getElementById('con-clear-filters')?.addEventListener('click', () => {
-    document.getElementById('con-search').value = '';
-    // Reset all pill groups to "All"
-    _resetPillGroup(container, '.con-commodity-pill');
-    _resetPillGroup(container, '.con-status-pill');
-    _resetPillGroup(container, '.con-month-pill');
+    if (searchInput) searchInput.value = '';
+    _resetSlicerGroup(container, '.con-commodity-pill');
+    _resetSlicerGroup(container, '.con-status-pill');
+    _resetSlicerGroup(container, '.con-month-pill');
     document.getElementById('con-clear-filters').style.display = 'none';
     _renderTable();
   });
 }
 
-function _resetPillGroup(container, selector) {
-  const pills = container.querySelectorAll(selector);
-  pills.forEach(p => {
-    const isAll = p.dataset.val === '';
-    p.classList.toggle('active', isAll);
-    p.style.background = isAll ? 'var(--ink)' : 'white';
-    p.style.color = isAll ? 'white' : 'var(--ink-mid)';
-    p.style.borderColor = isAll ? 'var(--ink)' : 'var(--border)';
-  });
+function _slicerActivate(btn) {
+  btn.classList.add('active');
+  btn.style.background = 'var(--blue)';
+  btn.style.color = 'white';
+  btn.style.borderColor = 'var(--blue)';
 }
+
+function _slicerDeactivate(btn) {
+  btn.classList.remove('active');
+  btn.style.background = 'white';
+  btn.style.color = 'var(--ink-mid)';
+  btn.style.borderColor = 'var(--border)';
+}
+
+function _resetSlicerGroup(container, selector) {
+  const pills = container.querySelectorAll(selector);
+  const allBtn = container.querySelector(selector + '[data-val=""]');
+  pills.forEach(p => _slicerDeactivate(p));
+  if (allBtn) _slicerActivate(allBtn);
+}
+// Keep old name as alias for safety
+function _resetPillGroup(container, selector) { _resetSlicerGroup(container, selector); }
 
 function _updateClearBtn() {
   const { activeCommodityPills, activeStatusPill, activeMonthPills, search } = _getFilterState();
@@ -489,20 +554,19 @@ function _wirePillGroup(container, selector) {
   container.querySelectorAll(selector).forEach(btn => {
     btn.addEventListener('click', () => {
       if (btn.dataset.val === '') {
-        // "All" selected — deactivate others
-        _resetPillGroup(container, selector);
+        _resetSlicerGroup(container, selector);
       } else {
-        // Deactivate "All", toggle this one
+        // Deactivate "All"
         const allBtn = container.querySelector(selector + '[data-val=""]');
-        if (allBtn) { allBtn.classList.remove('active'); allBtn.style.background='white'; allBtn.style.color='var(--ink-mid)'; allBtn.style.borderColor='var(--border)'; }
-        btn.classList.toggle('active');
+        if (allBtn) _slicerDeactivate(allBtn);
+        // Toggle this pill
         if (btn.classList.contains('active')) {
-          btn.style.background = 'var(--ink)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--ink)';
-        } else {
-          btn.style.background = 'white'; btn.style.color = 'var(--ink-mid)'; btn.style.borderColor = 'var(--border)';
-          // If nothing active, reactivate All
+          _slicerDeactivate(btn);
+          // If nothing else active, reactivate All
           const anyActive = [...container.querySelectorAll(selector)].some(b => b.classList.contains('active') && b.dataset.val !== '');
-          if (!anyActive) _resetPillGroup(container, selector);
+          if (!anyActive && allBtn) _slicerActivate(allBtn);
+        } else {
+          _slicerActivate(btn);
         }
       }
       _updateClearBtn();
