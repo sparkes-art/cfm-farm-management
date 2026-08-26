@@ -151,7 +151,7 @@ export async function buildCommodityCards(season) {
       <!-- Column headers -->
       <div style="display:grid;grid-template-columns:140px 70px 65px 65px 50px 65px 70px 70px 80px 80px 80px 65px;gap:0;padding:5px 14px;background:var(--page-bg);border-bottom:1px solid var(--border)">
         ${['Crop','Est prod','Bud price','Sold','% sold','Unsold','Avg sold $','vs budget','Bud revenue','Sold revenue','Unsold rev','Mkt price']
-          .map((h, i) => `<div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;${i > 0 ? 'text-align:right' : ''}">${h}</div>`)
+          .map((h, i) => `<div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;${i === 0 ? '' : 'text-align:center'}">${h}</div>`)
           .join('')}
       </div>
 
@@ -161,17 +161,17 @@ export async function buildCommodityCards(season) {
       <!-- Section totals at bottom -->
       <div style="display:grid;grid-template-columns:140px 70px 65px 65px 50px 65px 70px 70px 80px 80px 80px 65px;gap:0;padding:10px 14px;border-top:2px solid var(--border);background:var(--page-bg)">
         <div style="font-size:11px;font-weight:600;color:var(--ink)">${label} total</div>
-        <div style="font-size:11px;text-align:right;color:var(--hint)">—</div>
-        <div style="font-size:11px;text-align:right;color:var(--hint)">—</div>
+        <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
+        <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
         <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)">—</div>
-        <div style="font-size:11px;text-align:right;color:var(--hint)">—</div>
-        <div style="font-size:11px;text-align:right;color:var(--hint)">—</div>
-        <div style="font-size:11px;text-align:right;color:var(--hint)">—</div>
-        <div style="font-size:11px;text-align:right;color:var(--hint)">—</div>
-        <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)">${fM(budgetRev)}</div>
-        <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--green)">${fM(soldRev)}</div>
-        <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--blue)">${fM(unsoldRev)}</div>
-        <div style="font-size:11px;text-align:right;color:var(--hint)">—</div>
+        <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
+        <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
+        <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
+        <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
+        <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)">${fM(budgetRev)}</div>
+        <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:var(--green)">${fM(soldRev)}</div>
+        <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:var(--blue)">${fM(unsoldRev)}</div>
+        <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
       </div>
     </div>`;
   });
@@ -243,7 +243,7 @@ function _buildRow(c, alt) {
     return '<span style="display:inline-block;width:9px;height:3px;background:var(--amber);vertical-align:middle;margin-right:3px;border-radius:1px"></span>';
   };
 
-  const col = `font-size:11px;text-align:right;font-variant-numeric:tabular-nums;padding:9px 14px`;
+  const col = `font-size:11px;text-align:center;font-variant-numeric:tabular-nums;padding:9px 14px`;
   const pctColor = c.pctSold == null ? 'var(--hint)' : c.pctSold >= 100 ? 'var(--green)' : c.pctSold >= 80 ? 'var(--ink-mid)' : 'var(--blue)';
 
   // Revenue columns
@@ -557,22 +557,24 @@ export async function buildContractPosition(season) {
     if (inv.batches) {
       const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
       b.forEach(batch => {
-        const allIncomeLines = (batch.lines || []).filter(l => l.type === 'income');
-        const qaLines = allIncomeLines.filter(l => l.line_type === 'qa');
-        qty += parseFloat(batch.qty) || 0;
-        // Total paid = all income lines (gross + QA combined)
-        totalPaid += allIncomeLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+        // Only income-type lines — expense lines (gin charges etc) are separate
+        const saleLines = (batch.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa');
+        const qaLines   = (batch.lines || []).filter(l => l.type === 'income' && l.line_type === 'qa');
+        qty      += parseFloat(batch.qty) || 0;
+        totalPaid += saleLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
+                   + qaLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
         qa += qaLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
       });
     } else {
-      qty = parseFloat(inv.master_qty || inv.total_qty) || 0;
-      // gross_amount + quality_adj = total paid to grower
+      // Legacy: gross_amount is sale total, total_quality_adj is QA
+      // Use total_qty if master_qty is null
+      qty       = parseFloat(inv.master_qty) || parseFloat(inv.total_qty) || 0;
       totalPaid = (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0);
-      qa = parseFloat(inv.total_quality_adj) || 0;
+      qa        = parseFloat(inv.total_quality_adj) || 0;
     }
-    invByContract[inv.forward_contract_id].qty += qty;
+    invByContract[inv.forward_contract_id].qty       += qty;
     invByContract[inv.forward_contract_id].totalPaid += totalPaid;
-    invByContract[inv.forward_contract_id].qa += qa;
+    invByContract[inv.forward_contract_id].qa        += qa;
   });
 
   // Colour per commodity (cycling)
@@ -642,13 +644,13 @@ export async function buildContractPosition(season) {
       </div>
 
       <!-- Column headers -->
-      <div style="display:grid;grid-template-columns:160px 70px 65px 65px 65px 70px 1fr;gap:0;padding:4px 14px;background:var(--page-bg);border-bottom:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:1fr 60px 70px 70px 70px 60px 1fr;gap:0;padding:4px 14px;background:var(--page-bg);border-bottom:1px solid var(--border)">
         <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Buyer · Contract</div>
-        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right">Qty</div>
-        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right">Cont. Price</div>
-        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right">Net Paid</div>
-        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right">Avg QA/unit</div>
-        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:right">Remaining</div>
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center">Qty</div>
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center">Cont. Price</div>
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center">Net Paid</div>
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center">Avg QA/unit</div>
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center">Remaining</div>
         <div style="padding-left:10px">
           <div style="display:flex;gap:2px;margin-bottom:1px">
             ${months.map(m => `<div style="flex:1;font-size:8px;color:var(--hint);text-align:center;min-width:0">${m}</div>`).join('')}
@@ -691,17 +693,17 @@ export async function buildContractPosition(season) {
         const netPaidPerUnit = invoiced.qty > 0 ? invoiced.totalPaid / invoiced.qty : null;
         const avgQaPerUnit = invoiced.qty > 0 ? invoiced.qa / invoiced.qty : null;
         return `
-        <div style="display:grid;grid-template-columns:160px 70px 65px 65px 65px 70px 1fr;gap:0;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border-light);${idx % 2 === 1 ? 'background:var(--page-bg)' : ''}"
+        <div style="display:grid;grid-template-columns:1fr 60px 70px 70px 70px 60px 1fr;gap:0;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border-light);${idx % 2 === 1 ? 'background:var(--page-bg)' : ''}"
           onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background='${idx % 2 === 1 ? 'var(--page-bg)' : ''}'">
           <div>
             <div style="font-size:12px;font-weight:600;color:var(--ink)">${buyer}</div>
             <div style="font-size:10px;color:var(--hint);margin-top:1px">${c.contract_number || '—'} &nbsp;${statusBadge}</div>
           </div>
-          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-mid)">${fN2(contractQty)}</div>
-          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-mid)">${contractPrice ? fC(contractPrice) : '—'}</div>
-          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:${netPaidPerUnit ? 'var(--green)' : 'var(--hint)'}">${netPaidPerUnit ? fC(netPaidPerUnit) : '—'}</div>
-          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:${avgQaPerUnit != null ? (avgQaPerUnit >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--hint)'}">${avgQaPerUnit != null ? (avgQaPerUnit >= 0 ? '+' : '') + fC(avgQaPerUnit) : '—'}</div>
-          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:${remaining > 0 ? 'var(--blue)' : 'var(--hint)'}">${remaining > 0 ? fN2(remaining) : '—'}</div>
+          <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;color:var(--ink-mid)">${fN2(contractQty)}</div>
+          <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;color:var(--ink-mid)">${contractPrice ? fC(contractPrice) : '—'}</div>
+          <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:${netPaidPerUnit ? 'var(--green)' : 'var(--hint)'}">${netPaidPerUnit ? fC(netPaidPerUnit) : '—'}</div>
+          <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;color:${avgQaPerUnit != null ? (avgQaPerUnit >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--hint)'}">${avgQaPerUnit != null ? (avgQaPerUnit >= 0 ? '+' : '') + fC(avgQaPerUnit) : '—'}</div>
+          <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;color:${remaining > 0 ? 'var(--blue)' : 'var(--hint)'}">${remaining > 0 ? fN2(remaining) : '—'}</div>
           <div style="padding-left:10px">
             <div style="display:flex;gap:2px;margin-bottom:3px">${monthCells}</div>
             <div style="font-size:10px;color:var(--hint)">${delivLabel}</div>
@@ -715,7 +717,7 @@ export async function buildContractPosition(season) {
         const totalQa = com.contracts.reduce((s,c)=>s+(invByContract[c.id]?.qa||0),0);
         const totalNetPaid = totalInvoicedQty > 0 ? totalTotalPaid / totalInvoicedQty : null;
         const totalAvgQa = totalInvoicedQty > 0 ? totalQa / totalInvoicedQty : null;
-        return `<div style="display:grid;grid-template-columns:160px 70px 65px 65px 65px 70px 1fr;gap:0;align-items:center;padding:8px 14px;background:var(--page-bg);border-top:2px solid var(--border)">
+        return `<div style="display:grid;grid-template-columns:1fr 60px 70px 70px 70px 60px 1fr;gap:0;align-items:center;padding:8px 14px;background:var(--page-bg);border-top:2px solid var(--border)">
           <div style="font-size:11px;font-weight:600;color:var(--ink)">${commName} total</div>
           <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)">${fN2(totalQty)}</div>
           <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;color:var(--hint)">${avgPrice ? fC(avgPrice) : '—'} avg</div>
