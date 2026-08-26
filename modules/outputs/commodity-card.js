@@ -158,7 +158,12 @@ export async function buildCommodityCards(season) {
         <!-- Revenue group header -->
         <div style="grid-column:span 3;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center;border-bottom:2px solid var(--border-strong);padding-bottom:2px;margin-bottom:2px">Revenue</div>
         <!-- Heatmap header -->
-        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center">Payments</div>
+        <div style="display:flex;align-items:center;gap:6px;justify-content:center">
+          <span style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Delivery</span>
+          <span style="display:flex;align-items:center;gap:2px;font-size:8px;color:var(--hint)">
+            <span style="width:8px;height:8px;background:rgba(26,95,168,.6);border-radius:1px;display:inline-block"></span>contracted
+          </span>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:130px 65px 65px 55px 45px 65px 65px 60px 75px 75px 75px 264px;gap:0;padding:3px 10px 4px;background:var(--page-bg);border-bottom:1px solid var(--border)">
         <div style="font-size:9px;color:var(--hint);font-weight:600">Crop</div>
@@ -258,25 +263,54 @@ function _computeCom(com, allForecasts, allHarvests, season, commodityStatuses) 
   const unit = contracts[0]?.unit || budgets[0]?.unit || invoices[0]?.master_unit || 'unit';
   const marketPrice = com.latestPrice ? parseFloat(com.latestPrice.price_per_unit) : null;
 
-  // Invoice dates + paid amounts for heatmap
-  const invoiceDates = invoices.map(i => {
-    const date = i.invoice_date || i._batch?.date || null;
+  // Invoice dates + paid amounts for heatmap — season-filtered only
+  const invoiceDates = invoices.filter(i => {
+    if (i._batch) {
+      if (i._batch.crop_year && i._batch.crop_year !== season) return false;
+      const sl = (i._batch.lines||[]).filter(l => l.type==='income' && l.line_type!=='qa');
+      const ql = (i._batch.lines||[]).filter(l => l.type==='income' && l.line_type==='qa');
+      return sl.length > 0 || ql.length > 0;
+    }
+    return !i.season || i.season === season;
+  }).map(i => {
+    const date = i.invoice_date || null;
     let paid = 0;
     if (i._batch) {
       const b = i._batch;
       const sl = (b.lines||[]).filter(l => l.type==='income' && l.line_type!=='qa');
       const ql = (b.lines||[]).filter(l => l.type==='income' && l.line_type==='qa');
-      if (sl.length > 0 || ql.length > 0) {
-        paid = sl.reduce((s,l) => s+(parseFloat(l.amount)||0), 0)
-             + ql.reduce((s,l) => s+(parseFloat(l.amount)||0), 0);
-      }
+      paid = sl.reduce((s,l) => s+(parseFloat(l.amount)||0), 0)
+           + ql.reduce((s,l) => s+(parseFloat(l.amount)||0), 0);
     } else {
       paid = (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
     }
-    return date ? { date, paid } : null;
+    return date && paid > 0 ? { date, paid, type: 'paid' } : null;
   }).filter(Boolean);
 
-  return { name, budgetProd, budgetPrice, soldQty, soldRevenue, avgSoldPrice, unsoldQty, pctSold, priceVariance, vsbudgetPct, marketPrice, unit, invoiceDates };
+  // Contract delivery windows — show expected months even before invoiced
+  const deliveryMonths = [];
+  contracts.forEach(c => {
+    if (!c.delivery_start) return;
+    const start = new Date(c.delivery_start + 'T00:00:00');
+    const end = c.delivery_end ? new Date(c.delivery_end + 'T00:00:00') : new Date(start.getFullYear(), start.getMonth() + 1, 0);
+    const contractValue = (parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0);
+    const iter = new Date(start.getFullYear(), start.getMonth(), 1);
+    const endMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+    let monthCount = 0;
+    const tmp = new Date(iter);
+    while (tmp <= endMonth) { monthCount++; tmp.setMonth(tmp.getMonth() + 1); }
+    const perMonth = monthCount > 0 ? contractValue / monthCount : contractValue;
+    while (iter <= endMonth) {
+      deliveryMonths.push({
+        date: `${iter.getFullYear()}-${String(iter.getMonth()+1).padStart(2,'0')}-15`,
+        paid: perMonth,
+        type: 'contracted'
+      });
+      iter.setMonth(iter.getMonth() + 1);
+    }
+  });
+
+  return { name, budgetProd, budgetPrice, soldQty, soldRevenue, avgSoldPrice, unsoldQty, pctSold, priceVariance, vsbudgetPct, marketPrice, unit, invoiceDates, deliveryMonths };
 }
 
 // ── Single crop row ────────────────────────────────────────────
@@ -296,36 +330,34 @@ function _buildRow(c, alt, season) {
   const soldRev      = c.soldRevenue || null;
   const unsoldRevMkt = c.unsoldQty > 0 ? c.unsoldQty * (c.marketPrice || c.budgetPrice || 0) : null;
 
-  // ── Heatmap — payments by month ──────────────────────────────
-  // Build a map of month → total paid from invoice dates
+  // ── Heatmap — contracted delivery windows only ───────────────
+  // No actual payment dates — those cross season boundaries (gin payments arrive months later)
+  // Only show contracted delivery periods which are cleanly tied to the season
   const startYear = season ? parseInt(season.split('-')[0]) : new Date().getFullYear();
-  // Season months Jul(0)…Jun(11)
-  const heatMonths = [6,7,8,9,10,11,0,1,2,3,4,5]; // JS month indices
-  const heatYears  = [0,0,0,0,0,0,1,1,1,1,1,1];    // 0=startYear, 1=startYear+1
-  const monthPaid  = new Array(12).fill(0);
+  const heatMonths = [6,7,8,9,10,11,0,1,2,3,4,5];
+  const heatYears  = [0,0,0,0,0,0,1,1,1,1,1,1];
+  const monthContracted = new Array(12).fill(0);
 
-  (c.invoiceDates || []).forEach(({ date, paid }) => {
+  (c.deliveryMonths || []).forEach(({ date, paid }) => {
     const d = new Date(date + 'T00:00:00');
-    const mo = d.getMonth();
-    const yr = d.getFullYear();
+    const mo = d.getMonth(), yr = d.getFullYear();
     for (let i = 0; i < 12; i++) {
-      const expectedYr = startYear + heatYears[i];
-      if (heatMonths[i] === mo && yr === expectedYr) {
-        monthPaid[i] += paid;
-        break;
+      if (heatMonths[i] === mo && yr === startYear + heatYears[i]) {
+        monthContracted[i] += paid; break;
       }
     }
   });
 
-  const maxPaid = Math.max(...monthPaid, 1);
+  const maxVal = Math.max(...monthContracted, 1);
 
-  // Colour intensity: green for received, blue-ish for contracted future
   const heatCells = heatMonths.map((mo, i) => {
-    const paid = monthPaid[i];
-    if (paid === 0) return `<div style="flex:1;height:18px;background:var(--border-light);border-radius:2px;margin:0 1px" title=""></div>`;
-    const opacity = 0.15 + (paid / maxPaid) * 0.85;
-    const label = `${new Date(startYear + heatYears[i], mo).toLocaleDateString('en-AU',{month:'short',year:'numeric'})} · ${fM(paid)}`;
-    return `<div style="flex:1;height:18px;background:rgba(26,107,60,${opacity.toFixed(2)});border-radius:2px;margin:0 1px;cursor:default" title="${label}"></div>`;
+    const contracted = monthContracted[i];
+    if (contracted === 0) {
+      return `<div style="flex:1;height:18px;background:var(--border-light);border-radius:2px;margin:0 1px"></div>`;
+    }
+    const opacity = 0.2 + (contracted / maxVal) * 0.75;
+    const label = `${new Date(startYear + heatYears[i], mo).toLocaleDateString('en-AU',{month:'short',year:'numeric'})} · ${fM(contracted)} contracted`;
+    return `<div style="flex:1;height:18px;background:rgba(26,95,168,${opacity.toFixed(2)});border-radius:2px;margin:0 1px;cursor:default" title="${label}"></div>`;
   }).join('');
 
   return `
