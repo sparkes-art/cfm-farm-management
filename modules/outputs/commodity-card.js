@@ -517,3 +517,4 @@ function _drawMiniChart(container, allPrices, contracts, avgFwd, budgetPrice, mo
       }
     }
   });
+}
