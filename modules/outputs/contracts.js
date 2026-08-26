@@ -83,13 +83,48 @@ async function _loadData() {
   }
 }
 
+function _getFilterState() {
+  const activeCommodityPills = [...document.querySelectorAll('.con-commodity-pill.active')].map(el => el.dataset.val).filter(Boolean);
+  const activeStatusPill = document.querySelector('.con-status-pill.active')?.dataset.val || '';
+  const activeMonthPills = [...document.querySelectorAll('.con-month-pill.active')].map(el => el.dataset.val).filter(Boolean);
+  const search = (document.getElementById('con-search')?.value || '').toLowerCase().trim();
+  return { activeCommodityPills, activeStatusPill, activeMonthPills, search };
+}
+
 function _filtered() {
-  const year = getActiveSeason() || '';
-  const commodity = qs('#con-commodity-filter')?.value || '';
-  return _contracts.filter(c =>
-    (!year || c.crop_year === year) &&
-    (!commodity || c.commodity === commodity)
-  );
+  const season = getActiveSeason() || '';
+  const { activeCommodityPills, activeStatusPill, activeMonthPills, search } = _getFilterState();
+
+  return _contracts.filter(c => {
+    // Season
+    if (season && c.crop_year && c.crop_year !== season) return false;
+    // Commodity pills
+    if (activeCommodityPills.length && !activeCommodityPills.includes(c.commodity)) return false;
+    // Search
+    if (search && !((c.contract_number||'').toLowerCase().includes(search) ||
+      (c.counterparty||c.buyer||'').toLowerCase().includes(search))) return false;
+    // Delivery month pills
+    if (activeMonthPills.length) {
+      const delivMonth = c.delivery_start ? c.delivery_start.slice(0,7) : null;
+      if (!delivMonth || !activeMonthPills.includes(delivMonth)) return false;
+    }
+    // Status pill
+    if (activeStatusPill) {
+      const inv = _invoices.filter(i => i.forward_contract_id === c.id);
+      const invQty = inv.reduce((s, i) => {
+        if (i.batches?.length) {
+          const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
+          return s + b.filter(bt=>(bt.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa'))
+                      .reduce((ss,bt)=>ss+(parseFloat(bt.qty)||0),0);
+        }
+        return s + (parseFloat(i.master_qty||i.total_qty)||0);
+      }, 0);
+      if (activeStatusPill === 'not_started' && invQty > 0) return false;
+      if (activeStatusPill === 'filling' && (invQty === 0 || c.is_complete)) return false;
+      if (activeStatusPill === 'complete' && !c.is_complete) return false;
+    }
+    return true;
+  });
 }
 
 // ── Realtime ──────────────────────────────────────────────────
@@ -106,8 +141,7 @@ function _subscribeRealtime() {
     } else if (event === 'DELETE') {
       _contracts = _contracts.filter(c => c.id !== payload.old_record.id);
     }
-      _renderStats();
-    _renderTable();
+        _renderTable();
   });
 }
 
@@ -207,17 +241,30 @@ function _renderStats() {
 
 // ── Render table ──────────────────────────────────────────────
 function _renderTable() {
-  // Rebuild commodity filter
-  const _cf = document.getElementById('con-commodity-filter');
-  if (_cf) {
-    const _cv = _cf.value;
-    const comms = [...new Set(_contracts.map(c=>c.commodity).filter(Boolean))].sort();
-    _cf.innerHTML = '<option value="">All commodities</option>' +
-      comms.map(n => `<option value="${n}" ${_cv===n?'selected':''}>${n}</option>`).join('');
-    if (!_cf.dataset.wired) {
-      _cf.dataset.wired = '1';
-      _cf.addEventListener('change', () => { _renderStats(); _renderTable(); });
-    }
+  // Build commodity pills dynamically
+  const _cpWrap = document.getElementById('con-commodity-pills');
+  if (_cpWrap && !_cpWrap.dataset.built) {
+    _cpWrap.dataset.built = '1';
+    const commodities = [...new Set(_contracts.map(c=>c.commodity).filter(Boolean))].sort();
+    const activeComms = new Set([...(container.querySelectorAll('.con-commodity-pill.active')||[])].map(el=>el.dataset.val).filter(Boolean));
+    _cpWrap.innerHTML = `<button class="con-commodity-pill con-pill ${activeComms.size===0?'active':''}" data-val="" style="font-size:11px;padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:${activeComms.size===0?'var(--ink)':'white'};color:${activeComms.size===0?'white':'var(--ink-mid)'};cursor:pointer;font-weight:500">All</button>` +
+      commodities.map(c => `<button class="con-commodity-pill con-pill ${activeComms.has(c)?'active':''}" data-val="${c}" style="font-size:11px;padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:${activeComms.has(c)?'var(--ink)':'white'};color:${activeComms.has(c)?'white':'var(--ink-mid)'};cursor:pointer">${c}</button>`).join('');
+    _wirePillGroup(container, '.con-commodity-pill');
+  }
+
+  // Build delivery month pills dynamically
+  const _mpWrap = document.getElementById('con-month-pills');
+  if (_mpWrap && !_mpWrap.dataset.built) {
+    _mpWrap.dataset.built = '1';
+    const months = [...new Set(_contracts.filter(c=>c.delivery_start).map(c=>c.delivery_start.slice(0,7)))].sort();
+    const activeMonths = new Set([...(container.querySelectorAll('.con-month-pill.active')||[])].map(el=>el.dataset.val).filter(Boolean));
+    _mpWrap.innerHTML = `<button class="con-month-pill con-pill ${activeMonths.size===0?'active':''}" data-val="" style="font-size:11px;padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:${activeMonths.size===0?'var(--ink)':'white'};color:${activeMonths.size===0?'white':'var(--ink-mid)'};cursor:pointer;font-weight:500">All</button>` +
+      months.map(m => {
+        const [y,mo] = m.split('-');
+        const label = new Date(y,mo-1).toLocaleDateString('en-AU',{month:'short',year:'numeric'});
+        return `<button class="con-month-pill con-pill ${activeMonths.has(m)?'active':''}" data-val="${m}" style="font-size:11px;padding:3px 12px;border-radius:20px;border:1px solid var(--border);background:${activeMonths.has(m)?'var(--ink)':'white'};color:${activeMonths.has(m)?'white':'var(--ink-mid)'};cursor:pointer">${label}</button>`;
+      }).join('');
+    _wirePillGroup(container, '.con-month-pill');
   }
   const rows = _filtered();
   const wrap = qs('#con-table-wrap');
@@ -365,8 +412,7 @@ function _renderTable() {
         if (idx >= 0) _contracts[idx].is_complete = !isComplete;
         toast(!isComplete ? 'Contract marked complete' : 'Contract reopened', 'success');
         _renderTable();
-        _renderStats();
-      } catch(err) { toast('Error: ' + err.message, 'error'); }
+            } catch(err) { toast('Error: ' + err.message, 'error'); }
     });
   });
 
@@ -389,38 +435,77 @@ function _renderTable() {
 }
 
 function _bindFilters(container) {
-  // Wire search input
-  qs('#con-search', container)?.addEventListener('input', () => {
-    qs('#con-clear-filters', container) && (qs('#con-clear-filters', container).style.display = '');
+  // Live search on contract #
+  document.getElementById('con-search')?.addEventListener('input', () => {
+    _updateClearBtn();
     _renderTable();
   });
 
-  // Wire status filter
-  qs('#con-status-filter', container)?.addEventListener('change', () => {
-    qs('#con-clear-filters', container) && (qs('#con-clear-filters', container).style.display = '');
-    _renderTable();
-  });
-
-  // Wire month filter
-  qs('#con-month-filter', container)?.addEventListener('change', () => {
-    qs('#con-clear-filters', container) && (qs('#con-clear-filters', container).style.display = '');
-    _renderTable();
-  });
-
-  // Clear all filters
-  qs('#con-clear-filters', container)?.addEventListener('click', () => {
-    ['#con-commodity-filter','#con-status-filter','#con-month-filter'].forEach(id => {
-      const el = qs(id, container); if (el) el.value = '';
+  // Status pills
+  container.querySelectorAll('.con-status-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      container.querySelectorAll('.con-status-pill').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'white'; b.style.color = 'var(--ink-mid)'; b.style.borderColor = 'var(--border)';
+      });
+      btn.classList.add('active');
+      btn.style.background = 'var(--ink)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--ink)';
+      _updateClearBtn();
+      _renderTable();
     });
-    const search = qs('#con-search', container); if (search) search.value = '';
-    qs('#con-clear-filters', container).style.display = 'none';
-    _renderTable();
   });
 
+  // Clear all
+  document.getElementById('con-clear-filters')?.addEventListener('click', () => {
+    document.getElementById('con-search').value = '';
+    // Reset all pill groups to "All"
+    _resetPillGroup(container, '.con-commodity-pill');
+    _resetPillGroup(container, '.con-status-pill');
+    _resetPillGroup(container, '.con-month-pill');
+    document.getElementById('con-clear-filters').style.display = 'none';
+    _renderTable();
+  });
+}
 
-  ['#con-commodity-filter'].forEach(sel => {
-    qs(sel, container)?.addEventListener('change', () => {
-      _renderStats();
+function _resetPillGroup(container, selector) {
+  const pills = container.querySelectorAll(selector);
+  pills.forEach(p => {
+    const isAll = p.dataset.val === '';
+    p.classList.toggle('active', isAll);
+    p.style.background = isAll ? 'var(--ink)' : 'white';
+    p.style.color = isAll ? 'white' : 'var(--ink-mid)';
+    p.style.borderColor = isAll ? 'var(--ink)' : 'var(--border)';
+  });
+}
+
+function _updateClearBtn() {
+  const { activeCommodityPills, activeStatusPill, activeMonthPills, search } = _getFilterState();
+  const active = activeCommodityPills.length || activeStatusPill || activeMonthPills.length || search;
+  const btn = document.getElementById('con-clear-filters');
+  if (btn) btn.style.display = active ? '' : 'none';
+}
+
+function _wirePillGroup(container, selector) {
+  container.querySelectorAll(selector).forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.val === '') {
+        // "All" selected — deactivate others
+        _resetPillGroup(container, selector);
+      } else {
+        // Deactivate "All", toggle this one
+        const allBtn = container.querySelector(selector + '[data-val=""]');
+        if (allBtn) { allBtn.classList.remove('active'); allBtn.style.background='white'; allBtn.style.color='var(--ink-mid)'; allBtn.style.borderColor='var(--border)'; }
+        btn.classList.toggle('active');
+        if (btn.classList.contains('active')) {
+          btn.style.background = 'var(--ink)'; btn.style.color = 'white'; btn.style.borderColor = 'var(--ink)';
+        } else {
+          btn.style.background = 'white'; btn.style.color = 'var(--ink-mid)'; btn.style.borderColor = 'var(--border)';
+          // If nothing active, reactivate All
+          const anyActive = [...container.querySelectorAll(selector)].some(b => b.classList.contains('active') && b.dataset.val !== '');
+          if (!anyActive) _resetPillGroup(container, selector);
+        }
+      }
+      _updateClearBtn();
       _renderTable();
     });
   });
