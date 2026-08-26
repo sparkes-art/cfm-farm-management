@@ -47,7 +47,7 @@ export async function buildCommodityCards(season) {
 
   const [contracts, invoices, budgets, forecasts, harvests] = await Promise.all([
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
-    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
+    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*,invoice_date&order=invoice_date.desc'),
     dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.asc'),
     dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
@@ -148,22 +148,45 @@ export async function buildCommodityCards(season) {
         <span style="font-size:10px;color:rgba(255,255,255,.4)">${cropNames}</span>
       </div>
 
-      <!-- Column headers -->
-      <div style="display:grid;grid-template-columns:140px 70px 65px 65px 50px 65px 70px 70px 80px 80px 80px 65px;gap:0;padding:5px 14px;background:var(--page-bg);border-bottom:1px solid var(--border)">
-        ${['Crop','Est prod','Bud price','Sold','% sold','Unsold','Avg sold $','vs budget','Bud revenue','Sold revenue','Unsold rev','Mkt price']
-          .map((h, i) => `<div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;${i === 0 ? '' : 'text-align:center'}">${h}</div>`)
-          .join('')}
+      <!-- Column headers: Crop | Production group | Price group | Revenue group | Heatmap -->
+      <div style="display:grid;grid-template-columns:130px 65px 65px 55px 45px 65px 65px 60px 75px 75px 75px 264px;gap:0;padding:4px 10px;background:var(--page-bg);border-bottom:1px solid var(--border)">
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600"></div>
+        <!-- Production group header -->
+        <div style="grid-column:span 4;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center;border-bottom:2px solid var(--border-strong);padding-bottom:2px;margin-bottom:2px">Production</div>
+        <!-- Price group header -->
+        <div style="grid-column:span 3;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center;border-bottom:2px solid var(--border-strong);padding-bottom:2px;margin-bottom:2px">Price</div>
+        <!-- Revenue group header -->
+        <div style="grid-column:span 3;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center;border-bottom:2px solid var(--border-strong);padding-bottom:2px;margin-bottom:2px">Revenue</div>
+        <!-- Heatmap header -->
+        <div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center">Payments</div>
+      </div>
+      <div style="display:grid;grid-template-columns:130px 65px 65px 55px 45px 65px 65px 60px 75px 75px 75px 264px;gap:0;padding:3px 10px 4px;background:var(--page-bg);border-bottom:1px solid var(--border)">
+        <div style="font-size:9px;color:var(--hint);font-weight:600">Crop</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Budget</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Sold</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Unsold</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">%</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Budget $</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Avg sold $</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">vs bud</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Budget</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Sold</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Unsold</div>
+        <div style="display:flex;gap:1px">
+          ${['J','A','S','O','N','D','J','F','M','A','M','J'].map(m =>
+            `<div style="flex:1;font-size:8px;color:var(--hint);text-align:center">${m}</div>`).join('')}
+        </div>
       </div>
 
       <!-- Crop rows -->
-      ${items.map((c, idx) => _buildRow(c, idx % 2 === 1)).join('')}
+      ${items.map((c, idx) => _buildRow(c, idx % 2 === 1, season)).join('')}
 
       <!-- Section totals at bottom -->
-      <div style="display:grid;grid-template-columns:140px 70px 65px 65px 50px 65px 70px 70px 80px 80px 80px 65px;gap:0;padding:10px 14px;border-top:2px solid var(--border);background:var(--page-bg)">
+      <div style="display:grid;grid-template-columns:130px 65px 65px 55px 45px 65px 65px 60px 75px 75px 75px 264px;gap:0;padding:9px 10px;border-top:2px solid var(--border);background:var(--page-bg)">
         <div style="font-size:11px;font-weight:600;color:var(--ink)">${label} total</div>
         <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
         <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
-        <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)">—</div>
+        <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
         <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
         <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
         <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
@@ -171,7 +194,7 @@ export async function buildCommodityCards(season) {
         <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)">${fM(budgetRev)}</div>
         <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:var(--green)">${fM(soldRev)}</div>
         <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:var(--blue)">${fM(unsoldRev)}</div>
-        <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
+        <div></div>
       </div>
     </div>`;
   });
@@ -235,48 +258,100 @@ function _computeCom(com, allForecasts, allHarvests, season, commodityStatuses) 
   const unit = contracts[0]?.unit || budgets[0]?.unit || invoices[0]?.master_unit || 'unit';
   const marketPrice = com.latestPrice ? parseFloat(com.latestPrice.price_per_unit) : null;
 
-  return { name, budgetProd, budgetPrice, soldQty, soldRevenue, avgSoldPrice, unsoldQty, pctSold, priceVariance, vsbudgetPct, marketPrice, unit };
+  // Invoice dates + paid amounts for heatmap
+  const invoiceDates = invoices.map(i => {
+    const date = i.invoice_date || i._batch?.date || null;
+    let paid = 0;
+    if (i._batch) {
+      const b = i._batch;
+      const sl = (b.lines||[]).filter(l => l.type==='income' && l.line_type!=='qa');
+      const ql = (b.lines||[]).filter(l => l.type==='income' && l.line_type==='qa');
+      if (sl.length > 0 || ql.length > 0) {
+        paid = sl.reduce((s,l) => s+(parseFloat(l.amount)||0), 0)
+             + ql.reduce((s,l) => s+(parseFloat(l.amount)||0), 0);
+      }
+    } else {
+      paid = (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
+    }
+    return date ? { date, paid } : null;
+  }).filter(Boolean);
+
+  return { name, budgetProd, budgetPrice, soldQty, soldRevenue, avgSoldPrice, unsoldQty, pctSold, priceVariance, vsbudgetPct, marketPrice, unit, invoiceDates };
 }
 
 // ── Single crop row ────────────────────────────────────────────
-function _buildRow(c, alt) {
+function _buildRow(c, alt, season) {
   const arrow = (v) => {
     if (v == null) return '';
-    if (v > 2) return '<span style="display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid var(--green);vertical-align:middle;margin-right:3px"></span>';
-    if (v < -2) return '<span style="display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:7px solid var(--red);vertical-align:middle;margin-right:3px"></span>';
-    return '<span style="display:inline-block;width:9px;height:3px;background:var(--amber);vertical-align:middle;margin-right:3px;border-radius:1px"></span>';
+    if (v > 2) return '<span style="display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-bottom:7px solid var(--green);vertical-align:middle;margin-right:2px"></span>';
+    if (v < -2) return '<span style="display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:7px solid var(--red);vertical-align:middle;margin-right:2px"></span>';
+    return '<span style="display:inline-block;width:8px;height:3px;background:var(--amber);vertical-align:middle;margin-right:2px;border-radius:1px"></span>';
   };
 
-  const col = `font-size:11px;text-align:center;font-variant-numeric:tabular-nums;padding:9px 14px`;
+  const col = `font-size:11px;text-align:center;font-variant-numeric:tabular-nums;padding:8px 6px`;
   const pctColor = c.pctSold == null ? 'var(--hint)' : c.pctSold >= 100 ? 'var(--green)' : c.pctSold >= 80 ? 'var(--ink-mid)' : 'var(--blue)';
 
   // Revenue columns
-  const budgetRev = c.budgetProd && c.budgetPrice ? c.budgetProd * c.budgetPrice : null;
-  const soldRev   = c.soldRevenue || null;
-  const unsoldRevMkt = c.unsoldQty > 0
-    ? c.unsoldQty * (c.marketPrice || c.budgetPrice || 0)
-    : null;
+  const budgetRev    = c.budgetProd && c.budgetPrice ? c.budgetProd * c.budgetPrice : null;
+  const soldRev      = c.soldRevenue || null;
+  const unsoldRevMkt = c.unsoldQty > 0 ? c.unsoldQty * (c.marketPrice || c.budgetPrice || 0) : null;
+
+  // ── Heatmap — payments by month ──────────────────────────────
+  // Build a map of month → total paid from invoice dates
+  const startYear = season ? parseInt(season.split('-')[0]) : new Date().getFullYear();
+  // Season months Jul(0)…Jun(11)
+  const heatMonths = [6,7,8,9,10,11,0,1,2,3,4,5]; // JS month indices
+  const heatYears  = [0,0,0,0,0,0,1,1,1,1,1,1];    // 0=startYear, 1=startYear+1
+  const monthPaid  = new Array(12).fill(0);
+
+  (c.invoiceDates || []).forEach(({ date, paid }) => {
+    const d = new Date(date + 'T00:00:00');
+    const mo = d.getMonth();
+    const yr = d.getFullYear();
+    for (let i = 0; i < 12; i++) {
+      const expectedYr = startYear + heatYears[i];
+      if (heatMonths[i] === mo && yr === expectedYr) {
+        monthPaid[i] += paid;
+        break;
+      }
+    }
+  });
+
+  const maxPaid = Math.max(...monthPaid, 1);
+
+  // Colour intensity: green for received, blue-ish for contracted future
+  const heatCells = heatMonths.map((mo, i) => {
+    const paid = monthPaid[i];
+    if (paid === 0) return `<div style="flex:1;height:18px;background:var(--border-light);border-radius:2px;margin:0 1px" title=""></div>`;
+    const opacity = 0.15 + (paid / maxPaid) * 0.85;
+    const label = `${new Date(startYear + heatYears[i], mo).toLocaleDateString('en-AU',{month:'short',year:'numeric'})} · ${fM(paid)}`;
+    return `<div style="flex:1;height:18px;background:rgba(26,107,60,${opacity.toFixed(2)});border-radius:2px;margin:0 1px;cursor:default" title="${label}"></div>`;
+  }).join('');
 
   return `
-  <div style="display:grid;grid-template-columns:140px 70px 65px 65px 50px 65px 70px 70px 80px 80px 80px 65px;gap:0;align-items:center;border-bottom:1px solid var(--border-light);${alt ? 'background:var(--page-bg)' : ''}"
+  <div style="display:grid;grid-template-columns:130px 65px 65px 55px 45px 65px 65px 60px 75px 75px 75px 264px;gap:0;align-items:center;border-bottom:1px solid var(--border-light);${alt ? 'background:var(--page-bg)' : ''}"
     onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background='${alt ? 'var(--page-bg)' : ''}'">
-    <div style="padding:9px 14px;font-size:12px;font-weight:600;color:var(--ink)">
+    <div style="padding:8px 10px;font-size:12px;font-weight:600;color:var(--ink)">
       ${c.name}
-      <span style="font-size:10px;font-weight:400;color:var(--hint);margin-left:4px">${c.unit}</span>
+      <span style="font-size:10px;font-weight:400;color:var(--hint);margin-left:3px">${c.unit}</span>
     </div>
+    <!-- Production -->
     <div style="${col};color:var(--ink-mid)">${c.budgetProd ? fN(c.budgetProd) : '—'}</div>
-    <div style="${col};color:var(--ink-mid)">${c.budgetPrice ? fC(c.budgetPrice) : '—'}</div>
     <div style="${col};font-weight:600;color:var(--ink)">${c.soldQty ? fN(c.soldQty) : '—'}</div>
-    <div style="${col};color:${pctColor};font-weight:500">${c.pctSold != null ? c.pctSold + '%' : '—'}</div>
     <div style="${col};color:var(--blue)">${c.unsoldQty != null && c.unsoldQty > 0 ? fN(c.unsoldQty) : '—'}</div>
+    <div style="${col};color:${pctColor};font-weight:500">${c.pctSold != null ? c.pctSold + '%' : '—'}</div>
+    <!-- Price -->
+    <div style="${col};color:var(--ink-mid)">${c.budgetPrice ? fC(c.budgetPrice) : '—'}</div>
     <div style="${col};font-weight:600;color:var(--ink)">${c.avgSoldPrice ? fC(c.avgSoldPrice) : '—'}</div>
     <div style="${col}">
       ${c.vsbudgetPct != null ? arrow(c.vsbudgetPct) + '<span style="color:' + varColor(c.vsbudgetPct) + ';font-weight:600">' + varSign(c.vsbudgetPct) + c.vsbudgetPct + '%</span>' : '—'}
     </div>
+    <!-- Revenue -->
     <div style="${col};color:var(--ink-mid)">${budgetRev ? fM(budgetRev) : '—'}</div>
     <div style="${col};font-weight:600;color:${soldRev ? 'var(--green)' : 'var(--hint)'}">${soldRev ? fM(soldRev) : '—'}</div>
     <div style="${col};color:var(--blue)">${unsoldRevMkt ? fM(unsoldRevMkt) : '—'}</div>
-    <div style="${col};color:var(--ink-mid)">${c.marketPrice ? fC(c.marketPrice) : '—'}</div>
+    <!-- Heatmap -->
+    <div style="padding:8px 6px;display:flex;align-items:center">${heatCells}</div>
   </div>`;
 }
 
