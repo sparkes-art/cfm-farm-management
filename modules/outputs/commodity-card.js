@@ -246,8 +246,15 @@ function _buildRow(c, alt) {
   const col = `font-size:11px;text-align:right;font-variant-numeric:tabular-nums;padding:9px 14px`;
   const pctColor = c.pctSold == null ? 'var(--hint)' : c.pctSold >= 100 ? 'var(--green)' : c.pctSold >= 80 ? 'var(--ink-mid)' : 'var(--blue)';
 
+  // Revenue columns
+  const budgetRev = c.budgetProd && c.budgetPrice ? c.budgetProd * c.budgetPrice : null;
+  const soldRev   = c.soldRevenue || null;
+  const unsoldRevMkt = c.unsoldQty > 0
+    ? c.unsoldQty * (c.marketPrice || c.budgetPrice || 0)
+    : null;
+
   return `
-  <div style="display:grid;grid-template-columns:150px 80px 70px 70px 55px 70px 80px 80px 65px;gap:0;align-items:center;border-bottom:1px solid var(--border-light);${alt ? 'background:var(--page-bg)' : ''}"
+  <div style="display:grid;grid-template-columns:140px 70px 65px 65px 50px 65px 70px 70px 80px 80px 80px 65px;gap:0;align-items:center;border-bottom:1px solid var(--border-light);${alt ? 'background:var(--page-bg)' : ''}"
     onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background='${alt ? 'var(--page-bg)' : ''}'">
     <div style="padding:9px 14px;font-size:12px;font-weight:600;color:var(--ink)">
       ${c.name}
@@ -257,11 +264,14 @@ function _buildRow(c, alt) {
     <div style="${col};color:var(--ink-mid)">${c.budgetPrice ? fC(c.budgetPrice) : '—'}</div>
     <div style="${col};font-weight:600;color:var(--ink)">${c.soldQty ? fN(c.soldQty) : '—'}</div>
     <div style="${col};color:${pctColor};font-weight:500">${c.pctSold != null ? c.pctSold + '%' : '—'}</div>
-    <div style="${col};color:var(--blue)">${c.unsoldQty != null && c.unsoldQty > 0 ? fN(c.unsoldQty) : c.unsoldQty === 0 ? '<span style=\'color:var(--hint)\'>—</span>' : '—'}</div>
+    <div style="${col};color:var(--blue)">${c.unsoldQty != null && c.unsoldQty > 0 ? fN(c.unsoldQty) : '—'}</div>
     <div style="${col};font-weight:600;color:var(--ink)">${c.avgSoldPrice ? fC(c.avgSoldPrice) : '—'}</div>
     <div style="${col}">
       ${c.vsbudgetPct != null ? arrow(c.vsbudgetPct) + '<span style="color:' + varColor(c.vsbudgetPct) + ';font-weight:600">' + varSign(c.vsbudgetPct) + c.vsbudgetPct + '%</span>' : '—'}
     </div>
+    <div style="${col};color:var(--ink-mid)">${budgetRev ? fM(budgetRev) : '—'}</div>
+    <div style="${col};font-weight:600;color:${soldRev ? 'var(--green)' : 'var(--hint)'}">${soldRev ? fM(soldRev) : '—'}</div>
+    <div style="${col};color:var(--blue)">${unsoldRevMkt ? fM(unsoldRevMkt) : '—'}</div>
     <div style="${col};color:var(--ink-mid)">${c.marketPrice ? fC(c.marketPrice) : '—'}</div>
   </div>`;
 }
