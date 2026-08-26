@@ -210,9 +210,13 @@ function _computeCom(com, allForecasts, allHarvests, season, commodityStatuses) 
       // Use batch crop_year if set — invoice date alone is unreliable
       // (2025-26 crop payments can arrive July-Aug 2026)
       if (batch.crop_year && batch.crop_year !== season) return;
-      const saleLine = (batch.lines || []).find(l => l.type === 'income' && l.line_type !== 'qa');
-      soldQty += parseFloat(batch.qty) || 0;
-      soldRevenue += (parseFloat(batch.qty) || 0) * (parseFloat(saleLine?.eff_per_unit) || 0) || parseFloat(saleLine?.amount) || 0;
+      const saleLines = (batch.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa');
+      const qaLines   = (batch.lines || []).filter(l => l.type === 'income' && l.line_type === 'qa');
+      // Skip expense-only batches — gin charge batches have qty but no income lines
+      if (saleLines.length === 0 && qaLines.length === 0) return;
+      soldQty    += parseFloat(batch.qty) || 0;
+      soldRevenue += saleLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
+                  + qaLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
     } else {
       // Check invoice.season, then linked contract crop_year — NOT invoice date
       if (i.season && i.season !== season) return;
@@ -557,24 +561,25 @@ export async function buildContractPosition(season) {
     if (inv.batches) {
       const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
       b.forEach(batch => {
-        // Only income-type lines — expense lines (gin charges etc) are separate
         const saleLines = (batch.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa');
         const qaLines   = (batch.lines || []).filter(l => l.type === 'income' && l.line_type === 'qa');
-        qty      += parseFloat(batch.qty) || 0;
+        // Skip expense-only batches (e.g. gin charge batches have qty but no income lines)
+        // Their qty must NOT be counted as sold bales
+        if (saleLines.length === 0 && qaLines.length === 0) return;
+        qty       += parseFloat(batch.qty) || 0;
         totalPaid += saleLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0)
                    + qaLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
-        qa += qaLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+        qa        += qaLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
       });
     } else {
-      // Legacy: gross_amount is sale total, total_quality_adj is QA
-      // Use total_qty if master_qty is null
-      qty       = parseFloat(inv.master_qty) || parseFloat(inv.total_qty) || 0;
+      qty = parseFloat(inv.master_qty) || parseFloat(inv.total_qty) || 0;
+      // gross_amount + quality_adj = total paid to grower
       totalPaid = (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0);
-      qa        = parseFloat(inv.total_quality_adj) || 0;
+      qa = parseFloat(inv.total_quality_adj) || 0;
     }
-    invByContract[inv.forward_contract_id].qty       += qty;
+    invByContract[inv.forward_contract_id].qty += qty;
     invByContract[inv.forward_contract_id].totalPaid += totalPaid;
-    invByContract[inv.forward_contract_id].qa        += qa;
+    invByContract[inv.forward_contract_id].qa += qa;
   });
 
   // Colour per commodity (cycling)
@@ -660,7 +665,7 @@ export async function buildContractPosition(season) {
 
       <!-- Contract rows -->
       ${com.contracts.map((c, idx) => {
-        const invoiced = invByContract[c.id] || { qty: 0, revenue: 0 };
+        const invoiced = invByContract[c.id] || { qty: 0, totalPaid: 0, qa: 0 };
         const contractQty = parseFloat(c.quantity) || 0;
         const contractPrice = parseFloat(c.price_per_unit) || 0;
         const remaining = Math.max(0, contractQty - invoiced.qty);
@@ -699,11 +704,11 @@ export async function buildContractPosition(season) {
             <div style="font-size:12px;font-weight:600;color:var(--ink)">${buyer}</div>
             <div style="font-size:10px;color:var(--hint);margin-top:1px">${c.contract_number || '—'} &nbsp;${statusBadge}</div>
           </div>
-          <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;color:var(--ink-mid)">${fN2(contractQty)}</div>
-          <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;color:var(--ink-mid)">${contractPrice ? fC(contractPrice) : '—'}</div>
-          <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:${netPaidPerUnit ? 'var(--green)' : 'var(--hint)'}">${netPaidPerUnit ? fC(netPaidPerUnit) : '—'}</div>
-          <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;color:${avgQaPerUnit != null ? (avgQaPerUnit >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--hint)'}">${avgQaPerUnit != null ? (avgQaPerUnit >= 0 ? '+' : '') + fC(avgQaPerUnit) : '—'}</div>
-          <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;color:${remaining > 0 ? 'var(--blue)' : 'var(--hint)'}">${remaining > 0 ? fN2(remaining) : '—'}</div>
+          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;text-align:center;color:var(--ink-mid)">${fN2(contractQty)}</div>
+          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;text-align:center;color:var(--ink-mid)">${contractPrice ? fC(contractPrice) : '—'}</div>
+          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;text-align:center;font-weight:600;color:${netPaidPerUnit ? 'var(--green)' : 'var(--hint)'}">${netPaidPerUnit ? fC(netPaidPerUnit) : '—'}</div>
+          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;text-align:center;color:${avgQaPerUnit != null ? (avgQaPerUnit >= 0 ? 'var(--green)' : 'var(--red)') : 'var(--hint)'}">${avgQaPerUnit != null ? (avgQaPerUnit >= 0 ? '+' : '') + fC(avgQaPerUnit) : '—'}</div>
+          <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;text-align:center;color:${remaining > 0 ? 'var(--blue)' : 'var(--hint)'}">${remaining > 0 ? fN2(remaining) : '—'}</div>
           <div style="padding-left:10px">
             <div style="display:flex;gap:2px;margin-bottom:3px">${monthCells}</div>
             <div style="font-size:10px;color:var(--hint)">${delivLabel}</div>
