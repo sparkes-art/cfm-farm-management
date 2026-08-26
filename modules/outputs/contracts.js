@@ -101,7 +101,7 @@ function _subscribeRealtime() {
 }
 
 // ── Season invoice filter ─────────────────────────────────────
-function __invoiceInSeason(inv) {
+function _invoiceInSeason(inv) {
   const season = getActiveSeason() || '';
   const seasonStartYear = parseInt(season.split('-')[0]) || new Date().getFullYear();
   const seasonStart = `${seasonStartYear}-07-01`;
