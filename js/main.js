@@ -2,34 +2,34 @@
 // App bootstrap — auth, navigation, module loading
 // No localStorage. No caching. Pure Supabase.
 
-import { login, logout, onSessionChange } from './supabase-client.js?v=1787704519821';
-import { on, setActiveFarm, setActiveModule, getFarms, getState, getActiveFarm, getActiveSeason, setActiveSeason } from './app-state.js?v=1787704519821';
-import { toast, show, hide, qs } from './ui.js?v=1787704519821';
+import { login, logout, onSessionChange } from './supabase-client.js?v=1783290066771';
+import { on, setActiveFarm, setActiveModule, getFarms, getState, getActiveFarm, getActiveSeason, setActiveSeason } from './app-state.js?v=1783290066771';
+import { toast, show, hide, qs } from './ui.js?v=1783290066771';
 
 // Module loaders (lazy — only imported when navigated to)
 const MODULE_LOADERS = {
   outputs: async () => {
-    const m = await import('../modules/outputs/outputs.js?v=1787704519821');
+    const m = await import('../modules/outputs/outputs.js?v=1783290066771');
     return { mount: m.mountOutputs, unmount: m.unmountOutputs };
   },
   inputs: async () => {
-    const m = await import('../modules/inputs/inputs.js?v=1787704519821');
+    const m = await import('../modules/inputs/inputs.js?v=1784683108967');
     return { mount: m.mountInputs, unmount: m.unmountInputs };
   },
   water: async () => {
-    const m = await import('../modules/water/water.js?v=1787704519821');
+    const m = await import('../modules/water/water.js?v=1784683108967');
     return { mount: m.mountWater, unmount: m.unmountWater };
   },
   'meter-readings': async () => {
-    const m = await import('../modules/meter-readings/meter-readings.js?v=1787704519821');
+    const m = await import('../modules/meter-readings/meter-readings.js?v=1784683108967');
     return { mount: m.mountMeterReadings, unmount: m.unmountMeterReadings };
   },
   'gross-margin': async () => {
-    const m = await import('../modules/gross-margin/gross-margin.js?v=1787704519821');
+    const m = await import('../modules/gross-margin/gross-margin.js?v=1783290066771');
     return { mount: m.mountGrossMargin };
   },
   'farm-map': async () => {
-    const m = await import('../modules/paddocks/paddocks.js?v=1787704519821');
+    const m = await import('../modules/paddocks/paddocks.js?v=1784683108967');
     return {
       mount: (container) => m.mountFarmMap(container),
       unmount: () => m.unmountPaddocks()
@@ -41,19 +41,19 @@ const MODULE_LOADERS = {
   },
 
   recommendations: async () => {
-    const m = await import('../modules/agronomy/recommendations.js?v=1787704519821');
+    const m = await import('../modules/agronomy/recommendations.js?v=1784683108967');
     return { mount: m.mountRecommendations, unmount: m.unmountRecommendations };
   },
   agronomy: async () => {
-    const m = await import('../modules/agronomy/agronomy.js?v=1787704519821');
+    const m = await import('../modules/agronomy/agronomy.js?v=1787538024870');
     return { mount: m.mountAgronomy };
   },
   weather: async () => {
-    const m = await import('../modules/weather/weather.js?v=1787704519821');
+    const m = await import('../modules/weather/weather.js?v=1783290066771');
     return { mount: m.mountWeather };
   },
   budget: async () => {
-    const m = await import('../modules/budget/budget.js?v=1787704519821');
+    const m = await import('../modules/budget/budget.js?v=1783290066771');
     return { mount: m.mountBudget, unmount: m.unmountBudget };
   },
   'management-report': async () => {
@@ -61,15 +61,15 @@ const MODULE_LOADERS = {
     return { mount: m.mountManagementReport, unmount: m.unmountManagementReport };
   },
   acquisitions: async () => {
-    const m = await import('../modules/acquisitions/acquisitions.js?v=1787704519821');
+    const m = await import('../modules/acquisitions/acquisitions.js?v=1784683108967');
     return { mount: m.mountAcquisitions, unmount: m.unmountAcquisitions };
   },
   paddocks: async () => {
-    const m = await import('../modules/paddocks/paddocks.js?v=1787704519821');
+    const m = await import('../modules/paddocks/paddocks.js?v=1784683108967');
     return { mount: m.mountPaddocks, unmount: m.unmountPaddocks };
   },
   settings: async () => {
-    const m = await import('../modules/settings/settings.js?v=1787704519821');
+    const m = await import('../modules/settings/settings.js?v=1783290066771');
     return { mount: m.mountSettings };
   },
 };
@@ -198,7 +198,7 @@ async function _populateSeasonSelector() {
   try {
     const farm = getActiveFarm();
     if (farm) {
-      const { dbSelect } = await import('./supabase-client.js?v=1787704519821');
+      const { dbSelect } = await import('./supabase-client.js?v=1783290066771');
       const rows = await dbSelect('budgets', 'farm_id=eq.' + farm.id + '&select=season&order=season.desc&limit=1');
       if (rows[0]?.season) defaultSeason = rows[0].season;
     }
@@ -228,7 +228,7 @@ window._updateXeroIndicator = async function _updateXeroIndicator() {
   const farm = getActiveFarm();
   if (!farm) { el.style.display = 'none'; return; }
   try {
-    const { dbSelect } = await import('./supabase-client.js?v=1787704519821');
+    const { dbSelect } = await import('./supabase-client.js?v=1783290066771');
     const rows = await dbSelect('xero_tokens', 'farm_id=eq.' + farm.id + '&select=tenant_name,expires_at');
     const token = rows[0];
     el.style.display = 'flex';
