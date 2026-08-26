@@ -210,15 +210,19 @@ function _computeCom(com, allForecasts, allHarvests, season, commodityStatuses) 
   const comHarvests = allHarvests.filter(h => h.commodity_id === com.id);
   const totalHarvest = comHarvests.reduce((s, h) => s + (parseFloat(h.actual_production) || 0), 0);
 
-  // Sold qty + revenue from invoices
   let soldQty = 0, soldRevenue = 0;
   invoices.forEach(i => {
     if (i._batch) {
       const batch = i._batch;
+      // Use batch crop_year if set — invoice date alone is unreliable
+      // (2025-26 crop payments can arrive July-Aug 2026)
+      if (batch.crop_year && batch.crop_year !== season) return;
       const saleLine = (batch.lines || []).find(l => l.type === 'income' && l.line_type !== 'qa');
       soldQty += parseFloat(batch.qty) || 0;
       soldRevenue += (parseFloat(batch.qty) || 0) * (parseFloat(saleLine?.eff_per_unit) || 0) || parseFloat(saleLine?.amount) || 0;
     } else {
+      // Check invoice.season, then linked contract crop_year — NOT invoice date
+      if (i.season && i.season !== season) return;
       soldQty += parseFloat(i.total_qty) || parseFloat(i.master_qty) || 0;
       soldRevenue += (parseFloat(i.gross_amount) || 0) + (parseFloat(i.total_quality_adj) || 0);
     }

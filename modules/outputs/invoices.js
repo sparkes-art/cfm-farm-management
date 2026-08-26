@@ -90,7 +90,17 @@ function _filtered() {
         ? !i.forward_contract_id
         : i.forward_contract_id === contract;
     if (!season) return commodityMatch && contractMatch && monthMatch;
-    const seasonMatch = i.season === season || (i.line_items || []).some(l => l.season === season);
+    // Season match: check invoice.season field, line_items, batch crop_year, OR linked contract's crop_year
+    const linkedContract = i.forward_contract_id ? _contracts.find(c => c.id === i.forward_contract_id) : null;
+    const batchSeasonMatch = (() => {
+      if (!i.batches) return false;
+      const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
+      return b.some(batch => batch.crop_year === season);
+    })();
+    const seasonMatch = i.season === season
+      || (i.line_items||[]).some(l => l.season === season)
+      || batchSeasonMatch
+      || (linkedContract && linkedContract.crop_year === season);
     return seasonMatch && commodityMatch && contractMatch && monthMatch;
   });
 }
@@ -142,12 +152,14 @@ function _renderTable(container) {
     if (!_commodSel.dataset.wired) { _commodSel.dataset.wired = '1'; _commodSel.addEventListener('change', () => _renderTable(container)); }
   }
 
-  // Rebuild contract filter with live data
+  // Rebuild contract filter — season-scoped
   const _csel = document.getElementById('inv-filter-contract');
-  if (_csel && _contracts.length) {
+  if (_csel) {
     const _cv = _csel.value;
+    const _activeSeason = getActiveSeason();
+    const _seasonContracts = _contracts.filter(c => !_activeSeason || !c.crop_year || c.crop_year === _activeSeason);
     _csel.innerHTML = '<option value="">All contracts</option><option value="cash">Cash sales only</option>' +
-      _contracts.map(c => `<option value="${c.id}" ${_cv===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''}</option>`).join('');
+      _seasonContracts.map(c => `<option value="${c.id}" ${_cv===c.id?'selected':''}>${c.contract_number||'Contract'} — ${c.commodity||''}</option>`).join('');
     if (!_csel.dataset.wired) {
       _csel.dataset.wired = '1';
       _csel.addEventListener('change', () => _renderTable(container));
@@ -890,12 +902,15 @@ export function openInvoiceForm(container, existing = null) {
 
   const renderOpts = (filter='') => {
     const lower = filter.toLowerCase();
-    const filtered = _contracts.filter(c =>
-      !lower ||
-      (c.contract_number||'').toLowerCase().includes(lower) ||
-      (c.commodity||'').toLowerCase().includes(lower) ||
-      (c.counterparty||c.buyer||'').toLowerCase().includes(lower)
-    );
+    const activeSeason = getActiveSeason();
+    const filtered = _contracts.filter(c => {
+      // Only show contracts for the active season
+      if (activeSeason && c.crop_year && c.crop_year !== activeSeason) return false;
+      return !lower ||
+        (c.contract_number||'').toLowerCase().includes(lower) ||
+        (c.commodity||'').toLowerCase().includes(lower) ||
+        (c.counterparty||c.buyer||'').toLowerCase().includes(lower);
+    });
     optsWrap.innerHTML = filtered.length
       ? filtered.map(c => {
           const label = `${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}`;
