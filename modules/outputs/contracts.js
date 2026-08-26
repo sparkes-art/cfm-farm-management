@@ -108,7 +108,8 @@ function _renderStats() {
   const commodities = [...new Set(rows.map(c => c.commodity).filter(Boolean))];
 
   // Season filter for invoices — batch crop_year or invoice_date must match season
-  const seasonStartYear = parseInt(season.split('-')[0]);
+  const season = getActiveSeason() || '';
+  const seasonStartYear = parseInt(season.split('-')[0]) || new Date().getFullYear();
   const seasonStart = `${seasonStartYear}-07-01`;
   const seasonEnd = `${seasonStartYear+1}-06-30`;
   const invoiceInSeason = (inv) => {
