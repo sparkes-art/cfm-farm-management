@@ -58,7 +58,7 @@ async function _loadData() {
   const farm = getActiveFarm();
   if (!farm) return;
   [_invoices, _contracts] = await Promise.all([
-    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*,user_profiles(full_name,email)&order=invoice_date.desc').catch(() => dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc')),
+    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&select=*&order=sale_date.desc'),
   ]);
 }
@@ -477,12 +477,12 @@ function _openDetail(inv, container) {
 
       ${inv.xero_invoice_number ? `<div style="margin-top:10px;font-size:var(--text-sm);color:var(--muted)">Xero ref: <strong style="color:var(--ink)">${inv.xero_invoice_number}</strong></div>` : ''}
 
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-light);display:flex;align-items:center;justify-content:space-between">
-        <div style="font-size:11px;color:var(--hint)">
-          ${inv.created_at ? `Entered ${new Date(inv.created_at).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'})} at ${new Date(inv.created_at).toLocaleTimeString('en-AU', {hour:'2-digit',minute:'2-digit'})}` : ''}
-          ${inv.created_by ? ` · ${inv.user_profiles?.full_name || inv.user_profiles?.email || inv.created_by.slice(0,8) + '…'}` : ''}
-        </div>
-        ${inv.updated_at && inv.updated_at !== inv.created_at ? `<div style="font-size:11px;color:var(--hint)">Last edited ${new Date(inv.updated_at).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'})}</div>` : ''}
+      <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border-light);font-size:11px;color:var(--hint);display:flex;justify-content:space-between;align-items:center">
+        <span>
+          ${inv.created_at ? 'Entered ' + new Date(inv.created_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) + ' at ' + new Date(inv.created_at).toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'}) : ''}
+          ${inv.created_by && _userProfiles[inv.created_by] ? ' · ' + (_userProfiles[inv.created_by].full_name || _userProfiles[inv.created_by].email || '') : ''}
+        </span>
+        ${inv.updated_at && inv.updated_at !== inv.created_at ? '<span>Last edited ' + new Date(inv.updated_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) + '</span>' : ''}
       </div>
     `,
   });
