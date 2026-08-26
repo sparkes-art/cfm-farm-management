@@ -882,3 +882,45 @@ tbody tr:hover { background: var(--page-bg); }
   #main-content { overflow: visible; }
   .no-print { display: none !important; }
 }
+
+/* ── Login page ───────────────────────────────────────────────── */
+#login-page {
+  position: fixed;
+  inset: 0;
+  background: var(--navy);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.login-card {
+  background: var(--surface);
+  border-radius: var(--radius-xl);
+  padding: 36px 40px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: var(--shadow-lg);
+}
+
+.login-logo {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.login-logo img {
+  height: 48px;
+  margin-bottom: 10px;
+}
+
+.login-logo .subtitle {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.btn-lg {
+  padding: 11px 20px;
+  font-size: var(--text-base);
+  border-radius: var(--radius-md);
+}
