@@ -653,7 +653,7 @@ export async function buildContractPosition(season) {
         const contractPrice = parseFloat(c.price_per_unit) || 0;
         const remaining = Math.max(0, contractQty - invoiced.qty);
         const pct = contractQty > 0 ? Math.min(100, Math.round(invoiced.qty / contractQty * 100)) : 0;
-        const isComplete = pct >= 100;
+        const isComplete = c.is_complete === true;
         const buyer = c.counterparty || c.buyer || '—';
         const startYear = parseInt(season.split('-')[0]);
 

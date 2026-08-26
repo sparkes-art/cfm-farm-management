@@ -18,21 +18,33 @@ export async function mountContracts(container) {
         <h1>Forward Contracts</h1>
         <p class="page-subtitle">Sales contracts by crop year and commodity</p>
       </div>
-      <div class="flex gap-2">
+      ${canWrite() ? '<button class="btn btn-primary" id="btn-new-contract">＋ New contract</button>' : ''}
+    </div>
+
+    <!-- Filter bar -->
+    <div class="card" style="padding:12px 16px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <select id="con-commodity-filter" class="form-select" style="width:160px">
           <option value="">All commodities</option>
         </select>
-        ${canWrite() ? '<button class="btn btn-primary" id="btn-new-contract">＋ New contract</button>' : ''}
+        <select id="con-status-filter" class="form-select" style="width:160px">
+          <option value="">All statuses</option>
+          <option value="not_started">Not started</option>
+          <option value="filling">Filling</option>
+          <option value="complete">Complete</option>
+        </select>
+        <select id="con-month-filter" class="form-select" style="width:160px">
+          <option value="">All delivery months</option>
+        </select>
+        <div style="flex:1;min-width:160px">
+          <input type="text" id="con-search" class="form-input" placeholder="Search contract #, buyer..." style="width:100%">
+        </div>
+        <span id="con-count" class="text-muted text-sm" style="white-space:nowrap"></span>
+        <button id="con-clear-filters" class="btn btn-ghost btn-sm" style="display:none">✕ Clear filters</button>
       </div>
     </div>
 
-    <div class="stats-strip" id="con-stats"></div>
-
     <div class="card">
-      <div class="card-header">
-        <h2>Contracts</h2>
-        <span id="con-count" class="text-muted text-sm"></span>
-      </div>
       <div id="con-table-wrap">
         <div class="empty-state"><div class="empty-icon">📋</div><p>Loading contracts…</p></div>
       </div>
@@ -41,7 +53,6 @@ export async function mountContracts(container) {
 
   await loadCommodities();
   await _loadData();
-  _renderStats();
   _renderTable();
   _bindFilters(container);
   _subscribeRealtime();
@@ -223,30 +234,44 @@ function _renderTable() {
     return;
   }
 
+  // Column sort state
+  const sortCol = wrap.dataset.sortCol || '';
+  const sortDir = wrap.dataset.sortDir || 'asc';
+
+  const sortedRows = [...rows].sort((a, b) => {
+    if (!sortCol) return 0;
+    let av = a[sortCol], bv = b[sortCol];
+    if (sortCol === 'value') { av = (parseFloat(a.quantity)||0)*(parseFloat(a.price_per_unit)||0); bv = (parseFloat(b.quantity)||0)*(parseFloat(b.price_per_unit)||0); }
+    if (typeof av === 'string') av = av.toLowerCase();
+    if (typeof bv === 'string') bv = bv.toLowerCase();
+    if (av == null) return 1; if (bv == null) return -1;
+    return sortDir === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+  });
+
+  const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap';
+  const sortIcon = (col) => sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ⇅';
+
   wrap.innerHTML = `
     <table class="data-table">
       <thead>
         <tr>
-          <th>Contract #</th>
-          <th>Crop year</th>
-          <th>Commodity</th>
-          <th>Buyer</th>
-          <!-- Grade/Spec hidden -->
-          <th>Sale date</th>
-          <th class="num">Units sold</th>
-          <th class="num">Price / unit</th>
-          <th class="num">Total value</th>
-          <th class="num">Units invoiced</th>
-          <th class="num">Units to go</th>
-          <th class="num">Total paid (incl. QA)</th>
-          <!-- Avg price after QA hidden -->
-          <th>Delivery</th>
+          <th class="con-sort" data-col="contract_number" style="${thStyle}">Contract #${sortIcon('contract_number')}</th>
+          <th class="con-sort" data-col="commodity" style="${thStyle}">Commodity${sortIcon('commodity')}</th>
+          <th class="con-sort" data-col="counterparty" style="${thStyle}">Buyer${sortIcon('counterparty')}</th>
+          <th class="con-sort" data-col="sale_date" style="${thStyle}">Sale date${sortIcon('sale_date')}</th>
+          <th class="num con-sort" data-col="quantity" style="${thStyle}">Units sold${sortIcon('quantity')}</th>
+          <th class="num con-sort" data-col="price_per_unit" style="${thStyle}">Price / unit${sortIcon('price_per_unit')}</th>
+          <th class="num con-sort" data-col="value" style="${thStyle}">Total value${sortIcon('value')}</th>
+          <th class="num">Invoiced</th>
+          <th class="num">To go</th>
+          <th class="num">Paid (incl. QA)</th>
+          <th class="con-sort" data-col="delivery_start" style="${thStyle}">Delivery${sortIcon('delivery_start')}</th>
           <th>PDF</th>
           ${canWrite() ? '<th></th>' : ''}
         </tr>
       </thead>
       <tbody>
-        ${rows.map(c => {
+        ${sortedRows.map(c => {
           const value = (parseFloat(c.quantity) || 0) * (parseFloat(c.price_per_unit) || 0);
           // Calculate invoiced units and avg price for this contract
           const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id && _invoiceInSeason(i));
@@ -364,6 +389,35 @@ function _renderTable() {
 }
 
 function _bindFilters(container) {
+  // Wire search input
+  qs('#con-search', container)?.addEventListener('input', () => {
+    qs('#con-clear-filters', container) && (qs('#con-clear-filters', container).style.display = '');
+    _renderTable();
+  });
+
+  // Wire status filter
+  qs('#con-status-filter', container)?.addEventListener('change', () => {
+    qs('#con-clear-filters', container) && (qs('#con-clear-filters', container).style.display = '');
+    _renderTable();
+  });
+
+  // Wire month filter
+  qs('#con-month-filter', container)?.addEventListener('change', () => {
+    qs('#con-clear-filters', container) && (qs('#con-clear-filters', container).style.display = '');
+    _renderTable();
+  });
+
+  // Clear all filters
+  qs('#con-clear-filters', container)?.addEventListener('click', () => {
+    ['#con-commodity-filter','#con-status-filter','#con-month-filter'].forEach(id => {
+      const el = qs(id, container); if (el) el.value = '';
+    });
+    const search = qs('#con-search', container); if (search) search.value = '';
+    qs('#con-clear-filters', container).style.display = 'none';
+    _renderTable();
+  });
+
+
   ['#con-commodity-filter'].forEach(sel => {
     qs(sel, container)?.addEventListener('change', () => {
       _renderStats();
