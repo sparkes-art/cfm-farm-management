@@ -275,7 +275,6 @@ function _empty(msg) {
 
 // ── Mini charts (preserved exactly) ───────────────────────────
 export async function drawMiniCharts(commodityMap, season) {
-export async function drawMiniCharts(commodityMap, season) {
   if (!window.Chart) {
     await new Promise((resolve, reject) => {
       const s = document.createElement('script');
