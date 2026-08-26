@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CFM — Farm Management</title>
-  <link rel="stylesheet" href="/css/design-system.css?v=1783290066771">
+  <link rel="stylesheet" href="/css/design-system.css?v=1787704509897">
   <script>window.__CFM_MAPBOX_TOKEN = 'pk.eyJ1Ijoic2FtdWVsd2lsbGlhbSIsImEiOiJjbXBsc280aHcyOXEyMnBvaGVrNDExdW5pIn0.APAu0LyYKE9CbXvlbYzUbA';</script>
   <script>window.__CFM_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xdmZ1cXZpbmRzZ25vZ2VqYWVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5NTAwMTIsImV4cCI6MjA5NjUyNjAxMn0.EFeaUoz_yXOA34j4yR1LxaD-3755PejUt7qPxVccW7Y';</script>
 </head>
@@ -143,5 +143,24 @@
 </div>
 
 <script type="module" src="/js/main.js?v=1783290066771"></script>
+
+  <!-- Mobile bottom nav -->
+  <nav id="mobile-nav" aria-label="Mobile navigation">
+    <a href="#" data-module="outputs" class="mobile-nav-item active">
+      <span class="mobile-nav-icon">📈</span>Sales
+    </a>
+    <a href="#" data-module="water" class="mobile-nav-item">
+      <span class="mobile-nav-icon">💧</span>Water
+    </a>
+    <a href="#" data-module="stocktake" class="mobile-nav-item">
+      <span class="mobile-nav-icon">📦</span>Stock
+    </a>
+    <a href="#" data-module="agronomy" class="mobile-nav-item">
+      <span class="mobile-nav-icon">🌱</span>Agro
+    </a>
+    <a href="#" data-module="management-report" class="mobile-nav-item">
+      <span class="mobile-nav-icon">📊</span>Reports
+    </a>
+  </nav>
 </body>
 </html>
