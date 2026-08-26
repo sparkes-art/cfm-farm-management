@@ -8,6 +8,7 @@ import { getCommodities, loadCommodities } from '../../js/commodities.js?v=17832
 
 let _invoices = [];
 let _contracts = [];
+let _userProfiles = {};
 let _unsub = null;
 
 export async function mountInvoices(container) {
@@ -57,10 +58,15 @@ export function unmountInvoices() {
 async function _loadData() {
   const farm = getActiveFarm();
   if (!farm) return;
-  [_invoices, _contracts] = await Promise.all([
+  const [invoices, contracts, profiles] = await Promise.all([
     dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&select=*&order=sale_date.desc'),
+    dbSelect('user_profiles', 'select=id,full_name,email').catch(() => []),
   ]);
+  _invoices = invoices;
+  _contracts = contracts;
+  _userProfiles = {};
+  (profiles || []).forEach(p => { _userProfiles[p.id] = p; });
 }
 
 function _filtered() {
