@@ -119,11 +119,12 @@ function _subscribeRealtime() {
 function _renderTable(container) {
   const wrap = qs('#inv-table-wrap', container || document);
   if (!wrap) return;
-  // Rebuild month filter
+  // Rebuild month filter — only show months from season-filtered invoices
   const _monthSel = document.getElementById('inv-filter-month');
   if (_monthSel) {
     const _mv = _monthSel.value;
-    const months = [...new Set(_invoices.map(i => i.invoice_date?.slice(0,7)).filter(Boolean))].sort().reverse();
+    const _seasonInvoices = _filtered();
+    const months = [...new Set(_seasonInvoices.map(i => i.invoice_date?.slice(0,7)).filter(Boolean))].sort().reverse();
     _monthSel.innerHTML = '<option value="">All months</option>' +
       months.map(m => {
         const [y,mo] = m.split('-');
@@ -258,7 +259,10 @@ function _renderTable(container) {
             })() || inv.commodity_type || '—';
           return `
             <tr style="cursor:pointer" data-id="${inv.id}">
-              <td class="muted" style="font-size:11px;white-space:nowrap">${inv.invoice_date ? new Date(inv.invoice_date+'T00:00:00').toLocaleDateString('en-AU',{day:'2-digit',month:'numeric',year:'2-digit'}) : '—'}</td>
+              <td class="muted" style="font-size:11px;white-space:nowrap">
+                ${inv.invoice_date ? new Date(inv.invoice_date+'T00:00:00').toLocaleDateString('en-AU',{day:'2-digit',month:'numeric',year:'2-digit'}) : '—'}
+                ${inv.season && inv.season !== (getActiveSeason()||'') ? `<span style="font-size:9px;background:var(--blue-light);color:var(--blue-text);border-radius:3px;padding:1px 4px;margin-left:3px">${inv.season}</span>` : ''}
+              </td>
               <td><span class="badge ${inv.sale_type === 'against_contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'against_contract' ? 'Contract' : 'Cash'}</span></td>
               <td><strong>${inv.buyer || '—'}</strong></td>
               <td class="muted text-sm">${commodities}</td>
