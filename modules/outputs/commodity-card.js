@@ -548,28 +548,30 @@ export async function buildContractPosition(season) {
     byCommodity[key].contracts.push(c);
   });
 
-  // Compute invoiced qty + revenue + QA per contract
+  // Compute invoiced qty + total paid (gross + QA) per contract
   const invByContract = {};
   invoices.forEach(inv => {
     if (!inv.forward_contract_id) return;
-    if (!invByContract[inv.forward_contract_id]) invByContract[inv.forward_contract_id] = { qty: 0, revenue: 0, qa: 0 };
-    let qty = 0, revenue = 0, qa = 0;
+    if (!invByContract[inv.forward_contract_id]) invByContract[inv.forward_contract_id] = { qty: 0, totalPaid: 0, qa: 0 };
+    let qty = 0, totalPaid = 0, qa = 0;
     if (inv.batches) {
       const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
       b.forEach(batch => {
-        const saleLines = (batch.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa');
-        const qaLines = (batch.lines || []).filter(l => l.type === 'income' && l.line_type === 'qa');
+        const allIncomeLines = (batch.lines || []).filter(l => l.type === 'income');
+        const qaLines = allIncomeLines.filter(l => l.line_type === 'qa');
         qty += parseFloat(batch.qty) || 0;
-        revenue += saleLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+        // Total paid = all income lines (gross + QA combined)
+        totalPaid += allIncomeLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
         qa += qaLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
       });
     } else {
       qty = parseFloat(inv.master_qty || inv.total_qty) || 0;
-      revenue = parseFloat(inv.gross_amount) || 0;
+      // gross_amount + quality_adj = total paid to grower
+      totalPaid = (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0);
       qa = parseFloat(inv.total_quality_adj) || 0;
     }
     invByContract[inv.forward_contract_id].qty += qty;
-    invByContract[inv.forward_contract_id].revenue += revenue;
+    invByContract[inv.forward_contract_id].totalPaid += totalPaid;
     invByContract[inv.forward_contract_id].qa += qa;
   });
 
@@ -615,7 +617,7 @@ export async function buildContractPosition(season) {
     const totalQty = com.contracts.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0);
     const totalValue = com.contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
     const totalInvoicedQty = com.contracts.reduce((s, c) => s + (invByContract[c.id]?.qty || 0), 0);
-    const totalInvoicedRev = com.contracts.reduce((s, c) => s + (invByContract[c.id]?.revenue || 0), 0);
+    const totalInvoicedRev = com.contracts.reduce((s, c) => s + (invByContract[c.id]?.totalPaid || 0), 0);
     const totalRemaining = Math.max(0, totalQty - totalInvoicedQty);
     const avgPrice = totalQty > 0 ? totalValue / totalQty : 0;
     const pctInvoiced = totalQty > 0 ? Math.round(totalInvoicedQty / totalQty * 100) : 0;
@@ -686,7 +688,7 @@ export async function buildContractPosition(season) {
           ? `<span style="font-size:9px;font-weight:600;color:#185FA5;background:#e4f0fa;padding:2px 7px;border-radius:10px">${pct}%</span>`
           : `<span style="font-size:9px;font-weight:600;color:var(--hint);background:var(--border-light);padding:2px 7px;border-radius:10px">Pending</span>`;
 
-        const netPaidPerUnit = invoiced.qty > 0 ? (invoiced.revenue + invoiced.qa) / invoiced.qty : null;
+        const netPaidPerUnit = invoiced.qty > 0 ? invoiced.totalPaid / invoiced.qty : null;
         const avgQaPerUnit = invoiced.qty > 0 ? invoiced.qa / invoiced.qty : null;
         return `
         <div style="display:grid;grid-template-columns:160px 70px 65px 65px 65px 70px 1fr;gap:0;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border-light);${idx % 2 === 1 ? 'background:var(--page-bg)' : ''}"
@@ -709,8 +711,10 @@ export async function buildContractPosition(season) {
 
       <!-- Commodity total row -->
       ${(() => {
-        const totalNetPaid = totalInvoicedQty > 0 ? (totalInvoicedRev + com.contracts.reduce((s,c)=>s+(invByContract[c.id]?.qa||0),0)) / totalInvoicedQty : null;
-        const totalAvgQa = totalInvoicedQty > 0 ? com.contracts.reduce((s,c)=>s+(invByContract[c.id]?.qa||0),0) / totalInvoicedQty : null;
+        const totalTotalPaid = com.contracts.reduce((s,c)=>s+(invByContract[c.id]?.totalPaid||0),0);
+        const totalQa = com.contracts.reduce((s,c)=>s+(invByContract[c.id]?.qa||0),0);
+        const totalNetPaid = totalInvoicedQty > 0 ? totalTotalPaid / totalInvoicedQty : null;
+        const totalAvgQa = totalInvoicedQty > 0 ? totalQa / totalInvoicedQty : null;
         return `<div style="display:grid;grid-template-columns:160px 70px 65px 65px 65px 70px 1fr;gap:0;align-items:center;padding:8px 14px;background:var(--page-bg);border-top:2px solid var(--border)">
           <div style="font-size:11px;font-weight:600;color:var(--ink)">${commName} total</div>
           <div style="font-size:11px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:var(--ink)">${fN2(totalQty)}</div>
