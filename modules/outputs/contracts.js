@@ -9,6 +9,7 @@ import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLive
 let _contracts = [];
 let _invoices = [];
 let _unsub = null;
+let _container = null;
 
 // ── Entry point ───────────────────────────────────────────────
 export async function mountContracts(container) {
@@ -63,6 +64,7 @@ export async function mountContracts(container) {
     </div>
   `;
 
+  _container = container;
   await loadCommodities();
   await _loadData();
   _renderTable();
@@ -264,7 +266,7 @@ function _renderTable() {
     const slicerStyle = 'font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);cursor:pointer';
     _cpWrap.innerHTML = `<button class="con-commodity-pill con-slicer-btn ${activeComms.size===0?'active':''}" data-val="" style="${slicerStyle};background:${activeComms.size===0?'var(--blue)':'white'};color:${activeComms.size===0?'white':'var(--ink-mid)'};border-color:${activeComms.size===0?'var(--blue)':'var(--border)'};font-weight:500">All</button>` +
       commodities.map(c => `<button class="con-commodity-pill con-slicer-btn ${activeComms.has(c)?'active':''}" data-val="${c}" style="${slicerStyle};background:${activeComms.has(c)?'var(--blue)':'white'};color:${activeComms.has(c)?'white':'var(--ink-mid)'};border-color:${activeComms.has(c)?'var(--blue)':'var(--border)'}">${c}</button>`).join('');
-    _wirePillGroup(container, '.con-commodity-pill');
+    _wirePillGroup(_container, '.con-commodity-pill');
   }
 
   // Build delivery month pills dynamically
@@ -280,7 +282,7 @@ function _renderTable() {
         const label = new Date(y,mo-1).toLocaleDateString('en-AU',{month:'short',year:'numeric'});
         return `<button class="con-month-pill con-slicer-btn ${activeMonths.has(m)?'active':''}" data-val="${m}" style="${slicerStyle2};background:${activeMonths.has(m)?'var(--blue)':'white'};color:${activeMonths.has(m)?'white':'var(--ink-mid)'};border-color:${activeMonths.has(m)?'var(--blue)':'var(--border)'}">${label}</button>`;
       }).join('');
-    _wirePillGroup(container, '.con-month-pill');
+    _wirePillGroup(_container, '.con-month-pill');
   }
   const rows = _filtered();
   const wrap = qs('#con-table-wrap');
