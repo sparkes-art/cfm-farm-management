@@ -316,38 +316,24 @@ function _renderTable() {
   const thStyle = 'cursor:pointer;user-select:none;white-space:nowrap';
   const sortIcon = (col) => sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ' ⇅';
 
+  const thW = 'white-space:nowrap;cursor:pointer;user-select:none';
   wrap.innerHTML = `
-    <table class="data-table" style="table-layout:fixed;width:100%">
-      <colgroup>
-        <col style="width:110px">
-        <col style="width:120px">
-        <col style="width:140px">
-        <col style="width:90px">
-        <col style="width:90px">
-        <col style="width:90px">
-        <col style="width:100px">
-        <col style="width:90px">
-        <col style="width:80px">
-        <col style="width:110px">
-        <col style="width:120px">
-        <col style="width:50px">
-        ${canWrite() ? '<col style="width:60px">' : ''}
-      </colgroup>
+    <table class="data-table" style="width:100%">
       <thead>
         <tr>
-          <th class="con-sort" data-col="contract_number" style="${thStyle}">Contract #${sortIcon('contract_number')}</th>
-          <th class="con-sort" data-col="commodity" style="${thStyle}">Commodity${sortIcon('commodity')}</th>
-          <th class="con-sort" data-col="counterparty" style="${thStyle}">Buyer${sortIcon('counterparty')}</th>
-          <th class="con-sort" data-col="sale_date" style="${thStyle}">Sale date${sortIcon('sale_date')}</th>
-          <th class="num con-sort" data-col="quantity" style="${thStyle}">Units sold${sortIcon('quantity')}</th>
-          <th class="num con-sort" data-col="price_per_unit" style="${thStyle}">Price / unit${sortIcon('price_per_unit')}</th>
-          <th class="num con-sort" data-col="value" style="${thStyle}">Total value${sortIcon('value')}</th>
-          <th class="num">Invoiced</th>
-          <th class="num">To go</th>
-          <th class="num">Paid (incl. QA)</th>
-          <th class="con-sort" data-col="delivery_start" style="${thStyle}">Delivery${sortIcon('delivery_start')}</th>
-          <th>PDF</th>
-          ${canWrite() ? '<th></th>' : ''}
+          <th class="con-sort" data-col="contract_number" style="${thW};min-width:110px">Contract #${sortIcon('contract_number')}</th>
+          <th class="con-sort" data-col="commodity" style="${thW};min-width:110px">Commodity${sortIcon('commodity')}</th>
+          <th class="con-sort" data-col="counterparty" style="${thW};min-width:130px">Buyer${sortIcon('counterparty')}</th>
+          <th class="con-sort" data-col="sale_date" style="${thW};min-width:90px">Sale date${sortIcon('sale_date')}</th>
+          <th class="num con-sort" data-col="quantity" style="${thW};min-width:90px">Units sold${sortIcon('quantity')}</th>
+          <th class="num con-sort" data-col="price_per_unit" style="${thW};min-width:90px">Price / unit${sortIcon('price_per_unit')}</th>
+          <th class="num con-sort" data-col="value" style="${thW};min-width:100px">Total value${sortIcon('value')}</th>
+          <th class="num" style="white-space:nowrap;min-width:90px">Invoiced</th>
+          <th class="num" style="white-space:nowrap;min-width:80px">To go</th>
+          <th class="num" style="white-space:nowrap;min-width:110px">Paid (incl. QA)</th>
+          <th class="con-sort" data-col="delivery_start" style="${thW};min-width:110px">Delivery${sortIcon('delivery_start')}</th>
+          <th style="min-width:50px">PDF</th>
+          ${canWrite() ? '<th style="min-width:120px"></th>' : ''}
         </tr>
       </thead>
       <tbody>
@@ -387,7 +373,6 @@ function _renderTable() {
                 <strong>${c.contract_number || '—'}</strong>
                 ${c.is_complete ? '<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:600;color:white;background:var(--green);border-radius:10px;padding:1px 7px">✓ Complete</span>' : ''}
               </td>
-              <td class="muted">${c.crop_year || '—'}</td>
               <td><span class="badge badge-${c.commodity}">${_cap(c.commodity || 'other')}</span></td>
               <td>${c.counterparty || '—'}</td>
               <!-- grade_spec hidden -->
