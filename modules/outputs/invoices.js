@@ -740,16 +740,27 @@ export function openInvoiceForm(container, existing = null) {
   const modal = document.createElement('div');
   modal.style.cssText = 'background:var(--white);border-radius:var(--radius-xl);max-width:760px;margin:0 auto;display:flex;flex-direction:column;overflow:hidden';
 
-  // Existing data
-  const existingBatch = existing?.batches?.[0] || null;
-  const existingLines = existingBatch?.lines || existing?.line_items || [];
-  const existingSaleLine = existingLines.find(l => l.type === 'income' && l.line_type !== 'qa');
-  const existingQALine = existingLines.find(l => l.type === 'income' && l.line_type === 'qa');
-  const existingGross = existingSaleLine?.amount ?? existing?.gross_amount ?? '';
-  const existingQA = existingQALine?.amount ?? existing?.total_quality_adj ?? '';
-  const existingQty = existingBatch?.qty ?? existing?.total_qty ?? '';
-  const existingDocket = existingBatch?.income_docket || '';
-  const existingRctiFiles = existing?.rcti_files || (existingBatch?.income_files) || [];
+  // Existing data — sum across ALL batches for multi-batch invoices
+  const existingBatches = existing?.batches
+    ? (typeof existing.batches === 'string' ? JSON.parse(existing.batches) : existing.batches)
+    : [];
+  const isMultiBatch = existingBatches.length > 1;
+  // Sum qty and amounts across all income batches
+  const existingQty = existingBatches.length
+    ? existingBatches.filter(b => (b.lines||[]).some(l => l.type==='income' && l.line_type!=='qa'))
+        .reduce((s, b) => s + (parseFloat(b.qty)||0), 0) || existing?.total_qty || ''
+    : existing?.total_qty || '';
+  const existingGross = existingBatches.length
+    ? existingBatches.flatMap(b => b.lines||[]).filter(l => l.type==='income' && l.line_type!=='qa')
+        .reduce((s, l) => s + (parseFloat(l.amount)||0), 0) || existing?.gross_amount || ''
+    : existing?.gross_amount || '';
+  const existingQA = existingBatches.length
+    ? existingBatches.flatMap(b => b.lines||[]).filter(l => l.type==='income' && l.line_type==='qa')
+        .reduce((s, l) => s + (parseFloat(l.amount)||0), 0) || existing?.total_quality_adj || ''
+    : existing?.total_quality_adj || '';
+  const existingRctiFiles = existing?.rcti_files
+    || existingBatches.flatMap(b => b.income_files||[])
+    || [];
 
   modal.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border-light);background:#fafbfc">
@@ -757,6 +768,10 @@ export function openInvoiceForm(container, existing = null) {
       <button id="inv-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--hint);padding:2px 6px;border-radius:4px">✕</button>
     </div>
     <div style="padding:20px;overflow-y:auto;flex:1" id="inv-form-body">
+
+      ${isMultiBatch ? `<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e">
+        ⚠ This invoice has ${existingBatches.length} batches. Totals are summed across all batches — saving will consolidate them into one.
+      </div>` : ''}
 
       <!-- RCTI Upload -->
       <div style="border:2px dashed var(--border);border-radius:var(--radius-md);padding:16px;margin-bottom:20px;background:var(--page-bg)">
