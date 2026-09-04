@@ -29,7 +29,8 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body); }
   catch { return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
 
-  const { pdf_base64, farm_id, save_example, correction, extraction_id, document_type } = body;
+  // Accept either raw text (extracted client-side) or base64 PDF fallback
+  const { pdf_base64, pdf_text, farm_id, save_example, correction, extraction_id, document_type } = body;
 
   // Save correction as training example
   if (save_example && extraction_id && correction) {
@@ -44,7 +45,7 @@ exports.handler = async (event) => {
     }
   }
 
-  if (!pdf_base64) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No PDF data provided' }) };
+  if (!pdf_base64 && !pdf_text) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No PDF data provided' }) };
 
   // Load few-shot examples
   let examples = [];
@@ -131,10 +132,14 @@ exports.handler = async (event) => {
         max_tokens: 2000,
         messages: [{
           role: 'user',
-          content: [
-            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf_base64 } },
-            { type: 'text', text: prompt }
-          ]
+          content: pdf_text
+            // Text extracted client-side — much faster, no binary transfer
+            ? [{ type: 'text', text: prompt + '\n\nDocument text:\n' + pdf_text }]
+            // Fallback: send raw PDF (slower, may timeout on large files)
+            : [
+                { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf_base64 } },
+                { type: 'text', text: prompt }
+              ]
         }]
       })
     });

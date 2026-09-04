@@ -512,16 +512,55 @@ async function _callExtractAPI(file, farm, documentType) {
   if (file.size > 4 * 1024 * 1024) {
     throw new Error(`File too large (${(file.size/1024/1024).toFixed(1)}MB). Please use a PDF under 4MB.`);
   }
-  const base64 = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+
+  // Try to extract text client-side using PDF.js — much faster than sending binary
+  let pdf_text = null;
+  try {
+    if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+      // Load PDF.js if not already loaded
+      if (!window.pdfjsLib) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+          s.onload = resolve; s.onerror = reject;
+          document.head.appendChild(s);
+        });
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const pages = [];
+      for (let i = 1; i <= Math.min(pdf.numPages, 10); i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        pages.push(content.items.map(item => item.str).join(' '));
+      }
+      pdf_text = pages.join('\n\n');
+    }
+  } catch(e) {
+    console.warn('PDF.js text extraction failed, falling back to binary:', e.message);
+    pdf_text = null;
+  }
+
+  // Build request body — prefer text over binary
+  const body = { farm_id: farm.id, document_type: documentType };
+  if (pdf_text && pdf_text.trim().length > 50) {
+    body.pdf_text = pdf_text;
+  } else {
+    // Fallback to base64 for image-based PDFs or if text extraction failed
+    body.pdf_base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
   const res = await fetch('/api/extract-rcti', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pdf_base64: base64, farm_id: farm.id, document_type: documentType }),
+    body: JSON.stringify(body),
   });
   // Guard against HTML error pages from Netlify (timeout, 404, oversized body)
   const contentType = res.headers.get('content-type') || '';
