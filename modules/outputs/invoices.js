@@ -647,13 +647,13 @@ function _showRCTIReview(data, extractionId, examplesUsed, batchDiv, parentModal
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2000;overflow-y:auto;padding:20px';
   const fieldDefs = [
     ['RCTI number','rcti_number'],['Gin / buyer','gin_name'],['Invoice date','invoice_date'],
-    ['Crop year','crop_year'],['Docket numbers','docket_numbers'],['Bale count','bale_count'],
-    ['Gross proceeds','gross_proceeds'],['Net payment','net_payment'],['GST','gst_amount'],['Notes','notes']
+    ['Crop year','crop_year'],['Bale count','bale_count'],
+    ['Gross proceeds','gross_proceeds'],['Net payment','net_payment'],['Notes','notes']
   ];
   let html = '<div style="background:white;border-radius:12px;max-width:680px;margin:0 auto">';
   html += '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">';
   html += '<div><div style="font-size:15px;font-weight:700">RCTI extraction results</div>';
-  html += '<div style="font-size:11px;color:var(--hint);margin-top:2px">' + (examplesUsed ? 'Using ' + examplesUsed + ' training examples' : 'First extraction for this farm') + '</div></div>';
+  html += '<div style="font-size:11px;color:var(--hint);margin-top:2px">' + (examplesUsed ? 'Accuracy improving — ' + examplesUsed + ' past corrections used' : 'First extraction from this document type') + '</div></div>';
   html += '<div style="display:flex;gap:8px"><button id="rcti-cancel" class="btn btn-ghost btn-sm">Cancel</button><button id="rcti-apply" class="btn btn-primary btn-sm">Apply</button></div></div>';
   if (issues) {
     html += '<div style="margin:12px 16px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;font-size:12px;color:#92400e"><strong>Flagged:</strong>';
@@ -667,6 +667,8 @@ function _showRCTIReview(data, extractionId, examplesUsed, batchDiv, parentModal
     var val = data[key];
     if (Array.isArray(val)) val = val.join(', ');
     if (val == null) val = '';
+    // Round bale_count to 2 decimal places
+    if (key === 'bale_count' && val !== '') val = (Math.round(parseFloat(val)*100)/100).toFixed(2);
     html += '<div class="form-group" style="margin:0"><label class="form-label" style="font-size:10px">' + label + '</label>';
     html += '<input class="form-input rcti-field" data-key="' + key + '" type="text" value="' + String(val).replace(/"/g, '&quot;') + '" style="font-size:12px"></div>';
   });
@@ -730,15 +732,24 @@ function _getPastDescriptions(type) {
 export function openInvoiceForm(container, existing = null) {
   const farm = getActiveFarm();
   const isEdit = !!existing;
-  let saleType = existing?.sale_type === 'against_contract' ? 'contract' : (existing?.sale_type || 'contract');
-  let lines = existing?.line_items ? JSON.parse(JSON.stringify(existing.line_items)) : [];
-  let deductions = existing?.deductions ? JSON.parse(JSON.stringify(existing.deductions)) : [];
+  const activeSeason = getActiveSeason() || '';
 
   const formEl = document.createElement('div');
-  formEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:500;overflow-y:auto;padding:20px';
+  formEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;overflow-y:auto;padding:20px';
 
   const modal = document.createElement('div');
-  modal.style.cssText = 'background:var(--white);border-radius:var(--radius-xl);max-width:900px;margin:0 auto;display:flex;flex-direction:column;overflow:hidden';
+  modal.style.cssText = 'background:var(--white);border-radius:var(--radius-xl);max-width:760px;margin:0 auto;display:flex;flex-direction:column;overflow:hidden';
+
+  // Existing data
+  const existingBatch = existing?.batches?.[0] || null;
+  const existingLines = existingBatch?.lines || existing?.line_items || [];
+  const existingSaleLine = existingLines.find(l => l.type === 'income' && l.line_type !== 'qa');
+  const existingQALine = existingLines.find(l => l.type === 'income' && l.line_type === 'qa');
+  const existingGross = existingSaleLine?.amount ?? existing?.gross_amount ?? '';
+  const existingQA = existingQALine?.amount ?? existing?.total_quality_adj ?? '';
+  const existingQty = existingBatch?.qty ?? existing?.total_qty ?? '';
+  const existingDocket = existingBatch?.income_docket || '';
+  const existingRctiFiles = existing?.rcti_files || (existingBatch?.income_files) || [];
 
   modal.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border-light);background:#fafbfc">
@@ -747,45 +758,44 @@ export function openInvoiceForm(container, existing = null) {
     </div>
     <div style="padding:20px;overflow-y:auto;flex:1" id="inv-form-body">
 
-      <!-- RCTI Upload — PDF first, like contract form -->
-      <div class="card" style="margin-bottom:18px;border:2px dashed var(--rule);box-shadow:none">
-        <div class="card-body" style="padding:14px">
-          <p style="font-size:var(--text-sm);font-weight:600;margin-bottom:4px">📄 Upload RCTI</p>
-          <p style="font-size:var(--text-xs);color:var(--muted);margin-bottom:10px">
-            Upload the RCTI PDF and AI will extract the details automatically. Review and adjust before saving.
-          </p>
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-            <input type="file" id="rcti-pdf-upload" accept=".pdf,image/*" style="font-size:var(--text-sm);flex:1;min-width:200px">
-            <button class="btn btn-secondary" id="btn-extract-rcti" type="button">✨ Extract details</button>
-          </div>
-          <div id="rcti-extract-status" style="min-height:18px;margin-top:8px;font-size:12px"></div>
+      <!-- RCTI Upload -->
+      <div style="border:2px dashed var(--border);border-radius:var(--radius-md);padding:16px;margin-bottom:20px;background:var(--page-bg)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">📄 RCTI / Invoice</div>
+        <div style="font-size:11px;color:var(--hint);margin-bottom:12px">Upload an RCTI PDF and AI will extract the details. Or enter manually below.</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <input type="file" id="rcti-pdf-upload" accept=".pdf,image/*" style="font-size:12px;flex:1;min-width:180px">
+          <button class="btn btn-secondary btn-sm" id="btn-extract-rcti" type="button">✨ Extract details</button>
         </div>
+        <div id="rcti-extract-status" style="min-height:16px;margin-top:8px;font-size:11px"></div>
+        ${existingRctiFiles.length ? `
+          <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">
+            ${existingRctiFiles.map(f => `<a href="${f.url}" target="_blank" style="font-size:10px;color:var(--blue);text-decoration:none;background:var(--blue-light);border-radius:4px;padding:2px 8px">📄 ${f.filename||'RCTI'}</a>`).join('')}
+          </div>` : ''}
+        <div id="rcti-file-list" style="margin-top:6px"></div>
       </div>
 
       <!-- Sale type -->
       <div style="display:flex;gap:10px;margin-bottom:16px">
         <div id="inv-opt-contract" style="flex:1;border:2px solid var(--blue);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer;background:var(--blue-light)">
-          <p style="font-size:var(--text-sm);font-weight:600;color:var(--blue-text)">Contract sale</p>
-          <p style="font-size:var(--text-xs);color:var(--blue);margin-top:2px">Against a forward contract</p>
+          <p style="font-size:13px;font-weight:600;color:var(--blue-text)">Contract sale</p>
+          <p style="font-size:11px;color:var(--blue);margin-top:2px">Against a forward contract</p>
         </div>
         <div id="inv-opt-cash" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer">
-          <p style="font-size:var(--text-sm);font-weight:600;color:var(--ink-mid)">Cash sale</p>
-          <p style="font-size:var(--text-xs);color:var(--muted);margin-top:2px">Price set at time of sale</p>
+          <p style="font-size:13px;font-weight:600;color:var(--ink-mid)">Cash sale</p>
+          <p style="font-size:11px;color:var(--hint);margin-top:2px">Price set at time of sale</p>
         </div>
       </div>
 
       <!-- Contract selector -->
       <div id="f-contract-section" style="margin-bottom:16px">
-        <div class="form-group" style="margin:0">
-          <label class="form-label">Forward contract</label>
-          <div style="position:relative" id="f-contract-wrap">
-            <input type="text" id="f-contract-search" class="form-input" placeholder="Search contracts..." autocomplete="off"
-              value="${existing?.forward_contract_id ? (() => { const c = _contracts.find(x=>x.id===existing.forward_contract_id); return c ? (c.contract_number||'Contract')+' — '+(c.commodity||'')+' — '+formatNumber(c.quantity,0)+' '+(c.unit||'')+' @ '+formatCurrency(c.price_per_unit,2) : ''; })() : ''}"
-              style="width:100%">
-            <input type="hidden" id="f-contract" value="${existing?.forward_contract_id||''}">
-            <div id="f-contract-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:white;border:1px solid var(--border);border-radius:var(--radius-md);margin-top:2px;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1)">
-              <div id="f-contract-opts"></div>
-            </div>
+        <label class="form-label">Forward contract</label>
+        <div style="position:relative" id="f-contract-wrap">
+          <input type="text" id="f-contract-search" class="form-input" placeholder="Search contracts…" autocomplete="off"
+            value="${existing?.forward_contract_id ? (() => { const c = _contracts.find(x=>x.id===existing.forward_contract_id); return c ? (c.contract_number||'')+'  —  '+(c.commodity||'')+' — '+formatNumber(c.quantity,0)+' '+(c.unit||'')+' @ '+formatCurrency(c.price_per_unit,2) : ''; })() : ''}"
+            style="width:100%">
+          <input type="hidden" id="f-contract" value="${existing?.forward_contract_id||''}">
+          <div id="f-contract-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:white;border:1px solid var(--border);border-radius:var(--radius-md);margin-top:2px;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1)">
+            <div id="f-contract-opts"></div>
           </div>
         </div>
         <div id="f-contract-summary" style="display:none;grid-template-columns:repeat(4,1fr) 1.2fr;gap:10px;background:var(--blue-light);border-radius:var(--radius-sm);padding:12px;margin-top:8px">
@@ -797,713 +807,336 @@ export function openInvoiceForm(container, existing = null) {
         </div>
       </div>
 
-      <!-- Buyer + Date + Unit row -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+      <!-- Core fields -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
         <div class="form-group" style="margin:0">
-          <label class="form-label">Buyer</label>
-          <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer || ''}" placeholder="Buyer name">
+          <label class="form-label">Buyer <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="f-buyer" type="text" value="${existing?.buyer||''}" placeholder="Gin or buyer name">
         </div>
         <div class="form-group" style="margin:0">
-          <label class="form-label">Date</label>
-          <input class="form-input" id="f-date" type="date" value="${existing?.invoice_date || new Date().toISOString().slice(0,10)}">
+          <label class="form-label">Date <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="f-date" type="date" value="${existing?.invoice_date||new Date().toISOString().slice(0,10)}">
         </div>
         <div class="form-group" style="margin:0">
-          <label class="form-label">Master unit</label>
+          <label class="form-label">Unit</label>
           <select class="form-select" id="f-master-unit">
             ${['bale','t','kg','head','each'].map(u=>`<option${u===(existing?.master_unit||'bale')?' selected':''}>${u}</option>`).join('')}
           </select>
         </div>
+      </div>
+
+      <!-- Quantities and amounts -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
         <div class="form-group" style="margin:0">
-          <label class="form-label">GST treatment</label>
-          <div style="padding:8px 10px;background:#f0f9f4;border:1px solid #b7e4cc;border-radius:var(--radius-sm);font-size:12px;color:#1a6b3c">
-            Ex-GST — calculated in Xero
-          </div>
-          <input type="hidden" id="f-gst" value="ex">
+          <label class="form-label">Quantity <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="f-qty" type="number" step="0.01" min="0" value="${existingQty ? parseFloat(existingQty).toFixed(2) : ''}" placeholder="0.00">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Gross proceeds <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="f-gross" type="number" step="0.01" value="${existingGross||''}" placeholder="0.00">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Quality adjustment</label>
+          <input class="form-input" id="f-qa" type="number" step="0.01" value="${existingQA||''}" placeholder="0.00 (negative = discount)">
         </div>
       </div>
 
-      <!-- Batches -->
-      <div id="f-batches-wrap" style="margin-bottom:16px"></div>
-      <button class="btn btn-secondary btn-sm" id="f-add-batch" style="margin-bottom:16px">＋ Add batch</button>
-
-      <!-- Other documents (for items not tied to a specific batch) -->
-      <div style="margin-bottom:16px">
-        <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border:1px solid var(--border);border-radius:8px;background:var(--page-bg)">
-          <span style="font-size:11px;font-weight:600;color:var(--hint)">📎 Other documents</span>
-          <button id="f-other-attach" class="btn btn-ghost btn-sm" style="font-size:11px">Attach</button>
-          <input type="file" id="f-file-input" multiple accept=".pdf,image/*" style="display:none">
-          <div id="f-file-list" style="display:flex;flex-wrap:wrap;gap:4px;flex:1">
-            ${(existing?.other_files||[]).map(f=>`<a href="${f.url}" target="_blank" style="display:inline-flex;align-items:center;gap:4px;background:white;border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px;text-decoration:none;color:var(--blue)">📎 ${(f.filename||'file').slice(0,20)}</a>`).join('')}
-          </div>
+      <!-- Totals display -->
+      <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Gross proceeds</div>
+          <div id="t-gross" style="font-size:16px;font-weight:600;color:var(--ink)">—</div>
+        </div>
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Quality adj</div>
+          <div id="t-qa" style="font-size:16px;font-weight:600;color:var(--ink)">—</div>
+        </div>
+        <div style="border-left:2px solid var(--border);padding-left:12px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total income</div>
+          <div id="t-total" style="font-size:20px;font-weight:700;color:var(--blue)">—</div>
         </div>
       </div>
 
       <!-- Notes -->
       <div class="form-group" style="margin-bottom:16px">
         <label class="form-label">Notes</label>
-        <textarea class="form-textarea" id="f-notes" rows="3" placeholder="Internal notes, gin reference, pool details, delivery information…">${existing?.notes || ''}</textarea>
+        <textarea class="form-input" id="f-notes" rows="2" placeholder="Optional notes">${existing?.notes||''}</textarea>
       </div>
 
-      <!-- Invoice summary only -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
-        <div></div>
-        <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:14px">
-          <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Invoice Summary</p>
-          <div style="display:flex;flex-direction:column;gap:5px">
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Gross</span><span id="t-gross" style="font-family:var(--font-data)">$0.00</span></div>
-            <div id="t-qa-row" style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Quality adj</span><span id="t-qa" style="font-family:var(--font-data)">—</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);font-weight:600;color:var(--ink);border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px"><span>Net amount</span><span id="t-net" style="font-family:var(--font-data)">$0.00</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-md);font-weight:600;color:var(--blue)"><span>Total payable</span><span id="t-total" style="font-family:var(--font-data)">$0.00</span></div>
-          </div>
-        </div>
+      <!-- Actions -->
+      <div style="display:flex;justify-content:flex-end;gap:10px;padding-top:8px;border-top:1px solid var(--border-light)">
+        <button class="btn btn-ghost" id="f-cancel">Cancel</button>
+        <button class="btn btn-primary" id="f-save">✓ Save invoice</button>
       </div>
-
-    </div>
-
-    <!-- Footer -->
-    <div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid var(--border-light);background:#fafbfc">
-      <button class="btn btn-secondary" id="f-cancel">Cancel</button>
-      <button class="btn btn-primary" id="f-save"><i style="margin-right:4px">✓</i> Save — pending</button>
     </div>
   `;
 
   formEl.appendChild(modal);
   document.body.appendChild(formEl);
 
-  // ── Wire up interactions ───────────────────────────────────
-
-  // Close
-  const close = () => formEl.remove();
+  function close() { formEl.remove(); }
   modal.querySelector('#inv-close')?.addEventListener('click', close);
   modal.querySelector('#f-cancel')?.addEventListener('click', close);
+  formEl.addEventListener('click', e => { if (e.target === formEl) close(); });
 
-  // ── RCTI PDF extraction ──────────────────────────────────────
-  // Uses existing _extractFromRCTI which shows review panel, lets user
-  // correct fields, and saves corrections as training examples automatically
+  // ── RCTI extraction ──────────────────────────────────────────
+  let _rctiFiles = [...existingRctiFiles];
+
+  modal.querySelector('#rcti-pdf-upload')?.addEventListener('change', function() {
+    if (this.files[0]) {
+      const list = modal.querySelector('#rcti-file-list');
+      if (list) list.innerHTML = `<span style="font-size:10px;color:var(--blue)">📄 ${this.files[0].name}</span>`;
+    }
+  });
+
   modal.querySelector('#btn-extract-rcti')?.addEventListener('click', async () => {
     const fileInput = modal.querySelector('#rcti-pdf-upload');
     const statusEl = modal.querySelector('#rcti-extract-status');
     const file = fileInput?.files?.[0];
-    if (!file) {
-      statusEl.textContent = 'Please select a PDF first.';
-      statusEl.style.color = 'var(--red)';
-      return;
-    }
-    // Ensure at least one batch exists
-    if (!modal.querySelector('[data-batch-id]')) addBatch();
-    const batchDiv = modal.querySelector('[data-batch-id]');
-    statusEl.textContent = 'Extracting…'; statusEl.style.color = 'var(--muted)';
+    if (!file) { statusEl.textContent = 'Please select a PDF first.'; statusEl.style.color = 'var(--red)'; return; }
+    const btn = modal.querySelector('#btn-extract-rcti');
+    btn.disabled = true; btn.textContent = 'Extracting…';
+    statusEl.textContent = 'Reading PDF…'; statusEl.style.color = 'var(--hint)';
     try {
-      // Show which path is being taken
-      const batchDiv = modal.querySelector('[data-batch-id]') || (() => { addBatch(); return modal.querySelector('[data-batch-id]'); })();
-      await _extractFromRCTI(batchDiv, file, modal, addBatchLine, recalcBatch);
-      statusEl.textContent = '✓ Review the extracted details in the panel above.';
-      statusEl.style.color = 'var(--green)';
+      const { extracted, extraction_id, examples_used } = await _callExtractAPI(file, farm, 'rcti');
+      if (!extracted) throw new Error('No data returned');
+      _rctiFiles.push(file);
+
+      // Populate fields
+      const setField = (id, val, round2) => {
+        const el = modal.querySelector('#' + id);
+        if (!el || val == null || val === '') return;
+        el.value = round2 ? (Math.round(parseFloat(val)*100)/100).toFixed(2) : val;
+        el.style.borderColor = ''; el.style.background = '';
+        el.dispatchEvent(new Event('input'));
+      };
+      if (!modal.querySelector('#f-buyer').value) setField('f-buyer', extracted.gin_name);
+      if (!modal.querySelector('#f-date').value) setField('f-date', extracted.invoice_date);
+      setField('f-qty', extracted.bale_count, true);
+      setField('f-gross', extracted.gross_proceeds, true);
+      // QA: sum all quality_premiums_discounts
+      const qaTotal = (extracted.quality_premiums_discounts||[]).reduce((s,q)=>s+(parseFloat(q.total_amount)||0),0);
+      if (qaTotal !== 0) setField('f-qa', qaTotal, true);
+
+      // Save file reference for upload on save
+      const list = modal.querySelector('#rcti-file-list');
+      if (list) list.innerHTML = `<span style="font-size:10px;color:var(--blue)">📄 ${file.name}</span>`;
+
+      recalcTotals();
+
+      // Flag missing required fields
+      const missing = [];
+      ['f-buyer','f-date','f-qty','f-gross'].forEach(id => {
+        const el = modal.querySelector('#' + id);
+        if (el && !el.value) {
+          el.style.borderColor = 'var(--red)'; el.style.background = '#fff5f5';
+          missing.push(id.replace('f-',''));
+          el.addEventListener('input', () => { el.style.borderColor=''; el.style.background=''; }, { once: true });
+        }
+      });
+
+      // Save correction for continuous learning
+      if (extraction_id) fetch('/api/extract-rcti', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ farm_id: farm.id, save_example: true, extraction_id, correction: extracted })
+      }).catch(()=>{});
+
+      statusEl.textContent = missing.length
+        ? '⚠ Extracted — check highlighted fields: ' + missing.join(', ')
+        : `✓ Extracted${examples_used ? ' (using '+examples_used+' past examples)' : ''}. Review and save.`;
+      statusEl.style.color = missing.length ? 'var(--amber)' : 'var(--green)';
+
     } catch(e) {
-      statusEl.textContent = 'Error: ' + e.message;
+      statusEl.textContent = 'Extraction failed: ' + e.message;
       statusEl.style.color = 'var(--red)';
+    } finally {
+      btn.disabled = false; btn.textContent = '✨ Extract details';
     }
   });
 
+  // ── Sale type toggle ─────────────────────────────────────────
+  let saleType = existing?.sale_type === 'against_contract' ? 'contract' : (existing?.sale_type || 'contract');
+  function setSaleType(t) {
+    saleType = t;
+    const contractEl = modal.querySelector('#inv-opt-contract');
+    const cashEl = modal.querySelector('#inv-opt-cash');
+    const contractSection = modal.querySelector('#f-contract-section');
+    contractEl.style.border = t==='contract' ? '2px solid var(--blue)' : '1px solid var(--border)';
+    contractEl.style.background = t==='contract' ? 'var(--blue-light)' : '';
+    contractEl.querySelector('p').style.color = t==='contract' ? 'var(--blue-text)' : 'var(--ink-mid)';
+    cashEl.style.border = t==='cash' ? '2px solid var(--blue)' : '1px solid var(--border)';
+    cashEl.style.background = t==='cash' ? 'var(--blue-light)' : '';
+    contractSection.style.display = t==='contract' ? '' : 'none';
+  }
+  modal.querySelector('#inv-opt-contract').addEventListener('click', () => setSaleType('contract'));
+  modal.querySelector('#inv-opt-cash').addEventListener('click', () => setSaleType('cash'));
+  setSaleType(saleType);
 
-  const contractSel = modal.querySelector('#f-contract');
+  // ── Contract selector ────────────────────────────────────────
+  const contractSearch = modal.querySelector('#f-contract-search');
+  const contractHidden = modal.querySelector('#f-contract');
+  const contractDropdown = modal.querySelector('#f-contract-dropdown');
+  const contractOpts = modal.querySelector('#f-contract-opts');
   const contractSummary = modal.querySelector('#f-contract-summary');
 
   async function updateContractSummary() {
-    const cId = contractSel?.value;
+    const cId = contractHidden?.value;
     if (!cId) { contractSummary.style.display = 'none'; return; }
     const c = _contracts.find(x => x.id === cId);
     if (!c) return;
     contractSummary.style.display = 'grid';
     const qty = parseFloat(c.quantity) || 0;
     const unit = c.unit || '';
-    const existing_invs = _invoices.filter(i => i.forward_contract_id === cId && i.id !== existing?.id);
-    const invoicedQty = existing_invs.reduce((s, i) => {
-      if (i.batches && i.batches.length) {
-        const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
-        return s + b.filter(batch=>(batch.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((ss,batch)=>ss+(parseFloat(batch.qty)||0),0);
-      }
-      const lines = (i.line_items||[]).filter(l=>l.type!=='expense'&&l.line_type!=='qa');
-      const seen = new Set();
-      return s + lines.reduce((ss,l)=>{
-        const key=l.docket||l.commodity||JSON.stringify(l);
-        if(seen.has(key))return ss; seen.add(key);
-        return ss+(parseFloat(l.qty)||0);
-      },0);
-    }, 0);
-    const invoicedVal = existing_invs.reduce((s, i) => s + (parseFloat(i.gross_amount)||0), 0);
-    const cs = modal.querySelector('#cs-qty');
-    const ci = modal.querySelector('#cs-invoiced');
-    const cr = modal.querySelector('#cs-remaining');
-    const ca = modal.querySelector('#cs-avg');
-    if (cs) cs.textContent = formatNumber(qty, 0) + ' ' + unit;
-    if (ci) ci.textContent = formatNumber(invoicedQty, 0) + ' ' + unit;
-    if (cr) cr.textContent = formatNumber(Math.max(0, qty - invoicedQty), 0) + ' ' + unit;
-    if (ca) ca.textContent = invoicedQty ? formatCurrency(invoicedVal / invoicedQty, 2) : '—';
-    const cp = modal.querySelector('#cs-price');
-    if (cp) cp.textContent = c.price_per_unit ? formatCurrency(c.price_per_unit, 2) + ' / ' + (c.unit||'unit') : '—';
-    // Auto-fill buyer
-    const buyerField = modal.querySelector('#f-buyer');
-    const opt = contractSel.options[contractSel.selectedIndex];
-    if (buyerField && opt?.dataset?.buyer) buyerField.value = opt.dataset.buyer;
-
-    // Pre-fill income line descriptions with commodity name when contract changes
-    if (opt?.dataset?.commodity) {
-      const batchesWrap = modal.querySelector('#f-batches-wrap');
-      batchesWrap?.querySelectorAll('[data-batch-id]').forEach(bDiv => {
-        bDiv.querySelectorAll('.b-income-lines tr').forEach((tr, idx) => {
-          const descInput = tr.querySelector('.bl-desc');
-          if (descInput && (!descInput.value || descInput.value === descInput.dataset.prevCommodity)) {
-            descInput.value = opt.dataset.commodity;
-            descInput.dataset.prevCommodity = opt.dataset.commodity;
-          }
-        });
+    modal.querySelector('#cs-qty').textContent = formatNumber(qty, 0) + ' ' + unit;
+    modal.querySelector('#cs-price').textContent = formatCurrency(c.price_per_unit, 2);
+    // Load invoiced qty
+    try {
+      const invs = _invoices.filter(i => i.forward_contract_id === cId && i.id !== existing?.id);
+      let invoicedQty = 0;
+      invs.forEach(i => {
+        if (i.batches) {
+          const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
+          invoicedQty += b.filter(bt=>(bt.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((s,bt)=>s+(parseFloat(bt.qty)||0),0);
+        } else { invoicedQty += parseFloat(i.total_qty)||0; }
       });
-    }
+      const remaining = Math.max(0, qty - invoicedQty);
+      const avgPaid = invoicedQty > 0 ? invs.reduce((s,i)=>(s+(parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0)),0)/invoicedQty : 0;
+      modal.querySelector('#cs-invoiced').textContent = formatNumber(invoicedQty, 0) + ' ' + unit;
+      modal.querySelector('#cs-remaining').textContent = formatNumber(remaining, 0) + ' ' + unit;
+      modal.querySelector('#cs-avg').textContent = avgPaid ? formatCurrency(avgPaid, 2) : '—';
+    } catch(e) {}
   }
-  // Searchable contract dropdown
-  const searchInput = modal.querySelector('#f-contract-search');
-  const hiddenInput = modal.querySelector('#f-contract');
-  const dropdown = modal.querySelector('#f-contract-dropdown');
-  const optsWrap = modal.querySelector('#f-contract-opts');
 
-  const renderOpts = (filter='') => {
+  const renderContractOpts = (filter='') => {
+    const season = getActiveSeason();
     const lower = filter.toLowerCase();
-    const activeSeason = getActiveSeason();
-    const filtered = _contracts.filter(c => {
-      // Only show contracts for the active season
-      if (activeSeason && c.crop_year && c.crop_year !== activeSeason) return false;
-      return !lower ||
-        (c.contract_number||'').toLowerCase().includes(lower) ||
-        (c.commodity||'').toLowerCase().includes(lower) ||
-        (c.counterparty||c.buyer||'').toLowerCase().includes(lower);
+    const matches = _contracts.filter(c => {
+      if (season && c.crop_year && c.crop_year !== season) return false;
+      return !lower || (c.contract_number||'').toLowerCase().includes(lower) ||
+        (c.counterparty||c.buyer||'').toLowerCase().includes(lower) ||
+        (c.commodity||'').toLowerCase().includes(lower);
     });
-    optsWrap.innerHTML = filtered.length
-      ? filtered.map(c => {
-          const label = `${c.contract_number||'Contract'} — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}`;
-          const isSelected = hiddenInput.value === c.id;
-          return `<div class="f-contract-opt" data-id="${c.id}" data-price="${c.price_per_unit}" data-unit="${c.unit||'t'}" data-qty="${c.quantity||0}" data-buyer="${c.counterparty||c.buyer||''}" data-commodity="${c.commodity||''}"
-            style="padding:8px 12px;cursor:pointer;font-size:13px;color:var(--ink);${isSelected?'background:var(--blue-light);font-weight:600':''}">${label}</div>`;
-        }).join('')
-      : '<div style="padding:10px 12px;font-size:13px;color:var(--hint)">No contracts found</div>';
-
-    optsWrap.querySelectorAll('.f-contract-opt').forEach(opt => {
-      opt.addEventListener('mouseenter', () => opt.style.background='var(--page-bg)');
-      opt.addEventListener('mouseleave', () => opt.style.background = hiddenInput.value===opt.dataset.id?'var(--blue-light)':'');
+    contractOpts.innerHTML = matches.length
+      ? matches.map(c => `<div class="con-opt" data-id="${c.id}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border-light);font-size:13px"
+          onmouseenter="this.style.background='var(--page-bg)'" onmouseleave="this.style.background=''">
+          <strong>${c.contract_number||'—'}</strong> — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}
+        </div>`).join('')
+      : '<div style="padding:10px 14px;color:var(--hint);font-size:13px">No contracts found</div>';
+    contractOpts.querySelectorAll('.con-opt').forEach(opt => {
       opt.addEventListener('mousedown', e => {
         e.preventDefault();
-        hiddenInput.value = opt.dataset.id;
-        searchInput.value = opt.textContent.trim();
-        dropdown.style.display = 'none';
-        // Trigger contract summary update
-        const fakeOpt = { dataset: opt.dataset, value: opt.dataset.id };
-        updateContractSummaryFromOpt(fakeOpt);
+        const c = _contracts.find(x => x.id === opt.dataset.id);
+        contractHidden.value = opt.dataset.id;
+        contractSearch.value = (c?.contract_number||'') + '  —  ' + (c?.commodity||'') + ' — ' + formatNumber(c?.quantity,0) + ' ' + (c?.unit||'') + ' @ ' + formatCurrency(c?.price_per_unit,2);
+        contractDropdown.style.display = 'none';
+        // Pre-fill buyer from contract if empty
+        const buyerEl = modal.querySelector('#f-buyer');
+        if (buyerEl && !buyerEl.value) buyerEl.value = c?.counterparty || c?.buyer || '';
+        updateContractSummary();
       });
     });
   };
 
-  searchInput?.addEventListener('focus', () => { renderOpts(searchInput.value); dropdown.style.display='block'; });
-  searchInput?.addEventListener('input', () => { hiddenInput.value=''; renderOpts(searchInput.value); dropdown.style.display='block'; });
-  searchInput?.addEventListener('blur', () => setTimeout(()=>{ dropdown.style.display='none'; }, 150));
-  document.addEventListener('keydown', e => { if(e.key==='Escape') dropdown.style.display='none'; });
+  contractSearch.addEventListener('focus', () => { renderContractOpts(contractSearch.value); contractDropdown.style.display=''; });
+  contractSearch.addEventListener('input', () => { renderContractOpts(contractSearch.value); contractDropdown.style.display=''; });
+  contractSearch.addEventListener('blur', () => setTimeout(() => { contractDropdown.style.display='none'; }, 150));
+  if (existing?.forward_contract_id) updateContractSummary();
 
-  // Rewrite updateContractSummary to accept an opt object
-  const updateContractSummaryFromOpt = (opt) => {
-    const cId = opt?.dataset?.id || opt?.value || hiddenInput.value;
-    if (!cId) { contractSummary.style.display='none'; return; }
-    contractSummary.style.display='grid';
-    const qty = parseFloat(opt?.dataset?.qty||0);
-    const price = parseFloat(opt?.dataset?.price||0);
-    const unit = opt?.dataset?.unit||'unit';
-    const buyer = opt?.dataset?.buyer||'';
-    const commodity = opt?.dataset?.commodity||'';
-    const contractInvoices = _invoices.filter(i => i.forward_contract_id===cId && i.id!==existing?.id);
-    const invoicedQty = contractInvoices.reduce((s,i)=>{
-      if(i.batches){const b=typeof i.batches==='string'?JSON.parse(i.batches):i.batches;return s+b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((ss,x)=>ss+(parseFloat(x.qty)||0),0);}
-      const lines=(i.line_items||[]).filter(l=>l.type!=='expense'&&l.line_type!=='qa');const seen=new Set();
-      return s+lines.reduce((ss,l)=>{const k=l.docket||l.commodity||JSON.stringify(l);if(seen.has(k))return ss;seen.add(k);return ss+(parseFloat(l.qty)||0);},0);
-    },0);
-    const invoicedValue = contractInvoices.reduce((s,i)=>s+(parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0),0);
-    const remaining = Math.max(0, qty - invoicedQty);
-    modal.querySelector('#cs-qty').textContent = formatNumber(qty,0)+' '+unit;
-    modal.querySelector('#cs-invoiced').textContent = formatNumber(invoicedQty,2)+' '+unit;
-    modal.querySelector('#cs-remaining').textContent = formatNumber(remaining,2)+' '+unit;
-    modal.querySelector('#cs-avg').textContent = invoicedQty ? formatCurrency(invoicedValue/invoicedQty,2) : '—';
-    modal.querySelector('#cs-price').textContent = formatCurrency(price,2)+' / '+unit;
-    const buyerField = modal.querySelector('#f-buyer');
-    if (buyerField && buyer) buyerField.value = buyer;
-    // Pre-fill income descriptions
-    if (commodity) {
-      modal.querySelector('#f-batches-wrap')?.querySelectorAll('.b-income-lines tr').forEach(tr => {
-        const d = tr.querySelector('.bl-desc');
-        if (d && (!d.value || d.value===d.dataset.prevCommodity)) { d.value=commodity; d.dataset.prevCommodity=commodity; }
-      });
-    }
-  };
-
-  contractSel?.addEventListener('change', updateContractSummary);
-  if (hiddenInput?.value) updateContractSummaryFromOpt({dataset:{id:hiddenInput.value,...(() => { const c=_contracts.find(x=>x.id===hiddenInput.value); return c?{qty:c.quantity||0,price:c.price_per_unit||0,unit:c.unit||'t',buyer:c.counterparty||c.buyer||'',commodity:c.commodity||''}:{}; })()}});
-
-  // ── Batch system ──────────────────────────────────────────
-  let _batchCounter = 0;
-  const batchesWrap = modal.querySelector('#f-batches-wrap');
-  const masterUnitSel = modal.querySelector('#f-master-unit');
-
-  const COMMODITIES = ['Cotton Lint','Cotton Seed','Wheat','Barley','Canola','Sorghum','Cattle','Other'];
-  const CROP_YEARS = ['2025-26','2026-27','2024-25','2023-24','2022-23'];
-
-  function getUnit() { return masterUnitSel?.value || 'bale'; }
-
-  function addBatch(data = {}) {
-    const bId = ++_batchCounter;
-    const div = document.createElement('div');
-    div.dataset.batchId = bId;
-    div.style.cssText = 'border:1px solid var(--border);border-radius:8px;margin-bottom:12px;overflow:hidden';
-
-    const unit = getUnit();
-    const cropYears = CROP_YEARS;
-
-    const thStyle = 'padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:500';
-    div.innerHTML = `
-      <!-- Batch header -->
-      <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;background:#f8f9fa;border-bottom:1px solid var(--border)">
-        <span style="font-size:12px;font-weight:600;color:var(--hint)">BATCH ${bId}</span>
-        <div style="display:flex;align-items:center;gap:6px">
-          <label style="font-size:11px;color:var(--hint)">Qty</label>
-          <input type="number" class="form-input num b-qty" step="0.001" style="width:100px" value="${data.qty||''}" placeholder="0">
-          <span class="b-unit-label" style="font-size:12px;color:var(--hint)">${unit}</span>
-        </div>
-        <div style="flex:1"></div>
-        <button class="btn-remove-batch btn btn-ghost btn-sm" style="color:var(--red);font-size:13px" title="Remove batch">✕</button>
-      </div>
-
-      <!-- Income section -->
-      <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--border-light)">
-        <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#166534;min-width:60px">Income</span>
-        <input type="text" class="b-income-docket form-input" style="width:130px;font-size:12px;padding:3px 8px" placeholder="Docket / ID" value="${data.income_docket||''}">
-        <div class="b-income-files-wrap b-files-wrap" style="display:flex;align-items:center;gap:6px;flex:1;border:1.5px dashed var(--border);border-radius:6px;padding:4px 8px;min-height:32px;cursor:pointer" title="Drop files here or click Attach">
-          <button class="b-income-attach btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap">📄 Attach</button>
-          <input type="file" class="b-income-file-input" multiple accept=".pdf,image/*" style="display:none">
-          <button class="b-extract-rcti btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap;color:var(--blue)">✨ Extract RCTI</button>
-          <div class="b-income-file-list" style="display:flex;flex-wrap:wrap;gap:4px;flex:1"></div>
-          <span style="font-size:10px;color:var(--hint);white-space:nowrap">Drop files here</span>
-        </div>
-      </div>
-      <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="border-bottom:1px solid var(--border-light);background:#fafafa">
-            <th style="${thStyle};text-align:left;min-width:90px">Type</th>
-            <th style="${thStyle};text-align:left;min-width:160px">Description</th>
-            <th style="${thStyle};text-align:right;min-width:130px">Amount ($)</th>
-            <th style="${thStyle};text-align:right;min-width:100px">Eff. $/unit</th>
-            <th style="${thStyle};text-align:left;min-width:150px">Notes</th>
-            <th style="width:30px"></th>
-          </tr></thead>
-          <tbody class="b-income-lines"></tbody>
-        </table>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:var(--page-bg);border-bottom:1px solid var(--border)">
-        <button class="btn btn-ghost btn-sm b-add-income" style="font-size:12px;color:#166534">＋ Add income line</button>
-        <div style="display:flex;gap:16px;align-items:center;font-size:12px">
-          <span style="color:#166534;font-weight:600">Total income: <strong class="b-total-income" style="color:#166534">$0.00</strong></span>
-        </div>
-      </div>
-    `;
-
-    batchesWrap.appendChild(div);
-
-    // Wire remove batch
-    div.querySelector('.btn-remove-batch').addEventListener('click', () => {
-      if (batchesWrap.children.length > 1 || confirm('Remove this batch?')) div.remove();
-      recalcTotals();
-    });
-
-    // Wire qty change
-    div.querySelector('.b-qty').addEventListener('input', () => { recalcBatch(div); recalcTotals(); });
-
-    // Wire add income/expense buttons
-    div.querySelector('.b-add-income').addEventListener('click', () => {
-      const contractSel = modal.querySelector('#f-contract');
-      const cId = contractSel?.value;
-      const cMatch = _contracts.find(c => c.id === cId);
-      const defaultDesc = cMatch?.commodity || contractSel?.options[contractSel?.selectedIndex]?.dataset?.commodity || '';
-      addBatchLine(div, { description: defaultDesc }, 'income');
-    });
-
-    // Wire attach buttons
-    function wireAttach(btnCls, inputCls, listCls, filesArr) {
-      const btn = div.querySelector(btnCls);
-      const inp = div.querySelector(inputCls);
-      const list = div.querySelector(listCls);
-      const wrap = btn?.closest('.b-files-wrap');
-
-      function addFiles(fileList) {
-        [...fileList].forEach(f => {
-          filesArr.push(f);
-          const pill = document.createElement('span');
-          pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:var(--page-bg);border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px';
-          pill.innerHTML = '📎 ' + f.name.slice(0,24) + (f.name.length>24?'…':'') + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest(&quot;span&quot;).remove()">×</span>';
-          list?.appendChild(pill);
-        });
-      }
-
-      btn?.addEventListener('click', e => { e.stopPropagation(); inp?.click(); });
-      inp?.addEventListener('change', () => { addFiles(inp.files); inp.value = ''; });
-
-      if (wrap) {
-        wrap.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); wrap.style.borderColor = 'var(--blue)'; wrap.style.background = '#eff6ff'; });
-        wrap.addEventListener('dragleave', e => { wrap.style.borderColor = ''; wrap.style.background = ''; });
-        wrap.addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); wrap.style.borderColor = ''; wrap.style.background = ''; addFiles(e.dataTransfer.files); });
-      }
-    }
-    // Each batch has its own file arrays (only NEW files to upload)
-    div._incomeFiles = [];
-    div._expenseFiles = [];
-
-    // RCTI extraction button
-    div.querySelector('.b-extract-rcti')?.addEventListener('click', async () => {
-      const fileInput = div.querySelector('.b-income-file-input');
-      // Check if files already attached, or prompt user to select
-      if (div._incomeFiles?.length) {
-        await _extractFromRCTI(div, div._incomeFiles[0], modal, addBatchLine, recalcBatch);
-      } else {
-        // Trigger file picker then extract
-        const tempInput = document.createElement('input');
-        tempInput.type = 'file'; tempInput.accept = '.pdf'; tempInput.style.display = 'none';
-        document.body.appendChild(tempInput);
-        tempInput.addEventListener('change', async () => {
-          if (tempInput.files[0]) await _extractFromRCTI(div, tempInput.files[0], modal, addBatchLine, recalcBatch);
-          tempInput.remove();
-        });
-        tempInput.click();
-      }
-    });
-
-    // Datalists for description autocomplete (farm+season scoped)
-    const _dlIncome = document.createElement('datalist');
-    _dlIncome.id = `bl-inc-desc-${bId}`;
-    _getPastDescriptions('income').forEach(d => { const o = document.createElement('option'); o.value = d; _dlIncome.appendChild(o); });
-    div.appendChild(_dlIncome);
-    const _dlExpense = document.createElement('datalist');
-    _dlExpense.id = `bl-exp-desc-${bId}`;
-    _getPastDescriptions('expense').forEach(d => { const o = document.createElement('option'); o.value = d; _dlExpense.appendChild(o); });
-    div.appendChild(_dlExpense);
-    wireAttach('.b-income-attach', '.b-income-file-input', '.b-income-file-list', div._incomeFiles);
-
-    // Show existing files
-    ['income','expense'].forEach(sec => {
-      const existing = data[sec+'_files'] || [];
-      const list = div.querySelector('.b-'+sec+'-file-list');
-      existing.forEach(f => {
-        const pill = document.createElement('a');
-        pill.href = f.url; pill.target = '_blank';
-        pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:var(--page-bg);border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px;text-decoration:none;color:var(--blue)';
-        pill.textContent = '📎 ' + (f.filename||'file').slice(0,20);
-        list?.appendChild(pill);
-      });
-    });
-
-    // Wire unit label update
-    masterUnitSel?.addEventListener('change', () => {
-      div.querySelector('.b-unit-label').textContent = getUnit();
-    });
-
-    // Load existing lines
-    (data.lines || []).forEach(l => addBatchLine(div, l, l.type === 'expense' ? 'expense' : 'income'));
-    if (!(data.lines||[]).length) {
-      const contractSel = modal.querySelector('#f-contract');
-      const cId = contractSel?.value;
-      const cMatch = _contracts.find(c => c.id === cId);
-      const defaultDesc = cMatch?.commodity || contractSel?.options[contractSel?.selectedIndex]?.dataset?.commodity || '';
-      addBatchLine(div, { description: defaultDesc }, 'income');
-      addBatchLine(div, {}, 'expense');
-    }
-
-    recalcBatch(div);
-  }
-
-  function addBatchLine(batchDiv, data = {}, section = 'income') {
-    const tbody = batchDiv.querySelector(section === 'income' ? '.b-income-lines' : '.b-expense-lines');
-    const tr = document.createElement('tr');
-    tr.style.borderBottom = '1px solid var(--border-light)';
-    const inS = 'border:none;border-bottom:1px solid var(--border-light);border-radius:0;padding:5px 6px;font-size:12px;background:white;width:100%';
-    const numS = inS + ';text-align:right';
-    // For expenses, store absolute value and make negative on save
-    const displayAmount = data.amount != null ? data.amount : '';
-
-    const incomeTypeHtml = section === 'income'
-      ? `<td style="padding:3px 6px;min-width:90px"><select class="bl-type" style="${inS}">
-          <option value="sale"${(data.line_type||'sale')==='sale'?' selected':''}>Sale</option>
-          <option value="qa"${(data.line_type)==='qa'?' selected':''}>Quality adj</option>
-        </select></td>`
-      : '';
-    tr.innerHTML = incomeTypeHtml + `
-      <td style="padding:3px 6px;min-width:160px"><input type="text" class="bl-desc" style="${inS}" value="${data.description||''}" placeholder="${section==='income'?'e.g. Cotton Lint':'e.g. Ginning, CA Levy'}"></td>
-      <td style="padding:3px 6px;min-width:130px"><input type="number" class="bl-amount" style="${numS}" step="0.01" value="${displayAmount}" placeholder="0.00"></td>
-      <td style="padding:3px 6px;min-width:100px"><input type="number" class="bl-eff" style="${numS};color:var(--hint)" step="0.0001" value="${data.eff_per_unit!=null?Math.abs(data.eff_per_unit):''}" placeholder="0.00"></td>
-      <td style="padding:3px 6px;min-width:150px"><input type="text" class="bl-notes" style="${inS}" value="${data.notes||''}" placeholder="Notes…"></td>
-      <td style="padding:3px 6px;text-align:center"><button style="background:none;border:none;cursor:pointer;color:var(--hint);font-size:13px" onclick="this.closest('tr').remove();recalcBatch(this.closest('[data-batch-id]'));recalcTotals()">✕</button></td>
-    `;
-    tr.dataset.section = section;
-    tbody.appendChild(tr);
-    const amountInp = tr.querySelector('.bl-amount');
-    const effInp = tr.querySelector('.bl-eff');
-    amountInp.addEventListener('input', () => { tr.dataset.lastEdited = 'amount'; recalcBatch(batchDiv); recalcTotals(); });
-    effInp.addEventListener('input', () => { tr.dataset.lastEdited = 'eff'; recalcBatch(batchDiv); recalcTotals(); });
-    recalcBatch(batchDiv);
-  }
-
-  function recalcBatch(batchDiv) {
-    const qty = parseFloat(batchDiv.querySelector('.b-qty')?.value) || 0;
-    let gross = 0, qa = 0, expenses = 0;
-
-    function calcRow(tr, isExpense) {
-      const amountInp = tr.querySelector('.bl-amount');
-      const effInp = tr.querySelector('.bl-eff');
-      if (!amountInp || !effInp) return 0;
-      const lastEdited = tr.dataset.lastEdited || 'amount';
-      let amount = parseFloat(amountInp.value) || 0;
-      let eff = parseFloat(effInp.value) || 0;
-      if (lastEdited === 'eff' && eff && qty) {
-        // Eff edited → calculate amount
-        amount = Math.round(eff * qty * 100) / 100;
-        amountInp.value = amount;
-      } else if (lastEdited === 'amount' && amount && qty) {
-        // Amount edited → calculate eff
-        eff = Math.round((amount / qty) * 10000) / 10000;
-        effInp.value = eff;
-      }
-      effInp.style.color = isExpense ? '#9a3412' : '#166534';
-      return amount;
-    }
-
-    // Income lines — split sale vs QA
-    batchDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
-      const amount = calcRow(tr, false);
-      const lineType = tr.querySelector('.bl-type')?.value || 'sale';
-      if (lineType === 'qa') qa += amount;
-      else gross += amount;
-    });
-
-    // Expense lines
-
-
-    const net = gross + qa - expenses;
-
-    // Update subtotals
-    const totalIncome = gross + qa;
-    const setEl = (cls, val) => { const el = batchDiv.querySelector(cls); if (el) el.textContent = val; };
-    setEl('.b-gross', formatCurrency(gross, 2));
-    setEl('.b-gross-unit', qty ? formatCurrency(gross/qty, 2) + ' / ' + getUnit() : '—');
-    setEl('.b-qa', qa ? (qa>0?'+':'')+formatCurrency(qa,2) : '—');
-    setEl('.b-total-income', formatCurrency(gross+qa, 2));
-    setEl('.b-qa-unit', qa && qty ? (qa>0?'+':'')+formatCurrency(qa/qty,2)+' / '+getUnit() : '');
-
-    const netEl = batchDiv.querySelector('.b-net');
-    if (netEl) netEl.style.color = net < 0 ? 'var(--red)' : 'var(--ink)';
-  }
-
+  // ── Totals recalc ────────────────────────────────────────────
   function recalcTotals() {
-    let gross = 0, qa = 0, expenses = 0;
-    batchesWrap.querySelectorAll('[data-batch-id]').forEach(bDiv => {
-      bDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
-        const _a = parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
-        if ((tr.querySelector('.bl-type')?.value||'sale') === 'qa') qa += _a; else gross += _a;
-      });
-      bDiv.querySelectorAll('.b-expense-lines tr').forEach(tr => {
-        expenses += parseFloat(tr.querySelector('.bl-amount')?.value) || 0;
-      });
-    });
-    const net = gross + qa - expenses;
+    const gross = parseFloat(modal.querySelector('#f-gross')?.value) || 0;
+    const qa = parseFloat(modal.querySelector('#f-qa')?.value) || 0;
+    const total = gross + qa;
     const tg = modal.querySelector('#t-gross');
-    const td = modal.querySelector('#t-ded');
-    const tn = modal.querySelector('#t-net');
-    const tt = modal.querySelector('#t-total');
-    if (tg) tg.textContent = formatCurrency(gross, 2);
     const tqa = modal.querySelector('#t-qa');
+    const tt = modal.querySelector('#t-total');
+    if (tg) tg.textContent = gross ? formatCurrency(gross, 2) : '—';
     if (tqa) tqa.textContent = qa ? (qa>0?'+':'')+formatCurrency(qa,2) : '—';
-    if (td) td.textContent = expenses ? '-' + formatCurrency(expenses, 2) : '—';
-    if (tn) tn.textContent = formatCurrency(net, 2);
-    if (tt) tt.textContent = formatCurrency(net, 2);
+    if (tt) { tt.textContent = total ? formatCurrency(total, 2) : '—'; tt.style.color = total < 0 ? 'var(--red)' : 'var(--blue)'; }
   }
-
-  // Add batch button
-  modal.querySelector('#f-add-batch')?.addEventListener('click', () => addBatch());
-
-  // Load existing batches or start with one empty
-  const existingBatches = existing?.batches
-    ? (typeof existing.batches === 'string' ? JSON.parse(existing.batches) : existing.batches)
-    : null;
-  if (existingBatches?.length) {
-    try {
-      existingBatches.forEach(b => addBatch(b));
-    } catch(e) {
-      console.error('Error loading batches:', e);
-      addBatch();
-    }
-  } else {
-    addBatch();
-  }
-
+  modal.querySelector('#f-gross').addEventListener('input', recalcTotals);
+  modal.querySelector('#f-qa').addEventListener('input', recalcTotals);
   recalcTotals();
 
-  // ── File attachments ──────────────────────────────────────
-  let rctiFiles = [], ginFiles = [], attachments = [];
-
-  function wireMultiZone(zoneId, inputId, fileArr, listId) {
-    const zone = modal.querySelector('#'+zoneId);
-    const inp = modal.querySelector('#'+inputId);
-    if (!zone || !inp) return;
-    zone.addEventListener('click', () => inp.click());
-    zone.addEventListener('dragover', e => { e.preventDefault(); zone.style.borderColor='var(--blue)'; });
-    zone.addEventListener('dragleave', () => zone.style.borderColor='');
-    zone.addEventListener('drop', e => { e.preventDefault(); zone.style.borderColor=''; addToSection(e.dataTransfer.files, fileArr, listId); });
-    inp.addEventListener('change', () => { addToSection(inp.files, fileArr, listId); inp.value=''; });
-  }
-
-  function addToSection(fileList, fileArr, listId) {
-    const list = modal.querySelector('#'+listId);
-    [...fileList].forEach(f => {
-      fileArr.push(f);
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:3px 8px;background:var(--page-bg);border-radius:4px;font-size:11px;margin-top:3px';
-      row.innerHTML = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">📎 ${f.name}</span><span style="cursor:pointer;color:var(--hint);margin-left:6px;font-size:13px" onclick="this.closest('div').remove()">×</span>`;
-      list?.appendChild(row);
-    });
-  }
-
-  // Wire other documents
-  const otherAttachBtn = modal.querySelector('#f-other-attach');
-  const fileInput = modal.querySelector('#f-file-input');
-  const fileList = modal.querySelector('#f-file-list');
-  function addOtherFiles(fileList_) {
-    [...fileList_].forEach(f => {
-      attachments.push(f);
-      const pill = document.createElement('span');
-      pill.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:white;border:1px solid var(--border-light);border-radius:12px;padding:2px 8px;font-size:10px';
-      pill.innerHTML = '📎 ' + f.name.slice(0,24) + (f.name.length>24?'…':'') + ' <span style="cursor:pointer;color:var(--hint)" onclick="this.closest(&quot;span&quot;).remove()">×</span>';
-      fileList?.appendChild(pill);
-    });
-  }
-  otherAttachBtn?.addEventListener('click', () => fileInput?.click());
-  fileInput?.addEventListener('change', () => { addOtherFiles(fileInput.files); fileInput.value = ''; });
-  const otherWrap = otherAttachBtn?.closest('div');
-  if (otherWrap) {
-    otherWrap.addEventListener('dragover', e => { e.preventDefault(); otherWrap.style.outline = '2px dashed var(--blue)'; otherWrap.style.borderRadius = '6px'; });
-    otherWrap.addEventListener('dragleave', () => { otherWrap.style.outline = ''; });
-    otherWrap.addEventListener('drop', e => { e.preventDefault(); otherWrap.style.outline = ''; addOtherFiles(e.dataTransfer.files); });
-  }
-
-
+  // ── Save ─────────────────────────────────────────────────────
   modal.querySelector('#f-save').addEventListener('click', async () => {
     const btn = modal.querySelector('#f-save');
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      const farm = getActiveFarm();
       const session = getSession();
 
-      // Collect batches
-      const batches = [];
-      let grossTotal = 0, qaTotal = 0;
+      const buyer = modal.querySelector('#f-buyer')?.value?.trim();
+      const date = modal.querySelector('#f-date')?.value;
+      const qty = Math.round(parseFloat(modal.querySelector('#f-qty')?.value || 0) * 100) / 100;
+      const gross = parseFloat(modal.querySelector('#f-gross')?.value) || 0;
+      const qa = parseFloat(modal.querySelector('#f-qa')?.value) || 0;
+      const masterUnit = modal.querySelector('#f-master-unit')?.value || 'bale';
+      const contractId = contractHidden?.value || null;
+      const selectedContract = _contracts.find(c => c.id === contractId);
+      const notes = modal.querySelector('#f-notes')?.value?.trim() || '';
 
-      // Upload batch files
-      const uploadFile2 = async (file, prefix) => {
+      if (!date) throw new Error('Please enter a date');
+      if (!buyer) throw new Error('Please enter a buyer');
+      if (!qty) throw new Error('Please enter a quantity');
+      if (!gross) throw new Error('Please enter gross proceeds');
+
+      // Upload RCTI file
+      const uploadFile = async (file, prefix) => {
         const path = `invoices/${farm.id}/${Date.now()}_${prefix}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
-        const contentType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+        const ct = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
         const res = await fetch(`https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/cfm-documents/${path}`, {
-          method: 'POST',
-          headers: { 'apikey': window.__CFM_ANON_KEY, 'Authorization': `Bearer ${session?.access_token}`, 'Content-Type': contentType, 'x-upsert': 'true' },
-          body: file,
+          method:'POST', headers:{ 'apikey':window.__CFM_ANON_KEY, 'Authorization':`Bearer ${session?.access_token}`, 'Content-Type':ct, 'x-upsert':'true' }, body:file,
         });
-        if (!res.ok) { const e = await res.text(); throw new Error(`Upload failed (${res.status}): ${e}`); }
-        return { url: `https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/public/cfm-documents/${path}`, filename: file.name };
+        if (!res.ok) throw new Error(`Upload failed: ${await res.text()}`);
+        return { url:`https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/public/cfm-documents/${path}`, filename:file.name };
       };
 
-      for (const bDiv of batchesWrap.querySelectorAll('[data-batch-id]')) {
-        const qty = parseFloat(bDiv.querySelector('.b-qty')?.value) || 0;
-        const cropYear = getActiveSeason() || '';
-        const incomeDocket = bDiv.querySelector('.b-income-docket')?.value?.trim() || '';
-        const lines = [];
-
-        // Upload income files
-        const existingIncomeFiles = (existing?.batches||[]).find((_,i)=>i===Array.from(batchesWrap.querySelectorAll('[data-batch-id]')).indexOf(bDiv))?.income_files || [];
-        const newIncomeUploads = await Promise.all((bDiv._incomeFiles||[]).map(f => uploadFile2(f, 'rcti')));
-        const allIncomeFiles = [...existingIncomeFiles, ...newIncomeUploads];
-
-
-        bDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
-          const amount = parseFloat(tr.querySelector('.bl-amount')?.value);
-          if (!amount) return;
-          const lineType = tr.querySelector('.bl-type')?.value || 'sale';
-          lines.push({
-            description: tr.querySelector('.bl-desc')?.value?.trim() || '',
-            docket: incomeDocket,
-            amount: amount,
-            notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
-            eff_per_unit: parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((absAmount/qty)*10000)/10000 : null),
-            type: 'income',
-            line_type: lineType,
-          });
-          if (lineType === 'qa') qaTotal += amount;
-          else grossTotal += amount;
-        });
-
-        // Expense lines
-        if (lines.length) batches.push({ qty, crop_year: cropYear, income_docket: incomeDocket, income_files: allIncomeFiles, lines });
+      // Upload new RCTI file if one was selected
+      const fileInput = modal.querySelector('#rcti-pdf-upload');
+      const newFile = fileInput?.files?.[0];
+      let rctiFiles = [...existingRctiFiles];
+      if (newFile) {
+        const uploaded = await uploadFile(newFile, 'rcti');
+        rctiFiles = [...rctiFiles, uploaded];
       }
 
-      const masterUnit = modal.querySelector('#f-master-unit')?.value || 'bale';
+      // Build batch structure
+      const lines = [];
+      const commodity = selectedContract?.commodity || 'Sale';
+      if (gross) lines.push({ type:'income', line_type:'sale', description:commodity, amount:gross, eff_per_unit: qty ? Math.round(gross/qty*10000)/10000 : null });
+      if (qa) lines.push({ type:'income', line_type:'qa', description:'Quality adjustment', amount:qa, eff_per_unit: qty ? Math.round(qa/qty*10000)/10000 : null });
 
-
-      // Get commodity from selected contract
-      const contractId = modal.querySelector('#f-contract')?.value;
-      const selectedContract = _contracts.find(c => c.id === contractId);
-      const contractCommodity = selectedContract?.commodity || null;
+      const cropYear = activeSeason;
+      const batch = { qty, crop_year:cropYear, income_files:rctiFiles, lines };
 
       const row = {
         farm_id: farm.id,
-        buyer: modal.querySelector('#f-buyer')?.value?.trim() || '',
-        invoice_date: modal.querySelector('#f-date')?.value,
-        forward_contract_id: modal.querySelector('#f-contract')?.value || null,
-        sale_type: modal.querySelector('#f-contract')?.value ? 'against_contract' : 'cash',
-        gst_type: modal.querySelector('#f-gst')?.value || 'ex',
+        buyer,
+        invoice_date: date,
+        forward_contract_id: contractId,
+        sale_type: contractId ? 'against_contract' : 'cash',
+        gst_type: 'ex',
         master_unit: masterUnit,
-        batches,
-        // Keep legacy fields for display + filter compatibility
-        // Commodity comes from the contract, not the description
-        line_items: batches.flatMap(b => b.lines.filter(l => l.amount >= 0).map(l => ({
-          commodity: contractCommodity || l.description, docket: l.docket, qty: b.qty, unit: masterUnit,
-          season: b.crop_year, total: l.amount, price: b.qty ? l.amount/b.qty : 0, notes: l.notes,
-        }))),
-
-        total_qty: batches.filter(b => b.lines.some(l => l.type === 'income')).reduce((s,b) => s+(parseFloat(b.qty)||0), 0),
-        gross_amount: grossTotal,
-        total_quality_adj: qaTotal || 0,
-
+        season: cropYear,
+        batches: [batch],
+        total_qty: qty,
+        gross_amount: gross,
+        total_quality_adj: qa || 0,
+        notes,
+        rcti_files: rctiFiles,
+        rcti_url: rctiFiles[0]?.url || null,
+        rcti_filename: rctiFiles[0]?.filename || null,
+        gin_files: [], gin_url: null, gin_filename: null, other_files: [],
         status: existing?.xero_invoice_number ? 'complete' : (existing?.status || 'pending'),
-        notes: modal.querySelector('#f-notes')?.value?.trim() || '',
+        commodity_type: selectedContract?.commodity || null,
+        // Legacy line_items for compatibility
+        line_items: [
+          ...(gross ? [{ type:'income', line_type:'sale', commodity: commodity, docket:'', qty, unit:masterUnit, season:cropYear, total:gross, price:qty?gross/qty:0 }] : []),
+          ...(qa ? [{ type:'income', line_type:'qa', commodity: commodity, docket:'', qty, unit:masterUnit, season:cropYear, total:qa, price:qty?qa/qty:0 }] : []),
+        ],
       };
 
-      if (!row.invoice_date) throw new Error('Please enter a date');
-      if (!batches.length) throw new Error('Please add at least one batch');
-
-      // Collect all files from batches for legacy fields
-      const allRctiFiles = batches.flatMap(b => b.income_files || []);
-      const allGinFiles = [];
-      const otherUploads = await Promise.all(attachments.map(f => uploadFile2(f, 'other')));
-      const allOtherFiles = [...(existing?.other_files||[]), ...otherUploads];
-
-      // Preserve Xero ref on edit
-      if (existing?.xero_invoice_number) row.xero_invoice_number = existing.xero_invoice_number;
-      if (existing?.xero_invoice_id) row.xero_invoice_id = existing.xero_invoice_id;
-      if (existing?.xero_invoice_url) row.xero_invoice_url = existing.xero_invoice_url;
-      row.rcti_files = allRctiFiles;
-      row.gin_files = allGinFiles;
-      row.other_files = allOtherFiles;
-      row.rcti_url = allRctiFiles[0]?.url || null;
-      row.rcti_filename = allRctiFiles[0]?.filename || null;
-      row.gin_url = allGinFiles[0]?.url || null;
-      row.gin_filename = allGinFiles[0]?.filename || null;
+      if (existing?.xero_invoice_number) { row.xero_invoice_number = existing.xero_invoice_number; row.xero_invoice_id = existing.xero_invoice_id; row.xero_invoice_url = existing.xero_invoice_url; }
 
       if (existing?.id) {
         await dbUpdate('invoices', existing.id, row);
@@ -1512,17 +1145,13 @@ export function openInvoiceForm(container, existing = null) {
         await dbInsert('invoices', row);
         toast('Invoice saved', 'success');
       }
-
       close();
-      // Reload invoices
       await _loadData();
       _renderTable(container);
-
-    } catch (err) {
+    } catch(err) {
       toast(err.message || 'Save failed', 'error');
       console.error('Save error:', err);
     }
-    btn.disabled = false; btn.textContent = '✓ Save — pending';
+    btn.disabled = false; btn.textContent = '✓ Save invoice';
   });
-
 }
