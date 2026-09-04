@@ -191,17 +191,6 @@ exports.handler = async (event) => {
               TaxType: taxType,
             });
 
-          } else if (line.type === 'expense') {
-            // Expense line — Qty:1 prevents rounding on tax recalc
-            const desc = [line.description || 'Expense', expenseDocket || line.docket].filter(Boolean).join(', ');
-            const expAmount = -Math.abs(amount);
-            lineItems.push({
-              Description: desc,
-              Quantity: 1,
-              UnitAmount: Math.round(expAmount * 100) / 100,
-              LineAmount: Math.round(expAmount * 100) / 100,
-              TaxType: taxType,
-            });
           }
         });
       });
@@ -224,19 +213,6 @@ exports.handler = async (event) => {
           Quantity: qty,
           UnitAmount: Math.round(price * 10000) / 10000,
           LineAmount: Math.round(qty * price * 100) / 100,
-          TaxType: taxType,
-        });
-      });
-      (inv.deductions || []).forEach(d => {
-        if (!d.value) return;
-        const dedQty = parseFloat(d.qty) || 1;
-        const dedTotal = -Math.abs(parseFloat(d.value));
-        const dedDesc = [d.description || 'Deduction', d.docket].filter(Boolean).join(', ');
-        lineItems.push({
-          Description: dedDesc,
-          Quantity: dedQty,
-          UnitAmount: Math.round((dedTotal / dedQty) * 10000) / 10000,
-          LineAmount: Math.round(dedTotal * 100) / 100,
           TaxType: taxType,
         });
       });

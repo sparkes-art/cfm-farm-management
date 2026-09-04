@@ -176,13 +176,12 @@ function _renderTable(container) {
     return;
   }
 
-  const totalNet = rows.reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
   const totalGross = rows.reduce((s, i) => s + (parseFloat(i.gross_amount)||0), 0);
   const totalQA = rows.reduce((s, i) => s + (parseFloat(i.total_quality_adj)||0), 0);
   const totalIncome = totalGross + totalQA;
-  const totalDeductions = rows.reduce((s, i) => s + (parseFloat(i.total_deductions)||0), 0);
-  const totalPending = rows.filter(i => i.status === 'pending').reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
-  const totalComplete = rows.filter(i => i.status === 'complete').reduce((s, i) => s + (parseFloat(i.net_amount)||0), 0);
+
+  const totalPending = rows.filter(i => i.status === 'pending').reduce((s, i) => s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0), 0);
+  const totalComplete = rows.filter(i => i.status === 'complete').reduce((s, i) => s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0), 0);
 
   wrap.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:0;border-bottom:1px solid var(--border-light)">
@@ -209,14 +208,7 @@ function _renderTable(container) {
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total income</div>
         <div style="font-size:18px;font-weight:600;color:var(--ink)">${formatCurrency(totalIncome, 0)}</div>
       </div>
-      <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Selling costs</div>
-        <div style="font-size:18px;font-weight:600;color:var(--red)">${totalDeductions?'-'+formatCurrency(totalDeductions,0):'—'}</div>
-      </div>
-      <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Net total</div>
-        <div style="font-size:18px;font-weight:700;color:var(--ink)">${formatCurrency(totalNet, 0)}</div>
-      </div>
+
       <div style="padding:12px 16px">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Pending / Complete</div>
         <div style="font-size:13px;font-weight:600;color:var(--amber)">${formatCurrency(totalPending, 0)}</div>
@@ -235,8 +227,7 @@ function _renderTable(container) {
           <th class="num">Gross</th>
           <th class="num">Quality adj</th>
           <th class="num">Total income</th>
-          <th class="num">Selling costs</th>
-          <th class="num">Net</th>
+
           <th>Documents</th>
           <th style="min-width:70px;max-width:90px">Xero ref</th>
           <th>Status</th>
@@ -277,8 +268,7 @@ function _renderTable(container) {
               <td class="num">${formatCurrency(inv.gross_amount, 0)}</td>
               <td class="num" style="color:${(inv.total_quality_adj||0)>0?'var(--green)':(inv.total_quality_adj||0)<0?'var(--red)':'inherit'}">${inv.total_quality_adj ? ((inv.total_quality_adj>0?'+':'')+formatCurrency(inv.total_quality_adj,0)) : '—'}</td>
               <td class="num">${formatCurrency((parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0), 0)}</td>
-              <td class="num" style="color:var(--red)">${inv.total_deductions ? '-'+formatCurrency(inv.total_deductions,0) : '—'}</td>
-              <td class="num"><strong>${formatCurrency(inv.net_amount, 0)}</strong></td>
+
               <td style="white-space:nowrap;font-size:12px">
                 ${(() => {
                   const rctiCount = (inv.rcti_files||[]).length || (inv.rcti_url ? 1 : 0);
@@ -418,7 +408,7 @@ function _renderTable(container) {
 
 function _openDetail(inv, container) {
   const lines = inv.line_items || [];
-  const deductions = inv.deductions || [];
+
   const contract = inv.forward_contract_id ? _contracts.find(c => c.id === inv.forward_contract_id) : null;
   // Get season from first line item that has one
   const season = lines.find(l => l.season)?.season || inv.season || '—';
@@ -458,24 +448,7 @@ function _openDetail(inv, container) {
         </tbody>
       </table>
 
-      ${deductions.length ? `
-        <p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:600;margin-bottom:6px">Sale Expenses — Line Items</p>
-        <table class="data-table" style="margin-bottom:16px">
-          <thead><tr>
-            <th>Description</th><th>Docket</th><th>Season</th>
-            <th class="num">Qty</th><th>Unit</th><th class="num">Rate/unit ($)</th><th class="num">Amount ($)</th>
-          </tr></thead>
-          <tbody>${deductions.map(d => `<tr>
-            <td>${d.description||'—'}</td>
-            <td class="muted">${d.docket||'—'}</td>
-            <td class="muted">${d.season||'—'}</td>
-            <td class="num">${d.qty||'—'}</td>
-            <td class="muted">${d.unit||'—'}</td>
-            <td class="num">${d.rate ? formatCurrency(d.rate, 2) : '—'}</td>
-            <td class="num" style="color:var(--red)">-${formatCurrency(d.value, 2)}</td>
-          </tr>`).join('')}</tbody>
-        </table>
-      ` : ''}
+
 
       ${inv.notes ? `<div style="background:var(--page-bg);border-radius:6px;padding:8px 12px;margin-bottom:14px">
         <p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px">Notes</p>
@@ -489,9 +462,7 @@ function _openDetail(inv, container) {
           <div style="display:flex;flex-direction:column;gap:4px">
             <div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span style="color:var(--muted)">Gross</span><span>${formatCurrency(inv.gross_amount, 2)}</span></div>
             ${inv.total_quality_adj ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span style="color:var(--muted)">Quality adj</span><span style="color:${inv.total_quality_adj > 0 ? 'var(--green)' : 'var(--red)'}">${inv.total_quality_adj > 0 ? '+' : ''}${formatCurrency(inv.total_quality_adj, 2)}</span></div>` : ''}
-            ${inv.total_deductions ? `<div style="display:flex;justify-content:space-between;font-size:var(--text-sm)"><span style="color:var(--muted)">Sale Expenses</span><span style="color:var(--red)">-${formatCurrency(inv.total_deductions, 2)}</span></div>` : ''}
-            <div style="display:flex;justify-content:space-between;font-weight:600;border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px;font-size:var(--text-sm)"><span>Net amount</span><span style="color:var(--blue)">${formatCurrency(inv.net_amount, 2)}</span></div>
-            <div style="display:flex;justify-content:space-between;font-weight:700;font-size:var(--text-md)"><span>Total payable</span><span style="color:var(--blue)">${formatCurrency(inv.total_payable || inv.net_amount, 2)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-weight:700;font-size:var(--text-md)"><span>Total income</span><span style="color:var(--blue)">${formatCurrency((parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0), 2)}</span></div>
           </div>
         </div>
       </div>
@@ -815,7 +786,6 @@ export function openInvoiceForm(container, existing = null) {
           <div style="display:flex;flex-direction:column;gap:5px">
             <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Gross</span><span id="t-gross" style="font-family:var(--font-data)">$0.00</span></div>
             <div id="t-qa-row" style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Quality adj</span><span id="t-qa" style="font-family:var(--font-data)">—</span></div>
-            <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);color:var(--muted)"><span>Sale Expenses</span><span id="t-ded" style="font-family:var(--font-data);color:var(--red)">—</span></div>
             <div style="display:flex;justify-content:space-between;font-size:var(--text-sm);font-weight:600;color:var(--ink);border-top:1px solid var(--border-light);padding-top:6px;margin-top:2px"><span>Net amount</span><span id="t-net" style="font-family:var(--font-data)">$0.00</span></div>
             <div style="display:flex;justify-content:space-between;font-size:var(--text-md);font-weight:600;color:var(--blue)"><span>Total payable</span><span id="t-total" style="font-family:var(--font-data)">$0.00</span></div>
           </div>
@@ -1045,47 +1015,7 @@ export function openInvoiceForm(container, existing = null) {
         </div>
       </div>
 
-      <!-- Expenses section -->
-      <div style="display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--border-light)">
-        <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#9a3412;min-width:60px">Expenses</span>
-        <input type="text" class="b-expense-docket form-input" style="width:130px;font-size:12px;padding:3px 8px" placeholder="Docket / ID" value="${data.expense_docket||''}">
-        <div class="b-expense-files-wrap b-files-wrap" style="display:flex;align-items:center;gap:6px;flex:1;border:1.5px dashed var(--border);border-radius:6px;padding:4px 8px;min-height:32px;cursor:pointer" title="Drop files here or click Attach">
-          <button class="b-expense-attach btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap">🧾 Attach</button>
-          <input type="file" class="b-expense-file-input" multiple accept=".pdf,image/*" style="display:none">
-          <button class="b-extract-gin btn btn-ghost btn-sm" style="font-size:11px;white-space:nowrap;color:var(--red)">✨ Extract gin receipt</button>
-          <div class="b-expense-file-list" style="display:flex;flex-wrap:wrap;gap:4px;flex:1"></div>
-          <span style="font-size:10px;color:var(--hint);white-space:nowrap">Drop files here</span>
-        </div>
-      </div>
-      <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse">
-          <thead><tr style="border-bottom:1px solid var(--border-light);background:#fafafa">
-            <th style="${thStyle};text-align:left;min-width:180px">Description</th>
-            <th style="${thStyle};text-align:right;min-width:130px">Amount ($)</th>
-            <th style="${thStyle};text-align:right;min-width:100px">Eff. $/unit</th>
-            <th style="${thStyle};text-align:left;min-width:150px">Notes</th>
-            <th style="width:30px"></th>
-          </tr></thead>
-          <tbody class="b-expense-lines"></tbody>
-        </table>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:var(--page-bg);border-bottom:1px solid var(--border)">
-        <button class="btn btn-ghost btn-sm b-add-expense" style="font-size:12px;color:#9a3412">＋ Add expense line</button>
-        <div style="font-size:12px;color:#9a3412">
-          Total expenses: <strong class="b-expenses" style="color:#9a3412">$0.00</strong>
-          <span style="color:var(--border);margin:0 6px">|</span>
-          <span class="b-expenses-unit" style="color:#9a3412;font-weight:600">—</span>
-        </div>
-      </div>
 
-      <!-- Net -->
-      <div style="display:flex;justify-content:flex-end;align-items:center;gap:16px;padding:8px 12px;background:#f8fafc">
-        <span style="font-size:12px;color:var(--hint)">Net:</span>
-        <strong class="b-net" style="font-size:14px;color:var(--ink)">$0.00</strong>
-        <span style="color:var(--border)">|</span>
-        <span class="b-net-unit" style="font-size:13px;font-weight:600;color:var(--blue)">—</span>
-      </div>
-    `;
 
     batchesWrap.appendChild(div);
 
@@ -1106,7 +1036,6 @@ export function openInvoiceForm(container, existing = null) {
       const defaultDesc = cMatch?.commodity || contractSel?.options[contractSel?.selectedIndex]?.dataset?.commodity || '';
       addBatchLine(div, { description: defaultDesc }, 'income');
     });
-    div.querySelector('.b-add-expense').addEventListener('click', () => addBatchLine(div, {}, 'expense'));
 
     // Wire attach buttons
     function wireAttach(btnCls, inputCls, listCls, filesArr) {
@@ -1139,14 +1068,7 @@ export function openInvoiceForm(container, existing = null) {
     div._expenseFiles = [];
 
     // Gin receipt extraction button
-    div.querySelector('.b-extract-gin')?.addEventListener('click', async () => {
-      const tempInput = document.createElement('input');
-      tempInput.type = 'file'; tempInput.accept = '.pdf'; tempInput.style.display = 'none';
-      document.body.appendChild(tempInput);
-      tempInput.addEventListener('change', async () => {
-        if (tempInput.files[0]) await _extractFromGinReceipt(div, tempInput.files[0], modal, addBatchLine, recalcBatch);
-        tempInput.remove();
-      });
+
       tempInput.click();
     });
 
@@ -1179,7 +1101,6 @@ export function openInvoiceForm(container, existing = null) {
     _getPastDescriptions('expense').forEach(d => { const o = document.createElement('option'); o.value = d; _dlExpense.appendChild(o); });
     div.appendChild(_dlExpense);
     wireAttach('.b-income-attach', '.b-income-file-input', '.b-income-file-list', div._incomeFiles);
-    wireAttach('.b-expense-attach', '.b-expense-file-input', '.b-expense-file-list', div._expenseFiles);
 
     // Show existing files
     ['income','expense'].forEach(sec => {
@@ -1277,10 +1198,7 @@ export function openInvoiceForm(container, existing = null) {
     });
 
     // Expense lines
-    batchDiv.querySelectorAll('.b-expense-lines tr').forEach(tr => {
-      const amount = calcRow(tr, true);
-      expenses += amount;
-    });
+
 
     const net = gross + qa - expenses;
 
@@ -1292,10 +1210,6 @@ export function openInvoiceForm(container, existing = null) {
     setEl('.b-qa', qa ? (qa>0?'+':'')+formatCurrency(qa,2) : '—');
     setEl('.b-total-income', formatCurrency(gross+qa, 2));
     setEl('.b-qa-unit', qa && qty ? (qa>0?'+':'')+formatCurrency(qa/qty,2)+' / '+getUnit() : '');
-    setEl('.b-expenses', formatCurrency(expenses, 2));
-    setEl('.b-expenses-unit', qty ? '-' + formatCurrency(expenses/qty, 2) + ' / ' + getUnit() : '—');
-    setEl('.b-net', formatCurrency(net, 2));
-    setEl('.b-net-unit', qty ? formatCurrency(net/qty, 2) + ' / ' + getUnit() : '—');
 
     const netEl = batchDiv.querySelector('.b-net');
     if (netEl) netEl.style.color = net < 0 ? 'var(--red)' : 'var(--ink)';
@@ -1402,7 +1316,7 @@ export function openInvoiceForm(container, existing = null) {
 
       // Collect batches
       const batches = [];
-      let grossTotal = 0, qaTotal = 0, expensesTotal = 0;
+      let grossTotal = 0, qaTotal = 0;
 
       // Upload batch files
       const uploadFile2 = async (file, prefix) => {
@@ -1421,7 +1335,6 @@ export function openInvoiceForm(container, existing = null) {
         const qty = parseFloat(bDiv.querySelector('.b-qty')?.value) || 0;
         const cropYear = getActiveSeason() || '';
         const incomeDocket = bDiv.querySelector('.b-income-docket')?.value?.trim() || '';
-        const expenseDocket = bDiv.querySelector('.b-expense-docket')?.value?.trim() || '';
         const lines = [];
 
         // Upload income files
@@ -1429,12 +1342,7 @@ export function openInvoiceForm(container, existing = null) {
         const newIncomeUploads = await Promise.all((bDiv._incomeFiles||[]).map(f => uploadFile2(f, 'rcti')));
         const allIncomeFiles = [...existingIncomeFiles, ...newIncomeUploads];
 
-        // Upload expense files
-        const existingExpenseFiles = (existing?.batches||[]).find((_,i)=>i===Array.from(batchesWrap.querySelectorAll('[data-batch-id]')).indexOf(bDiv))?.expense_files || [];
-        const newExpenseUploads = await Promise.all((bDiv._expenseFiles||[]).map(f => uploadFile2(f, 'gin')));
-        const allExpenseFiles = [...existingExpenseFiles, ...newExpenseUploads];
 
-        // Income lines
         bDiv.querySelectorAll('.b-income-lines tr').forEach(tr => {
           const amount = parseFloat(tr.querySelector('.bl-amount')?.value);
           if (!amount) return;
@@ -1453,24 +1361,9 @@ export function openInvoiceForm(container, existing = null) {
         });
 
         // Expense lines
-        bDiv.querySelectorAll('.b-expense-lines tr').forEach(tr => {
-          const amount = parseFloat(tr.querySelector('.bl-amount')?.value);
-          if (!amount) return;
-          lines.push({
-            description: tr.querySelector('.bl-desc')?.value?.trim() || '',
-            docket: expenseDocket,
-            amount: amount,
-            notes: tr.querySelector('.bl-notes')?.value?.trim() || '',
-            eff_per_unit: -(parseFloat(tr.querySelector('.bl-eff')?.value) || (qty ? Math.round((Math.abs(amount)/qty)*10000)/10000 : null)),
-            type: 'expense',
-          });
-          expensesTotal += amount;
-        });
-
-        if (lines.length) batches.push({ qty, crop_year: cropYear, income_docket: incomeDocket, expense_docket: expenseDocket, income_files: allIncomeFiles, expense_files: allExpenseFiles, lines });
+        if (lines.length) batches.push({ qty, crop_year: cropYear, income_docket: incomeDocket, income_files: allIncomeFiles, lines });
       }
 
-      const netAmount = grossTotal + expensesTotal;
       const masterUnit = modal.querySelector('#f-master-unit')?.value || 'bale';
 
 
@@ -1494,15 +1387,11 @@ export function openInvoiceForm(container, existing = null) {
           commodity: contractCommodity || l.description, docket: l.docket, qty: b.qty, unit: masterUnit,
           season: b.crop_year, total: l.amount, price: b.qty ? l.amount/b.qty : 0, notes: l.notes,
         }))),
-        deductions: batches.flatMap(b => b.lines.filter(l => l.amount < 0).map(l => ({
-          description: l.description, docket: l.docket, qty: b.qty, unit: masterUnit,
-          season: b.crop_year, value: Math.abs(l.amount), rate: b.qty ? Math.abs(l.amount)/b.qty : 0, notes: l.notes,
-        }))),
+
         total_qty: batches.filter(b => b.lines.some(l => l.type === 'income')).reduce((s,b) => s+(parseFloat(b.qty)||0), 0),
         gross_amount: grossTotal,
         total_quality_adj: qaTotal || 0,
-        total_deductions: Math.abs(expensesTotal),
-        net_amount: netAmount,
+
         status: existing?.xero_invoice_number ? 'complete' : (existing?.status || 'pending'),
         notes: modal.querySelector('#f-notes')?.value?.trim() || '',
       };
@@ -1512,7 +1401,7 @@ export function openInvoiceForm(container, existing = null) {
 
       // Collect all files from batches for legacy fields
       const allRctiFiles = batches.flatMap(b => b.income_files || []);
-      const allGinFiles = batches.flatMap(b => b.expense_files || []);
+      const allGinFiles = [];
       const otherUploads = await Promise.all(attachments.map(f => uploadFile2(f, 'other')));
       const allOtherFiles = [...(existing?.other_files||[]), ...otherUploads];
 
