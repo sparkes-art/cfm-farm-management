@@ -827,127 +827,28 @@ export function openInvoiceForm(container, existing = null) {
   modal.querySelector('#f-cancel')?.addEventListener('click', close);
 
   // ── RCTI PDF extraction ──────────────────────────────────────
+  // Uses existing _extractFromRCTI which shows review panel, lets user
+  // correct fields, and saves corrections as training examples automatically
   modal.querySelector('#btn-extract-rcti')?.addEventListener('click', async () => {
     const fileInput = modal.querySelector('#rcti-pdf-upload');
     const statusEl = modal.querySelector('#rcti-extract-status');
     const file = fileInput?.files?.[0];
-    if (!file) { statusEl.textContent = 'Please select a PDF first.'; statusEl.style.color = 'var(--red)'; return; }
-
-    statusEl.textContent = 'Reading PDF…'; statusEl.style.color = 'var(--muted)';
-    modal.querySelector('#btn-extract-rcti').disabled = true;
-
-    try {
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(',')[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-
-      statusEl.textContent = 'Extracting details with AI…';
-      const farm = getActiveFarm();
-      const res = await fetch('/api/extract-rcti', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pdf_base64: base64, farm_id: farm?.id, document_type: 'rcti' }),
-      });
-      if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || 'Extraction failed');
-      const { extracted } = await res.json();
-
-      // Helper — set field value and clear red border
-      const setField = (id, val) => {
-        const el = modal.querySelector('#' + id);
-        if (el && val != null && val !== '') {
-          el.value = val;
-          el.style.borderColor = '';
-          el.style.background = '';
-          el.dispatchEvent(new Event('input'));
-        }
-      };
-
-      // Populate top-level fields
-      setField('f-date', extracted.invoice_date);
-      setField('f-buyer', extracted.gin_name);
-      setField('f-notes', extracted.notes);
-
-      // Populate into current batch (first/only batch)
-      const batchDivs = modal.querySelectorAll('[data-batch-id]');
-      if (batchDivs.length > 0) {
-        const bDiv = batchDivs[0];
-        const bQty = bDiv.querySelector('.b-qty');
-        const bDocket = bDiv.querySelector('.b-income-docket');
-        if (bQty && extracted.bale_count) { bQty.value = extracted.bale_count; bQty.dispatchEvent(new Event('input')); }
-        if (bDocket && extracted.docket_numbers?.length) bDocket.value = extracted.docket_numbers.join(', ');
-
-        // Clear existing income lines and repopulate from extraction
-        const incomeBody = bDiv.querySelector('.b-income-lines');
-        if (incomeBody && extracted.gross_proceeds) {
-          incomeBody.innerHTML = '';
-          // Add sale line with gross proceeds
-          addBatchLine(bDiv, {
-            description: modal.querySelector('#f-contract') && _contracts.find(c=>c.id===modal.querySelector('#f-contract').value)?.commodity || 'Cotton Lint',
-            amount: extracted.gross_proceeds,
-            type: 'income',
-            line_type: 'sale',
-          }, 'income');
-          // Add QA lines from quality_premiums_discounts
-          (extracted.quality_premiums_discounts || []).forEach(qa => {
-            if (qa.total_amount) {
-              addBatchLine(bDiv, {
-                description: qa.description || 'Quality adj',
-                amount: qa.total_amount,
-                type: 'income',
-                line_type: 'qa',
-              }, 'income');
-            }
-          });
-          recalcBatch(bDiv);
-          recalcTotals();
-        }
-
-        // Store file for upload
-        bDiv._incomeFiles = bDiv._incomeFiles || [];
-        bDiv._incomeFiles.push(file);
-        // Show filename in file list
-        const list = bDiv.querySelector('.b-income-file-list');
-        if (list) list.innerHTML = `<span style="font-size:10px;color:var(--blue)">📄 ${file.name}</span>`;
-      }
-
-      // Highlight fields that couldn't be filled
-      const required = ['f-date', 'f-buyer'];
-      const missing = [];
-      required.forEach(id => {
-        const el = modal.querySelector('#' + id);
-        if (el && !el.value) {
-          el.style.borderColor = 'var(--red)';
-          el.style.background = '#fff5f5';
-          missing.push(id.replace('f-',''));
-          el.addEventListener('input', () => { el.style.borderColor = ''; el.style.background = ''; }, { once: true });
-        }
-      });
-
-      // Also check batch qty and amount
-      const bDiv = modal.querySelector('[data-batch-id]');
-      const bQty = bDiv?.querySelector('.b-qty');
-      if (bQty && !bQty.value) {
-        bQty.style.borderColor = 'var(--red)'; bQty.style.background = '#fff5f5';
-        missing.push('qty');
-        bQty.addEventListener('input', () => { bQty.style.borderColor = ''; bQty.style.background = ''; }, { once: true });
-      }
-
-      if (missing.length) {
-        statusEl.textContent = `⚠ Extracted — could not find: ${missing.join(', ')}. Please fill these fields.`;
-        statusEl.style.color = 'var(--amber)';
-      } else {
-        statusEl.textContent = '✓ Details extracted — please review before saving.';
-        statusEl.style.color = 'var(--green)';
-      }
-
-    } catch (err) {
-      statusEl.textContent = 'Error: ' + err.message;
+    if (!file) {
+      statusEl.textContent = 'Please select a PDF first.';
       statusEl.style.color = 'var(--red)';
-    } finally {
-      modal.querySelector('#btn-extract-rcti').disabled = false;
+      return;
+    }
+    // Ensure at least one batch exists
+    if (!modal.querySelector('[data-batch-id]')) addBatch();
+    const batchDiv = modal.querySelector('[data-batch-id]');
+    statusEl.textContent = 'Extracting…'; statusEl.style.color = 'var(--muted)';
+    try {
+      await _extractFromRCTI(batchDiv, file, modal, addBatchLine, recalcBatch);
+      statusEl.textContent = '✓ Review the extracted details in the panel above.';
+      statusEl.style.color = 'var(--green)';
+    } catch(e) {
+      statusEl.textContent = 'Error: ' + e.message;
+      statusEl.style.color = 'var(--red)';
     }
   });
 
