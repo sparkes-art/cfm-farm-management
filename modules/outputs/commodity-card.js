@@ -337,11 +337,6 @@ function _buildRow(c, alt, season) {
   const col = `font-size:11px;text-align:center;font-variant-numeric:tabular-nums;padding:8px 6px`;
   const pctColor = c.pctSold == null ? 'var(--hint)' : c.pctSold >= 100 ? 'var(--green)' : c.pctSold >= 80 ? 'var(--ink-mid)' : 'var(--blue)';
 
-  // Revenue columns
-  const budgetRev    = c.budgetProd && c.budgetPrice ? c.budgetProd * c.budgetPrice : null;
-  const soldRev      = c.soldRevenue || null;
-  const unsoldRevMkt = c.unsoldQty > 0 ? c.unsoldQty * (c.marketPrice || c.budgetPrice || 0) : null;
-
   // ── Heatmap — contracted delivery windows only ───────────────
   // No actual payment dates — those cross season boundaries (gin payments arrive months later)
   // Only show contracted delivery periods which are cleanly tied to the season
