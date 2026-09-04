@@ -696,6 +696,21 @@ export function openInvoiceForm(container, existing = null) {
     </div>
     <div style="padding:20px;overflow-y:auto;flex:1" id="inv-form-body">
 
+      <!-- RCTI Upload — PDF first, like contract form -->
+      <div class="card" style="margin-bottom:18px;border:2px dashed var(--rule);box-shadow:none">
+        <div class="card-body" style="padding:14px">
+          <p style="font-size:var(--text-sm);font-weight:600;margin-bottom:4px">📄 Upload RCTI</p>
+          <p style="font-size:var(--text-xs);color:var(--muted);margin-bottom:10px">
+            Upload the RCTI PDF and AI will extract the details automatically. Review and adjust before saving.
+          </p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input type="file" id="rcti-pdf-upload" accept=".pdf,image/*" style="font-size:var(--text-sm);flex:1;min-width:200px">
+            <button class="btn btn-secondary" id="btn-extract-rcti" type="button">✨ Extract details</button>
+          </div>
+          <div id="rcti-extract-status" style="min-height:18px;margin-top:8px;font-size:12px"></div>
+        </div>
+      </div>
+
       <!-- Sale type -->
       <div style="display:flex;gap:10px;margin-bottom:16px">
         <div id="inv-opt-contract" style="flex:1;border:2px solid var(--blue);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer;background:var(--blue-light)">
@@ -811,7 +826,132 @@ export function openInvoiceForm(container, existing = null) {
   modal.querySelector('#inv-close')?.addEventListener('click', close);
   modal.querySelector('#f-cancel')?.addEventListener('click', close);
 
-  // Contract selector
+  // ── RCTI PDF extraction ──────────────────────────────────────
+  modal.querySelector('#btn-extract-rcti')?.addEventListener('click', async () => {
+    const fileInput = modal.querySelector('#rcti-pdf-upload');
+    const statusEl = modal.querySelector('#rcti-extract-status');
+    const file = fileInput?.files?.[0];
+    if (!file) { statusEl.textContent = 'Please select a PDF first.'; statusEl.style.color = 'var(--red)'; return; }
+
+    statusEl.textContent = 'Reading PDF…'; statusEl.style.color = 'var(--muted)';
+    modal.querySelector('#btn-extract-rcti').disabled = true;
+
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      statusEl.textContent = 'Extracting details with AI…';
+      const farm = getActiveFarm();
+      const res = await fetch('/api/extract-rcti', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf_base64: base64, farm_id: farm?.id, document_type: 'rcti' }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(()=>({}))).error || 'Extraction failed');
+      const { extracted } = await res.json();
+
+      // Helper — set field value and clear red border
+      const setField = (id, val) => {
+        const el = modal.querySelector('#' + id);
+        if (el && val != null && val !== '') {
+          el.value = val;
+          el.style.borderColor = '';
+          el.style.background = '';
+          el.dispatchEvent(new Event('input'));
+        }
+      };
+
+      // Populate top-level fields
+      setField('f-date', extracted.invoice_date);
+      setField('f-buyer', extracted.gin_name);
+      setField('f-notes', extracted.notes);
+
+      // Populate into current batch (first/only batch)
+      const batchDivs = modal.querySelectorAll('[data-batch-id]');
+      if (batchDivs.length > 0) {
+        const bDiv = batchDivs[0];
+        const bQty = bDiv.querySelector('.b-qty');
+        const bDocket = bDiv.querySelector('.b-income-docket');
+        if (bQty && extracted.bale_count) { bQty.value = extracted.bale_count; bQty.dispatchEvent(new Event('input')); }
+        if (bDocket && extracted.docket_numbers?.length) bDocket.value = extracted.docket_numbers.join(', ');
+
+        // Clear existing income lines and repopulate from extraction
+        const incomeBody = bDiv.querySelector('.b-income-lines');
+        if (incomeBody && extracted.gross_proceeds) {
+          incomeBody.innerHTML = '';
+          // Add sale line with gross proceeds
+          addBatchLine(bDiv, {
+            description: modal.querySelector('#f-contract') && _contracts.find(c=>c.id===modal.querySelector('#f-contract').value)?.commodity || 'Cotton Lint',
+            amount: extracted.gross_proceeds,
+            type: 'income',
+            line_type: 'sale',
+          }, 'income');
+          // Add QA lines from quality_premiums_discounts
+          (extracted.quality_premiums_discounts || []).forEach(qa => {
+            if (qa.total_amount) {
+              addBatchLine(bDiv, {
+                description: qa.description || 'Quality adj',
+                amount: qa.total_amount,
+                type: 'income',
+                line_type: 'qa',
+              }, 'income');
+            }
+          });
+          recalcBatch(bDiv);
+          recalcTotals();
+        }
+
+        // Store file for upload
+        bDiv._incomeFiles = bDiv._incomeFiles || [];
+        bDiv._incomeFiles.push(file);
+        // Show filename in file list
+        const list = bDiv.querySelector('.b-income-file-list');
+        if (list) list.innerHTML = `<span style="font-size:10px;color:var(--blue)">📄 ${file.name}</span>`;
+      }
+
+      // Highlight fields that couldn't be filled
+      const required = ['f-date', 'f-buyer'];
+      const missing = [];
+      required.forEach(id => {
+        const el = modal.querySelector('#' + id);
+        if (el && !el.value) {
+          el.style.borderColor = 'var(--red)';
+          el.style.background = '#fff5f5';
+          missing.push(id.replace('f-',''));
+          el.addEventListener('input', () => { el.style.borderColor = ''; el.style.background = ''; }, { once: true });
+        }
+      });
+
+      // Also check batch qty and amount
+      const bDiv = modal.querySelector('[data-batch-id]');
+      const bQty = bDiv?.querySelector('.b-qty');
+      if (bQty && !bQty.value) {
+        bQty.style.borderColor = 'var(--red)'; bQty.style.background = '#fff5f5';
+        missing.push('qty');
+        bQty.addEventListener('input', () => { bQty.style.borderColor = ''; bQty.style.background = ''; }, { once: true });
+      }
+
+      if (missing.length) {
+        statusEl.textContent = `⚠ Extracted — could not find: ${missing.join(', ')}. Please fill these fields.`;
+        statusEl.style.color = 'var(--amber)';
+      } else {
+        statusEl.textContent = '✓ Details extracted — please review before saving.';
+        statusEl.style.color = 'var(--green)';
+      }
+
+    } catch (err) {
+      statusEl.textContent = 'Error: ' + err.message;
+      statusEl.style.color = 'var(--red)';
+    } finally {
+      modal.querySelector('#btn-extract-rcti').disabled = false;
+    }
+  });
+
+
   const contractSel = modal.querySelector('#f-contract');
   const contractSummary = modal.querySelector('#f-contract-summary');
 
