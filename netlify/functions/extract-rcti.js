@@ -37,7 +37,7 @@ exports.handler = async (event) => {
     try {
       await sb('rcti_extraction_examples', {
         method: 'POST',
-        body: JSON.stringify({ farm_id, extraction_id, corrected_data: correction, created_at: new Date().toISOString() }),
+        body: JSON.stringify({ farm_id, extraction_id, buyer_name: correction.buyer_name || null, corrected_data: correction, created_at: new Date().toISOString() }),
       });
       return { statusCode: 200, headers, body: JSON.stringify({ saved: true }) };
     } catch(e) {
@@ -47,17 +47,33 @@ exports.handler = async (event) => {
 
   if (!pdf_base64 && !pdf_text) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No PDF data provided' }) };
 
-  // Load few-shot examples only when using binary PDF path (text path is fast enough without them)
+  // Load few-shot examples filtered by farm + buyer_name if we can detect the gin from the text
+  // We do a quick first-pass scan to find the gin name before the full extraction
   let examples = [];
-  if (!pdf_text) {
-    try {
-      examples = await sb('rcti_extraction_examples?farm_id=eq.' + farm_id + '&order=created_at.desc&limit=3&select=corrected_data');
-    } catch(e) { /* table may not exist yet */ }
-  }
+  try {
+    // Try to detect gin name from text for targeted examples
+    let buyerFilter = '';
+    if (pdf_text) {
+      const knownBuyers = ['Omnicotton', 'Colly', 'Auscott', 'Louis Dreyfus', 'Olam', 'Macquarie'];
+      const detectedBuyer = knownBuyers.find(g => pdf_text.toLowerCase().includes(g.toLowerCase()));
+      if (detectedBuyer) buyerFilter = '&buyer_name=ilike.*' + encodeURIComponent(detectedBuyer) + '*';
+    }
+    // First try gin-specific examples, fall back to all farm examples
+    const byGin = buyerFilter
+      ? await sb('rcti_extraction_examples?farm_id=eq.' + farm_id + buyerFilter + '&corrected_data=not.is.null&order=created_at.desc&limit=5&select=corrected_data,buyer_name').catch(()=>[])
+      : [];
+    examples = byGin.length > 0
+      ? byGin
+      : await sb('rcti_extraction_examples?farm_id=eq.' + farm_id + '&corrected_data=not.is.null&order=created_at.desc&limit=5&select=corrected_data,buyer_name');
+  } catch(e) { /* table may not exist yet */ }
 
   const exampleText = examples.length > 0
-    ? 'Here are examples of correctly extracted data from previous documents for this farm:\n\n' +
-      examples.map((ex, i) => 'Example ' + (i+1) + ':\n' + JSON.stringify(ex.corrected_data, null, 2)).join('\n\n') + '\n\n'
+    ? 'IMPORTANT: Previous extractions from this farm have been corrected. Use these as reference for the expected format and values:\n\n' +
+      examples.map((ex, i) => {
+        const d = ex.corrected_data || {};
+        const ginLabel = ex.buyer_name || d.buyer_name || '?';
+        return `Correction ${i+1} (${ginLabel}): gin="${d.buyer_name||'?'}", date="${d.invoice_date||'?'}", bales=${d.bale_count||'?'}, gross=${d.gross_proceeds||'?'}`;
+      }).join('\n') + '\n\nPrioritise corrections from the same buyer when extracting.\n\n'
     : '';
 
   const isGinReceipt = document_type === 'gin_receipt';
@@ -67,7 +83,7 @@ exports.handler = async (event) => {
     'Return ONLY a valid JSON object with no other text or markdown:\n' +
     '{\n' +
     '  "receipt_number": "reference or receipt number",\n' +
-    '  "gin_name": "the gin company name",\n' +
+    '  "buyer_name": "the buyer name",\n' +
     '  "grower_name": "grower or property name",\n' +
     '  "date": "YYYY-MM-DD",\n' +
     '  "bale_count": null,\n' +
@@ -86,7 +102,7 @@ exports.handler = async (event) => {
     'Start your response with { and end with }.\n' +
     '{\n' +
     '  "rcti_number": "invoice reference number",\n' +
-    '  "gin_name": "gin or buyer company name",\n' +
+    '  "buyer_name": "gin or buyer company name",\n' +
     '  "grower_name": "grower or property name",\n' +
     '  "crop_year": "e.g. 2025-26",\n' +
     '  "invoice_date": "YYYY-MM-DD",\n' +
@@ -160,7 +176,7 @@ exports.handler = async (event) => {
     try {
       const saved = await sb('rcti_extraction_examples', {
         method: 'POST',
-        body: JSON.stringify({ farm_id, extracted_data: extracted, corrected_data: null, created_at: new Date().toISOString() }),
+        body: JSON.stringify({ farm_id, buyer_name: extracted.buyer_name || null, extracted_data: extracted, corrected_data: null, created_at: new Date().toISOString() }),
       });
       extractionId = saved?.[0]?.id;
     } catch(e) { /* non-fatal */ }

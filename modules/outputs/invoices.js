@@ -935,11 +935,9 @@ export function openInvoiceForm(container, existing = null) {
         }
       });
 
-      // Save correction for continuous learning
-      if (extraction_id) fetch('/api/extract-rcti', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ farm_id: farm.id, save_example: true, extraction_id, correction: extracted })
-      }).catch(()=>{});
+      // Save correction for continuous learning — store extraction_id for later
+      modal._extractionId = extraction_id;
+      modal._extracted = extracted;
 
       statusEl.textContent = missing.length
         ? '⚠ Extracted — check highlighted fields: ' + missing.join(', ')
@@ -1136,6 +1134,23 @@ export function openInvoiceForm(container, existing = null) {
       };
 
       if (existing?.xero_invoice_number) { row.xero_invoice_number = existing.xero_invoice_number; row.xero_invoice_id = existing.xero_invoice_id; row.xero_invoice_url = existing.xero_invoice_url; }
+
+      // Save extraction correction with actual user-entered values (not original AI values)
+      // This is what teaches the system to do better next time
+      if (modal._extractionId && modal._extracted) {
+        const corrected = Object.assign({}, modal._extracted, {
+          buyer_name: buyer,
+          gin_name: buyer,  // keep for backward compat
+          invoice_date: date,
+          bale_count: qty,
+          gross_proceeds: gross,
+          net_payment: gross + (qa||0),
+        });
+        fetch('/api/extract-rcti', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ farm_id: farm.id, save_example: true, extraction_id: modal._extractionId, correction: corrected })
+        }).catch(()=>{});
+      }
 
       if (existing?.id) {
         await dbUpdate('invoices', existing.id, row);
