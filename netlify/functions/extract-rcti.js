@@ -47,24 +47,26 @@ exports.handler = async (event) => {
 
   if (!pdf_base64 && !pdf_text) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No PDF data provided' }) };
 
-  // Load few-shot examples filtered by farm + buyer_name if we can detect the gin from the text
-  // We do a quick first-pass scan to find the gin name before the full extraction
+  // Load all farm corrections — buyer-specific ones sorted to top dynamically
+  // No hardcoded buyer list — we detect buyers from our own correction history
   let examples = [];
   try {
-    // Try to detect gin name from text for targeted examples
-    let buyerFilter = '';
-    if (pdf_text) {
-      const knownBuyers = ['Omnicotton', 'Colly', 'Auscott', 'Louis Dreyfus', 'Olam', 'Macquarie'];
-      const detectedBuyer = knownBuyers.find(g => pdf_text.toLowerCase().includes(g.toLowerCase()));
-      if (detectedBuyer) buyerFilter = '&buyer_name=ilike.*' + encodeURIComponent(detectedBuyer) + '*';
+    const allExamples = await sb('rcti_extraction_examples?farm_id=eq.' + farm_id + '&corrected_data=not.is.null&order=created_at.desc&limit=20&select=corrected_data,buyer_name');
+    if (pdf_text && allExamples.length > 0) {
+      // Find any buyer from our correction history that appears in this document
+      const knownBuyers = [...new Set(allExamples.map(e => e.buyer_name).filter(Boolean))];
+      const matchedBuyer = knownBuyers.find(b => pdf_text.toLowerCase().includes(b.toLowerCase()));
+      if (matchedBuyer) {
+        // Buyer-specific examples first, then others, cap at 5 total
+        const buyerFirst = allExamples.filter(e => e.buyer_name?.toLowerCase() === matchedBuyer.toLowerCase());
+        const others = allExamples.filter(e => e.buyer_name?.toLowerCase() !== matchedBuyer.toLowerCase());
+        examples = [...buyerFirst, ...others].slice(0, 5);
+      } else {
+        examples = allExamples.slice(0, 5);
+      }
+    } else {
+      examples = allExamples.slice(0, 5);
     }
-    // First try gin-specific examples, fall back to all farm examples
-    const byGin = buyerFilter
-      ? await sb('rcti_extraction_examples?farm_id=eq.' + farm_id + buyerFilter + '&corrected_data=not.is.null&order=created_at.desc&limit=5&select=corrected_data,buyer_name').catch(()=>[])
-      : [];
-    examples = byGin.length > 0
-      ? byGin
-      : await sb('rcti_extraction_examples?farm_id=eq.' + farm_id + '&corrected_data=not.is.null&order=created_at.desc&limit=5&select=corrected_data,buyer_name');
   } catch(e) { /* table may not exist yet */ }
 
   const exampleText = examples.length > 0
