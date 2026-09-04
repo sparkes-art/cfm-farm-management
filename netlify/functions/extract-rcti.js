@@ -81,43 +81,26 @@ exports.handler = async (event) => {
     'Extract EVERY charge line item separately. For fields not found use null. Return only the JSON object.';
 
   const rctiPrompt = exampleText +
-    'Extract all available information from this RCTI (Recipient Created Tax Invoice) or gin advice document. ' +
-    'Return ONLY a valid JSON object with no other text or markdown:\n' +
+    'Extract information from this RCTI (Recipient Created Tax Invoice). ' +
+    'Respond with ONLY a JSON object — no explanation, no markdown, no text before or after. ' +
+    'Start your response with { and end with }.\n' +
     '{\n' +
-    '  "rcti_number": "the RCTI or invoice reference number",\n' +
-    '  "gin_name": "the gin or buyer company name",\n' +
-    '  "gin_address": "gin location/address if shown",\n' +
-    '  "grower_name": "the grower or property name",\n' +
-    '  "grower_pid": "property identification code if shown",\n' +
+    '  "rcti_number": "invoice reference number",\n' +
+    '  "gin_name": "gin or buyer company name",\n' +
+    '  "grower_name": "grower or property name",\n' +
     '  "crop_year": "e.g. 2025-26",\n' +
-    '  "invoice_date": "YYYY-MM-DD format",\n' +
-    '  "payment_date": "YYYY-MM-DD format or null",\n' +
-    '  "docket_numbers": ["array of all docket/bale lot numbers found"],\n' +
+    '  "invoice_date": "YYYY-MM-DD",\n' +
+    '  "payment_date": "YYYY-MM-DD or null",\n' +
+    '  "docket_numbers": ["docket or bale lot numbers"],\n' +
     '  "bale_count": 0,\n' +
-    '  "gross_weight_kg": null,\n' +
-    '  "lint_weight_kg": null,\n' +
-    '  "average_micronaire": null,\n' +
-    '  "average_staple_length": null,\n' +
-    '  "average_strength": null,\n' +
-    '  "average_colour": null,\n' +
-    '  "base_price_per_kg": null,\n' +
-    '  "base_price_per_bale": null,\n' +
     '  "quality_premiums_discounts": [\n' +
-    '    {"description": "e.g. Micronaire premium", "amount_per_kg": null, "total_amount": 0}\n' +
+    '    {"description": "e.g. Micronaire premium", "total_amount": 0}\n' +
     '  ],\n' +
     '  "gross_proceeds": 0,\n' +
-    '  "deductions": [\n' +
-    '    {"description": "e.g. Ginning charge", "rate": null, "total_amount": 0}\n' +
-    '  ],\n' +
     '  "net_payment": 0,\n' +
     '  "gst_amount": null,\n' +
-    '  "gst_exclusive": true,\n' +
-    '  "currency": "AUD",\n' +
-    '  "notes": "any other relevant information",\n' +
-    '  "_unfound_fields": ["list standard RCTI fields you could not find"],\n' +
-    '  "_confidence_issues": ["describe fields where you had low confidence"]\n' +
-    '}\n' +
-    'Extract EVERY field you can find. Return only the JSON object.';
+    '  "_unfound_fields": ["fields you could not find"]\n' +
+    '}';
 
   const prompt = isGinReceipt ? ginReceiptPrompt : rctiPrompt;
 
@@ -155,12 +138,22 @@ exports.handler = async (event) => {
     }
 
     const data = await response.json();
-    const text = data.content?.map(c => c.text || '').join('');
-    const clean = text.replace(/```json|```/g, '').trim();
+    const raw = data.content?.map(c => c.text || '').join('') || '';
+    // Extract JSON object regardless of any surrounding text
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start === -1 || end === -1) {
+      console.error('[extract-rcti] No JSON found in response:', raw.slice(0, 200));
+      return { statusCode: 200, headers, body: JSON.stringify({ error: 'Could not parse extraction', raw: raw.slice(0, 500) }) };
+    }
+    const clean = raw.slice(start, end + 1);
 
     let extracted;
     try { extracted = JSON.parse(clean); }
-    catch { return { statusCode: 200, headers, body: JSON.stringify({ error: 'Could not parse extraction', raw: text }) }; }
+    catch(e) {
+      console.error('[extract-rcti] JSON parse error:', e.message, 'raw:', clean.slice(0, 300));
+      return { statusCode: 200, headers, body: JSON.stringify({ error: 'Could not parse extraction', raw: clean.slice(0, 500) }) };
+    }
 
     // Save extraction record
     let extractionId = null;
