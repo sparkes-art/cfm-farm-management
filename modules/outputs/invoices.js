@@ -546,8 +546,10 @@ async function _callExtractAPI(file, farm, documentType) {
   // Build request body — prefer text over binary
   const body = { farm_id: farm.id, document_type: documentType };
   if (pdf_text && pdf_text.trim().length > 50) {
+    console.log('[RCTI] Sending extracted text:', pdf_text.length, 'chars');
     body.pdf_text = pdf_text;
   } else {
+    console.log('[RCTI] Text extraction failed or empty, sending binary PDF');
     // Fallback to base64 for image-based PDFs or if text extraction failed
     body.pdf_base64 = await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -892,6 +894,8 @@ export function openInvoiceForm(container, existing = null) {
     const batchDiv = modal.querySelector('[data-batch-id]');
     statusEl.textContent = 'Extracting…'; statusEl.style.color = 'var(--muted)';
     try {
+      // Show which path is being taken
+      const batchDiv = modal.querySelector('[data-batch-id]') || (() => { addBatch(); return modal.querySelector('[data-batch-id]'); })();
       await _extractFromRCTI(batchDiv, file, modal, addBatchLine, recalcBatch);
       statusEl.textContent = '✓ Review the extracted details in the panel above.';
       statusEl.style.color = 'var(--green)';

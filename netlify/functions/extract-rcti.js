@@ -47,11 +47,13 @@ exports.handler = async (event) => {
 
   if (!pdf_base64 && !pdf_text) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No PDF data provided' }) };
 
-  // Load few-shot examples
+  // Load few-shot examples only when using binary PDF path (text path is fast enough without them)
   let examples = [];
-  try {
-    examples = await sb('rcti_extraction_examples?farm_id=eq.' + farm_id + '&order=created_at.desc&limit=5&select=corrected_data');
-  } catch(e) { /* table may not exist yet */ }
+  if (!pdf_text) {
+    try {
+      examples = await sb('rcti_extraction_examples?farm_id=eq.' + farm_id + '&order=created_at.desc&limit=3&select=corrected_data');
+    } catch(e) { /* table may not exist yet */ }
+  }
 
   const exampleText = examples.length > 0
     ? 'Here are examples of correctly extracted data from previous documents for this farm:\n\n' +
@@ -119,6 +121,8 @@ exports.handler = async (event) => {
 
   const prompt = isGinReceipt ? ginReceiptPrompt : rctiPrompt;
 
+  console.log('[extract-rcti] path:', pdf_text ? 'text (' + pdf_text.length + ' chars)' : 'binary pdf');
+
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -128,8 +132,9 @@ exports.handler = async (event) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 2000,
+        // Use Haiku for speed — fast enough for structured extraction
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1000,
         messages: [{
           role: 'user',
           content: pdf_text
