@@ -807,7 +807,7 @@ export async function buildContractPosition(season) {
         const invoiced = invByContract[c.id] || { qty: 0, totalPaid: 0, qa: 0 };
         const contractQty = parseFloat(c.quantity) || 0;
         const contractPrice = parseFloat(c.price_per_unit) || 0;
-        const remaining = Math.max(0, contractQty - invoiced.qty);
+        const remaining = c.is_complete ? 0 : Math.max(0, contractQty - invoiced.qty);
         const pct = contractQty > 0 ? Math.min(100, Math.round(invoiced.qty / contractQty * 100)) : 0;
         const isComplete = c.is_complete === true;
         const buyer = c.counterparty || c.buyer || '—';
