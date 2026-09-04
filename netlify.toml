@@ -11,6 +11,12 @@
 [functions.export-backup]
   timeout = 30
 
+[functions.extract-rcti]
+  timeout = 60
+
+[functions.extract-contract]
+  timeout = 60
+
 [functions.sync-water-announcements]
   timeout = 60
   schedule = "0 2 * * *"

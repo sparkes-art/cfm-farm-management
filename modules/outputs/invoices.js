@@ -508,6 +508,10 @@ function _xeroRefModal(inv, container) {
 // ── RCTI / Gin receipt extraction ────────────────────────────
 
 async function _callExtractAPI(file, farm, documentType) {
+  // Netlify function body limit is ~6MB; base64 adds ~33% overhead
+  if (file.size > 4 * 1024 * 1024) {
+    throw new Error(`File too large (${(file.size/1024/1024).toFixed(1)}MB). Please use a PDF under 4MB.`);
+  }
   const base64 = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result.split(',')[1]);
@@ -519,6 +523,12 @@ async function _callExtractAPI(file, farm, documentType) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pdf_base64: base64, farm_id: farm.id, document_type: documentType }),
   });
+  // Guard against HTML error pages from Netlify (timeout, 404, oversized body)
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await res.text();
+    throw new Error(`Server error (${res.status}) — ${text.slice(0,80)}`);
+  }
   const json = await res.json();
   if (!res.ok || json.error) throw new Error(json.error || 'Extraction failed');
   return json;
