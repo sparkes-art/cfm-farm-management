@@ -165,7 +165,7 @@ export async function buildCommodityCards(season) {
         <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Contracted</div>
         <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Invoiced</div>
         <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Unsold</div>
-        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">%</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center" title="% invoiced of budget, or % contracted if not yet invoiced">%</div>
         <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Budget $</div>
         <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Contract $</div>
         <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Paid $</div>
@@ -262,7 +262,13 @@ function _computeCom(com, allForecasts, allHarvests, season, commodityStatuses) 
   const estProd = forecastProd || budgetProd || totalContractedQty;
   const effectiveSoldQty = soldQty || 0;
   const unsoldQty = estProd != null ? Math.max(0, estProd - effectiveSoldQty) : null;
-  const pctSold = estProd ? Math.round(effectiveSoldQty / estProd * 100) : null;
+  // % column: show % invoiced if any invoiced, else % contracted of budget
+  const pctSold = soldQty > 0 && estProd
+    ? Math.round(soldQty / estProd * 100)
+    : null;
+  const pctContracted = !soldQty && totalContractedQty && estProd
+    ? Math.round(totalContractedQty / estProd * 100)
+    : null;
   const priceVariance = avgSoldPrice && budgetPrice && soldQty ? (avgSoldPrice - budgetPrice) * soldQty : null;
   const vsbudgetPct = avgSoldPrice && budgetPrice ? Math.round((avgSoldPrice - budgetPrice) / budgetPrice * 100) : null;
 
@@ -322,7 +328,7 @@ function _computeCom(com, allForecasts, allHarvests, season, commodityStatuses) 
     : null;
   const contractedRev = totalContractedQty && avgContractPrice ? totalContractedQty * avgContractPrice : null;
 
-  return { name, budgetProd, budgetPrice, totalContractedQty, avgContractPrice, contractedRev, soldQty, soldRevenue, avgSoldPrice, unsoldQty, pctSold, priceVariance, vsbudgetPct, marketPrice, unit, invoiceDates, deliveryMonths };
+  return { name, budgetProd, budgetPrice, totalContractedQty, avgContractPrice, contractedRev, soldQty, soldRevenue, avgSoldPrice, unsoldQty, pctSold, pctContracted, priceVariance, vsbudgetPct, marketPrice, unit, invoiceDates, deliveryMonths };
 }
 
 // ── Single crop row ────────────────────────────────────────────
@@ -335,7 +341,14 @@ function _buildRow(c, alt, season) {
   };
 
   const col = `font-size:11px;text-align:center;font-variant-numeric:tabular-nums;padding:8px 6px`;
-  const pctColor = c.pctSold == null ? 'var(--hint)' : c.pctSold >= 100 ? 'var(--green)' : c.pctSold >= 80 ? 'var(--ink-mid)' : 'var(--blue)';
+  const pctColor = c.pctSold != null
+    ? (c.pctSold >= 100 ? 'var(--green)' : c.pctSold >= 80 ? 'var(--ink-mid)' : 'var(--blue)')
+    : c.pctContracted != null ? 'var(--blue)' : 'var(--hint)';
+  const pctDisplay = c.pctSold != null
+    ? `<span title="% invoiced">${c.pctSold}%</span>`
+    : c.pctContracted != null
+    ? `<span title="% contracted of budget" style="font-size:9px;color:var(--hint);display:block;line-height:1">con</span><span>${c.pctContracted}%</span>`
+    : '—';
 
   // ── Heatmap — contracted delivery windows only ───────────────
   // No actual payment dates — those cross season boundaries (gin payments arrive months later)
@@ -388,7 +401,7 @@ function _buildRow(c, alt, season) {
     <div style="${col};font-weight:600;color:var(--blue)">${c.totalContractedQty ? fN(c.totalContractedQty) : '—'}</div>
     <div style="${col};font-weight:600;color:var(--green)">${c.soldQty ? fN(c.soldQty) : '—'}</div>
     <div style="${col};color:var(--amber)">${c.unsoldQty != null && c.unsoldQty > 0 ? fN(c.unsoldQty) : '—'}</div>
-    <div style="${col};color:${pctColor};font-weight:500">${c.pctSold != null ? c.pctSold + '%' : '—'}</div>
+    <div style="${col};color:${pctColor};font-weight:500;line-height:1.2">${pctDisplay}</div>
     <!-- Price -->
     <div style="${col};color:var(--ink-mid)">${c.budgetPrice ? fC(c.budgetPrice) : '—'}</div>
     <div style="${col};font-weight:600;color:var(--blue)">${c.avgContractPrice ? fC(c.avgContractPrice) : '—'}</div>
