@@ -1066,11 +1066,6 @@ export function openInvoiceForm(container, existing = null) {
     div._incomeFiles = [];
     div._expenseFiles = [];
 
-    // Gin receipt extraction button
-
-      tempInput.click();
-    });
-
     // RCTI extraction button
     div.querySelector('.b-extract-rcti')?.addEventListener('click', async () => {
       const fileInput = div.querySelector('.b-income-file-input');
