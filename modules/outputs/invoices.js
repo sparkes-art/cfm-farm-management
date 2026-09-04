@@ -1014,8 +1014,7 @@ export function openInvoiceForm(container, existing = null) {
           <span style="color:#166534;font-weight:600">Total income: <strong class="b-total-income" style="color:#166534">$0.00</strong></span>
         </div>
       </div>
-
-
+    `;
 
     batchesWrap.appendChild(div);
 
