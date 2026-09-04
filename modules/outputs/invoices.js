@@ -829,7 +829,7 @@ export function openInvoiceForm(container, existing = null) {
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
         <div class="form-group" style="margin:0">
           <label class="form-label">Quantity <span style="color:var(--red)">*</span></label>
-          <input class="form-input" id="f-qty" type="number" step="0.01" min="0" value="${existingQty ? parseFloat(existingQty).toFixed(2) : ''}" placeholder="0.00">
+          <input class="form-input" id="f-qty" type="number" step="any" min="0" value="${existingQty ? parseFloat(existingQty) : ''}" placeholder="0.00">
         </div>
         <div class="form-group" style="margin:0">
           <label class="form-label">Gross proceeds <span style="color:var(--red)">*</span></label>
@@ -903,20 +903,20 @@ export function openInvoiceForm(container, existing = null) {
       _rctiFiles.push(file);
 
       // Populate fields
-      const setField = (id, val, round2) => {
+      const setField = (id, val, _unused) => {
         const el = modal.querySelector('#' + id);
         if (!el || val == null || val === '') return;
-        el.value = round2 ? (Math.round(parseFloat(val)*100)/100).toFixed(2) : val;
+        el.value = val;
         el.style.borderColor = ''; el.style.background = '';
         el.dispatchEvent(new Event('input'));
       };
       if (!modal.querySelector('#f-buyer').value) setField('f-buyer', extracted.gin_name);
       if (!modal.querySelector('#f-date').value) setField('f-date', extracted.invoice_date);
-      setField('f-qty', extracted.bale_count, true);
+      setField('f-qty', extracted.bale_count, false);
       setField('f-gross', extracted.gross_proceeds, true);
       // QA: sum all quality_premiums_discounts
       const qaTotal = (extracted.quality_premiums_discounts||[]).reduce((s,q)=>s+(parseFloat(q.total_amount)||0),0);
-      if (qaTotal !== 0) setField('f-qa', qaTotal, true);
+      if (qaTotal !== 0) setField('f-qa', qaTotal, false);
 
       // Save file reference for upload on save
       const list = modal.querySelector('#rcti-file-list');
@@ -1067,7 +1067,7 @@ export function openInvoiceForm(container, existing = null) {
 
       const buyer = modal.querySelector('#f-buyer')?.value?.trim();
       const date = modal.querySelector('#f-date')?.value;
-      const qty = Math.round(parseFloat(modal.querySelector('#f-qty')?.value || 0) * 100) / 100;
+      const qty = parseFloat(modal.querySelector('#f-qty')?.value || 0) || 0;
       const gross = parseFloat(modal.querySelector('#f-gross')?.value) || 0;
       const qa = parseFloat(modal.querySelector('#f-qa')?.value) || 0;
       const masterUnit = modal.querySelector('#f-master-unit')?.value || 'bale';
@@ -1106,7 +1106,7 @@ export function openInvoiceForm(container, existing = null) {
       if (gross) lines.push({ type:'income', line_type:'sale', description:commodity, amount:gross, eff_per_unit: qty ? Math.round(gross/qty*10000)/10000 : null });
       if (qa) lines.push({ type:'income', line_type:'qa', description:'Quality adjustment', amount:qa, eff_per_unit: qty ? Math.round(qa/qty*10000)/10000 : null });
 
-      const cropYear = activeSeason;
+      const cropYear = selectedContract?.crop_year || activeSeason;
       const batch = { qty, crop_year:cropYear, income_files:rctiFiles, lines };
 
       const row = {
@@ -1128,7 +1128,6 @@ export function openInvoiceForm(container, existing = null) {
         rcti_filename: rctiFiles[0]?.filename || null,
         gin_files: [], gin_url: null, gin_filename: null, other_files: [],
         status: existing?.xero_invoice_number ? 'complete' : (existing?.status || 'pending'),
-        commodity_type: selectedContract?.commodity || null,
         // Legacy line_items for compatibility
         line_items: [
           ...(gross ? [{ type:'income', line_type:'sale', commodity: commodity, docket:'', qty, unit:masterUnit, season:cropYear, total:gross, price:qty?gross/qty:0 }] : []),
