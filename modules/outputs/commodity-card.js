@@ -149,9 +149,9 @@ export async function buildCommodityCards(season) {
       </div>
 
       <!-- Column headers: Crop | Production(5) | Price(4) | Revenue(4) | Heatmap -->
-      <div style="display:grid;grid-template-columns:120px 55px 58px 58px 52px 42px 60px 62px 62px 50px 70px 70px 70px 70px 264px;gap:0;padding:4px 8px;background:var(--page-bg);border-bottom:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:120px 52px 58px 58px 55px 52px 42px 60px 62px 62px 50px 70px 70px 70px 70px 264px;gap:0;padding:4px 8px;background:var(--page-bg);border-bottom:1px solid var(--border)">
         <div></div>
-        <div style="grid-column:span 5;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center;border-bottom:2px solid var(--border-strong);padding-bottom:2px">Production</div>
+        <div style="grid-column:span 6;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center;border-bottom:2px solid var(--border-strong);padding-bottom:2px">Production</div>
         <div style="grid-column:span 4;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center;border-bottom:2px solid var(--border-strong);padding-bottom:2px">Price</div>
         <div style="grid-column:span 4;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:center;border-bottom:2px solid var(--border-strong);padding-bottom:2px">Revenue</div>
         <div style="display:flex;align-items:center;gap:4px;justify-content:center">
@@ -159,9 +159,10 @@ export async function buildCommodityCards(season) {
           <span style="width:8px;height:8px;background:rgba(26,95,168,.6);border-radius:1px;display:inline-block"></span>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:120px 55px 58px 58px 52px 42px 60px 62px 62px 50px 70px 70px 70px 70px 264px;gap:0;padding:3px 8px 4px;background:var(--page-bg);border-bottom:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:120px 52px 58px 58px 55px 52px 42px 60px 62px 62px 50px 70px 70px 70px 70px 264px;gap:0;padding:3px 8px 4px;background:var(--page-bg);border-bottom:1px solid var(--border)">
         <div style="font-size:9px;color:var(--hint);font-weight:600">Crop</div>
         <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Budget</div>
+        <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center" title="Latest forecast if available, actual harvest if harvested">Fcst/Hvst</div>
         <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Contracted</div>
         <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Invoiced</div>
         <div style="font-size:9px;color:var(--hint);font-weight:600;text-align:center">Unsold</div>
@@ -184,8 +185,9 @@ export async function buildCommodityCards(season) {
       ${items.map((c, idx) => _buildRow(c, idx % 2 === 1, season)).join('')}
 
       <!-- Section totals at bottom -->
-      <div style="display:grid;grid-template-columns:120px 55px 58px 58px 52px 42px 60px 62px 62px 50px 70px 70px 70px 70px 264px;gap:0;padding:8px 8px;border-top:2px solid var(--border);background:var(--page-bg)">
+      <div style="display:grid;grid-template-columns:120px 52px 58px 58px 55px 52px 42px 60px 62px 62px 50px 70px 70px 70px 70px 264px;gap:0;padding:8px 8px;border-top:2px solid var(--border);background:var(--page-bg)">
         <div style="font-size:11px;font-weight:600;color:var(--ink)">${label} total</div>
+        <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
         <div style="font-size:11px;text-align:center;color:var(--hint)">—</div>
         <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:var(--blue)">${fM(items.reduce((s,c)=>s+(c.totalContractedQty||0),0)||null)}</div>
         <div style="font-size:11px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;color:var(--green)">${fM(items.reduce((s,c)=>s+(c.soldQty||0),0)||null)}</div>
@@ -259,7 +261,8 @@ function _computeCom(com, allForecasts, allHarvests, season, commodityStatuses) 
   });
 
   const avgSoldPrice = soldQty > 0 ? soldRevenue / soldQty : null;
-  const estProd = forecastProd || budgetProd || totalContractedQty;
+  // Best estimate of production: actual harvest → latest forecast → budget → contracted qty
+  const estProd = (totalHarvest || null) || forecastProd || budgetProd || totalContractedQty;
   const effectiveSoldQty = soldQty || 0;
   const unsoldQty = estProd != null ? Math.max(0, estProd - effectiveSoldQty) : null;
   // % column: show % invoiced if any invoiced, else % contracted of budget
@@ -328,7 +331,7 @@ function _computeCom(com, allForecasts, allHarvests, season, commodityStatuses) 
     : null;
   const contractedRev = totalContractedQty && avgContractPrice ? totalContractedQty * avgContractPrice : null;
 
-  return { name, budgetProd, budgetPrice, totalContractedQty, avgContractPrice, contractedRev, soldQty, soldRevenue, avgSoldPrice, unsoldQty, pctSold, pctContracted, priceVariance, vsbudgetPct, marketPrice, unit, invoiceDates, deliveryMonths };
+  return { name, budgetProd, budgetPrice, forecastProd, totalHarvest, totalContractedQty, avgContractPrice, contractedRev, soldQty, soldRevenue, avgSoldPrice, unsoldQty, pctSold, pctContracted, priceVariance, vsbudgetPct, marketPrice, unit, invoiceDates, deliveryMonths };
 }
 
 // ── Single crop row ────────────────────────────────────────────
@@ -390,7 +393,7 @@ function _buildRow(c, alt, season) {
     : c.vsbudgetPct;
 
   return `
-  <div style="display:grid;grid-template-columns:120px 55px 58px 58px 52px 42px 60px 62px 62px 50px 70px 70px 70px 70px 264px;gap:0;align-items:center;border-bottom:1px solid var(--border-light);${alt ? 'background:var(--page-bg)' : ''}"
+  <div style="display:grid;grid-template-columns:120px 52px 58px 58px 55px 52px 42px 60px 62px 62px 50px 70px 70px 70px 70px 264px;gap:0;align-items:center;border-bottom:1px solid var(--border-light);${alt ? 'background:var(--page-bg)' : ''}"
     onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background='${alt ? 'var(--page-bg)' : ''}'">
     <div style="padding:8px 8px;font-size:11px;font-weight:600;color:var(--ink)">
       ${c.name}
@@ -398,6 +401,13 @@ function _buildRow(c, alt, season) {
     </div>
     <!-- Production -->
     <div style="${col};color:var(--ink-mid)">${c.budgetProd ? fN(c.budgetProd) : '—'}</div>
+    <div style="${col}" title="${c.totalHarvest ? 'Actual harvest' : c.forecastProd ? 'Latest forecast' : 'No forecast or harvest entered'}">
+      ${c.totalHarvest
+        ? `<span style="color:var(--green);font-weight:600">${fN(c.totalHarvest)}</span><span style="font-size:8px;color:var(--green);display:block;line-height:1">hvst</span>`
+        : c.forecastProd
+        ? `<span style="color:var(--amber);font-weight:500">${fN(c.forecastProd)}</span><span style="font-size:8px;color:var(--amber);display:block;line-height:1">fcst</span>`
+        : `<span style="color:var(--hint)">—</span>`}
+    </div>
     <div style="${col};font-weight:600;color:var(--blue)">${c.totalContractedQty ? fN(c.totalContractedQty) : '—'}</div>
     <div style="${col};font-weight:600;color:var(--green)">${c.soldQty ? fN(c.soldQty) : '—'}</div>
     <div style="${col};color:var(--amber)">${c.unsoldQty != null && c.unsoldQty > 0 ? fN(c.unsoldQty) : '—'}</div>
