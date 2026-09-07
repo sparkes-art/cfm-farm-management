@@ -109,11 +109,13 @@ exports.handler = async (event) => {
     'Respond with ONLY a JSON object — no explanation, no markdown, no text before or after. ' +
     'Start your response with { and end with }.\n' +
     contractHint +
-    'IMPORTANT RULES:\n' +
-    '1. invoice_date: Convert to YYYY-MM-DD. Dates like "01-SEP-2026" = "2026-09-01", "15/07/2026" = "2026-07-15".\n' +
-    '2. quality_adj: Calculate as gross_proceeds MINUS net_payment. Do NOT read it from a line item — derive it mathematically. If net > gross it is negative.\n' +
-    '3. gross_proceeds and net_payment: Use AUD amounts only. Ignore any USD figures.\n' +
-    '4. buyer_name: The trading company (e.g. Omnicotton, Colly) NOT the gin facility.\n\n' +
+    'RULES — follow exactly:\n' +
+    '1. ALL monetary values must be in AUD only. Ignore any USD, US cents, or non-AUD figures.\n' +
+    '2. invoice_date must be YYYY-MM-DD. Examples: "01-SEP-2026"→"2026-09-01", "15/07/2026"→"2026-07-15", "July 15 2026"→"2026-07-15".\n' +
+    '3. quality_adj: find the AUD quality adjustment, premium or discount line. Positive = premium paid to grower. Negative = discount deducted.\n' +
+    '4. gross_proceeds: the base sale amount before quality adjustments, in AUD.\n' +
+    '5. net_payment: the final total paid to grower in AUD.\n' +
+    '6. buyer_name: the trading company name, NOT the gin facility.\n\n' +
     '{\n' +
     '  "rcti_number": "invoice reference number",\n' +
     '  "buyer_name": "buyer trading company name",\n' +
@@ -122,8 +124,8 @@ exports.handler = async (event) => {
     '  "invoice_date": "YYYY-MM-DD",\n' +
     '  "bale_count": 0,\n' +
     '  "gross_proceeds": 0,\n' +
-    '  "net_payment": 0,\n' +
     '  "quality_adj": 0,\n' +
+    '  "net_payment": 0,\n' +
     '  "contract_number_matched": "contract or PO number found in document, or null",\n' +
     '  "_unfound_fields": ["fields you could not find"]\n' +
     '}';
@@ -179,6 +181,36 @@ exports.handler = async (event) => {
     catch(e) {
       console.error('[extract-rcti] JSON parse error:', e.message, 'raw:', clean.slice(0, 300));
       return { statusCode: 200, headers, body: JSON.stringify({ error: 'Could not parse extraction', raw: clean.slice(0, 500) }) };
+    }
+
+    // Post-process: validate and fix date format
+    if (extracted.invoice_date && !/^\d{4}-\d{2}-\d{2}$/.test(extracted.invoice_date)) {
+      const months = { JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12 };
+      // Try DD-MON-YYYY (e.g. 01-SEP-2026)
+      const m1 = extracted.invoice_date.match(/^(\d{1,2})[\/\-]([A-Z]{3})[\/\-](\d{4})$/i);
+      if (m1 && months[m1[2].toUpperCase()]) {
+        extracted.invoice_date = `${m1[3]}-${String(months[m1[2].toUpperCase()]).padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
+      }
+      // Try DD/MM/YYYY
+      const m2 = extracted.invoice_date.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      if (m2) extracted.invoice_date = `${m2[3]}-${m2[2].padStart(2,'0')}-${m2[1].padStart(2,'0')}`;
+      // Validate result
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(extracted.invoice_date)) {
+        console.warn('[extract-rcti] Could not parse date:', extracted.invoice_date);
+        extracted.invoice_date = null;
+      }
+    }
+
+    // Post-process: ensure quality_adj sign is correct (positive = premium, negative = discount)
+    // Cross-check: gross + quality_adj should roughly equal net_payment
+    if (extracted.gross_proceeds && extracted.net_payment && extracted.quality_adj != null) {
+      const expectedQA = extracted.net_payment - extracted.gross_proceeds;
+      const extractedQA = parseFloat(extracted.quality_adj);
+      // If sign is wrong (off by more than 1), flip it
+      if (Math.abs(expectedQA - extractedQA) > Math.abs(expectedQA + extractedQA)) {
+        console.log('[extract-rcti] Flipping QA sign:', extractedQA, '->', -extractedQA);
+        extracted.quality_adj = -extractedQA;
+      }
     }
 
     // Save extraction record

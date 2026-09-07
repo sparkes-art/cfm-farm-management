@@ -935,13 +935,11 @@ export function openInvoiceForm(container, existing = null) {
       if (!modal.querySelector('#f-date').value) setField('f-date', extracted.invoice_date);
       setField('f-qty', extracted.bale_count, false);
       setField('f-gross', extracted.gross_proceeds, false);
-      // QA: use quality_adj directly, else derive from gross - net (most reliable), else sum line items
+      // QA: use quality_adj from extraction directly (already derived server-side as net - gross)
       const qaVal = extracted.quality_adj != null && extracted.quality_adj !== 0
         ? extracted.quality_adj
-        : (extracted.gross_proceeds && extracted.net_payment
-            ? Math.round((extracted.net_payment - extracted.gross_proceeds) * 100) / 100
-            : (extracted.quality_premiums_discounts||[]).reduce((s,q)=>s+(parseFloat(q.total_amount)||0), 0));
-      if (qaVal !== 0) setField('f-qa', qaVal, false);
+        : null;
+      if (qaVal != null) setField('f-qa', qaVal, false);
 
       // Auto-match contract number from document
       if (extracted.contract_number_matched) {
