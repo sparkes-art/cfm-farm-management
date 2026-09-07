@@ -780,10 +780,12 @@ export async function buildContractPosition(season) {
     const complete = pctInvoiced >= 100;
 
     html += `
-    <div class="card" style="overflow:hidden">
+    <div class="card" style="overflow:hidden" id="cp-card-${commName.replace(/\s+/g,'-')}">
       <!-- Commodity header -->
-      <div style="padding:10px 16px;background:#1a2535;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div style="padding:10px 16px;background:#1a2535;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;cursor:pointer"
+           onclick="(function(el){const body=el.closest('.card').querySelector('.cp-body');const icon=el.querySelector('.cp-toggle');const collapsed=body.style.display==='none';body.style.display=collapsed?'':'none';icon.textContent=collapsed?'▾':'▸';})(this)">
         <div style="display:flex;align-items:center;gap:10px">
+          <span style="color:rgba(255,255,255,.5);font-size:11px;line-height:1;margin-right:2px" class="cp-toggle">▾</span>
           <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
           <span style="font-size:13px;font-weight:600;color:white">${commName}</span>
           <span style="font-size:10px;color:rgba(255,255,255,.4)">${com.contracts.length} contract${com.contracts.length !== 1 ? 's' : ''} · ${com.unit}</span>
@@ -796,6 +798,7 @@ export async function buildContractPosition(season) {
           ${complete ? `<span style="background:#15803d;color:white;font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px">Complete</span>` : ''}
         </div>
       </div>
+      <div class="cp-body">
 
       <!-- Column headers -->
       <div style="display:grid;grid-template-columns:1fr 60px 70px 70px 70px 60px 1fr;gap:0;padding:4px 14px;background:var(--page-bg);border-bottom:1px solid var(--border)">
@@ -886,4 +889,152 @@ export async function buildContractPosition(season) {
 
   html += `</div></div>`;
   return html;
+}
+// ── Operations Summary — yield analysis by crop type ──────────
+export async function buildOperationsSummary(season) {
+  const farm = getActiveFarm();
+  if (!farm) return '';
+
+  const [budgets, forecasts, harvests] = await Promise.all([
+    dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
+    dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.desc'),
+    dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
+  ]);
+
+  if (!budgets.length && !forecasts.length && !harvests.length) return '';
+
+  const fN  = (n, dp=0) => n != null ? formatNumber(n, dp) : '—';
+  const fN2 = (n) => n != null ? formatNumber(n, 2) : '—';
+  const pct = (a, b) => (a != null && b) ? Math.round(a / b * 100) : null;
+  const varColor = (v) => v == null ? 'var(--hint)' : v >= 0 ? 'var(--green)' : 'var(--red)';
+
+  // Group by crop type (commodity name)
+  const cropMap = {};
+  const addCrop = (name) => {
+    if (!name) return;
+    const k = name.trim().toLowerCase();
+    if (!cropMap[k]) cropMap[k] = { name: name.trim(), budgets: [], forecasts: [], harvests: [] };
+    return k;
+  };
+
+  budgets.forEach(b => {
+    const k = addCrop(b.commodity || b.crop_type);
+    if (k) cropMap[k].budgets.push(b);
+  });
+  forecasts.forEach(f => {
+    const k = addCrop(f.commodity || f.crop_type);
+    if (k) cropMap[k].forecasts.push(f);
+  });
+  harvests.forEach(h => {
+    const k = addCrop(h.commodity || h.crop_type);
+    if (k) cropMap[k].harvests.push(h);
+  });
+
+  if (!Object.keys(cropMap).length) return '';
+
+  // Compute per-crop summary
+  const rows = Object.values(cropMap).map(crop => {
+    // Budget
+    const budArea  = crop.budgets.reduce((s, b) => s + (parseFloat(b.area_ha)||0), 0) || null;
+    const budYield = crop.budgets.length && budArea
+      ? crop.budgets.reduce((s, b) => s + ((parseFloat(b.yield_per_ha)||0) * (parseFloat(b.area_ha)||0)), 0) / budArea
+      : null;
+    const budProd  = crop.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_production) || ((parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0))), 0) || null;
+
+    // Latest forecast per budget_id
+    const latestFcst = {};
+    crop.forecasts.forEach(f => {
+      const k = f.budget_id || 'def';
+      if (!latestFcst[k] || f.forecast_date > latestFcst[k].forecast_date) latestFcst[k] = f;
+    });
+    const fcsts = Object.values(latestFcst);
+    const fcstArea  = fcsts.reduce((s, f) => s + (parseFloat(f.area_ha)||0), 0) || null;
+    const fcstYield = fcsts.length && fcstArea
+      ? fcsts.reduce((s, f) => s + ((parseFloat(f.yield_per_ha)||0) * (parseFloat(f.area_ha)||0)), 0) / fcstArea
+      : null;
+    const fcstProd  = fcsts.reduce((s, f) => s + (parseFloat(f.forecast_production) || ((parseFloat(f.area_ha)||0) * (parseFloat(f.yield_per_ha)||0))), 0) || null;
+
+    // Harvest actuals
+    const hvstArea  = crop.harvests.reduce((s, h) => s + (parseFloat(h.area_ha)||0), 0) || null;
+    const hvstProd  = crop.harvests.reduce((s, h) => s + (parseFloat(h.actual_production)||0), 0) || null;
+    const hvstYield = hvstArea && hvstProd ? hvstProd / hvstArea : null;
+
+    // Variance: actual vs budget
+    const yieldVar  = hvstYield != null && budYield  ? Math.round((hvstYield  - budYield)  * 100) / 100 : null;
+    const prodVar   = hvstProd  != null && budProd   ? Math.round((hvstProd   - budProd)   * 10)  / 10  : null;
+    const yieldVarPct = hvstYield != null && budYield ? Math.round((hvstYield - budYield) / budYield * 100) : null;
+
+    const unit = crop.budgets[0]?.unit || crop.harvests[0]?.unit || 't';
+
+    return { name: crop.name, unit, budArea, budYield, budProd, fcstArea, fcstYield, fcstProd, hvstArea, hvstYield, hvstProd, yieldVar, prodVar, yieldVarPct };
+  }).filter(r => r.budArea || r.fcstArea || r.hvstArea);
+
+  if (!rows.length) return '';
+
+  const colH = 'font-size:9px;color:var(--hint);font-weight:600;text-align:center;padding:4px 8px';
+  const cell = 'font-size:11px;text-align:center;font-variant-numeric:tabular-nums;padding:8px 8px';
+
+  return `
+  <div style="margin-top:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h2 style="font-size:var(--text-md);font-weight:600">Operations summary — ${season}</h2>
+      <div style="font-size:11px;color:var(--hint)">${rows.length} crop type${rows.length !== 1 ? 's' : ''} · ha, yield, production</div>
+    </div>
+    <div class="card" style="overflow:hidden">
+
+      <!-- Headers -->
+      <div style="display:grid;grid-template-columns:130px 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 80px;gap:0;background:var(--page-bg);border-bottom:1px solid var(--border)">
+        <div style="${colH};text-align:left">Crop</div>
+        <div style="${colH};grid-column:span 3;border-bottom:2px solid var(--border-strong);text-align:center">Budget</div>
+        <div style="${colH};grid-column:span 3;border-bottom:2px solid var(--border-strong);text-align:center">Forecast</div>
+        <div style="${colH};grid-column:span 3;border-bottom:2px solid var(--border-strong);text-align:center">Actual harvest</div>
+        <div style="${colH}">vs Budget</div>
+      </div>
+      <div style="display:grid;grid-template-columns:130px 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 80px;gap:0;background:var(--page-bg);border-bottom:1px solid var(--border)">
+        <div style="${colH};text-align:left">—</div>
+        <div style="${colH}">Ha</div><div style="${colH}">Yield</div><div style="${colH}">Prod</div>
+        <div style="${colH}">Ha</div><div style="${colH}">Yield</div><div style="${colH}">Prod</div>
+        <div style="${colH}">Ha</div><div style="${colH}">Yield</div><div style="${colH}">Prod</div>
+        <div style="${colH}">Yield %</div>
+      </div>
+
+      <!-- Rows -->
+      ${rows.map((r, i) => `
+      <div style="display:grid;grid-template-columns:130px 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 80px;gap:0;align-items:center;border-bottom:1px solid var(--border-light);${i%2===1?'background:var(--page-bg)':''}"
+        onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background='${i%2===1?'var(--page-bg)':''}'">
+        <div style="padding:8px 10px;font-size:12px;font-weight:600;color:var(--ink)">${r.name}</div>
+        <!-- Budget -->
+        <div style="${cell};color:var(--ink-mid)">${r.budArea ? fN(r.budArea) : '—'}</div>
+        <div style="${cell};color:var(--ink-mid)">${r.budYield ? fN2(r.budYield) : '—'}</div>
+        <div style="${cell};color:var(--ink-mid)">${r.budProd ? fN(r.budProd) : '—'}</div>
+        <!-- Forecast -->
+        <div style="${cell};color:var(--amber)">${r.fcstArea ? fN(r.fcstArea) : '—'}</div>
+        <div style="${cell};color:var(--amber)">${r.fcstYield ? fN2(r.fcstYield) : '—'}</div>
+        <div style="${cell};color:var(--amber)">${r.fcstProd ? fN(r.fcstProd) : '—'}</div>
+        <!-- Actual -->
+        <div style="${cell};color:${r.hvstArea ? 'var(--green)' : 'var(--hint)'}; font-weight:${r.hvstArea?'600':'400'}">${r.hvstArea ? fN(r.hvstArea) : '—'}</div>
+        <div style="${cell};color:${r.hvstYield ? 'var(--green)' : 'var(--hint)'};font-weight:${r.hvstYield?'600':'400'}">${r.hvstYield ? fN2(r.hvstYield) : '—'}</div>
+        <div style="${cell};color:${r.hvstProd ? 'var(--green)' : 'var(--hint)'};font-weight:${r.hvstProd?'600':'400'}">${r.hvstProd ? fN(r.hvstProd) : '—'}</div>
+        <!-- vs Budget -->
+        <div style="${cell};color:${varColor(r.yieldVarPct)};font-weight:600">
+          ${r.yieldVarPct != null ? (r.yieldVarPct >= 0 ? '+' : '') + r.yieldVarPct + '%' : '—'}
+        </div>
+      </div>`).join('')}
+
+      <!-- Totals -->
+      <div style="display:grid;grid-template-columns:130px 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 80px;gap:0;padding:8px 0;border-top:2px solid var(--border);background:var(--page-bg)">
+        <div style="padding:0 10px;font-size:11px;font-weight:600;color:var(--ink)">Total / avg</div>
+        <div style="${cell};font-weight:600;color:var(--ink)">${fN(rows.reduce((s,r)=>s+(r.budArea||0),0))}</div>
+        <div style="${cell};color:var(--hint)">—</div>
+        <div style="${cell};font-weight:600;color:var(--ink)">${fN(rows.reduce((s,r)=>s+(r.budProd||0),0))}</div>
+        <div style="${cell};font-weight:600;color:var(--amber)">${fN(rows.reduce((s,r)=>s+(r.fcstArea||0),0))}</div>
+        <div style="${cell};color:var(--hint)">—</div>
+        <div style="${cell};font-weight:600;color:var(--amber)">${fN(rows.reduce((s,r)=>s+(r.fcstProd||0),0))}</div>
+        <div style="${cell};font-weight:600;color:var(--green)">${fN(rows.reduce((s,r)=>s+(r.hvstArea||0),0))}</div>
+        <div style="${cell};color:var(--hint)">—</div>
+        <div style="${cell};font-weight:600;color:var(--green)">${fN(rows.reduce((s,r)=>s+(r.hvstProd||0),0))}</div>
+        <div style="${cell};color:var(--hint)">—</div>
+      </div>
+    </div>
+  </div>`;
 }
