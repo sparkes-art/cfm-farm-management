@@ -75,12 +75,13 @@ exports.handler = async (event) => {
   } catch(e) { /* table may not exist yet */ }
 
   const exampleText = examples.length > 0
-    ? 'IMPORTANT: Previous extractions from this farm have been corrected. Use these as reference for the expected format and values:\n\n' +
+    ? 'PREVIOUS CORRECTIONS from this farm — use these patterns exactly, same buyer corrections are most relevant:\n' +
       examples.map((ex, i) => {
         const d = ex.corrected_data || {};
-        const ginLabel = ex.buyer_name || d.buyer_name || '?';
-        return `Correction ${i+1} (${ginLabel}): gin="${d.buyer_name||'?'}", date="${d.invoice_date||'?'}", bales=${d.bale_count||'?'}, gross=${d.gross_proceeds||'?'}`;
-      }).join('\n') + '\n\nPrioritise corrections from the same buyer when extracting.\n\n'
+        return `  Correction ${i+1} (buyer: ${ex.buyer_name||d.buyer_name||'?'}): ` +
+          `date="${d.invoice_date||'?'}", bales=${d.bale_count||'?'}, ` +
+          `gross=${d.gross_proceeds||'?'}, quality_adj=${d.quality_adj != null ? d.quality_adj : '?'}, net=${d.net_payment||'?'}`;
+      }).join('\n') + '\n\n'
     : '';
 
   const isGinReceipt = document_type === 'gin_receipt';
@@ -108,20 +109,22 @@ exports.handler = async (event) => {
     'Respond with ONLY a JSON object — no explanation, no markdown, no text before or after. ' +
     'Start your response with { and end with }.\n' +
     contractHint +
+    'IMPORTANT RULES:\n' +
+    '1. invoice_date: Convert to YYYY-MM-DD. Dates like "01-SEP-2026" = "2026-09-01", "15/07/2026" = "2026-07-15".\n' +
+    '2. quality_adj: Calculate as gross_proceeds MINUS net_payment. Do NOT read it from a line item — derive it mathematically. If net > gross it is negative.\n' +
+    '3. gross_proceeds and net_payment: Use AUD amounts only. Ignore any USD figures.\n' +
+    '4. buyer_name: The trading company (e.g. Omnicotton, Colly) NOT the gin facility.\n\n' +
     '{\n' +
     '  "rcti_number": "invoice reference number",\n' +
-    '  "buyer_name": "buyer or trading company name (NOT the gin facility name)",\n' +
+    '  "buyer_name": "buyer trading company name",\n' +
     '  "grower_name": "grower or property name",\n' +
     '  "crop_year": "e.g. 2025-26",\n' +
-    '  "invoice_date": "YYYY-MM-DD — convert any date format to this exactly",\n' +
+    '  "invoice_date": "YYYY-MM-DD",\n' +
     '  "bale_count": 0,\n' +
     '  "gross_proceeds": 0,\n' +
-    '  "quality_adj": 0,\n' +
-    '  "quality_premiums_discounts": [\n' +
-    '    {"description": "e.g. Micronaire premium", "total_amount": 0}\n' +
-    '  ],\n' +
     '  "net_payment": 0,\n' +
-    '  "contract_number_matched": "contract or purchase order number found in document, or null",\n' +
+    '  "quality_adj": 0,\n' +
+    '  "contract_number_matched": "contract or PO number found in document, or null",\n' +
     '  "_unfound_fields": ["fields you could not find"]\n' +
     '}';
 
