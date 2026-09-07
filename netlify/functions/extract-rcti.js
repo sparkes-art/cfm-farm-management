@@ -29,8 +29,7 @@ exports.handler = async (event) => {
   try { body = JSON.parse(event.body); }
   catch { return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid JSON' }) }; }
 
-  // Accept either raw text (extracted client-side) or base64 PDF fallback
-  const { pdf_base64, pdf_text, farm_id, save_example, correction, extraction_id, document_type } = body;
+  const { pdf_base64, pdf_text, farm_id, save_example, correction, extraction_id, document_type, contracts } = body;
 
   // Save correction as training example
   if (save_example && extraction_id && correction) {
@@ -46,6 +45,12 @@ exports.handler = async (event) => {
   }
 
   if (!pdf_base64 && !pdf_text) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No PDF data provided' }) };
+
+  // Build contract matching hint
+  const contractHint = contracts && contracts.length > 0
+    ? '\n\nContracts in this farm\'s system — if you find a matching contract or purchase order number in the document, return it as contract_number_matched:\n' +
+      contracts.map(c => `  ${c.number} — ${c.commodity}${c.buyer ? ' ('+c.buyer+')' : ''}`).join('\n') + '\n'
+    : '';
 
   // Load all farm corrections — buyer-specific ones sorted to top dynamically
   // No hardcoded buyer list — we detect buyers from our own correction history
@@ -102,21 +107,21 @@ exports.handler = async (event) => {
     'Extract information from this RCTI (Recipient Created Tax Invoice). ' +
     'Respond with ONLY a JSON object — no explanation, no markdown, no text before or after. ' +
     'Start your response with { and end with }.\n' +
+    contractHint +
     '{\n' +
     '  "rcti_number": "invoice reference number",\n' +
-    '  "buyer_name": "gin or buyer company name",\n' +
+    '  "buyer_name": "buyer or trading company name (NOT the gin facility name)",\n' +
     '  "grower_name": "grower or property name",\n' +
     '  "crop_year": "e.g. 2025-26",\n' +
-    '  "invoice_date": "YYYY-MM-DD",\n' +
-    '  "payment_date": "YYYY-MM-DD or null",\n' +
-    '  "docket_numbers": ["docket or bale lot numbers"],\n' +
+    '  "invoice_date": "YYYY-MM-DD — convert any date format to this exactly",\n' +
     '  "bale_count": 0,\n' +
+    '  "gross_proceeds": 0,\n' +
+    '  "quality_adj": 0,\n' +
     '  "quality_premiums_discounts": [\n' +
     '    {"description": "e.g. Micronaire premium", "total_amount": 0}\n' +
     '  ],\n' +
-    '  "gross_proceeds": 0,\n' +
     '  "net_payment": 0,\n' +
-    '  "gst_amount": null,\n' +
+    '  "contract_number_matched": "contract or purchase order number found in document, or null",\n' +
     '  "_unfound_fields": ["fields you could not find"]\n' +
     '}';
 

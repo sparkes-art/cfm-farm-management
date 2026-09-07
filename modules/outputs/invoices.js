@@ -544,7 +544,12 @@ async function _callExtractAPI(file, farm, documentType) {
   }
 
   // Build request body — prefer text over binary
-  const body = { farm_id: farm.id, document_type: documentType };
+  // Include active contracts so Claude can match contract numbers from the document
+  const activeSeason = typeof getActiveSeason === 'function' ? getActiveSeason() : '';
+  const contractList = (window._cfmContracts || [])
+    .filter(c => !activeSeason || c.crop_year === activeSeason)
+    .map(c => ({ id: c.id, number: c.contract_number, commodity: c.commodity, buyer: c.counterparty || c.buyer }));
+  const body = { farm_id: farm.id, document_type: documentType, contracts: contractList };
   if (pdf_text && pdf_text.trim().length > 50) {
     console.log('[RCTI] Sending extracted text:', pdf_text.length, 'chars');
     body.pdf_text = pdf_text;
@@ -896,6 +901,7 @@ export function openInvoiceForm(container, existing = null) {
 
   // ── RCTI extraction ──────────────────────────────────────────
   let _rctiFiles = [...existingRctiFiles];
+  window._cfmContracts = _contracts; // expose for RCTI extraction
 
   modal.querySelector('#rcti-pdf-upload')?.addEventListener('change', function() {
     if (this.files[0]) {
@@ -928,10 +934,27 @@ export function openInvoiceForm(container, existing = null) {
       if (!modal.querySelector('#f-buyer').value) setField('f-buyer', extracted.gin_name);
       if (!modal.querySelector('#f-date').value) setField('f-date', extracted.invoice_date);
       setField('f-qty', extracted.bale_count, false);
-      setField('f-gross', extracted.gross_proceeds, true);
-      // QA: sum all quality_premiums_discounts
-      const qaTotal = (extracted.quality_premiums_discounts||[]).reduce((s,q)=>s+(parseFloat(q.total_amount)||0),0);
-      if (qaTotal !== 0) setField('f-qa', qaTotal, false);
+      setField('f-gross', extracted.gross_proceeds, false);
+      // QA: use quality_adj directly if available, else sum quality_premiums_discounts
+      const qaVal = extracted.quality_adj
+        || (extracted.quality_premiums_discounts||[]).reduce((s,q)=>s+(parseFloat(q.total_amount)||0), 0);
+      if (qaVal !== 0) setField('f-qa', qaVal, false);
+
+      // Auto-match contract number from document
+      if (extracted.contract_number_matched) {
+        const matchedContract = _contracts.find(c =>
+          c.contract_number?.toLowerCase() === extracted.contract_number_matched?.toLowerCase()
+        );
+        if (matchedContract && !contractHidden.value) {
+          contractHidden.value = matchedContract.id;
+          contractSearch.value = (matchedContract.contract_number||'') + '  —  ' + (matchedContract.commodity||'') +
+            ' — ' + formatNumber(matchedContract.quantity,0) + ' ' + (matchedContract.unit||'') +
+            ' @ ' + formatCurrency(matchedContract.price_per_unit,2);
+          updateContractSummary();
+          const buyerEl = modal.querySelector('#f-buyer');
+          if (buyerEl && !buyerEl.value) buyerEl.value = matchedContract.counterparty || matchedContract.buyer || '';
+        }
+      }
 
       // Save file reference for upload on save
       const list = modal.querySelector('#rcti-file-list');
@@ -1053,7 +1076,15 @@ export function openInvoiceForm(container, existing = null) {
   contractSearch.addEventListener('focus', () => { renderContractOpts(contractSearch.value); contractDropdown.style.display=''; });
   contractSearch.addEventListener('input', () => { renderContractOpts(contractSearch.value); contractDropdown.style.display=''; });
   contractSearch.addEventListener('blur', () => setTimeout(() => { contractDropdown.style.display='none'; }, 150));
-  if (existing?.forward_contract_id) updateContractSummary();
+  if (existing?.forward_contract_id) {
+    updateContractSummary();
+    // Pre-fill buyer if not already set
+    const buyerEl = modal.querySelector('#f-buyer');
+    if (buyerEl && !buyerEl.value) {
+      const c = _contracts.find(x => x.id === existing.forward_contract_id);
+      if (c) buyerEl.value = c.counterparty || c.buyer || '';
+    }
+  }
 
   // ── Totals recalc ────────────────────────────────────────────
   function recalcTotals() {
@@ -1151,20 +1182,24 @@ export function openInvoiceForm(container, existing = null) {
       if (existing?.xero_invoice_number) { row.xero_invoice_number = existing.xero_invoice_number; row.xero_invoice_id = existing.xero_invoice_id; row.xero_invoice_url = existing.xero_invoice_url; }
 
       // Save extraction correction with actual user-entered values (not original AI values)
-      // This is what teaches the system to do better next time
-      if (modal._extractionId && modal._extracted) {
-        const corrected = Object.assign({}, modal._extracted, {
+      if (modal._extractionId) {
+        const corrected = Object.assign({}, modal._extracted || {}, {
           buyer_name: buyer,
-          gin_name: buyer,  // keep for backward compat
+          gin_name: buyer,
           invoice_date: date,
           bale_count: qty,
           gross_proceeds: gross,
-          net_payment: gross + (qa||0),
+          quality_adj: qa || 0,
+          quality_premiums_discounts: qa ? [{ description: 'Quality adjustment', total_amount: qa }] : [],
+          net_payment: gross + (qa || 0),
         });
         fetch('/api/extract-rcti', {
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ farm_id: farm.id, save_example: true, extraction_id: modal._extractionId, correction: corrected })
-        }).catch(()=>{});
+        })
+        .then(r => r.json())
+        .then(r => console.log('[RCTI] Correction saved:', r))
+        .catch(e => console.error('[RCTI] Correction save failed:', e));
       }
 
       if (existing?.id) {
