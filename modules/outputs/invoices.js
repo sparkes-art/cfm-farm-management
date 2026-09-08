@@ -1427,23 +1427,50 @@ export function openLivestockForm(container, existing = null) {
         </select>
         <input class="form-input ls-price" type="number" step="0.001" placeholder="0.00" value="${data.price||''}" style="font-size:12px;padding:4px 8px">
       </div>
-      <input class="form-input ls-gross" type="number" step="0.01" placeholder="0.00" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600" readonly>
+      <input class="form-input ls-gross" type="number" step="0.01" placeholder="0.00" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600">
       <button class="btn btn-ghost ls-remove" style="padding:4px;font-size:16px;color:var(--hint)">✕</button>
     `;
     // Recalc gross on input
-    const recalcLine = () => {
-      const head = parseFloat(div.querySelector('.ls-head').value) || 0;
-      const weight = parseFloat(div.querySelector('.ls-weight').value) || 0;
-      const price = parseFloat(div.querySelector('.ls-price').value) || 0;
-      const basis = div.querySelector('.ls-price-basis').value;
+    let _grossManual = false;
+
+    const recalcLine = (changedField) => {
+      const headEl   = div.querySelector('.ls-head');
+      const weightEl = div.querySelector('.ls-weight');
+      const priceEl  = div.querySelector('.ls-price');
+      const grossEl  = div.querySelector('.ls-gross');
+      const basis    = div.querySelector('.ls-price-basis').value;
+      const head     = parseFloat(headEl.value)   || 0;
+      const weight   = parseFloat(weightEl.value) || 0;
+      const price    = parseFloat(priceEl.value)  || 0;
+
+      if (changedField === 'gross') {
+        // User typed gross — back-calculate price, mark as manual
+        _grossManual = true;
+        const gross = parseFloat(grossEl.value) || 0;
+        if (head && gross) {
+          if (basis === 'per_kg' && weight) {
+            priceEl.value = (gross / (head * weight)).toFixed(4);
+          } else {
+            priceEl.value = (gross / head).toFixed(2);
+          }
+        }
+        recalcTotals();
+        return;
+      }
+
+      // Head/weight/price changed — recalculate gross from inputs
+      _grossManual = false;
       let gross = 0;
       if (basis === 'per_kg' && head && weight && price) gross = head * weight * price;
       else if (basis === 'per_head' && head && price) gross = head * price;
-      div.querySelector('.ls-gross').value = gross ? gross.toFixed(2) : '';
+      grossEl.value = gross ? gross.toFixed(2) : '';
       recalcTotals();
     };
-    ['ls-head','ls-weight','ls-price'].forEach(cls => div.querySelector('.' + cls).addEventListener('input', recalcLine));
-    div.querySelector('.ls-price-basis').addEventListener('change', recalcLine);
+
+    ['ls-head','ls-weight','ls-price'].forEach(cls =>
+      div.querySelector('.' + cls).addEventListener('input', () => recalcLine(cls.replace('ls-',''))));
+    div.querySelector('.ls-gross').addEventListener('input', () => recalcLine('gross'));
+    div.querySelector('.ls-price-basis').addEventListener('change', () => recalcLine('basis'));
     div.querySelector('.ls-remove').addEventListener('click', () => { div.remove(); recalcTotals(); });
     recalcLine();
     return div;
