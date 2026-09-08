@@ -1348,18 +1348,6 @@ export function openLivestockForm(container, existing = null) {
         <div id="ls-lines"></div>
       </div>
 
-      <!-- Commission (sale yard only) -->
-      <div id="ls-commission-wrap" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;padding:12px;background:var(--page-bg);border-radius:var(--radius-md)">
-        <div>
-          <label class="form-label">Commission / agent fees</label>
-          <input class="form-input" id="ls-commission" type="number" step="0.01" value="${existing?.commission_amount||''}" placeholder="0.00">
-        </div>
-        <div>
-          <label class="form-label">Vendor number</label>
-          <input class="form-input" id="ls-vendor" type="text" value="${existing?.notes?.match(/Vendor: ([^\n]+)/)?.[1]||''}" placeholder="Optional">
-        </div>
-      </div>
-
       <!-- Totals -->
       <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
         <div>
