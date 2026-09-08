@@ -903,130 +903,115 @@ export async function buildOperationsSummary(season) {
 
   if (!budgets.length && !forecasts.length && !harvests.length) return '';
 
-  const fN  = (n, dp=0) => n != null ? formatNumber(n, dp) : '—';
-  const fN2 = (n) => n != null ? formatNumber(n, 2) : '—';
-  const pct = (a, b) => (a != null && b) ? Math.round(a / b * 100) : null;
+  // Resolve commodity names
+  const masterCommodities = getCommodities();
+  const idToName = {};
+  masterCommodities.forEach(c => { idToName[c.id] = c.name; });
+  const getName = (row) => idToName[row.commodity_id] || row.commodity || '—';
+
+  const fN  = (n, dp=0) => n != null && n !== 0 ? formatNumber(n, dp) : '—';
+  const fN2 = (n) => n != null && n !== 0 ? formatNumber(n, 2) : '—';
   const varColor = (v) => v == null ? 'var(--hint)' : v >= 0 ? 'var(--green)' : 'var(--red)';
 
-  // Group by crop type (commodity name)
+  // Group by commodity_id
   const cropMap = {};
-  const addCrop = (name) => {
-    if (!name) return;
-    const k = name.trim().toLowerCase();
-    if (!cropMap[k]) cropMap[k] = { name: name.trim(), budgets: [], forecasts: [], harvests: [] };
+  const addCrop = (id, name) => {
+    if (!id && !name) return null;
+    const k = id || name.toLowerCase();
+    if (!cropMap[k]) cropMap[k] = { name: name || idToName[id] || id, budgets: [], forecasts: [], harvests: [] };
     return k;
   };
 
-  budgets.forEach(b => {
-    const k = addCrop(b.commodity || b.crop_type);
-    if (k) cropMap[k].budgets.push(b);
-  });
+  budgets.forEach(b => { const k = addCrop(b.commodity_id, getName(b)); if (k) cropMap[k].budgets.push(b); });
+  
+  // Latest forecast per budget_id only
+  const latestByBudget = {};
   forecasts.forEach(f => {
-    const k = addCrop(f.commodity || f.crop_type);
-    if (k) cropMap[k].forecasts.push(f);
+    const bid = f.budget_id || f.commodity_id || 'x';
+    if (!latestByBudget[bid] || f.forecast_date > latestByBudget[bid].forecast_date) latestByBudget[bid] = f;
   });
-  harvests.forEach(h => {
-    const k = addCrop(h.commodity || h.crop_type);
-    if (k) cropMap[k].harvests.push(h);
-  });
+  Object.values(latestByBudget).forEach(f => { const k = addCrop(f.commodity_id, getName(f)); if (k) cropMap[k].forecasts.push(f); });
 
-  if (!Object.keys(cropMap).length) return '';
+  harvests.forEach(h => { const k = addCrop(h.commodity_id, getName(h)); if (k) cropMap[k].harvests.push(h); });
 
-  // Compute per-crop summary
   const rows = Object.values(cropMap).map(crop => {
-    // Budget
-    const budArea  = crop.budgets.reduce((s, b) => s + (parseFloat(b.area_ha)||0), 0) || null;
-    const budYield = crop.budgets.length && budArea
-      ? crop.budgets.reduce((s, b) => s + ((parseFloat(b.yield_per_ha)||0) * (parseFloat(b.area_ha)||0)), 0) / budArea
-      : null;
-    const budProd  = crop.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_production) || ((parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0))), 0) || null;
-
-    // Latest forecast per budget_id
-    const latestFcst = {};
-    crop.forecasts.forEach(f => {
-      const k = f.budget_id || 'def';
-      if (!latestFcst[k] || f.forecast_date > latestFcst[k].forecast_date) latestFcst[k] = f;
-    });
-    const fcsts = Object.values(latestFcst);
-    const fcstArea  = fcsts.reduce((s, f) => s + (parseFloat(f.area_ha)||0), 0) || null;
-    const fcstYield = fcsts.length && fcstArea
-      ? fcsts.reduce((s, f) => s + ((parseFloat(f.yield_per_ha)||0) * (parseFloat(f.area_ha)||0)), 0) / fcstArea
-      : null;
-    const fcstProd  = fcsts.reduce((s, f) => s + (parseFloat(f.forecast_production) || ((parseFloat(f.area_ha)||0) * (parseFloat(f.yield_per_ha)||0))), 0) || null;
-
-    // Harvest actuals
-    const hvstArea  = crop.harvests.reduce((s, h) => s + (parseFloat(h.area_ha)||0), 0) || null;
-    const hvstProd  = crop.harvests.reduce((s, h) => s + (parseFloat(h.actual_production)||0), 0) || null;
-    const hvstYield = hvstArea && hvstProd ? hvstProd / hvstArea : null;
-
-    // Variance: actual vs budget
-    const yieldVar  = hvstYield != null && budYield  ? Math.round((hvstYield  - budYield)  * 100) / 100 : null;
-    const prodVar   = hvstProd  != null && budProd   ? Math.round((hvstProd   - budProd)   * 10)  / 10  : null;
-    const yieldVarPct = hvstYield != null && budYield ? Math.round((hvstYield - budYield) / budYield * 100) : null;
-
     const unit = crop.budgets[0]?.unit || crop.harvests[0]?.unit || 't';
 
-    return { name: crop.name, unit, budArea, budYield, budProd, fcstArea, fcstYield, fcstProd, hvstArea, hvstYield, hvstProd, yieldVar, prodVar, yieldVarPct };
+    // Budget — uses budgeted_yield_per_ha
+    const budArea  = crop.budgets.reduce((s,b) => s + (parseFloat(b.area_ha)||0), 0) || null;
+    const budYield = budArea
+      ? crop.budgets.reduce((s,b) => s + ((parseFloat(b.budgeted_yield_per_ha)||parseFloat(b.yield_per_ha)||0) * (parseFloat(b.area_ha)||0)), 0) / budArea
+      : null;
+    const budProd  = crop.budgets.reduce((s,b) => s + (parseFloat(b.budgeted_production) || ((parseFloat(b.area_ha)||0) * (parseFloat(b.budgeted_yield_per_ha)||parseFloat(b.yield_per_ha)||0))), 0) || null;
+
+    // Forecast
+    const fcstArea  = crop.forecasts.reduce((s,f) => s + (parseFloat(f.area_ha)||0), 0) || null;
+    const fcstYield = fcstArea
+      ? crop.forecasts.reduce((s,f) => s + ((parseFloat(f.yield_per_ha)||0) * (parseFloat(f.area_ha)||0)), 0) / fcstArea
+      : null;
+    const fcstProd  = crop.forecasts.reduce((s,f) => s + (parseFloat(f.forecast_production) || ((parseFloat(f.area_ha)||0) * (parseFloat(f.yield_per_ha)||0))), 0) || null;
+
+    // Harvest
+    const hvstArea  = crop.harvests.reduce((s,h) => s + (parseFloat(h.area_ha)||0), 0) || null;
+    const hvstProd  = crop.harvests.reduce((s,h) => s + (parseFloat(h.actual_production)||0), 0) || null;
+    const hvstYield = hvstArea && hvstProd ? hvstProd / hvstArea : null;
+
+    const yieldVarPct = hvstYield != null && budYield ? Math.round((hvstYield - budYield) / budYield * 100) : null;
+
+    return { name: crop.name, unit, budArea, budYield, budProd, fcstArea, fcstYield, fcstProd, hvstArea, hvstYield, hvstProd, yieldVarPct };
   }).filter(r => r.budArea || r.fcstArea || r.hvstArea);
 
   if (!rows.length) return '';
 
   const colH = 'font-size:9px;color:var(--hint);font-weight:600;text-align:center;padding:4px 8px';
-  const cell = 'font-size:11px;text-align:center;font-variant-numeric:tabular-nums;padding:8px 8px';
+  const cell = 'font-size:11px;text-align:center;font-variant-numeric:tabular-nums;padding:8px 6px';
+  const GRID = '130px repeat(3,1fr) repeat(3,1fr) repeat(3,1fr) 72px';
 
   return `
   <div style="margin-top:20px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <h2 style="font-size:var(--text-md);font-weight:600">Operations summary — ${season}</h2>
-      <div style="font-size:11px;color:var(--hint)">${rows.length} crop type${rows.length !== 1 ? 's' : ''} · ha, yield, production</div>
+      <div style="font-size:11px;color:var(--hint)">${rows.length} crop type${rows.length!==1?'s':''} · ha · yield · production</div>
     </div>
     <div class="card" style="overflow:hidden">
-
-      <!-- Headers -->
-      <div style="display:grid;grid-template-columns:130px 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 80px;gap:0;background:var(--page-bg);border-bottom:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:${GRID};gap:0;background:var(--page-bg);border-bottom:1px solid var(--border)">
         <div style="${colH};text-align:left">Crop</div>
-        <div style="${colH};grid-column:span 3;border-bottom:2px solid var(--border-strong);text-align:center">Budget</div>
-        <div style="${colH};grid-column:span 3;border-bottom:2px solid var(--border-strong);text-align:center">Forecast</div>
-        <div style="${colH};grid-column:span 3;border-bottom:2px solid var(--border-strong);text-align:center">Actual harvest</div>
-        <div style="${colH}">vs Budget</div>
+        <div style="${colH};grid-column:span 3;border-bottom:2px solid var(--border-strong)">Budget</div>
+        <div style="${colH};grid-column:span 3;border-bottom:2px solid var(--border-strong)">Forecast</div>
+        <div style="${colH};grid-column:span 3;border-bottom:2px solid var(--border-strong)">Actual harvest</div>
+        <div style="${colH}">vs Bud</div>
       </div>
-      <div style="display:grid;grid-template-columns:130px 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 80px;gap:0;background:var(--page-bg);border-bottom:1px solid var(--border)">
-        <div style="${colH};text-align:left">—</div>
-        <div style="${colH}">Ha</div><div style="${colH}">Yield</div><div style="${colH}">Prod</div>
-        <div style="${colH}">Ha</div><div style="${colH}">Yield</div><div style="${colH}">Prod</div>
-        <div style="${colH}">Ha</div><div style="${colH}">Yield</div><div style="${colH}">Prod</div>
+      <div style="display:grid;grid-template-columns:${GRID};gap:0;background:var(--page-bg);border-bottom:1px solid var(--border)">
+        <div style="${colH};text-align:left"></div>
+        <div style="${colH}">Ha</div><div style="${colH}">Yield/ha</div><div style="${colH}">Total</div>
+        <div style="${colH}">Ha</div><div style="${colH}">Yield/ha</div><div style="${colH}">Total</div>
+        <div style="${colH}">Ha</div><div style="${colH}">Yield/ha</div><div style="${colH}">Total</div>
         <div style="${colH}">Yield %</div>
       </div>
-
-      <!-- Rows -->
-      ${rows.map((r, i) => `
-      <div style="display:grid;grid-template-columns:130px 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 80px;gap:0;align-items:center;border-bottom:1px solid var(--border-light);${i%2===1?'background:var(--page-bg)':''}"
+      ${rows.map((r,i) => `
+      <div style="display:grid;grid-template-columns:${GRID};gap:0;align-items:center;border-bottom:1px solid var(--border-light);${i%2===1?'background:var(--page-bg)':''}"
         onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background='${i%2===1?'var(--page-bg)':''}'">
-        <div style="padding:8px 10px;font-size:12px;font-weight:600;color:var(--ink)">${r.name}</div>
-        <!-- Budget -->
-        <div style="${cell};color:var(--ink-mid)">${r.budArea ? fN(r.budArea) : '—'}</div>
-        <div style="${cell};color:var(--ink-mid)">${r.budYield ? fN2(r.budYield) : '—'}</div>
-        <div style="${cell};color:var(--ink-mid)">${r.budProd ? fN(r.budProd) : '—'}</div>
-        <!-- Forecast -->
-        <div style="${cell};color:var(--amber)">${r.fcstArea ? fN(r.fcstArea) : '—'}</div>
-        <div style="${cell};color:var(--amber)">${r.fcstYield ? fN2(r.fcstYield) : '—'}</div>
-        <div style="${cell};color:var(--amber)">${r.fcstProd ? fN(r.fcstProd) : '—'}</div>
-        <!-- Actual -->
-        <div style="${cell};color:${r.hvstArea ? 'var(--green)' : 'var(--hint)'}; font-weight:${r.hvstArea?'600':'400'}">${r.hvstArea ? fN(r.hvstArea) : '—'}</div>
-        <div style="${cell};color:${r.hvstYield ? 'var(--green)' : 'var(--hint)'};font-weight:${r.hvstYield?'600':'400'}">${r.hvstYield ? fN2(r.hvstYield) : '—'}</div>
-        <div style="${cell};color:${r.hvstProd ? 'var(--green)' : 'var(--hint)'};font-weight:${r.hvstProd?'600':'400'}">${r.hvstProd ? fN(r.hvstProd) : '—'}</div>
-        <!-- vs Budget -->
-        <div style="${cell};color:${varColor(r.yieldVarPct)};font-weight:600">
-          ${r.yieldVarPct != null ? (r.yieldVarPct >= 0 ? '+' : '') + r.yieldVarPct + '%' : '—'}
+        <div style="padding:8px 10px;font-size:12px;font-weight:600;color:var(--ink)">
+          ${r.name}<span style="font-size:9px;color:var(--hint);margin-left:4px">${r.unit}</span>
+        </div>
+        <div style="${cell};color:var(--ink-mid)">${fN(r.budArea)}</div>
+        <div style="${cell};color:var(--ink-mid)">${fN2(r.budYield)}</div>
+        <div style="${cell};color:var(--ink-mid)">${fN(r.budProd)}</div>
+        <div style="${cell};color:var(--amber)">${fN(r.fcstArea)}</div>
+        <div style="${cell};color:var(--amber)">${fN2(r.fcstYield)}</div>
+        <div style="${cell};color:var(--amber)">${fN(r.fcstProd)}</div>
+        <div style="${cell};color:${r.hvstArea?'var(--green)':'var(--hint)'};font-weight:${r.hvstArea?600:400}">${fN(r.hvstArea)}</div>
+        <div style="${cell};color:${r.hvstYield?'var(--green)':'var(--hint)'};font-weight:${r.hvstYield?600:400}">${fN2(r.hvstYield)}</div>
+        <div style="${cell};color:${r.hvstProd?'var(--green)':'var(--hint)'};font-weight:${r.hvstProd?600:400}">${fN(r.hvstProd)}</div>
+        <div style="${cell};font-weight:600;color:${varColor(r.yieldVarPct)}">
+          ${r.yieldVarPct!=null?(r.yieldVarPct>=0?'+':'')+r.yieldVarPct+'%':'—'}
         </div>
       </div>`).join('')}
-
-      <!-- Totals -->
-      <div style="display:grid;grid-template-columns:130px 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr 80px;gap:0;padding:8px 0;border-top:2px solid var(--border);background:var(--page-bg)">
-        <div style="padding:0 10px;font-size:11px;font-weight:600;color:var(--ink)">Total / avg</div>
-        <div style="${cell};font-weight:600;color:var(--ink)">${fN(rows.reduce((s,r)=>s+(r.budArea||0),0))}</div>
+      <div style="display:grid;grid-template-columns:${GRID};gap:0;padding:2px 0;border-top:2px solid var(--border);background:var(--page-bg)">
+        <div style="padding:8px 10px;font-size:11px;font-weight:600;color:var(--ink)">Total</div>
+        <div style="${cell};font-weight:600">${fN(rows.reduce((s,r)=>s+(r.budArea||0),0))}</div>
         <div style="${cell};color:var(--hint)">—</div>
-        <div style="${cell};font-weight:600;color:var(--ink)">${fN(rows.reduce((s,r)=>s+(r.budProd||0),0))}</div>
+        <div style="${cell};font-weight:600">${fN(rows.reduce((s,r)=>s+(r.budProd||0),0))}</div>
         <div style="${cell};font-weight:600;color:var(--amber)">${fN(rows.reduce((s,r)=>s+(r.fcstArea||0),0))}</div>
         <div style="${cell};color:var(--hint)">—</div>
         <div style="${cell};font-weight:600;color:var(--amber)">${fN(rows.reduce((s,r)=>s+(r.fcstProd||0),0))}</div>
