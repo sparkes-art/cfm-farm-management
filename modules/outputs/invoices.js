@@ -1315,18 +1315,6 @@ export function openLivestockForm(container, existing = null) {
         <div id="ls-extract-status" style="min-height:16px;margin-top:8px;font-size:11px"></div>
       </div>
 
-      <!-- Sale type -->
-      <div style="display:flex;gap:10px;margin-bottom:16px">
-        <div id="ls-opt-yard" style="flex:1;border:2px solid var(--blue);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer;background:var(--blue-light)">
-          <p style="font-size:13px;font-weight:600;color:var(--blue-text)">Sale yard</p>
-          <p style="font-size:11px;color:var(--blue);margin-top:2px">Auctioneer statement</p>
-        </div>
-        <div id="ls-opt-private" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer">
-          <p style="font-size:13px;font-weight:600;color:var(--ink-mid)">Private treaty</p>
-          <p style="font-size:11px;color:var(--hint);margin-top:2px">Direct to buyer</p>
-        </div>
-      </div>
-
       <!-- Header fields -->
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
         <div>
@@ -1337,7 +1325,7 @@ export function openLivestockForm(container, existing = null) {
           <label class="form-label">Date <span style="color:var(--red)">*</span></label>
           <input class="form-input" id="ls-date" type="date" value="${existing?.invoice_date||new Date().toISOString().slice(0,10)}">
         </div>
-        <div id="ls-location-wrap">
+        <div>
           <label class="form-label">Sale yard / location</label>
           <input class="form-input" id="ls-location" type="text" value="${existing?.sale_location||''}" placeholder="e.g. Dubbo, Wagga">
         </div>
@@ -1373,22 +1361,18 @@ export function openLivestockForm(container, existing = null) {
       </div>
 
       <!-- Totals -->
-      <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
+      <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
         <div>
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total head</div>
           <div id="ls-t-head" style="font-size:18px;font-weight:600;color:var(--ink)">—</div>
         </div>
         <div>
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Gross proceeds</div>
-          <div id="ls-t-gross" style="font-size:18px;font-weight:600;color:var(--ink)">—</div>
-        </div>
-        <div>
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Commission</div>
-          <div id="ls-t-comm" style="font-size:18px;font-weight:600;color:var(--red)">—</div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Avg $/head</div>
+          <div id="ls-t-avg" style="font-size:18px;font-weight:600;color:var(--ink)">—</div>
         </div>
         <div style="border-left:2px solid var(--border);padding-left:12px">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Net to farm</div>
-          <div id="ls-t-net" style="font-size:20px;font-weight:700;color:var(--blue)">—</div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total gross</div>
+          <div id="ls-t-gross" style="font-size:20px;font-weight:700;color:var(--blue)">—</div>
         </div>
       </div>
 
@@ -1414,19 +1398,7 @@ export function openLivestockForm(container, existing = null) {
   modal.querySelector('#ls-cancel').addEventListener('click', close);
   formEl.addEventListener('click', e => { if (e.target === formEl) close(); });
 
-  // ── Sale type toggle ─────────────────────────────────────────
-  let saleSubtype = existing?.sale_subtype || 'yard';
-  const setSaleType = (t) => {
-    saleSubtype = t;
-    modal.querySelector('#ls-opt-yard').style.cssText = `flex:1;border:${t==='yard'?'2px solid var(--blue)':'1px solid var(--border)'};border-radius:var(--radius-md);padding:10px 14px;cursor:pointer;background:${t==='yard'?'var(--blue-light)':''}`;
-    modal.querySelector('#ls-opt-private').style.cssText = `flex:1;border:${t==='private'?'2px solid var(--blue)':'1px solid var(--border)'};border-radius:var(--radius-md);padding:10px 14px;cursor:pointer;background:${t==='private'?'var(--blue-light)':''}`;
-    modal.querySelector('#ls-commission-wrap').style.display = t === 'yard' ? 'grid' : 'none';
-    modal.querySelector('#ls-location-wrap').style.display = t === 'yard' ? '' : 'none';
-    modal.querySelector('#ls-agent').placeholder = t === 'yard' ? 'e.g. Elders, AuctionsPlus' : 'e.g. Thomas Foods, JBS';
-  };
-  modal.querySelector('#ls-opt-yard').addEventListener('click', () => setSaleType('yard'));
-  modal.querySelector('#ls-opt-private').addEventListener('click', () => setSaleType('private'));
-  setSaleType(saleSubtype);
+  const saleSubtype = 'livestock';
 
   // ── Livestock lines ─────────────────────────────────────────
   const linesWrap = modal.querySelector('#ls-lines');
@@ -1483,13 +1455,10 @@ export function openLivestockForm(container, existing = null) {
       totalHead += parseInt(div.querySelector('.ls-head')?.value) || 0;
       totalGross += parseFloat(div.querySelector('.ls-gross')?.value) || 0;
     });
-    const comm = parseFloat(modal.querySelector('#ls-commission')?.value) || 0;
-    const net = totalGross - comm;
+    const avgPerHead = totalHead ? totalGross / totalHead : null;
     modal.querySelector('#ls-t-head').textContent = totalHead || '—';
+    modal.querySelector('#ls-t-avg').textContent = avgPerHead ? formatCurrency(avgPerHead, 0) : '—';
     modal.querySelector('#ls-t-gross').textContent = totalGross ? formatCurrency(totalGross, 2) : '—';
-    modal.querySelector('#ls-t-comm').textContent = comm ? '-' + formatCurrency(comm, 2) : '—';
-    modal.querySelector('#ls-t-net').textContent = net ? formatCurrency(net, 2) : '—';
-    modal.querySelector('#ls-t-net').style.color = net < 0 ? 'var(--red)' : 'var(--blue)';
   };
 
   // Render initial lines
@@ -1497,7 +1466,7 @@ export function openLivestockForm(container, existing = null) {
   modal.querySelector('#ls-add-line').addEventListener('click', () => {
     linesWrap.appendChild(buildLine());
   });
-  modal.querySelector('#ls-commission').addEventListener('input', recalcTotals);
+
 
   // ── AI extraction ────────────────────────────────────────────
   modal.querySelector('#btn-extract-ls').addEventListener('click', async () => {
@@ -1567,7 +1536,7 @@ export function openLivestockForm(container, existing = null) {
       const date = modal.querySelector('#ls-date')?.value;
       const location = modal.querySelector('#ls-location')?.value?.trim() || null;
       const vendor = modal.querySelector('#ls-vendor')?.value?.trim() || null;
-      const commission = parseFloat(modal.querySelector('#ls-commission')?.value) || 0;
+      const commission = 0;
       const notes = modal.querySelector('#ls-notes')?.value?.trim() || '';
 
       if (!date) throw new Error('Please enter a date');
@@ -1597,7 +1566,7 @@ export function openLivestockForm(container, existing = null) {
 
       if (!lines.length) throw new Error('Please add at least one line');
 
-      const net = totalGross - commission;
+      const net = totalGross;
       const notesWithVendor = [notes, vendor ? 'Vendor: ' + vendor : ''].filter(Boolean).join('\n');
 
       // Upload file if selected
