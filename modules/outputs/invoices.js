@@ -42,7 +42,31 @@ export async function mountInvoices(container) {
   _renderTable(container);
   _subscribeRealtime();
 
-  qs('#btn-new-invoice', container)?.addEventListener('click', () => openInvoiceForm(container));
+  qs('#btn-new-invoice', container)?.addEventListener('click', () => {
+    // Show sale type picker
+    const picker = document.createElement('div');
+    picker.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;display:flex;align-items:center;justify-content:center';
+    picker.innerHTML = `
+      <div style="background:white;border-radius:var(--radius-xl);padding:24px;max-width:420px;width:100%;margin:20px">
+        <h2 style="font-size:var(--text-md);font-weight:600;margin-bottom:16px">What type of sale?</h2>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <button id="pick-crop" class="btn btn-primary" style="justify-content:flex-start;padding:14px 16px;text-align:left">
+            <span style="font-size:20px;margin-right:10px">🌾</span>
+            <span><strong>Crop / commodity</strong><br><span style="font-weight:400;font-size:12px">Cotton, grain, canola, seed</span></span>
+          </button>
+          <button id="pick-livestock" class="btn btn-secondary" style="justify-content:flex-start;padding:14px 16px;text-align:left">
+            <span style="font-size:20px;margin-right:10px">🐄</span>
+            <span><strong>Livestock</strong><br><span style="font-weight:400;font-size:12px">Cattle or sheep sale</span></span>
+          </button>
+          <button id="pick-cancel" class="btn btn-ghost" style="margin-top:4px">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(picker);
+    picker.querySelector('#pick-crop').addEventListener('click', () => { picker.remove(); openInvoiceForm(container); });
+    picker.querySelector('#pick-livestock').addEventListener('click', () => { picker.remove(); openLivestockForm(container); });
+    picker.querySelector('#pick-cancel').addEventListener('click', () => picker.remove());
+    picker.addEventListener('click', e => { if (e.target === picker) picker.remove(); });
+  });
   ['#inv-filter-commodity', '#inv-filter-contract'].forEach(sel => {
     qs(sel, container)?.addEventListener('change', () => _renderTable(container));
   });
@@ -255,7 +279,7 @@ function _renderTable(container) {
               </td>
               <td><span class="badge ${inv.sale_type === 'against_contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'against_contract' ? 'Contract' : 'Cash'}</span></td>
               <td><strong>${inv.buyer || '—'}</strong></td>
-              <td class="muted text-sm">${commodities}</td>
+              <td class="muted text-sm">${commodities}${inv.grade ? `<span style="font-size:10px;background:var(--page-bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:4px">${inv.grade}</span>` : ''}</td>
               <td class="num text-sm">${(() => {
                 if (inv.batches && inv.batches.length) {
                   const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
@@ -347,7 +371,13 @@ function _renderTable(container) {
   wrap.querySelectorAll('.edit-inv-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const inv = _invoices.find(i => i.id === btn.dataset.id);
-      if (inv) openInvoiceForm(container, inv);
+      if (inv) {
+        if (inv.sale_subtype === 'yard' || inv.sale_subtype === 'private' || inv.master_unit === 'head') {
+          openLivestockForm(container, inv);
+        } else {
+          openInvoiceForm(container, inv);
+        }
+      }
     });
   });
 
@@ -417,7 +447,13 @@ function _openDetail(inv, container) {
     title: (inv.sale_type === 'against_contract' ? 'Contract sale' : 'Cash sale') + ' — ' + (inv.buyer || ''),
     confirmLabel: canWrite() ? 'Edit' : null,
     confirmClass: 'btn-secondary',
-    onConfirm: canWrite() ? async () => { openInvoiceForm(container, inv); } : null,
+    onConfirm: canWrite() ? async () => {
+      if (inv.sale_subtype === 'yard' || inv.sale_subtype === 'private' || inv.master_unit === 'head') {
+        openLivestockForm(container, inv);
+      } else {
+        openInvoiceForm(container, inv);
+      }
+    } : null,
     bodyHTML: `
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">
         <div><p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:3px">Date</p><p style="font-size:var(--text-sm);font-weight:500">${formatDate(inv.invoice_date)}</p></div>
@@ -845,6 +881,12 @@ export function openInvoiceForm(container, existing = null) {
         </div>
       </div>
 
+      <!-- Grade (grain) -->
+      <div id="f-grade-section" style="margin-bottom:16px;display:none">
+        <label class="form-label">Grade / variety</label>
+        <input class="form-input" id="f-grade" type="text" value="${existing?.grade||''}" placeholder="e.g. APW1, Malt, Canola SQ">
+      </div>
+
       <!-- Quantities and amounts -->
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
         <div class="form-group" style="margin:0">
@@ -952,6 +994,7 @@ export function openInvoiceForm(container, existing = null) {
             ' — ' + formatNumber(matchedContract.quantity,0) + ' ' + (matchedContract.unit||'') +
             ' @ ' + formatCurrency(matchedContract.price_per_unit,2);
           updateContractSummary();
+        _updateGradeVisibility(c?.commodity);
           const buyerEl = modal.querySelector('#f-buyer');
           if (buyerEl && !buyerEl.value) buyerEl.value = matchedContract.counterparty || matchedContract.buyer || '';
         }
@@ -1070,6 +1113,7 @@ export function openInvoiceForm(container, existing = null) {
         const buyerEl = modal.querySelector('#f-buyer');
         if (buyerEl && !buyerEl.value) buyerEl.value = c?.counterparty || c?.buyer || '';
         updateContractSummary();
+        _updateGradeVisibility(c?.commodity);
       });
     });
   };
@@ -1085,6 +1129,21 @@ export function openInvoiceForm(container, existing = null) {
       const c = _contracts.find(x => x.id === existing.forward_contract_id);
       if (c) buyerEl.value = c.counterparty || c.buyer || '';
     }
+  }
+
+  // ── Grade field visibility ──────────────────────────────────
+  const GRAIN_COMMODITIES = ['barley','canola','wheat','oats','sorghum','corn','maize','chickpeas','lentils','lupins','faba beans','grain'];
+  function _updateGradeVisibility(commodity) {
+    const gradeSection = modal.querySelector('#f-grade-section');
+    if (!gradeSection) return;
+    const isGrain = commodity && GRAIN_COMMODITIES.some(g => commodity.toLowerCase().includes(g));
+    gradeSection.style.display = isGrain ? '' : 'none';
+  }
+  // Check on load for existing invoices
+  if (existing?.grade) modal.querySelector('#f-grade-section').style.display = '';
+  if (existing?.forward_contract_id) {
+    const c = _contracts.find(x => x.id === existing.forward_contract_id);
+    if (c) _updateGradeVisibility(c.commodity);
   }
 
   // ── Totals recalc ────────────────────────────────────────────
@@ -1219,4 +1278,439 @@ export function openInvoiceForm(container, existing = null) {
     }
     btn.disabled = false; btn.textContent = '✓ Save invoice';
   });
+}
+
+// ── Livestock sale form ────────────────────────────────────────
+export function openLivestockForm(container, existing = null) {
+  const farm = getActiveFarm();
+  const isEdit = !!existing;
+
+  const CATTLE_CATS = ['Steer','Heifer','Bull','Cow','PTIC Cow','Cull Cow','Weaner Steer','Weaner Heifer'];
+  const SHEEP_CATS  = ['Wether','Ram','Ewe','Ewe Lamb','Wether Lamb','X-bred Lamb','PTIC Ewe','Cull Ewe'];
+  const ALL_CATS    = [...CATTLE_CATS, ...SHEEP_CATS];
+
+  const existingLines = existing?.livestock_lines || [{}];
+
+  const formEl = document.createElement('div');
+  formEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;overflow-y:auto;padding:20px';
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--white);border-radius:var(--radius-xl);max-width:820px;margin:0 auto;display:flex;flex-direction:column;overflow:hidden';
+
+  modal.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border-light);background:#fafbfc">
+      <h2 style="font-size:var(--text-md);font-weight:600">${isEdit ? 'Edit livestock sale' : 'New livestock sale'}</h2>
+      <button id="ls-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--hint);padding:2px 6px;border-radius:4px">✕</button>
+    </div>
+    <div style="padding:20px;overflow-y:auto;flex:1">
+
+      <!-- Statement upload -->
+      <div style="border:2px dashed var(--border);border-radius:var(--radius-md);padding:16px;margin-bottom:20px;background:var(--page-bg)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">📄 Sale statement</div>
+        <div style="font-size:11px;color:var(--hint);margin-bottom:12px">Upload the sale yard statement or remittance and AI will extract the details.</div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <input type="file" id="ls-pdf-upload" accept=".pdf,image/*" style="font-size:12px;flex:1;min-width:180px">
+          <button class="btn btn-secondary btn-sm" id="btn-extract-ls" type="button">✨ Extract details</button>
+        </div>
+        <div id="ls-extract-status" style="min-height:16px;margin-top:8px;font-size:11px"></div>
+      </div>
+
+      <!-- Sale type -->
+      <div style="display:flex;gap:10px;margin-bottom:16px">
+        <div id="ls-opt-yard" style="flex:1;border:2px solid var(--blue);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer;background:var(--blue-light)">
+          <p style="font-size:13px;font-weight:600;color:var(--blue-text)">Sale yard</p>
+          <p style="font-size:11px;color:var(--blue);margin-top:2px">Auctioneer statement</p>
+        </div>
+        <div id="ls-opt-private" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer">
+          <p style="font-size:13px;font-weight:600;color:var(--ink-mid)">Private treaty</p>
+          <p style="font-size:11px;color:var(--hint);margin-top:2px">Direct to buyer</p>
+        </div>
+      </div>
+
+      <!-- Header fields -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label class="form-label">Agent / Buyer <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="ls-agent" type="text" value="${existing?.agent_name||''}" placeholder="e.g. Elders, Thomas Foods">
+        </div>
+        <div>
+          <label class="form-label">Date <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="ls-date" type="date" value="${existing?.invoice_date||new Date().toISOString().slice(0,10)}">
+        </div>
+        <div id="ls-location-wrap">
+          <label class="form-label">Sale yard / location</label>
+          <input class="form-input" id="ls-location" type="text" value="${existing?.sale_location||''}" placeholder="e.g. Dubbo, Wagga">
+        </div>
+      </div>
+
+      <!-- Livestock lines -->
+      <div style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <label class="form-label" style="margin:0">Livestock sold</label>
+          <button class="btn btn-ghost btn-sm" id="ls-add-line">+ Add line</button>
+        </div>
+
+        <!-- Line headers -->
+        <div style="display:grid;grid-template-columns:110px 1fr 55px 75px 75px 80px 80px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
+          ${['Category','Description','Head','Avg kg','Est?','Price','Gross',''].map(h =>
+            `<div style="font-size:9px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${h}</div>`
+          ).join('')}
+        </div>
+
+        <div id="ls-lines"></div>
+      </div>
+
+      <!-- Commission (sale yard only) -->
+      <div id="ls-commission-wrap" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;padding:12px;background:var(--page-bg);border-radius:var(--radius-md)">
+        <div>
+          <label class="form-label">Commission / agent fees</label>
+          <input class="form-input" id="ls-commission" type="number" step="0.01" value="${existing?.commission_amount||''}" placeholder="0.00">
+        </div>
+        <div>
+          <label class="form-label">Vendor number</label>
+          <input class="form-input" id="ls-vendor" type="text" value="${existing?.notes?.match(/Vendor: ([^\n]+)/)?.[1]||''}" placeholder="Optional">
+        </div>
+      </div>
+
+      <!-- Totals -->
+      <div style="background:var(--page-bg);border-radius:var(--radius-md);padding:12px 16px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total head</div>
+          <div id="ls-t-head" style="font-size:18px;font-weight:600;color:var(--ink)">—</div>
+        </div>
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Gross proceeds</div>
+          <div id="ls-t-gross" style="font-size:18px;font-weight:600;color:var(--ink)">—</div>
+        </div>
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Commission</div>
+          <div id="ls-t-comm" style="font-size:18px;font-weight:600;color:var(--red)">—</div>
+        </div>
+        <div style="border-left:2px solid var(--border);padding-left:12px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Net to farm</div>
+          <div id="ls-t-net" style="font-size:20px;font-weight:700;color:var(--blue)">—</div>
+        </div>
+      </div>
+
+      <!-- Notes -->
+      <div style="margin-bottom:16px">
+        <label class="form-label">Notes</label>
+        <textarea class="form-input" id="ls-notes" rows="2" placeholder="Optional notes">${existing?.notes||''}</textarea>
+      </div>
+
+      <!-- Actions -->
+      <div style="display:flex;justify-content:flex-end;gap:10px;padding-top:8px;border-top:1px solid var(--border-light)">
+        <button class="btn btn-ghost" id="ls-cancel">Cancel</button>
+        <button class="btn btn-primary" id="ls-save">✓ Save sale</button>
+      </div>
+    </div>
+  `;
+
+  formEl.appendChild(modal);
+  document.body.appendChild(formEl);
+
+  const close = () => formEl.remove();
+  modal.querySelector('#ls-close').addEventListener('click', close);
+  modal.querySelector('#ls-cancel').addEventListener('click', close);
+  formEl.addEventListener('click', e => { if (e.target === formEl) close(); });
+
+  // ── Sale type toggle ─────────────────────────────────────────
+  let saleSubtype = existing?.sale_subtype || 'yard';
+  const setSaleType = (t) => {
+    saleSubtype = t;
+    modal.querySelector('#ls-opt-yard').style.cssText = `flex:1;border:${t==='yard'?'2px solid var(--blue)':'1px solid var(--border)'};border-radius:var(--radius-md);padding:10px 14px;cursor:pointer;background:${t==='yard'?'var(--blue-light)':''}`;
+    modal.querySelector('#ls-opt-private').style.cssText = `flex:1;border:${t==='private'?'2px solid var(--blue)':'1px solid var(--border)'};border-radius:var(--radius-md);padding:10px 14px;cursor:pointer;background:${t==='private'?'var(--blue-light)':''}`;
+    modal.querySelector('#ls-commission-wrap').style.display = t === 'yard' ? 'grid' : 'none';
+    modal.querySelector('#ls-location-wrap').style.display = t === 'yard' ? '' : 'none';
+    modal.querySelector('#ls-agent').placeholder = t === 'yard' ? 'e.g. Elders, AuctionsPlus' : 'e.g. Thomas Foods, JBS';
+  };
+  modal.querySelector('#ls-opt-yard').addEventListener('click', () => setSaleType('yard'));
+  modal.querySelector('#ls-opt-private').addEventListener('click', () => setSaleType('private'));
+  setSaleType(saleSubtype);
+
+  // ── Livestock lines ─────────────────────────────────────────
+  const linesWrap = modal.querySelector('#ls-lines');
+  let lineData = existingLines.length ? existingLines : [{}];
+
+  const buildLine = (data = {}) => {
+    const div = document.createElement('div');
+    div.style.cssText = 'display:grid;grid-template-columns:110px 1fr 55px 75px 75px 80px 80px 30px;gap:6px;margin-bottom:6px;align-items:center';
+    div.innerHTML = `
+      <select class="form-select ls-cat" style="font-size:12px;padding:6px 8px">
+        <option value="">Category</option>
+        <optgroup label="Cattle">${CATTLE_CATS.map(c=>`<option${c===data.category?' selected':''}>${c}</option>`).join('')}</optgroup>
+        <optgroup label="Sheep">${SHEEP_CATS.map(c=>`<option${c===data.category?' selected':''}>${c}</option>`).join('')}</optgroup>
+      </select>
+      <input class="form-input ls-desc" type="text" placeholder="e.g. 18mo, PTIC" value="${data.description||''}" style="font-size:12px;padding:6px 8px">
+      <input class="form-input ls-head" type="number" min="1" placeholder="0" value="${data.head||''}" style="font-size:12px;padding:6px 8px">
+      <input class="form-input ls-weight" type="number" step="0.1" placeholder="kg" value="${data.avg_weight_kg||''}" style="font-size:12px;padding:6px 8px">
+      <div style="display:flex;align-items:center;gap:4px">
+        <input type="checkbox" class="ls-est" ${data.weight_estimated?'checked':''} id="est-${Math.random().toString(36).slice(2)}">
+        <label style="font-size:10px;color:var(--hint)">Est</label>
+      </div>
+      <div style="position:relative">
+        <select class="form-select ls-price-basis" style="font-size:11px;padding:3px 4px;margin-bottom:3px;width:100%">
+          <option value="per_kg"${data.price_basis==='per_kg'||!data.price_basis?' selected':''}>$/kg</option>
+          <option value="per_head"${data.price_basis==='per_head'?' selected':''}>$/hd</option>
+        </select>
+        <input class="form-input ls-price" type="number" step="0.001" placeholder="0.00" value="${data.price||''}" style="font-size:12px;padding:4px 8px">
+      </div>
+      <input class="form-input ls-gross" type="number" step="0.01" placeholder="0.00" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600" readonly>
+      <button class="btn btn-ghost ls-remove" style="padding:4px;font-size:16px;color:var(--hint)">✕</button>
+    `;
+    // Recalc gross on input
+    const recalcLine = () => {
+      const head = parseFloat(div.querySelector('.ls-head').value) || 0;
+      const weight = parseFloat(div.querySelector('.ls-weight').value) || 0;
+      const price = parseFloat(div.querySelector('.ls-price').value) || 0;
+      const basis = div.querySelector('.ls-price-basis').value;
+      let gross = 0;
+      if (basis === 'per_kg' && head && weight && price) gross = head * weight * price;
+      else if (basis === 'per_head' && head && price) gross = head * price;
+      div.querySelector('.ls-gross').value = gross ? gross.toFixed(2) : '';
+      recalcTotals();
+    };
+    ['ls-head','ls-weight','ls-price'].forEach(cls => div.querySelector('.' + cls).addEventListener('input', recalcLine));
+    div.querySelector('.ls-price-basis').addEventListener('change', recalcLine);
+    div.querySelector('.ls-remove').addEventListener('click', () => { div.remove(); recalcTotals(); });
+    recalcLine();
+    return div;
+  };
+
+  const recalcTotals = () => {
+    let totalHead = 0, totalGross = 0;
+    linesWrap.querySelectorAll(':scope > div').forEach(div => {
+      totalHead += parseInt(div.querySelector('.ls-head')?.value) || 0;
+      totalGross += parseFloat(div.querySelector('.ls-gross')?.value) || 0;
+    });
+    const comm = parseFloat(modal.querySelector('#ls-commission')?.value) || 0;
+    const net = totalGross - comm;
+    modal.querySelector('#ls-t-head').textContent = totalHead || '—';
+    modal.querySelector('#ls-t-gross').textContent = totalGross ? formatCurrency(totalGross, 2) : '—';
+    modal.querySelector('#ls-t-comm').textContent = comm ? '-' + formatCurrency(comm, 2) : '—';
+    modal.querySelector('#ls-t-net').textContent = net ? formatCurrency(net, 2) : '—';
+    modal.querySelector('#ls-t-net').style.color = net < 0 ? 'var(--red)' : 'var(--blue)';
+  };
+
+  // Render initial lines
+  lineData.forEach(d => linesWrap.appendChild(buildLine(d)));
+  modal.querySelector('#ls-add-line').addEventListener('click', () => {
+    linesWrap.appendChild(buildLine());
+  });
+  modal.querySelector('#ls-commission').addEventListener('input', recalcTotals);
+
+  // ── AI extraction ────────────────────────────────────────────
+  modal.querySelector('#btn-extract-ls').addEventListener('click', async () => {
+    const file = modal.querySelector('#ls-pdf-upload')?.files?.[0];
+    const statusEl = modal.querySelector('#ls-extract-status');
+    if (!file) { statusEl.textContent = 'Please select a file first.'; statusEl.style.color = 'var(--red)'; return; }
+    const btn = modal.querySelector('#btn-extract-ls');
+    btn.disabled = true; btn.textContent = 'Extracting…';
+    statusEl.textContent = 'Reading document…'; statusEl.style.color = 'var(--hint)';
+    try {
+      const data = await _callExtractLivestockAPI(file, farm);
+      const ext = data.extracted;
+      if (!ext) throw new Error('No data returned');
+      modal._lsExtractionId = data.extraction_id;
+
+      // Populate header fields
+      const set = (id, val) => { const el = modal.querySelector('#' + id); if (el && val) { el.value = val; el.style.borderColor = ''; } };
+      set('ls-agent', ext.agent_name);
+      set('ls-date', ext.sale_date);
+      set('ls-location', ext.sale_location);
+      set('ls-vendor', ext.vendor_number);
+      if (ext.commission_amount) set('ls-commission', ext.commission_amount);
+
+      // Populate lines
+      if (ext.lots && ext.lots.length) {
+        linesWrap.innerHTML = '';
+        ext.lots.forEach(lot => {
+          linesWrap.appendChild(buildLine({
+            category: lot.category || '',
+            description: lot.description || '',
+            head: lot.head,
+            avg_weight_kg: lot.avg_weight_kg,
+            weight_estimated: lot.weight_estimated,
+            price: lot.price,
+            price_basis: lot.price_basis || 'per_kg',
+            gross: lot.gross,
+          }));
+        });
+      }
+      recalcTotals();
+
+      // Flag missing required fields
+      const missing = [];
+      ['ls-agent','ls-date'].forEach(id => {
+        const el = modal.querySelector('#' + id);
+        if (el && !el.value) { el.style.borderColor = 'var(--red)'; missing.push(id.replace('ls-','')); }
+      });
+      statusEl.textContent = missing.length
+        ? '⚠ Check highlighted fields: ' + missing.join(', ')
+        : `✓ Extracted${data.examples_used ? ' (using '+data.examples_used+' past examples)' : ''}. Review and save.`;
+      statusEl.style.color = missing.length ? 'var(--amber)' : 'var(--green)';
+    } catch(e) {
+      statusEl.textContent = 'Extraction failed: ' + e.message;
+      statusEl.style.color = 'var(--red)';
+    } finally {
+      btn.disabled = false; btn.textContent = '✨ Extract details';
+    }
+  });
+
+  // ── Save ─────────────────────────────────────────────────────
+  modal.querySelector('#ls-save').addEventListener('click', async () => {
+    const btn = modal.querySelector('#ls-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const session = getSession();
+      const agent = modal.querySelector('#ls-agent')?.value?.trim();
+      const date = modal.querySelector('#ls-date')?.value;
+      const location = modal.querySelector('#ls-location')?.value?.trim() || null;
+      const vendor = modal.querySelector('#ls-vendor')?.value?.trim() || null;
+      const commission = parseFloat(modal.querySelector('#ls-commission')?.value) || 0;
+      const notes = modal.querySelector('#ls-notes')?.value?.trim() || '';
+
+      if (!date) throw new Error('Please enter a date');
+      if (!agent) throw new Error('Please enter an agent or buyer');
+
+      // Collect lines
+      const lines = [];
+      let totalHead = 0, totalGross = 0;
+      linesWrap.querySelectorAll(':scope > div').forEach(div => {
+        const head = parseInt(div.querySelector('.ls-head')?.value) || 0;
+        const gross = parseFloat(div.querySelector('.ls-gross')?.value) || 0;
+        if (!head) return;
+        const line = {
+          category: div.querySelector('.ls-cat')?.value,
+          description: div.querySelector('.ls-desc')?.value?.trim(),
+          head,
+          avg_weight_kg: parseFloat(div.querySelector('.ls-weight')?.value) || null,
+          weight_estimated: div.querySelector('.ls-est')?.checked || false,
+          price_basis: div.querySelector('.ls-price-basis')?.value,
+          price: parseFloat(div.querySelector('.ls-price')?.value) || null,
+          gross,
+        };
+        lines.push(line);
+        totalHead += head;
+        totalGross += gross;
+      });
+
+      if (!lines.length) throw new Error('Please add at least one line');
+
+      const net = totalGross - commission;
+      const notesWithVendor = [notes, vendor ? 'Vendor: ' + vendor : ''].filter(Boolean).join('\n');
+
+      // Upload file if selected
+      let statementFiles = existing?.rcti_files || [];
+      const fileInput = modal.querySelector('#ls-pdf-upload');
+      const newFile = fileInput?.files?.[0];
+      if (newFile) {
+        const path = `invoices/${farm.id}/${Date.now()}_ls_${newFile.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+        const ct = newFile.type || 'application/pdf';
+        const res = await fetch(`https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/cfm-documents/${path}`, {
+          method:'POST', headers:{'apikey':window.__CFM_ANON_KEY,'Authorization':`Bearer ${session?.access_token}`,'Content-Type':ct,'x-upsert':'true'}, body:newFile,
+        });
+        if (res.ok) statementFiles = [...statementFiles, { url:`https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/public/cfm-documents/${path}`, filename:newFile.name }];
+      }
+
+      // Save correction
+      if (modal._lsExtractionId) {
+        const corrected = { agent_name: agent, sale_date: date, sale_location: location, commission_amount: commission, lots: lines };
+        fetch('/api/extract-livestock', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ farm_id: farm.id, save_example: true, extraction_id: modal._lsExtractionId, correction: corrected })
+        }).catch(()=>{});
+      }
+
+      const row = {
+        farm_id: farm.id,
+        buyer: agent,
+        invoice_date: date,
+        sale_type: 'cash',
+        sale_subtype: saleSubtype,
+        agent_name: agent,
+        sale_location: location,
+        commission_amount: commission,
+        livestock_lines: lines,
+        total_qty: totalHead,
+        master_unit: 'head',
+        gross_amount: totalGross,
+        total_quality_adj: -commission,
+        notes: notesWithVendor,
+        season: getActiveSeason() || '',
+        rcti_files: statementFiles,
+        batches: [{
+          qty: totalHead,
+          lines: lines.map(l => ({ type:'income', line_type:'sale', description: [l.category, l.description].filter(Boolean).join(' '), amount: l.gross, eff_per_unit: l.head ? l.gross/l.head : null })),
+          income_files: statementFiles,
+        }],
+        status: existing?.status || 'pending',
+      };
+
+      if (existing?.id) {
+        await dbUpdate('invoices', existing.id, row);
+        toast('Sale updated', 'success');
+      } else {
+        await dbInsert('invoices', row);
+        toast('Sale saved', 'success');
+      }
+      close();
+      await _loadData();
+      _renderTable(container);
+    } catch(err) {
+      toast(err.message || 'Save failed', 'error');
+    }
+    btn.disabled = false; btn.textContent = '✓ Save sale';
+  });
+}
+
+// ── Livestock extraction API call ────────────────────────────
+async function _callExtractLivestockAPI(file, farm) {
+  if (file.size > 4 * 1024 * 1024) throw new Error(`File too large (${(file.size/1024/1024).toFixed(1)}MB). Please use a file under 4MB.`);
+
+  let pdf_text = null;
+  try {
+    if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+      if (!window.pdfjsLib) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+          s.onload = resolve; s.onerror = reject;
+          document.head.appendChild(s);
+        });
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const pages = [];
+      for (let i = 1; i <= Math.min(pdf.numPages, 10); i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        pages.push(content.items.map(item => item.str).join(' '));
+      }
+      pdf_text = pages.join('\n\n');
+    }
+  } catch(e) { pdf_text = null; }
+
+  const body = { farm_id: farm.id, document_type: 'livestock_sale' };
+  if (pdf_text && pdf_text.trim().length > 50) {
+    body.pdf_text = pdf_text;
+  } else {
+    body.pdf_base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  const res = await fetch('/api/extract-livestock', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await res.text();
+    throw new Error(`Server error (${res.status}) — ${text.slice(0,80)}`);
+  }
+  const json = await res.json();
+  if (!res.ok || json.error) throw new Error(json.error || 'Extraction failed');
+  return json;
 }
