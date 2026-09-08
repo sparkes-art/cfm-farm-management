@@ -141,7 +141,7 @@ async function _mountOverview(container) {
     // Contract position
     const contractHtml = await buildContractPosition(season);
     const opsHtml = await buildOperationsSummary(season);
-    html += contractHtml;
+    html += contractHtml + opsHtml;
 
     container.innerHTML = html;
 
