@@ -2,7 +2,7 @@
 // Outputs module — Dashboard, Contracts, Market Prices, Invoices
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert, subscribeTable } from '../../js/supabase-client.js';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js';
+import { getActiveFarm, getSession, canWrite, getActiveSeason, getRole } from '../../js/app-state.js';
 import {
   toast, openModal, formatCurrency, formatDate,
   commodityBadge, statusBadge, qs, setContent, currentSeason, formatNumber
@@ -17,7 +17,11 @@ import { loadCommodities } from '../../js/commodities.js';
 let _invoices = [];
 let _contracts = [];
 let _unsub = null;
-let _activeTab = 'overview';
+let _activeTab = (() => {
+  const role = getRole();
+  if (role === 'investor') return 'investor';
+  return 'overview';
+})();
 
 // ── Entry point ───────────────────────────────────────────────
 export async function mountOutputs(container) {
@@ -32,7 +36,8 @@ export async function mountOutputs(container) {
     </div>
 
     <div class="tab-strip">
-      <button class="tab-btn" data-tab="overview" style="font-weight:600">Dashboard</button>
+      <button class="tab-btn" data-tab="investor">Investor view</button>
+      <button class="tab-btn" data-tab="overview">Manager view</button>
       <button class="tab-btn" data-tab="contracts">Contracts</button>
       <button class="tab-btn" data-tab="prices">Market prices</button>
       <button class="tab-btn" data-tab="invoices">Invoices</button>
@@ -58,7 +63,7 @@ export async function mountOutputs(container) {
   });
 
   // Listen for global season changes
-  const onSeasonChange = () => { if (_activeTab === 'overview') _loadTab(); };
+  const onSeasonChange = () => { if (_activeTab === 'overview' || _activeTab === 'investor') _loadTab(); };
   window.addEventListener('cfm:seasonchange', onSeasonChange);
   container._offSeasonChange = () => window.removeEventListener('cfm:seasonchange', onSeasonChange);
 
@@ -93,7 +98,9 @@ async function _loadTab() {
   if (!content) return;
   unmountContracts();
   unmountMarketPrices();
-  if (_activeTab === 'overview') {
+  if (_activeTab === 'investor') {
+    await _mountInvestorView(content);
+  } else if (_activeTab === 'overview') {
     await _mountOverview(content);
   } else if (_activeTab === 'contracts') {
     await mountContracts(content);
@@ -662,4 +669,230 @@ function _openInvoiceDetail(inv) {
       ${contract ? '<hr class="divider"><div class="mt-2"><p class="text-xs text-muted">Forward contract</p><p>' + (contract.contract_number || 'Contract') + ' — ' + formatCurrency(contract.price_per_unit, 4) + '/' + contract.unit + '</p></div>' : ''}
     `,
   });
+}
+// ── Investor view ─────────────────────────────────────────────
+async function _mountInvestorView(container) {
+  const farm = getActiveFarm();
+  if (!farm) { container.innerHTML = '<div class="empty-state"><p>No farm selected.</p></div>'; return; }
+
+  const season = getActiveSeason() || currentSeason();
+  container.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>';
+
+  try {
+    await loadCommodities();
+    const commodityList = getCommodities();
+    const idToName = {};
+    commodityList.forEach(c => { idToName[c.id] = c.name; });
+
+    const [contracts, invoices, budgets, forecasts, harvests, lsInvoices] = await Promise.all([
+      dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
+      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=neq.head&select=id,gross_amount,total_quality_adj,total_qty,forward_contract_id,batches,season,status,buyer'),
+      dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
+      dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.desc'),
+      dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
+      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&master_unit=eq.head&season=eq.' + season + '&select=total_qty,gross_amount,livestock_lines'),
+    ]);
+
+    const fM = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + Math.round(n).toLocaleString();
+    const fN = (n, dp=0) => n == null ? '—' : formatNumber(n, dp);
+    const fC = (n) => n == null ? '—' : formatCurrency(n, 2);
+    const pctBar = (pct, color) => `<div style="height:4px;background:var(--border-light);border-radius:2px;overflow:hidden;margin-top:4px"><div style="height:100%;width:${Math.min(100,pct)}%;background:${color};border-radius:2px"></div></div>`;
+    const badge = (text, type) => {
+      const styles = {
+        green: 'background:#eaf3de;color:#3b6d11', amber: 'background:#faeeda;color:#854f0b',
+        blue: 'background:#e6f1fb;color:#185fa5', red: 'background:#fcebeb;color:#a32d2d',
+      };
+      return `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;${styles[type]||styles.blue}">${text}</span>`;
+    };
+
+    // ── Aggregate metrics ─────────────────────────────────────
+    const totalBudgetRev = budgets.reduce((s,b) => s + (parseFloat(b.budgeted_gross_revenue)||(parseFloat(b.budgeted_production||0)*parseFloat(b.price||0))), 0);
+    const totalContractedValue = contracts.reduce((s,c) => s + (parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0), 0);
+
+    let invoicedRev = 0;
+    invoices.forEach(inv => {
+      if (inv.batches) {
+        const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;
+        b.forEach(bt => { const sl=(bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa'); invoicedRev+=sl.reduce((s,l)=>s+(parseFloat(l.amount)||0),0); });
+      } else { invoicedRev += (parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0); }
+    });
+
+    const openExposure = Math.max(0, totalBudgetRev - totalContractedValue);
+    const pctContracted = totalBudgetRev ? Math.round(totalContractedValue/totalBudgetRev*100) : 0;
+    const pctInvoiced = totalContractedValue ? Math.round(invoicedRev/totalContractedValue*100) : 0;
+
+    // ── Enterprise coverage rows ──────────────────────────────
+    const byCom = {};
+    contracts.forEach(c => {
+      const name = idToName[c.commodity_id] || c.commodity || 'Other';
+      if (!byCom[name]) byCom[name] = { contracts:[], invoicedRev:0, budgetProd:0, budgetPrice:0 };
+      byCom[name].contracts.push(c);
+    });
+    budgets.forEach(b => {
+      const name = idToName[b.commodity_id] || b.commodity || 'Other';
+      if (!byCom[name]) byCom[name] = { contracts:[], invoicedRev:0, budgetProd:0, budgetPrice:0 };
+      byCom[name].budgetProd += parseFloat(b.budgeted_production)||0;
+      byCom[name].budgetPrice = parseFloat(b.price)||byCom[name].budgetPrice;
+    });
+    invoices.forEach(inv => {
+      const c = contracts.find(c=>c.id===inv.forward_contract_id);
+      if (!c) return;
+      const name = idToName[c.commodity_id] || c.commodity || 'Other';
+      if (byCom[name]) byCom[name].invoicedRev += (parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0);
+    });
+
+    const enterpriseRows = Object.entries(byCom).map(([name, d]) => {
+      const contractedQty = d.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0),0);
+      const contractedVal = d.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
+      const avgPrice = contractedQty ? contractedVal/contractedQty : null;
+      const unit = d.contracts[0]?.unit || 't';
+      const complete = d.contracts.length && d.contracts.every(c=>c.is_complete);
+      const pct = d.budgetProd ? Math.round(contractedQty/d.budgetProd*100) : null;
+      const coverageBadge = complete ? badge('Complete', 'green') : pct >= 100 ? badge('Fully covered', 'green') : pct >= 50 ? badge('Partial', 'amber') : badge('Open', 'red');
+      return `
+      <div style="display:grid;grid-template-columns:130px 1fr 90px 90px 90px;gap:0;padding:10px 18px;border-bottom:0.5px solid var(--border-light);align-items:center;font-size:12px"
+        onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background=''">
+        <div style="font-weight:600;color:var(--ink)">${name}</div>
+        <div>
+          ${pct != null ? `<div style="font-size:11px;color:var(--hint);margin-bottom:3px">${contractedQty.toLocaleString()} ${unit} contracted${d.budgetProd ? ' of ' + d.budgetProd.toLocaleString() + ' budgeted' : ''}</div>` : ''}
+          <div style="height:5px;background:var(--border-light);border-radius:2px;overflow:hidden;max-width:200px">
+            <div style="height:100%;width:${Math.min(100,pct||0)}%;background:${(pct||0)>=100?'var(--green)':'var(--blue)'};border-radius:2px"></div>
+          </div>
+          ${pct != null ? `<div style="font-size:10px;color:var(--hint);margin-top:2px">${pct}% contracted</div>` : ''}
+        </div>
+        <div style="text-align:right;font-weight:600;color:var(--blue)">${fM(contractedVal)}</div>
+        <div style="text-align:right;color:var(--hint)">${avgPrice ? fC(avgPrice) + '/' + unit : '—'}</div>
+        <div style="text-align:right">${coverageBadge}</div>
+      </div>`;
+    }).join('');
+
+    // ── Yield vs budget ───────────────────────────────────────
+    const budgetHa = budgets.reduce((s,b)=>s+(parseFloat(b.area_ha)||0),0);
+    const hvstHa = harvests.reduce((s,h)=>s+(parseFloat(h.area_ha)||0),0);
+    const hvstProd = harvests.reduce((s,h)=>s+(parseFloat(h.actual_production)||0),0);
+    const hvstYield = hvstHa ? hvstProd/hvstHa : null;
+    // Latest forecast per commodity
+    const fcstMap = {};
+    forecasts.forEach(f => { const k = f.budget_id||f.commodity_id||'x'; if (!fcstMap[k]||f.forecast_date>fcstMap[k].forecast_date) fcstMap[k]=f; });
+    const fcstProd = Object.values(fcstMap).reduce((s,f)=>s+(parseFloat(f.forecast_production)||(parseFloat(f.area_ha||0)*parseFloat(f.yield_per_ha||0))),0);
+    const budgetProd = budgets.reduce((s,b)=>s+(parseFloat(b.budgeted_production)||(parseFloat(b.area_ha||0)*parseFloat(b.budgeted_yield_per_ha||b.yield_per_ha||0))),0);
+
+    // ── Livestock ─────────────────────────────────────────────
+    const lsHead = lsInvoices.reduce((s,i)=>s+(parseFloat(i.total_qty)||0),0);
+    const lsGross = lsInvoices.reduce((s,i)=>s+(parseFloat(i.gross_amount)||0),0);
+
+    // ── Downside / risk ───────────────────────────────────────
+    const uncontractedVal = openExposure;
+    const contractComplete = contracts.filter(c=>c.is_complete).length;
+
+    const html = `
+    <div style="padding:16px 0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;padding:0 18px">
+        <div>
+          <h2 style="font-size:16px;font-weight:600;color:var(--ink)">${farm.name || 'Portfolio'} — ${season}</h2>
+          <p style="font-size:12px;color:var(--hint);margin-top:2px">Asset and operational performance · Read only</p>
+        </div>
+        <div style="font-size:11px;color:var(--hint)">As at ${new Date().toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'})}</div>
+      </div>
+
+      <!-- Headline metrics -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);border-top:0.5px solid var(--border);border-bottom:0.5px solid var(--border);margin-bottom:16px">
+        <div style="padding:14px 18px;border-right:0.5px solid var(--border)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Budgeted revenue</div>
+          <div style="font-size:24px;font-weight:600;color:var(--ink)">${fM(totalBudgetRev)}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">${season} full season</div>
+        </div>
+        <div style="padding:14px 18px;border-right:0.5px solid var(--border)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Contracted value</div>
+          <div style="font-size:24px;font-weight:600;color:var(--blue)">${fM(totalContractedValue)}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">${pctContracted}% of budget</div>
+          ${pctBar(pctContracted, 'var(--blue)')}
+        </div>
+        <div style="padding:14px 18px;border-right:0.5px solid var(--border)">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Invoiced to date</div>
+          <div style="font-size:24px;font-weight:600;color:var(--green)">${fM(invoicedRev)}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">${pctInvoiced}% of contracted</div>
+          ${pctBar(pctInvoiced, 'var(--green)')}
+        </div>
+        <div style="padding:14px 18px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Open exposure</div>
+          <div style="font-size:24px;font-weight:600;color:${uncontractedVal > 0 ? 'var(--amber)' : 'var(--green)'}">${fM(uncontractedVal)}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">Uncontracted at market risk</div>
+        </div>
+      </div>
+
+      <!-- Contract coverage -->
+      <div style="margin-bottom:16px">
+        <div style="padding:8px 18px;background:var(--page-bg);border-top:0.5px solid var(--border);border-bottom:0.5px solid var(--border)">
+          <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Contract coverage by enterprise</span>
+        </div>
+        <div style="display:grid;grid-template-columns:130px 1fr 90px 90px 90px;gap:0;padding:6px 18px;background:var(--page-bg);border-bottom:0.5px solid var(--border)">
+          ${['Enterprise','Coverage','Contracted value','Avg price','Status'].map((h,i)=>`<div style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);${i>1?'text-align:right':''}">${h}</div>`).join('')}
+        </div>
+        ${enterpriseRows || '<div style="padding:14px 18px;font-size:12px;color:var(--hint)">No contracts entered for this season.</div>'}
+        ${lsHead ? `
+        <div style="display:grid;grid-template-columns:130px 1fr 90px 90px 90px;gap:0;padding:10px 18px;border-bottom:0.5px solid var(--border-light);align-items:center;font-size:12px">
+          <div style="font-weight:600;color:var(--ink)">Livestock</div>
+          <div style="font-size:11px;color:var(--hint)">${Math.round(lsHead)} head sold YTD</div>
+          <div style="text-align:right;font-weight:600;color:var(--green)">${fM(lsGross)}</div>
+          <div style="text-align:right;color:var(--hint)">${lsHead ? fC(lsGross/lsHead) + '/hd' : '—'}</div>
+          <div style="text-align:right">${badge('Realised', 'green')}</div>
+        </div>` : ''}
+      </div>
+
+      <!-- Production and risk -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;border-top:0.5px solid var(--border)">
+        <div style="padding:14px 18px;border-right:0.5px solid var(--border)">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Production vs budget</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;justify-content:space-between;font-size:12px">
+              <span style="color:var(--hint)">Budget area</span>
+              <span style="font-weight:600;color:var(--ink)">${fN(budgetHa)} ha</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:12px">
+              <span style="color:var(--hint)">Budget production</span>
+              <span style="font-weight:600;color:var(--ink)">${fN(budgetProd)} t</span>
+            </div>
+            ${fcstProd ? `<div style="display:flex;justify-content:space-between;font-size:12px">
+              <span style="color:var(--hint)">Latest forecast</span>
+              <span style="font-weight:600;color:var(--amber)">${fN(fcstProd)} t</span>
+            </div>` : ''}
+            ${hvstProd ? `<div style="display:flex;justify-content:space-between;font-size:12px">
+              <span style="color:var(--hint)">Actual harvest</span>
+              <span style="font-weight:600;color:var(--green)">${fN(hvstProd)} t · ${fN(hvstYield,2)} t/ha</span>
+            </div>` : ''}
+            ${!fcstProd && !hvstProd ? `<div style="font-size:11px;color:var(--hint)">Season underway — no forecast or harvest yet.</div>` : ''}
+          </div>
+        </div>
+        <div style="padding:14px 18px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Risk summary</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+              <span style="color:var(--hint)">Uncontracted production</span>
+              <span style="font-weight:600;color:${uncontractedVal>0?'var(--amber)':'var(--green)'}">
+                ${uncontractedVal > 0 ? fM(uncontractedVal) + ' at market' : 'Fully covered'}
+              </span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+              <span style="color:var(--hint)">Contracts complete</span>
+              <span style="font-weight:600;color:var(--ink)">${contractComplete} of ${contracts.length}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+              <span style="color:var(--hint)">Livestock exposure</span>
+              <span style="font-weight:600;color:var(--green)">${lsHead ? Math.round(lsHead) + ' hd · cash sales only' : 'None this season'}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+              <span style="color:var(--hint)">Reporting basis</span>
+              <span style="color:var(--hint)">Operational · asset level only</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    container.innerHTML = html;
+  } catch(err) {
+    console.error('Investor view error:', err);
+    container.innerHTML = '<div class="empty-state"><p>Error loading investor view.</p></div>';
+  }
 }
