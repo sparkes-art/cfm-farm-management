@@ -281,7 +281,7 @@ async function _mountOverview(container) {
             <div style="font-size:10px;color:var(--hint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">vs Market</div>
             ${vsContract!=null ? `
             <div style="font-size:18px;font-weight:600;color:${vsContract>=0?'var(--green)':'var(--red)'}">${vsContract>=0?'+':''}${fC(vsContract)}/${com.unit}</div>
-            <div style="font-size:12px;color:var(--hint);margin-top:2px">${vsContract>=0?'Above':'Below'} today's market · ${vsContract>=0?'✓ Protected':'↓ Market moved up'}</div>` :
+            <div style="font-size:12px;color:var(--hint);margin-top:2px">${vsContract>=0?'Above':'Below'} today vs market · ${vsContract>=0?'Protected':'Market moved up'}</div>` :
             `<div style="font-size:14px;color:var(--hint);margin-top:4px">No market price to compare</div>`}
             ${vsBudget!=null?`<div style="font-size:11px;color:${vsBudget>=0?'var(--green)':'var(--red)'};margin-top:6px">Market ${vsBudget>=0?'+':''}${fC(vsBudget)} vs budget price</div>`:''}
           </div>
@@ -289,7 +289,7 @@ async function _mountOverview(container) {
             <div style="font-size:10px;color:var(--hint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">Uncontracted</div>
             ${uncontracted > 0 ? `
             <div style="font-size:18px;font-weight:600;color:var(--amber)">${fN(uncontracted)} ${com.unit}</div>
-            <div style="font-size:12px;color:var(--hint);margin-top:2px">${uncontractedVal?fM(uncontractedVal)+' at today's market':''}</div>` :
+            <div style="font-size:12px;color:var(--hint);margin-top:2px">${uncontractedVal?fM(uncontractedVal)+' at market today':''}</div>` :
             `<div style="font-size:16px;font-weight:600;color:var(--green);margin-top:4px">Fully contracted ✓</div>`}
             ${pctInvd!=null?`<div style="font-size:11px;color:var(--hint);margin-top:6px">${pctInvd}% invoiced of contracted</div>`:''}
           </div>
