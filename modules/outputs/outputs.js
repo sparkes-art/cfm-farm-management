@@ -11,7 +11,7 @@ import { mountContracts, unmountContracts } from './contracts.js';
 import { mountInvoices, unmountInvoices, openInvoiceForm } from './invoices.js';
 import { mountReconciliation, unmountReconciliation } from './reconciliation.js';
 import { mountMarketPrices, unmountMarketPrices } from './market-prices.js';
-import { buildCommodityCards, drawMiniCharts, buildContractPosition, buildOperationsSummary } from './commodity-card.js';
+import { buildCommodityCards, drawMiniCharts, buildContractPosition, buildOperationsSummary, buildLivestockPosition } from './commodity-card.js';
 import { loadCommodities } from '../../js/commodities.js';
 
 let _invoices = [];
@@ -141,7 +141,8 @@ async function _mountOverview(container) {
     // Contract position
     const contractHtml = await buildContractPosition(season);
     const opsHtml = await buildOperationsSummary(season);
-    html += opsHtml + contractHtml;
+    const livestockHtml = await buildLivestockPosition(season);
+    html += opsHtml + livestockHtml + contractHtml;
 
     container.innerHTML = html;
 

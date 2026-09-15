@@ -1031,3 +1031,123 @@ export async function buildOperationsSummary(season) {
     </div>
   </div>`;
 }
+// ── Livestock position card ────────────────────────────────────
+export async function buildLivestockPosition(season) {
+  const farm = getActiveFarm();
+  if (!farm) return '';
+
+  const invoices = await dbSelect('invoices',
+    'farm_id=eq.' + farm.id +
+    '&master_unit=eq.head' +
+    '&season=eq.' + season +
+    '&select=buyer,invoice_date,total_qty,gross_amount,livestock_lines,agent_name'
+  );
+
+  if (!invoices.length) return '';
+
+  const fN  = (n, dp=0) => n != null ? formatNumber(n, dp) : '—';
+  const fN2 = (n) => n != null ? formatNumber(n, 2) : '—';
+  const fC  = (n) => n != null ? formatCurrency(n, 2) : '—';
+
+  // Aggregate by species + category
+  const CATTLE = ['Steer','Heifer','Bull','Cow','PTIC Cow','Cull Cow','Weaner Steer','Weaner Heifer'];
+  const SHEEP  = ['Wether','Ram','Ewe','Ewe Lamb','Wether Lamb','X-bred Lamb','PTIC Ewe','Cull Ewe'];
+  const speciesOf = (cat) => CATTLE.includes(cat) ? 'Cattle' : SHEEP.includes(cat) ? 'Sheep' : 'Other';
+
+  const catMap = {};
+  let totalHead = 0, totalGross = 0;
+
+  invoices.forEach(inv => {
+    const lines = inv.livestock_lines || [];
+    lines.forEach(line => {
+      if (!line.head) return;
+      const cat = line.category || 'Other';
+      if (!catMap[cat]) catMap[cat] = { category: cat, species: speciesOf(cat), head: 0, totalGross: 0, weightedKg: 0, weightedPrice: 0, hasWeight: false, estimated: false };
+      const c = catMap[cat];
+      c.head      += line.head;
+      c.totalGross += line.gross || 0;
+      if (line.avg_weight_kg) {
+        c.weightedKg    += line.avg_weight_kg * line.head;
+        c.weightedPrice += (line.price_basis === 'per_kg' ? line.price : 0) * line.head;
+        c.hasWeight = true;
+        if (line.weight_estimated) c.estimated = true;
+      }
+      totalHead  += line.head;
+      totalGross += line.gross || 0;
+    });
+  });
+
+  // Compute derived metrics
+  const rows = Object.values(catMap).map(c => ({
+    ...c,
+    avgWeightKg  : c.hasWeight ? c.weightedKg / c.head : null,
+    avgPricePerKg: c.hasWeight ? c.weightedPrice / c.head : null,
+    avgPerHead   : c.head ? c.totalGross / c.head : null,
+  }));
+
+  // Sort: Cattle first then Sheep, alpha within
+  rows.sort((a, b) => {
+    if (a.species !== b.species) return a.species === 'Cattle' ? -1 : 1;
+    return a.category.localeCompare(b.category);
+  });
+
+  // Group by species for section headers
+  const sections = [];
+  let currentSpecies = null;
+  rows.forEach(r => {
+    if (r.species !== currentSpecies) { sections.push({ species: r.species, rows: [] }); currentSpecies = r.species; }
+    sections[sections.length-1].rows.push(r);
+  });
+
+  const colH = 'font-size:9px;color:var(--hint);font-weight:600;text-align:center;padding:4px 10px;text-transform:uppercase;letter-spacing:.07em';
+  const cell = 'font-size:11px;text-align:center;font-variant-numeric:tabular-nums;padding:9px 10px';
+  const GRID = '140px 70px 80px 80px 80px 90px';
+
+  const sectionHtml = sections.map(sec => `
+    <!-- ${sec.species} header -->
+    <div style="display:grid;grid-template-columns:${GRID};background:#1a2535;padding:6px 14px;align-items:center">
+      <div style="font-size:11px;font-weight:600;color:white">${sec.species}</div>
+      <div style="font-size:9px;color:rgba(255,255,255,.5);text-align:center;text-transform:uppercase;letter-spacing:.07em">Head</div>
+      <div style="font-size:9px;color:rgba(255,255,255,.5);text-align:center;text-transform:uppercase;letter-spacing:.07em">Avg weight</div>
+      <div style="font-size:9px;color:rgba(255,255,255,.5);text-align:center;text-transform:uppercase;letter-spacing:.07em">Avg $/kg</div>
+      <div style="font-size:9px;color:rgba(255,255,255,.5);text-align:center;text-transform:uppercase;letter-spacing:.07em">Avg $/head</div>
+      <div style="font-size:9px;color:rgba(255,255,255,.5);text-align:center;text-transform:uppercase;letter-spacing:.07em">Total gross</div>
+    </div>
+    ${sec.rows.map((r, i) => `
+    <div style="display:grid;grid-template-columns:${GRID};align-items:center;border-bottom:1px solid var(--border-light);${i%2===1?'background:var(--page-bg)':''}"
+      onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background='${i%2===1?'var(--page-bg)':''}'">
+      <div style="padding:9px 14px;font-size:12px;font-weight:600;color:var(--ink)">${r.category}</div>
+      <div style="${cell};font-weight:600;color:var(--ink)">${fN(r.head)}</div>
+      <div style="${cell};color:${r.avgWeightKg?'var(--ink-mid)':'var(--hint)'}">
+        ${r.avgWeightKg ? fN(r.avgWeightKg) + ' kg' + (r.estimated?'<span style="font-size:9px;color:var(--amber);margin-left:2px">est</span>':'') : '—'}
+      </div>
+      <div style="${cell};color:${r.avgPricePerKg?'var(--ink)':'var(--hint)'}">
+        ${r.avgPricePerKg ? fC(r.avgPricePerKg) : '—'}
+      </div>
+      <div style="${cell};font-weight:600;color:var(--ink)">${fC(r.avgPerHead)}</div>
+      <div style="${cell};font-weight:600;color:var(--green)">${fC(r.totalGross)}</div>
+    </div>`).join('')}
+    <!-- Species subtotal -->
+    <div style="display:grid;grid-template-columns:${GRID};align-items:center;padding:7px 0;border-bottom:2px solid var(--border);background:var(--page-bg)">
+      <div style="padding:0 14px;font-size:11px;font-weight:600;color:var(--ink)">${sec.species} total</div>
+      <div style="${cell};font-weight:600">${fN(sec.rows.reduce((s,r)=>s+r.head,0))}</div>
+      <div style="${cell};color:var(--hint)">—</div>
+      <div style="${cell};color:var(--hint)">—</div>
+      <div style="${cell};font-weight:600">${fC(sec.rows.reduce((s,r)=>s+r.totalGross,0) / sec.rows.reduce((s,r)=>s+r.head,0))}</div>
+      <div style="${cell};font-weight:600;color:var(--green)">${fC(sec.rows.reduce((s,r)=>s+r.totalGross,0))}</div>
+    </div>`).join('');
+
+  return `
+  <div style="margin-top:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h2 style="font-size:var(--text-md);font-weight:600">Livestock sales — ${season}</h2>
+      <div style="display:flex;gap:20px;font-size:12px;color:var(--hint)">
+        <span>Total head <strong style="color:var(--ink)">${fN(totalHead)}</strong></span>
+        <span>Total gross <strong style="color:var(--green)">${fC(totalGross)}</strong></span>
+      </div>
+    </div>
+    <div class="card" style="overflow:hidden">
+      ${sectionHtml}
+    </div>
+  </div>`;
+}
