@@ -47,7 +47,7 @@ export async function buildCommodityCards(season) {
 
   const [contracts, invoices, budgets, forecasts, harvests] = await Promise.all([
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
-    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*,invoice_date&order=invoice_date.desc'),
+    dbSelect('invoices', 'farm_id=eq.' + farm.id + '&master_unit=neq.head&select=*,invoice_date&order=invoice_date.desc'),
     dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.asc'),
     dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
@@ -1036,12 +1036,21 @@ export async function buildLivestockPosition(season) {
   const farm = getActiveFarm();
   if (!farm) return '';
 
-  const invoices = await dbSelect('invoices',
+  const allLsInvoices = await dbSelect('invoices',
     'farm_id=eq.' + farm.id +
     '&master_unit=eq.head' +
-    '&season=eq.' + season +
-    '&select=buyer,invoice_date,total_qty,gross_amount,livestock_lines,agent_name'
+    '&select=buyer,invoice_date,season,total_qty,gross_amount,livestock_lines,agent_name'
   );
+  // Filter by season client-side to handle invoices with missing season field
+  const seasonStart = season ? parseInt(season.split('-')[0]) : null;
+  const invoices = allLsInvoices.filter(inv => {
+    if (inv.season) return inv.season === season;
+    if (seasonStart && inv.invoice_date) {
+      const yr = parseInt(inv.invoice_date.slice(0,4));
+      return yr === seasonStart || yr === seasonStart + 1;
+    }
+    return true;
+  });
 
   if (!invoices.length) return '';
 
