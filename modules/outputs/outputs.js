@@ -123,98 +123,228 @@ async function _mountOverview(container) {
   if (!farm) { container.innerHTML = '<div class="empty-state"><p>No farm selected.</p></div>'; return; }
   const season = getActiveSeason() || currentSeason();
   container.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>';
+
   try {
     await loadCommodities();
+    const commodityList = getCommodities();
+    const idToName = {}; commodityList.forEach(c => { idToName[c.id] = c.name; });
 
-    const [contracts, invoices, budgets, lsInvoices] = await Promise.all([
+    const settings = farm.settings || {};
+    const grainSites = settings.grainSites || {};
+    const cottonRegion = settings.cottonRegion || '';
+
+    const [contracts, invoices, budgets, lsInvoices, allPrices, forecasts] = await Promise.all([
       dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
-      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=id,gross_amount,total_quality_adj,total_qty,forward_contract_id,batches,status,master_unit,buyer,invoice_date'),
-      dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=area_ha,budgeted_production,budgeted_yield_per_ha,yield_per_ha,commodity'),
+      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=neq.head&select=id,gross_amount,total_quality_adj,total_qty,forward_contract_id,batches,status,buyer,invoice_date'),
+      dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&master_unit=eq.head&season=eq.' + season + '&select=total_qty,gross_amount'),
+      dbSelect('market_prices', 'select=commodity_id,region,price_per_unit,price_date,unit&order=price_date.desc&limit=200'),
+      dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.desc'),
     ]);
 
-    const fM = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + Math.round(n).toLocaleString();
-    const fN = (n,dp=0) => n == null ? '—' : formatNumber(n,dp);
-    const fC2 = (n) => n == null ? '—' : formatCurrency(n,2);
+    const fM  = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + Math.round(n).toLocaleString();
+    const fN  = (n,dp=0) => n == null ? '—' : formatNumber(n,dp);
+    const fC  = (n,dp=2) => n == null ? '—' : formatCurrency(n,dp);
+    const fPct = (n) => n == null ? '' : (n >= 0 ? '+' : '') + n + '%';
 
-    // Metrics
-    const totalContractedVal = contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
-    let invoicedRev = 0, invoicedQty = 0;
-    invoices.filter(i=>i.master_unit!=='head').forEach(inv => {
-      if (inv.batches) {
-        const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;
-        b.forEach(bt => { const sl=(bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa'); if(sl.length){invoicedRev+=sl.reduce((s,l)=>s+(parseFloat(l.amount)||0),0); invoicedQty+=parseFloat(bt.qty)||0;} });
-      } else { invoicedRev+=(parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0); }
+    // ── Market price lookup ───────────────────────────────────
+    // Get latest price per commodity per region
+    const priceMap = {}; // commodity_id → { region → { price, date } }
+    allPrices.forEach(p => {
+      if (!priceMap[p.commodity_id]) priceMap[p.commodity_id] = {};
+      if (!priceMap[p.commodity_id][p.region]) priceMap[p.commodity_id][p.region] = { price: parseFloat(p.price_per_unit), date: p.price_date, unit: p.unit };
     });
+
+    // Get farm gate price for a commodity
+    const farmGatePrice = (comId, comName) => {
+      const regions = priceMap[comId];
+      if (!regions) return null;
+      // Try farm's preferred site first
+      const preferred = comName === 'Cotton Lint' ? cottonRegion : grainSites[comName];
+      if (preferred && regions[preferred]) return { ...regions[preferred], region: preferred };
+      // Fall back to most recent across all regions
+      const all = Object.entries(regions).map(([r, v]) => ({ ...v, region: r }));
+      all.sort((a,b) => b.date.localeCompare(a.date));
+      return all[0] || null;
+    };
+
+    // Get yesterday's price for movement
+    const yesterdayPrice = (comId, region) => {
+      const all = allPrices.filter(p => p.commodity_id === comId && p.region === region);
+      if (all.length < 2) return null;
+      return parseFloat(all[1].price_per_unit);
+    };
+
+    // ── Invoiced revenue ─────────────────────────────────────
+    let invoicedRev = 0;
+    invoices.forEach(inv => {
+      if (inv.batches) { const b=typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches; b.forEach(bt=>{const sl=(bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa');invoicedRev+=sl.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);}); }
+      else { invoicedRev+=(parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0); }
+    });
+
     const completeContracts = contracts.filter(c=>c.is_complete).length;
-    const fillingContracts  = contracts.filter(c=>!c.is_complete && invoices.some(i=>i.forward_contract_id===c.id)).length;
+    const fillingContracts  = contracts.filter(c=>!c.is_complete&&invoices.some(i=>i.forward_contract_id===c.id)).length;
     const pendingInvoices   = invoices.filter(i=>i.status==='pending');
-    const lsHead  = lsInvoices.reduce((s,i)=>s+(parseFloat(i.total_qty)||0),0);
+    const lsHead = lsInvoices.reduce((s,i)=>s+(parseFloat(i.total_qty)||0),0);
     const lsGross = lsInvoices.reduce((s,i)=>s+(parseFloat(i.gross_amount)||0),0);
     const budgetHa = budgets.reduce((s,b)=>s+(parseFloat(b.area_ha)||0),0);
+    const totalContractedVal = contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
     const pctInvoiced = totalContractedVal ? Math.round(invoicedRev/totalContractedVal*100) : 0;
 
-    // Attention items
+    // ── Needs attention ───────────────────────────────────────
     const attentionItems = [];
-
-    // Contracts with delivery window coming up (no invoices yet)
     const now = new Date();
-    contracts.filter(c => !c.is_complete).forEach(c => {
+    contracts.filter(c=>!c.is_complete).forEach(c => {
       if (c.delivery_start) {
         const ds = new Date(c.delivery_start);
-        const daysUntil = Math.round((ds - now)/(1000*60*60*24));
-        const hasInvoices = invoices.some(i=>i.forward_contract_id===c.id);
-        if (daysUntil <= 60 && daysUntil >= 0 && !hasInvoices) {
-          attentionItems.push({ level:'red', title:`${c.contract_number} — delivery window opens ${ds.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`, sub:'No invoices entered yet · confirm delivery schedule', badge:'Action required' });
-        }
+        const days = Math.round((ds-now)/(1000*60*60*24));
+        if (days<=60&&days>=0&&!invoices.some(i=>i.forward_contract_id===c.id))
+          attentionItems.push({level:'red',title:`${c.contract_number} — delivery opens ${ds.toLocaleDateString('en-AU',{day:'numeric',month:'short'})}`,sub:'No invoices yet · confirm gin delivery schedule',badge:'Action required'});
       }
-      // Contracts nearly full
-      const contractInvs = invoices.filter(i=>i.forward_contract_id===c.id);
-      if (contractInvs.length > 0 && !c.is_complete) {
-        const invQty = contractInvs.reduce((s,i)=>{
-          if(i.batches){const b=typeof i.batches==='string'?JSON.parse(i.batches):i.batches;return s+b.filter(bt=>(bt.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((ss,bt)=>ss+(parseFloat(bt.qty)||0),0);}
-          return s+(parseFloat(i.total_qty)||0);
-        },0);
-        const pct = parseFloat(c.quantity) ? invQty/parseFloat(c.quantity) : 0;
-        if (pct >= 0.9) attentionItems.push({ level:'amber', title:`${c.contract_number} — ${Math.round(pct*100)}% invoiced`, sub:'Nearly complete · mark as complete when last delivery confirmed', badge:'Review' });
-      }
+      const invQty = invoices.filter(i=>i.forward_contract_id===c.id).reduce((s,i)=>{
+        if(i.batches){const b=typeof i.batches==='string'?JSON.parse(i.batches):i.batches;return s+b.filter(bt=>(bt.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((ss,bt)=>ss+(parseFloat(bt.qty)||0),0);}
+        return s+(parseFloat(i.total_qty)||0);
+      },0);
+      const pct = parseFloat(c.quantity) ? invQty/parseFloat(c.quantity) : 0;
+      if (pct>=0.9&&!c.is_complete) attentionItems.push({level:'amber',title:`${c.contract_number} — ${Math.round(pct*100)}% invoiced`,sub:'Mark complete when last delivery confirmed',badge:'Review'});
+    });
+    if (pendingInvoices.length) attentionItems.push({level:'amber',title:`${pendingInvoices.length} invoice${pendingInvoices.length>1?'s':''} pending Xero sync`,sub:pendingInvoices.slice(0,2).map(i=>(i.buyer||'Invoice')+' '+fM((parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0))).join(' · '),badge:'Pending'});
+
+    const dotColor = {red:'var(--red)',amber:'var(--amber)',green:'var(--green)'};
+    const badgeStyle = {red:'background:#fcebeb;color:#a32d2d',amber:'background:#faeeda;color:#854f0b',green:'background:#eaf3de;color:#3b6d11'};
+
+    // ── Commodity position cards ──────────────────────────────
+    const comMap = {};
+    contracts.forEach(c => {
+      const name = idToName[c.commodity_id] || c.commodity || 'Other';
+      if (!comMap[name]) comMap[name] = { name, commodity_id: c.commodity_id, contracts:[], invoicedQty:0, invoicedRev:0, budgetProd:0, budgetPrice:0, unit: c.unit||'unit' };
+      comMap[name].contracts.push(c);
+    });
+    budgets.forEach(b => {
+      const name = idToName[b.commodity_id] || b.commodity || 'Other';
+      if (!comMap[name]) comMap[name] = { name, commodity_id: b.commodity_id, contracts:[], invoicedQty:0, invoicedRev:0, budgetProd:0, budgetPrice:0, unit: b.unit||'unit' };
+      comMap[name].budgetProd += parseFloat(b.budgeted_production)||((parseFloat(b.area_ha)||0)*(parseFloat(b.budgeted_yield_per_ha||b.yield_per_ha)||0));
+      comMap[name].budgetPrice = parseFloat(b.price)||comMap[name].budgetPrice;
+    });
+    invoices.forEach(inv => {
+      const c = contracts.find(c=>c.id===inv.forward_contract_id);
+      if (!c) return;
+      const name = idToName[c.commodity_id] || c.commodity || 'Other';
+      if (!comMap[name]) return;
+      let qty=0, rev=0;
+      if (inv.batches){const b=typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;b.forEach(bt=>{const sl=(bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa');if(sl.length){qty+=parseFloat(bt.qty)||0;rev+=sl.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);}});}
+      else{qty+=parseFloat(inv.total_qty)||0;rev+=(parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0);}
+      comMap[name].invoicedQty+=qty; comMap[name].invoicedRev+=rev;
     });
 
-    // Pending invoices
-    if (pendingInvoices.length) attentionItems.push({ level:'amber', title:`${pendingInvoices.length} invoice${pendingInvoices.length>1?'s':''} pending Xero sync`, sub:pendingInvoices.slice(0,2).map(i=>(i.buyer||'Invoice')+' · '+fM((parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0))).join(' · '), badge:'Pending' });
+    const comCards = Object.values(comMap).map(com => {
+      const contractedQty = com.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0),0);
+      const contractedVal = com.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
+      const avgContractPrice = contractedQty ? contractedVal/contractedQty : null;
+      const market = farmGatePrice(com.commodity_id, com.name);
+      const mktPrice = market?.price || null;
+      const mktRegion = market?.region || '';
+      const mktDate = market?.date || '';
+      const yest = market ? yesterdayPrice(com.commodity_id, mktRegion) : null;
+      const mktMove = yest && mktPrice ? Math.round((mktPrice-yest)*100)/100 : null;
+      const vsContract = avgContractPrice && mktPrice ? Math.round((avgContractPrice-mktPrice)*100)/100 : null;
+      const vsBudget = com.budgetPrice && mktPrice ? Math.round((mktPrice-com.budgetPrice)*100)/100 : null;
+      const estProd = com.budgetProd || contractedQty;
+      const uncontracted = Math.max(0, estProd - contractedQty);
+      const uncontractedVal = uncontracted && mktPrice ? uncontracted*mktPrice : null;
+      const pctContracted = estProd ? Math.min(100,Math.round(contractedQty/estProd*100)) : null;
+      const pctInvd = contractedQty ? Math.min(100,Math.round(com.invoicedQty/contractedQty*100)) : null;
+      const complete = com.contracts.length && com.contracts.every(c=>c.is_complete);
 
-    // No forecast entered
-    const hasFcst = await dbSelect('forecasts','farm_id=eq.'+farm.id+'&season=eq.'+season+'&select=id&limit=1').catch(()=>[]);
-    if (!hasFcst.length && budgets.length) attentionItems.push({ level:'amber', title:'No production forecast entered for '+season, sub:'Forecasts help track progress to budget — add one in Operations', badge:'Overdue' });
+      return `
+      <div class="card" style="padding:0;overflow:hidden;margin-bottom:12px">
+        <!-- Header -->
+        <div style="padding:10px 16px;background:#1a2535;display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:13px;font-weight:600;color:white">${com.name}</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            ${mktPrice ? `<span style="font-size:12px;color:rgba(255,255,255,.7)">Market <strong style="color:white">${fC(mktPrice)}/${com.unit}</strong>
+              ${mktMove!=null?`<span style="color:${mktMove>=0?'#86efac':'#fca5a5'};font-size:11px;margin-left:4px">${mktMove>=0?'▲':'▼'} ${Math.abs(mktMove).toFixed(2)}</span>`:''}
+              <span style="font-size:10px;color:rgba(255,255,255,.4);margin-left:4px">${mktRegion} · ${mktDate}</span>
+            </span>` : '<span style="font-size:11px;color:rgba(255,255,255,.4)">No market price</span>'}
+            ${complete?'<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:#15803d;color:white">Complete</span>':''}
+          </div>
+        </div>
+        <!-- Body -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-bottom:0.5px solid var(--border)">
+          <div style="padding:12px 16px;border-right:0.5px solid var(--border)">
+            <div style="font-size:10px;color:var(--hint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">Contracted</div>
+            <div style="font-size:18px;font-weight:600;color:var(--ink)">${fN(contractedQty)} ${com.unit}</div>
+            <div style="font-size:12px;color:var(--hint);margin-top:2px">${fC(avgContractPrice)}/${com.unit} avg · ${fM(contractedVal)}</div>
+            ${pctContracted!=null?`<div style="margin-top:6px;height:3px;background:var(--border-light);border-radius:2px;overflow:hidden"><div style="height:100%;width:${pctContracted}%;background:var(--blue);border-radius:2px"></div></div><div style="font-size:10px;color:var(--hint);margin-top:2px">${pctContracted}% of expected production</div>`:''}
+          </div>
+          <div style="padding:12px 16px;border-right:0.5px solid var(--border)">
+            <div style="font-size:10px;color:var(--hint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">vs Market</div>
+            ${vsContract!=null ? `
+            <div style="font-size:18px;font-weight:600;color:${vsContract>=0?'var(--green)':'var(--red)'}">${vsContract>=0?'+':''}${fC(vsContract)}/${com.unit}</div>
+            <div style="font-size:12px;color:var(--hint);margin-top:2px">${vsContract>=0?'Above':'Below'} today's market · ${vsContract>=0?'✓ Protected':'↓ Market moved up'}</div>` :
+            `<div style="font-size:14px;color:var(--hint);margin-top:4px">No market price to compare</div>`}
+            ${vsBudget!=null?`<div style="font-size:11px;color:${vsBudget>=0?'var(--green)':'var(--red)'};margin-top:6px">Market ${vsBudget>=0?'+':''}${fC(vsBudget)} vs budget price</div>`:''}
+          </div>
+          <div style="padding:12px 16px">
+            <div style="font-size:10px;color:var(--hint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">Uncontracted</div>
+            ${uncontracted > 0 ? `
+            <div style="font-size:18px;font-weight:600;color:var(--amber)">${fN(uncontracted)} ${com.unit}</div>
+            <div style="font-size:12px;color:var(--hint);margin-top:2px">${uncontractedVal?fM(uncontractedVal)+' at today's market':''}</div>` :
+            `<div style="font-size:16px;font-weight:600;color:var(--green);margin-top:4px">Fully contracted ✓</div>`}
+            ${pctInvd!=null?`<div style="font-size:11px;color:var(--hint);margin-top:6px">${pctInvd}% invoiced of contracted</div>`:''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
 
-    const badgeStyle = { red:'background:#fcebeb;color:#a32d2d', amber:'background:#faeeda;color:#854f0b', green:'background:#eaf3de;color:#3b6d11' };
-    const dotColor   = { red:'var(--red)', amber:'var(--amber)', green:'var(--green)' };
+    // ── Market prices panel ───────────────────────────────────
+    const uniqueComs = [...new Set(Object.keys(priceMap))];
+    const mktPanel = uniqueComs.map(comId => {
+      const name = idToName[comId] || comId;
+      const regions = Object.entries(priceMap[comId]).sort((a,b)=>b[1].date.localeCompare(a[1].date));
+      const preferred = name === 'Cotton Lint' ? cottonRegion : grainSites[name];
+      return `
+      <div style="margin-bottom:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--ink);margin-bottom:6px">${name}</div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          ${regions.slice(0,5).map(([region, data]) => {
+            const isPreferred = region === preferred;
+            const yest = allPrices.filter(p=>p.commodity_id===comId&&p.region===region);
+            const move = yest.length>=2 ? data.price - parseFloat(yest[1].price_per_unit) : null;
+            return `<div style="display:flex;align-items:center;padding:6px 10px;border-radius:6px;background:${isPreferred?'var(--blue-light)':'var(--page-bg)'};gap:8px">
+              <div style="flex:1;font-size:12px;color:${isPreferred?'var(--blue-text)':'var(--ink-mid)'}">
+                ${isPreferred?'<strong>':''}${region}${isPreferred?'</strong>':''} 
+                ${isPreferred?'<span style="font-size:10px;color:var(--blue);margin-left:4px">★ farm site</span>':''}
+              </div>
+              <div style="font-size:13px;font-weight:600;color:${isPreferred?'var(--blue-text)':'var(--ink)'}">${fC(data.price)}/${data.unit||'unit'}</div>
+              ${move!=null?`<div style="font-size:11px;color:${move>=0?'var(--green)':'var(--red)'};min-width:45px;text-align:right">${move>=0?'▲':'▼'}${fC(Math.abs(move))}</div>`:'<div style="min-width:45px"></div>'}
+              <div style="font-size:10px;color:var(--hint);min-width:70px;text-align:right">${data.date}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }).join('');
 
-    // Contract status rows
+    // ── Contract status rows ──────────────────────────────────
     const contractRows = contracts.slice(0,6).map(c => {
       const invQty = invoices.filter(i=>i.forward_contract_id===c.id).reduce((s,i)=>{
         if(i.batches){const b=typeof i.batches==='string'?JSON.parse(i.batches):i.batches;return s+b.filter(bt=>(bt.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((ss,bt)=>ss+(parseFloat(bt.qty)||0),0);}
         return s+(parseFloat(i.total_qty)||0);
       },0);
-      const qty = parseFloat(c.quantity)||0;
-      const pct = qty ? Math.round(invQty/qty*100) : 0;
-      const status = c.is_complete ? 'Complete' : invQty===0 ? 'Not started' : 'Filling';
-      const statusColor = c.is_complete ? 'var(--green)' : invQty===0 ? 'var(--hint)' : 'var(--blue)';
+      const qty=parseFloat(c.quantity)||0, pct=qty?Math.round(invQty/qty*100):0;
+      const status=c.is_complete?'Complete':invQty===0?'Not started':'Filling';
+      const sc=c.is_complete?'var(--green)':invQty===0?'var(--hint)':'var(--blue)';
       return `<div style="display:flex;align-items:center;padding:8px 0;border-bottom:0.5px solid var(--border-light);font-size:12px;gap:8px">
-        <span style="flex:1;color:var(--ink);font-weight:500">${c.contract_number||'—'}</span>
-        <span style="color:var(--hint);min-width:90px">${c.commodity||''}</span>
-        <span style="min-width:110px;color:var(--hint)">${fN(invQty,0)} / ${fN(qty,0)} ${c.unit||''}</span>
-        <div style="min-width:60px">
-          <div style="height:4px;background:var(--border-light);border-radius:2px;overflow:hidden">
-            <div style="height:100%;width:${pct}%;background:${c.is_complete?'var(--green)':'var(--blue)'};border-radius:2px"></div>
-          </div>
-          <div style="font-size:10px;color:var(--hint);margin-top:2px">${pct}%</div>
-        </div>
-        <span style="color:${statusColor};font-weight:500;min-width:70px;text-align:right">${status}</span>
+        <span style="flex:1;font-weight:500;color:var(--ink)">${c.contract_number||'—'}</span>
+        <span style="color:var(--hint);min-width:90px">${idToName[c.commodity_id]||c.commodity||''}</span>
+        <span style="color:var(--hint);min-width:100px">${fN(invQty)} / ${fN(qty)} ${c.unit||''}</span>
+        <div style="min-width:60px"><div style="height:4px;background:var(--border-light);border-radius:2px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${c.is_complete?'var(--green)':'var(--blue)'};border-radius:2px"></div></div>
+        <div style="font-size:10px;color:var(--hint);margin-top:2px">${pct}%</div></div>
+        <span style="color:${sc};font-weight:500;min-width:70px;text-align:right">${status}</span>
       </div>`;
     }).join('');
 
-    const html = `
+    container.innerHTML = `
     <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">
       <h2 style="font-size:var(--text-md);font-weight:600">Manager view — ${season}</h2>
       <div style="font-size:11px;color:var(--hint)">${new Date().toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
@@ -226,9 +356,7 @@ async function _mountOverview(container) {
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Invoiced this season</div>
         <div style="font-size:22px;font-weight:600;color:var(--ink)">${fM(invoicedRev)}</div>
         <div style="font-size:11px;color:var(--hint);margin-top:2px">${pctInvoiced}% of contracted</div>
-        <div style="height:3px;background:var(--border-light);border-radius:2px;margin-top:6px;overflow:hidden">
-          <div style="height:100%;width:${pctInvoiced}%;background:var(--green);border-radius:2px"></div>
-        </div>
+        <div style="height:3px;background:var(--border-light);border-radius:2px;margin-top:6px;overflow:hidden"><div style="height:100%;width:${pctInvoiced}%;background:var(--green);border-radius:2px"></div></div>
       </div>
       <div class="card" style="padding:14px 16px">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Contracts</div>
@@ -242,57 +370,51 @@ async function _mountOverview(container) {
       </div>
       <div class="card" style="padding:14px 16px">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Livestock YTD</div>
-        <div style="font-size:22px;font-weight:600;color:var(--ink)">${lsHead ? fN(lsHead) + ' hd' : '—'}</div>
-        <div style="font-size:11px;color:${lsGross?'var(--green)':'var(--hint)'};margin-top:2px">${lsGross ? fM(lsGross) + ' gross' : 'No sales this season'}</div>
+        <div style="font-size:22px;font-weight:600;color:var(--ink)">${lsHead?fN(lsHead)+' hd':'—'}</div>
+        <div style="font-size:11px;color:${lsGross?'var(--green)':'var(--hint)'};margin-top:2px">${lsGross?fM(lsGross)+' gross':'No sales this season'}</div>
       </div>
     </div>
 
     <!-- Needs attention -->
-    ${attentionItems.length ? `
+    ${attentionItems.length?`
     <div class="card" style="margin-bottom:16px;overflow:hidden">
       <div style="padding:10px 16px;border-bottom:0.5px solid var(--border);background:var(--page-bg)">
         <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">⚡ Needs attention</span>
       </div>
-      ${attentionItems.map(item => `
+      ${attentionItems.map(item=>`
       <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:0.5px solid var(--border-light)">
         <div style="width:7px;height:7px;border-radius:50%;background:${dotColor[item.level]};flex-shrink:0"></div>
-        <div style="flex:1">
-          <div style="font-size:13px;font-weight:500;color:var(--ink)">${item.title}</div>
-          <div style="font-size:11px;color:var(--hint);margin-top:2px">${item.sub}</div>
-        </div>
+        <div style="flex:1"><div style="font-size:13px;font-weight:500;color:var(--ink)">${item.title}</div><div style="font-size:11px;color:var(--hint);margin-top:2px">${item.sub}</div></div>
         <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;${badgeStyle[item.level]}">${item.badge}</span>
       </div>`).join('')}
     </div>` : ''}
 
-    <!-- Contract status + budget vs actual -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-      <div class="card" style="padding:14px 16px">
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Contract status</div>
-        ${contractRows || '<div style="font-size:12px;color:var(--hint)">No contracts this season</div>'}
-      </div>
-      <div class="card" style="padding:14px 16px">
+    <!-- Commodity position cards + market prices side by side -->
+    <div style="display:grid;grid-template-columns:1fr 320px;gap:12px;margin-bottom:16px;align-items:start">
+      <div>
         <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Commodity position</div>
-        ${await (async () => {
-          try {
-            const { html: h } = await buildCommodityCards(season);
-            return '<div style="font-size:11px;color:var(--hint)">See Commodity position below</div>';
-          } catch { return ''; }
-        })()}
-        <div style="font-size:12px;color:var(--hint)">Full detail in commodity position below ↓</div>
+        ${comCards || '<div class="card" style="padding:14px;font-size:12px;color:var(--hint)">No contracts or budgets for this season.</div>'}
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Farm gate prices</div>
+        <div class="card" style="padding:14px 16px">
+          ${mktPanel || '<div style="font-size:12px;color:var(--hint)">No market prices available.</div>'}
+        </div>
       </div>
     </div>
 
-    <!-- Full commodity position -->
-    ${await (async () => { try { const { html: h } = await buildCommodityCards(season); return h; } catch { return ''; } })()}
-    `;
-
-    container.innerHTML = html;
+    <!-- Contract status -->
+    <div class="card" style="padding:14px 16px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">Contract status</div>
+      ${contractRows || '<div style="font-size:12px;color:var(--hint)">No contracts this season</div>'}
+    </div>`;
 
   } catch(err) {
     console.error('Manager view error:', err);
     container.innerHTML = '<div class="empty-state"><p>Error loading manager view: ' + err.message + '</p></div>';
   }
 }
+
 
 
 
