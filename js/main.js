@@ -156,6 +156,168 @@ document.getElementById('btn-farm-settings')?.addEventListener('click', () => {
   _navigateTo('settings');
 });
 
+document.getElementById('btn-add-farm')?.addEventListener('click', () => {
+  _openAddFarmModal();
+});
+
+function _openAddFarmModal(existing = null) {
+  const isEdit = !!existing;
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:600;display:flex;align-items:center;justify-content:center;padding:20px';
+
+  const AUS_STATES = ['NSW','VIC','QLD','SA','WA','TAS','NT','ACT'];
+  const GRAIN_CROPS = ['Wheat','Barley','Canola','Oats','Sorghum','Chickpeas'];
+
+  const existingSettings = existing?.settings || {};
+  const existingGrainSites = existingSettings.grainSites || {};
+  const existingCottonRegion = existingSettings.cottonRegion || '';
+
+  modal.innerHTML = `
+    <div style="background:white;border-radius:var(--radius-xl);width:100%;max-width:520px;overflow:hidden">
+      <div style="padding:14px 20px;border-bottom:1px solid var(--border-light);background:#fafbfc;display:flex;align-items:center;justify-content:space-between">
+        <h2 style="font-size:15px;font-weight:600">${isEdit ? 'Edit farm' : 'Add new farm'}</h2>
+        <button id="af-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--hint)">✕</button>
+      </div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:14px;max-height:80vh;overflow-y:auto">
+
+        <div>
+          <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:4px">Farm name <span style="color:var(--red)">*</span></label>
+          <input id="af-name" class="form-input" type="text" value="${existing?.name||''}" placeholder="e.g. Merrowie">
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:4px">Location / region</label>
+            <input id="af-location" class="form-input" type="text" value="${existing?.location||''}" placeholder="e.g. Forbes, NSW">
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:4px">State</label>
+            <select id="af-state" class="form-select">
+              <option value="">Select state</option>
+              ${AUS_STATES.map(s => `<option value="${s}"${existing?.state===s?' selected':''}>${s}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:4px">Organisation</label>
+          <input id="af-org" class="form-input" type="text" value="${existing?.org||''}" placeholder="e.g. CFM">
+        </div>
+
+        <div>
+          <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:4px">Farm ID <span style="color:var(--red)">*</span></label>
+          <input id="af-id" class="form-input" type="text" value="${existing?.id||''}" placeholder="e.g. farm_merrowie" ${isEdit?'disabled':''}>
+          <div style="font-size:11px;color:var(--hint);margin-top:3px">Lowercase, underscores only, cannot be changed after creation</div>
+        </div>
+
+        <div style="border-top:1px solid var(--border-light);padding-top:14px">
+          <div style="font-size:12px;font-weight:600;color:var(--ink);margin-bottom:10px">Market price settings</div>
+
+          <div style="margin-bottom:10px">
+            <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:4px">Cotton region</label>
+            <input id="af-cotton-region" class="form-input" type="text" value="${existingCottonRegion}" placeholder="e.g. Lachlan/Sth NSW">
+          </div>
+
+          <div>
+            <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:6px">Grain delivery sites</label>
+            <div style="display:flex;flex-direction:column;gap:6px" id="af-grain-sites">
+              ${GRAIN_CROPS.map(crop => `
+              <div style="display:grid;grid-template-columns:90px 1fr;gap:8px;align-items:center">
+                <span style="font-size:12px;color:var(--ink-mid)">${crop}</span>
+                <input class="form-input af-grain-site" data-crop="${crop}" type="text"
+                  value="${existingGrainSites[crop]||''}" placeholder="e.g. GOOLGOWI LDC" style="font-size:12px;padding:5px 8px">
+              </div>`).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--border-light);padding-top:14px">
+          <button id="af-cancel" class="btn btn-ghost">Cancel</button>
+          <button id="af-save" class="btn btn-primary">${isEdit ? '✓ Save changes' : '✓ Add farm'}</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+
+  const close = () => modal.remove();
+  modal.querySelector('#af-close').addEventListener('click', close);
+  modal.querySelector('#af-cancel').addEventListener('click', close);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+
+  // Auto-generate farm ID from name
+  if (!isEdit) {
+    modal.querySelector('#af-name').addEventListener('input', function() {
+      const idEl = modal.querySelector('#af-id');
+      if (!idEl._manuallyEdited) {
+        idEl.value = 'farm_' + this.value.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+      }
+    });
+    modal.querySelector('#af-id').addEventListener('input', function() {
+      this._manuallyEdited = true;
+    });
+  }
+
+  modal.querySelector('#af-save').addEventListener('click', async () => {
+    const btn = modal.querySelector('#af-save');
+    const name = modal.querySelector('#af-name').value.trim();
+    const farmId = modal.querySelector('#af-id').value.trim();
+    const location = modal.querySelector('#af-location').value.trim();
+    const farmState = modal.querySelector('#af-state').value;
+    const org = modal.querySelector('#af-org').value.trim();
+    const cottonRegion = modal.querySelector('#af-cotton-region').value.trim();
+
+    if (!name) { alert('Farm name is required'); return; }
+    if (!farmId) { alert('Farm ID is required'); return; }
+    if (!/^farm_[a-z0-9_]+$/.test(farmId)) { alert('Farm ID must start with farm_ and contain only lowercase letters, numbers and underscores'); return; }
+
+    const grainSites = {};
+    modal.querySelectorAll('.af-grain-site').forEach(inp => {
+      if (inp.value.trim()) grainSites[inp.dataset.crop] = inp.value.trim();
+    });
+
+    const settings = {};
+    if (cottonRegion) settings.cottonRegion = cottonRegion;
+    if (Object.keys(grainSites).length) settings.grainSites = grainSites;
+
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    try {
+      const state = getState();
+      const session = state.session;
+      const SUPA_URL = 'https://nqvfuqvindsgnogejaei.supabase.co/rest/v1';
+      const headers = {
+        'apikey': window.__CFM_ANON_KEY,
+        'Authorization': `Bearer ${session?.access_token}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+      };
+
+      const row = {
+        id: farmId,
+        name,
+        location: location || null,
+        state: farmState || null,
+        org: org || null,
+        settings: Object.keys(settings).length ? settings : null,
+        owner_id: session?.user?.id || null,
+      };
+
+      const res = isEdit
+        ? await fetch(`${SUPA_URL}/farms?id=eq.${farmId}`, { method:'PATCH', headers, body: JSON.stringify(row) })
+        : await fetch(`${SUPA_URL}/farms`, { method:'POST', headers, body: JSON.stringify(row) });
+
+      if (!res.ok) throw new Error(await res.text());
+
+      close();
+      window.location.reload();
+    } catch(err) {
+      alert('Save failed: ' + err.message);
+      btn.disabled = false; btn.textContent = isEdit ? '✓ Save changes' : '✓ Add farm';
+    }
+  });
+}
+
 // ── Farm selector ─────────────────────────────────────────────
 on('farms', (farms) => _populateFarmSelector(farms));
 on('activeFarm', () => {
