@@ -200,44 +200,51 @@ function _renderTable(container) {
     return;
   }
 
-  const totalGross = rows.reduce((s, i) => s + (parseFloat(i.gross_amount)||0), 0);
-  const totalQA = rows.reduce((s, i) => s + (parseFloat(i.total_quality_adj)||0), 0);
-  const totalIncome = totalGross + totalQA;
-
-  const totalPending = rows.filter(i => i.status === 'pending').reduce((s, i) => s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0), 0);
-  const totalComplete = rows.filter(i => i.status === 'complete').reduce((s, i) => s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0), 0);
+  const cropRows = rows.filter(i => i.master_unit !== 'head');
+  const lsRows   = rows.filter(i => i.master_unit === 'head');
+  const totalGross   = cropRows.reduce((s,i) => s + (parseFloat(i.gross_amount)||0), 0);
+  const totalQA      = cropRows.reduce((s,i) => s + (parseFloat(i.total_quality_adj)||0), 0);
+  const totalIncome  = totalGross + totalQA;
+  const totalLsHead  = lsRows.reduce((s,i) => s + (parseFloat(i.total_qty)||0), 0);
+  const totalLsGross = lsRows.reduce((s,i) => s + (parseFloat(i.gross_amount)||0), 0);
+  const totalPending  = rows.filter(i=>i.status==='pending').reduce((s,i)=>s+(parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0),0);
+  const totalComplete = rows.filter(i=>i.status==='complete').reduce((s,i)=>s+(parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0),0);
 
   wrap.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:0;border-bottom:1px solid var(--border-light)">
-      <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total qty</div>
-        <div style="font-size:18px;font-weight:600;color:var(--ink)">${(() => {
-          const qty = rows.reduce((s,i) => {
-            if (i.batches) { const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches; return s+b.filter(x=>(x.lines||[]).some(l=>l.type==='income')).reduce((ss,x)=>ss+(parseFloat(x.qty)||0),0); }
-            return s+(parseFloat(i.total_qty)||0);
-          }, 0);
-          const units = [...new Set(rows.map(i=>i.master_unit).filter(Boolean))];
-          return formatNumber(qty,0) + (units.length===1?' '+units[0]:'');
-        })()}</div>
+    <div style="display:flex;gap:0;flex-wrap:wrap;border-bottom:1px solid var(--border-light)">
+      ${cropRows.length ? `
+      <div style="padding:12px 18px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Gross proceeds</div>
+        <div style="font-size:18px;font-weight:700;color:var(--ink)">${formatCurrency(totalGross, 0)}</div>
       </div>
-      <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Gross</div>
-        <div style="font-size:18px;font-weight:600;color:var(--ink)">${formatCurrency(totalGross, 0)}</div>
-      </div>
-      <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
+      <div style="padding:12px 18px;border-right:1px solid var(--border-light)">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Quality adj</div>
-        <div style="font-size:18px;font-weight:600;color:${totalQA>=0?'var(--green)':'var(--red)'}">${totalQA?(totalQA>0?'+':'')+formatCurrency(totalQA,0):'—'}</div>
+        <div style="font-size:18px;font-weight:700;color:${totalQA>=0?'var(--green)':'var(--red)'}">${totalQA?(totalQA>0?'+':'')+formatCurrency(totalQA,0):'—'}</div>
       </div>
-      <div style="padding:12px 16px;border-right:1px solid var(--border-light)">
+      <div style="padding:12px 18px;border-right:1px solid var(--border-light)">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total income</div>
-        <div style="font-size:18px;font-weight:600;color:var(--ink)">${formatCurrency(totalIncome, 0)}</div>
+        <div style="font-size:18px;font-weight:700;color:var(--blue)">${formatCurrency(totalIncome, 0)}</div>
+      </div>` : ''}
+      ${lsRows.length ? `
+      <div style="padding:12px 18px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">🐄 Head sold</div>
+        <div style="font-size:18px;font-weight:700;color:var(--ink)">${formatNumber(totalLsHead, 0)}</div>
       </div>
-
-      <div style="padding:12px 16px">
+      <div style="padding:12px 18px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">🐄 Livestock gross</div>
+        <div style="font-size:18px;font-weight:700;color:var(--green)">${formatCurrency(totalLsGross, 0)}</div>
+      </div>` : ''}
+      <div style="padding:12px 18px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Invoices</div>
+        <div style="font-size:18px;font-weight:700;color:var(--ink)">${rows.length}</div>
+      </div>
+      <div style="padding:12px 18px">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Pending / Complete</div>
         <div style="font-size:13px;font-weight:600;color:var(--amber)">${formatCurrency(totalPending, 0)}</div>
         <div style="font-size:13px;font-weight:600;color:var(--green)">${formatCurrency(totalComplete, 0)}</div>
       </div>
+    </div>
+
     </div>
     <table class="data-table">
       <thead>

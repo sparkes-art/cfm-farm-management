@@ -57,6 +57,8 @@ export async function mountContracts(container) {
       </div>
     </div>
 
+    <div class="card" id="con-summary-strip" style="margin-bottom:12px;overflow:hidden;padding:0"></div>
+
     <div class="card">
       <div id="con-table-wrap">
         <div class="empty-state"><div class="empty-icon">📋</div><p>Loading contracts…</p></div>
@@ -67,6 +69,7 @@ export async function mountContracts(container) {
   _container = container;
   await loadCommodities();
   await _loadData();
+  _renderSummaryStrip(container);
   _renderTable();
   _bindFilters(container);
   _subscribeRealtime();
@@ -256,6 +259,89 @@ function _renderStats() {
 }
 
 // ── Render table ──────────────────────────────────────────────
+function _renderSummaryStrip(container) {
+  const season = getActiveSeason();
+  const filtered = _contracts.filter(c => !season || c.crop_year === season);
+  if (!filtered.length) return;
+
+  const fM = (n) => n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + n.toFixed(0);
+  const fN = (n) => formatNumber(n, 0);
+
+  const totalValue = filtered.reduce((s,c) => s + (parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0), 0);
+  const completeCount = filtered.filter(c => c.is_complete).length;
+  const fillingCount  = filtered.filter(c => !c.is_complete).length;
+
+  // Invoiced against these contracts
+  let invoicedQty = 0, invoicedRev = 0;
+  _invoices.filter(i => filtered.some(c => c.id === i.forward_contract_id)).forEach(inv => {
+    if (inv.batches) {
+      const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;
+      b.forEach(bt => {
+        const sl = (bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa');
+        if (sl.length) { invoicedQty += parseFloat(bt.qty)||0; invoicedRev += sl.reduce((s,l)=>s+(parseFloat(l.amount)||0),0); }
+      });
+    } else {
+      invoicedRev += (parseFloat(inv.gross_amount)||0) + (parseFloat(inv.total_quality_adj)||0);
+    }
+  });
+  const remainingValue = totalValue - invoicedRev;
+  const pct = totalValue ? Math.round(invoicedRev/totalValue*100) : 0;
+
+  // Per-commodity breakdown
+  const byCom = {};
+  filtered.forEach(c => {
+    if (!byCom[c.commodity]) byCom[c.commodity] = { total: 0, invoiced: 0, complete: 0, count: 0 };
+    byCom[c.commodity].total += (parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0);
+    byCom[c.commodity].count++;
+    if (c.is_complete) byCom[c.commodity].complete++;
+  });
+  _invoices.forEach(inv => {
+    const c = filtered.find(c => c.id === inv.forward_contract_id);
+    if (!c) return;
+    const rev = (parseFloat(inv.gross_amount)||0) + (parseFloat(inv.total_quality_adj)||0);
+    byCom[c.commodity].invoiced += rev;
+  });
+
+  const stripEl = container.querySelector('#con-summary-strip');
+  if (!stripEl) return;
+  stripEl.innerHTML = `
+    <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;padding:0">
+      <div style="padding:14px 20px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Contracted</div>
+        <div style="font-size:20px;font-weight:700;color:var(--ink)">${fM(totalValue)}</div>
+      </div>
+      <div style="padding:14px 20px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Invoiced</div>
+        <div style="font-size:20px;font-weight:700;color:var(--green)">${fM(invoicedRev)}</div>
+        <div style="font-size:11px;color:var(--hint);margin-top:2px">${pct}% of contracted</div>
+      </div>
+      <div style="padding:14px 20px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Remaining</div>
+        <div style="font-size:20px;font-weight:700;color:var(--blue)">${fM(remainingValue)}</div>
+      </div>
+      <div style="padding:14px 20px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Status</div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">${completeCount} complete · ${fillingCount} filling</div>
+      </div>
+      <div style="padding:14px 20px;flex:1">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:6px">By commodity</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${Object.entries(byCom).map(([com, d]) => {
+            const p = d.total ? Math.round(d.invoiced/d.total*100) : 0;
+            return `<div style="font-size:11px;background:var(--page-bg);border:1px solid var(--border);border-radius:6px;padding:4px 10px">
+              <span style="font-weight:600">${com}</span>
+              <span style="color:var(--hint);margin-left:4px">${p}% · ${d.complete}/${d.count}</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+    <div style="height:4px;background:var(--border-light)">
+      <div style="height:100%;width:${Math.min(100,pct)}%;background:var(--green);transition:width .5s"></div>
+    </div>
+  `;
+}
+
 function _renderTable() {
   // Build commodity pills dynamically
   const _cpWrap = document.getElementById('con-commodity-pills');

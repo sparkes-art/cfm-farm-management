@@ -118,103 +118,177 @@ async function _mountOverview(container) {
   container.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>';
 
   try {
-    const [contracts, invoices] = await Promise.all([
-      dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
-      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
+    await loadCommodities();
+
+    const [contracts, invoices, budgets, harvests, lsInvoices] = await Promise.all([
+      dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
+      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=neq.head&select=id,gross_amount,total_quality_adj,total_qty,forward_contract_id,batches,season,status'),
+      dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=area_ha,budgeted_production,budgeted_yield_per_ha,yield_per_ha'),
+      dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=area_ha,actual_production'),
+      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&master_unit=eq.head&select=total_qty,gross_amount,season,livestock_lines'),
     ]);
 
-    const totalContractValue = contracts.reduce((s, c) => s + ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)), 0);
-    const totalInvoiced = invoices.reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
-    const totalPaid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (parseFloat(i.net_amount || i.gross_amount)||0), 0);
+    // ── Commodity metrics ────────────────────────────────────
+    const totalContractedValue = contracts.reduce((s,c) => s + (parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0), 0);
+    let invoicedQty = 0, invoicedRev = 0;
+    invoices.forEach(inv => {
+      if (inv.batches) {
+        const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;
+        b.forEach(bt => {
+          const sl = (bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa');
+          if (sl.length) invoicedQty += parseFloat(bt.qty)||0;
+          invoicedRev += sl.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
+        });
+      } else {
+        invoicedRev += (parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0);
+      }
+    });
+    const pctInvoiced = totalContractedValue ? Math.round(invoicedRev/totalContractedValue*100) : 0;
 
-    let html = '';
+    // ── Operations metrics ───────────────────────────────────
+    const totalBudgetHa = budgets.reduce((s,b)=>s+(parseFloat(b.area_ha)||0),0);
+    const hvstProd = harvests.reduce((s,h)=>s+(parseFloat(h.actual_production)||0),0);
+    const hvstHa   = harvests.reduce((s,h)=>s+(parseFloat(h.area_ha)||0),0);
+    const hvstYield = hvstHa ? hvstProd/hvstHa : null;
+    const budYieldWt = budgets.reduce((s,b)=>s+(parseFloat(b.budgeted_yield_per_ha||b.yield_per_ha)||0)*(parseFloat(b.area_ha)||0),0);
+    const budYield = totalBudgetHa ? budYieldWt/totalBudgetHa : null;
 
-    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">';
-    html += '<h2 style="font-size:var(--text-md);font-weight:600">Commodity position — ' + season + '</h2>';
-    html += '</div>';
+    // ── Livestock metrics ────────────────────────────────────
+    const lsFiltered = lsInvoices.filter(i => !season || i.season === season);
+    const lsHead  = lsFiltered.reduce((s,i)=>s+(parseFloat(i.total_qty)||0),0);
+    const lsGross = lsFiltered.reduce((s,i)=>s+(parseFloat(i.gross_amount)||0),0);
+    const lsAvg   = lsHead ? lsGross/lsHead : null;
 
-    // Commodity cards - also get the commodity map back for mini charts
-    await loadCommodities();
-    const { html: cardsHtml, commodityMap } = await buildCommodityCards(season);
-    html += cardsHtml;
+    // ── Contracts metrics ────────────────────────────────────
+    const totalContracts = contracts.length;
+    const completeContracts = contracts.filter(c=>c.is_complete).length;
+    const remainingValue = totalContractedValue - invoicedRev;
 
-    // Contract position
-    const contractHtml = await buildContractPosition(season);
-    const opsHtml = await buildOperationsSummary(season);
-    const livestockHtml = await buildLivestockPosition(season);
-    html += opsHtml + livestockHtml + contractHtml;
+    const fM = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + n.toFixed(0);
+    const fN = (n,dp=0) => n == null ? '—' : formatNumber(n,dp);
+
+    const cardStyle = 'background:white;border-radius:var(--radius-xl);padding:20px 24px;cursor:pointer;border:1px solid var(--border);transition:box-shadow .15s;position:relative;overflow:hidden';
+    const hintStyle = 'font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:6px;font-weight:600';
+    const bigStyle  = 'font-size:26px;font-weight:700;color:var(--ink);letter-spacing:-.02em;margin-bottom:4px';
+    const subStyle  = 'font-size:12px;color:var(--hint)';
+
+    const html = `
+    <div style="margin-bottom:18px">
+      <h2 style="font-size:var(--text-md);font-weight:600;color:var(--ink)">${season} — Farm overview</h2>
+      <p style="font-size:12px;color:var(--hint);margin-top:2px">Click any card to view details</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+
+      <!-- Commodity sales -->
+      <div style="${cardStyle}" data-nav="invoices"
+        onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseleave="this.style.boxShadow=''">
+        <div style="position:absolute;top:0;left:0;right:0;height:3px;background:var(--blue)"></div>
+        <div style="${hintStyle}">🌾 Commodity sales</div>
+        <div style="${bigStyle}">${fM(invoicedRev)}</div>
+        <div style="${subStyle}">
+          <span style="color:var(--blue);font-weight:600">${fM(totalContractedValue)}</span> contracted
+          · <span style="color:${pctInvoiced>=80?'var(--green)':'var(--ink)'};font-weight:600">${pctInvoiced}%</span> invoiced
+        </div>
+        <div style="margin-top:12px;height:4px;background:var(--border-light);border-radius:2px;overflow:hidden">
+          <div style="height:100%;width:${Math.min(100,pctInvoiced)}%;background:var(--green);border-radius:2px;transition:width .4s"></div>
+        </div>
+      </div>
+
+      <!-- Contracts -->
+      <div style="${cardStyle}" data-nav="contracts"
+        onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseleave="this.style.boxShadow=''">
+        <div style="position:absolute;top:0;left:0;right:0;height:3px;background:#6366f1"></div>
+        <div style="${hintStyle}">📋 Contracts</div>
+        <div style="${bigStyle}">${totalContracts} <span style="font-size:16px;font-weight:500;color:var(--hint)">contracts</span></div>
+        <div style="${subStyle}">
+          <span style="color:var(--green);font-weight:600">${completeContracts} complete</span>
+          · <span style="color:var(--blue);font-weight:600">${fM(remainingValue)}</span> remaining
+        </div>
+        <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+          ${[...new Set(contracts.map(c=>c.commodity).filter(Boolean))].map(com => {
+            const comContracts = contracts.filter(c=>c.commodity===com);
+            const comComplete = comContracts.filter(c=>c.is_complete).length;
+            return `<span style="font-size:10px;background:var(--page-bg);border:1px solid var(--border);border-radius:4px;padding:2px 8px;color:var(--ink-mid)">${com} ${comComplete}/${comContracts.length}</span>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <!-- Operations -->
+      <div style="${cardStyle}" data-nav="overview-ops"
+        onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseleave="this.style.boxShadow=''">
+        <div style="position:absolute;top:0;left:0;right:0;height:3px;background:#f59e0b"></div>
+        <div style="${hintStyle}">🚜 Operations</div>
+        <div style="${bigStyle}">${fN(totalBudgetHa)} <span style="font-size:16px;font-weight:500;color:var(--hint)">ha budgeted</span></div>
+        <div style="${subStyle}">
+          ${hvstHa ? `<span style="color:var(--green);font-weight:600">${fN(hvstHa)} ha harvested</span> · ` : ''}
+          ${hvstYield ? `<span style="color:var(--green);font-weight:600">${fN(hvstYield,2)} t/ha</span> avg yield` : budYield ? `<span style="color:var(--hint)">${fN(budYield,2)} t/ha</span> budget yield` : 'No harvest data yet'}
+        </div>
+        ${hvstYield && budYield ? `
+        <div style="margin-top:10px;font-size:11px">
+          <span style="color:${hvstYield>=budYield?'var(--green)':'var(--red)'};font-weight:600">
+            ${hvstYield>=budYield?'▲':'▼'} ${Math.abs(Math.round((hvstYield-budYield)/budYield*100))}% vs budget
+          </span>
+        </div>` : ''}
+      </div>
+
+      <!-- Livestock -->
+      <div style="${cardStyle}" data-nav="overview-livestock"
+        onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseleave="this.style.boxShadow=''">
+        <div style="position:absolute;top:0;left:0;right:0;height:3px;background:#10b981"></div>
+        <div style="${hintStyle}">🐄 Livestock</div>
+        <div style="${bigStyle}">${lsHead ? fN(lsHead) + ' <span style="font-size:16px;font-weight:500;color:var(--hint)">head</span>' : '—'}</div>
+        <div style="${subStyle}">
+          ${lsGross ? `<span style="color:var(--green);font-weight:600">${fM(lsGross)}</span> gross` : 'No sales this season'}
+          ${lsAvg ? ` · <span style="font-weight:600">$${Math.round(lsAvg)}/head</span> avg` : ''}
+        </div>
+      </div>
+
+    </div>`;
 
     container.innerHTML = html;
 
-
-
-    await drawMiniCharts(commodityMap, season);
-
-    // Wire value per unit inputs — update value on hand when changed
-    container.querySelectorAll('.value-per-unit-input').forEach(inp => {
-      inp.addEventListener('focus', () => {
-        // Show raw number on focus for editing
-        const raw = parseFloat(inp.dataset.current || inp.dataset.default || 0);
-        if (raw) inp.value = raw.toFixed(0);
-      });
-      inp.addEventListener('blur', () => {
-        const val = parseFloat(inp.value.replace(/[^0-9.]/g, '')) || parseFloat(inp.dataset.default) || 0;
-        inp.dataset.current = val;
-        inp.value = val ? '$' + Math.round(val).toLocaleString() : '—';
-        // Recalculate value on hand
-        const comId = inp.dataset.commodity;
-        const onHandEl = container.querySelector('.value-on-hand-display[data-commodity="' + comId + '"]');
-        if (onHandEl) {
-          const onHandText = onHandEl.closest('.commodity-card-body')?.querySelector('[data-on-hand]');
-          // Get on hand qty from the position section
-          const posRows = inp.closest('.commodity-card-body')?.querySelectorAll('div');
-          let onHandQty = 0;
-          posRows?.forEach(div => {
-            if (div.textContent.includes('On hand') && div.style.borderBottom) {
-              const span = div.querySelector('span:last-child');
-              if (span) onHandQty = parseFloat(span.textContent.replace(/[^0-9.]/g,'')) || 0;
-            }
-          });
-          const valueOnHand = onHandQty && val ? onHandQty * val : null;
-          onHandEl.textContent = valueOnHand ? '$' + Math.round(valueOnHand).toLocaleString() : '—';
-        }
-      });
-      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
-    });
-
-    // Wire status toggle buttons
-    container.querySelectorAll('.status-opt-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const commodityId = btn.dataset.commodity;
-        const s = btn.dataset.season;
-        const status = btn.dataset.status;
-        if (!commodityId) return;
-        try {
-          // Try update first, then insert if no existing record
-          try {
-            const existing = await dbSelect('commodity_status',
-              'farm_id=eq.' + farm.id + '&commodity_id=eq.' + commodityId + '&season=eq.' + s + '&select=id'
-            );
-            if (existing.length) {
-              await dbUpdate('commodity_status', existing[0].id, { status });
-            } else {
-              await dbInsert('commodity_status', { farm_id: farm.id, commodity_id: commodityId, season: s, status });
-            }
-          } catch (e) {
-            throw e;
-          }
-          await _mountOverview(container);
-        } catch (err) {
-          toast('Failed to save status: ' + err.message, 'error');
+    // Wire card clicks — navigate to tabs or scroll to sections
+    container.querySelectorAll('[data-nav]').forEach(card => {
+      card.addEventListener('click', () => {
+        const nav = card.dataset.nav;
+        if (nav === 'invoices') {
+          document.querySelector('[data-tab="invoices"]')?.click();
+        } else if (nav === 'contracts') {
+          document.querySelector('[data-tab="contracts"]')?.click();
+        } else if (nav === 'overview-ops' || nav === 'overview-livestock') {
+          // Load expanded overview with full sections visible
+          _mountOverviewDetail(container, season, nav);
         }
       });
     });
 
-  } catch (err) {
-    container.innerHTML = '<div class="empty-state"><p>Failed to load dashboard: ' + err.message + '</p></div>';
-    console.error(err);
+  } catch(err) {
+    console.error('Overview error:', err);
+    container.innerHTML = '<div class="empty-state"><p>Error loading overview</p></div>';
   }
 }
+
+// ── Expanded detail view for ops/livestock ────────────────────
+async function _mountOverviewDetail(container, season, section) {
+  container.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>';
+  await loadCommodities();
+  let html = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <button class="btn btn-ghost btn-sm" id="back-to-overview">← Overview</button>
+      <h2 style="font-size:var(--text-md);font-weight:600">${section === 'overview-ops' ? 'Operations summary' : 'Livestock sales'} — ${season}</h2>
+    </div>`;
+  if (section === 'overview-ops') {
+    const { buildOperationsSummary: bos } = await import('./commodity-card.js');
+    html += await bos(season);
+  } else {
+    const { buildLivestockPosition: blp } = await import('./commodity-card.js');
+    html += await blp(season);
+  }
+  container.innerHTML = html;
+  container.querySelector('#back-to-overview')?.addEventListener('click', () => _mountOverview(container));
+}
+
 
 // ── Invoices tab ──────────────────────────────────────────────
 async function _mountInvoices(container) {
