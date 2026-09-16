@@ -1096,6 +1096,37 @@ async function _mountInvestorView(container) {
     container.innerHTML = '<div class="empty-state"><p>Error loading investor view.</p></div>';
   }
 }
+// ── Admin livestock pending panel ────────────────────────────
+async function _buildAdminLivestockPanel(farm) {
+  try {
+    const pp = await dbSelect('stock_periods', 'farm_id=eq.' + farm.id + '&status=eq.open&select=period_start,period_end&limit=1');
+    if (!pp.length) return '';
+    const lsInvs = await dbSelect('invoices',
+      'farm_id=eq.' + farm.id + '&master_unit=eq.head&invoice_date=gte.' + pp[0].period_start + '&invoice_date=lte.' + pp[0].period_end + '&select=id,livestock_lines,buyer'
+    );
+    const allMoves = await dbSelect('stock_movements', 'farm_id=eq.' + farm.id + '&source_system=eq.invoices&select=source_ref');
+    const allocatedRefs = new Set(allMoves.map(m => m.source_ref));
+    const pending = [];
+    lsInvs.forEach(inv => {
+      (inv.livestock_lines || []).forEach((line, idx) => {
+        if (line.head && !allocatedRefs.has(inv.id + ':' + idx))
+          pending.push({ buyer: inv.buyer, head: line.head, desc: line.description });
+      });
+    });
+    if (!pending.length) return '';
+    const rows = pending.slice(0, 3).map(p =>
+      '<div style="padding:8px 16px;border-bottom:0.5px solid var(--border-light);font-size:12px;color:var(--ink-mid)">' +
+      (p.buyer || 'Sale') + ' · ' + (p.desc || '') + ' · <strong>' + p.head + ' hd</strong></div>'
+    ).join('');
+    const more = pending.length > 3 ? '<div style="padding:8px 16px;font-size:11px;color:var(--hint)">+' + (pending.length - 3) + ' more</div>' : '';
+    return '<div class="card" style="margin-bottom:16px;overflow:hidden;border:1.5px solid var(--amber)">' +
+      '<div style="padding:10px 16px;border-bottom:0.5px solid var(--border);background:#fffbeb;display:flex;align-items:center;justify-content:space-between">' +
+      '<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#92400e">🐄 ' + pending.length + ' livestock sale' + (pending.length !== 1 ? 's' : '') + ' awaiting mob allocation</span>' +
+      '<span style="font-size:11px;color:#92400e">Go to Stocktake → Livestock to allocate</span>' +
+      '</div>' + rows + more + '</div>';
+  } catch(e) { return ''; }
+}
+
 // ── Admin view ────────────────────────────────────────────────
 async function _mountAdminView(container) {
   const farm = getActiveFarm();
@@ -1144,6 +1175,8 @@ async function _mountAdminView(container) {
       </div>`;
     }).join('');
 
+    const _adminLivestockHtml = await _buildAdminLivestockPanel(farm);
+
     container.innerHTML = `
     <div style="margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">
       <h2 style="font-size:var(--text-md);font-weight:600">Admin — ${season}</h2>
@@ -1175,35 +1208,9 @@ async function _mountAdminView(container) {
     </div>
 
     <!-- Livestock pending allocations -->
-    ${await (async () => {
-      try {
-        const pp = await dbSelect('stock_periods', 'farm_id=eq.' + farm.id + '&status=eq.open&select=period_start,period_end&limit=1');
-        if (!pp.length) return '';
-        const lsInvs = await dbSelect('invoices',
-          'farm_id=eq.' + farm.id + '&master_unit=eq.head&invoice_date=gte.' + pp[0].period_start + '&invoice_date=lte.' + pp[0].period_end + '&select=id,livestock_lines,buyer'
-        );
-        const allMoves = await dbSelect('stock_movements', 'farm_id=eq.' + farm.id + '&source_system=eq.invoices&select=source_ref');
-        const allocatedRefs = new Set(allMoves.map(m=>m.source_ref));
-        const pending = [];
-        lsInvs.forEach(inv => {
-          (inv.livestock_lines||[]).forEach((line,idx) => {
-            if (line.head && !allocatedRefs.has(inv.id+':'+idx))
-              pending.push({ buyer: inv.buyer, head: line.head, desc: line.description });
-          });
-        });
-        if (!pending.length) return '';
-        return \`<div class="card" style="margin-bottom:16px;overflow:hidden;border:1.5px solid var(--amber)">
-          <div style="padding:10px 16px;border-bottom:0.5px solid var(--border);background:#fffbeb;display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#92400e">🐄 \${pending.length} livestock sale\${pending.length!==1?'s':''} awaiting mob allocation</span>
-            <span style="font-size:11px;color:#92400e">Go to Stocktake → Livestock to allocate</span>
-          </div>
-          \${pending.slice(0,3).map(p=>\`<div style="padding:8px 16px;border-bottom:0.5px solid var(--border-light);font-size:12px;color:var(--ink-mid)">\${p.buyer||'Sale'} · \${p.desc||''} · <strong>\${p.head} hd</strong></div>\`).join('')}
-          \${pending.length > 3 ? \`<div style="padding:8px 16px;font-size:11px;color:var(--hint)">+\${pending.length-3} more</div>\` : ''}
-        </div>\`;
-      } catch(e) { return ''; }
-    })()}
+    ${_adminLivestockHtml}
 
-    <!-- Work queue -->
+        <!-- Work queue -->
     ${workItems.length ? `
     <div class="card" style="margin-bottom:16px;overflow:hidden">
       <div style="padding:10px 16px;border-bottom:0.5px solid var(--border);background:var(--page-bg);display:flex;align-items:center;justify-content:space-between">
