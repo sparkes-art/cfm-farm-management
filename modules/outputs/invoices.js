@@ -1354,9 +1354,8 @@ export async function openLivestockForm(container, existing = null) {
         </div>
 
         <!-- Line headers -->
-        <div style="display:grid;grid-template-columns:110px 1fr 55px 75px 55px 90px 90px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
+        <div style="display:grid;grid-template-columns:1fr 55px 75px 55px 90px 90px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
           ${[
-            {label:'Category',w:'110px'},
             {label:'Description',w:'1fr'},
             {label:'Head',w:'55px'},
             {label:'Avg kg',w:'75px'},
@@ -1416,13 +1415,8 @@ export async function openLivestockForm(container, existing = null) {
 
   const buildLine = (data = {}) => {
     const div = document.createElement('div');
-    div.style.cssText = 'display:grid;grid-template-columns:110px 1fr 55px 75px 55px 90px 90px 30px;gap:6px;margin-bottom:6px;align-items:center';
+    div.style.cssText = 'display:grid;grid-template-columns:1fr 55px 75px 55px 90px 90px 30px;gap:6px;margin-bottom:6px;align-items:center';
     div.innerHTML = `
-      <select class="form-select ls-cat" style="font-size:12px;padding:6px 8px">
-        <option value="">Category</option>
-        <optgroup label="Cattle">${CATTLE_CATS.map(c=>`<option${c===data.category?' selected':''}>${c}</option>`).join('')}</optgroup>
-        <optgroup label="Sheep">${SHEEP_CATS.map(c=>`<option${c===data.category?' selected':''}>${c}</option>`).join('')}</optgroup>
-      </select>
       <input class="form-input ls-desc" type="text" placeholder="e.g. 18mo, PTIC" value="${data.description||''}" style="font-size:12px;padding:6px 8px">
       <input class="form-input ls-head" type="number" min="1" placeholder="0" value="${data.head||''}" style="font-size:12px;padding:6px 8px">
       <input class="form-input ls-weight" type="number" step="0.1" placeholder="kg" value="${data.avg_weight_kg||''}" style="font-size:12px;padding:6px 8px">
@@ -1587,7 +1581,6 @@ export async function openLivestockForm(container, existing = null) {
         const gross = parseFloat(div.querySelector('.ls-gross')?.value) || 0;
         if (!head) return;
         const line = {
-          category: div.querySelector('.ls-cat')?.value,
           description: div.querySelector('.ls-desc')?.value?.trim(),
           head,
           avg_weight_kg: parseFloat(div.querySelector('.ls-weight')?.value) || null,
