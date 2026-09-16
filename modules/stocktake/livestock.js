@@ -135,6 +135,46 @@ async function _render(container, farm, period, allPeriods = []) {
   const totalHead = Object.values(closingBalance).reduce((s, v) => s + v, 0);
   const totalOpening = Object.values(openingBalance).reduce((s, v) => s + v, 0);
 
+  // ── Unallocated sales panel (built early, rendered at top) ──
+  const unallocatedHtml = (() => {
+    const unallocated = [];
+    pendingInvoices.forEach(inv => {
+      if (!inv.livestock_lines?.length) return;
+      inv.livestock_lines.forEach((line, idx) => {
+        if (!line.head) return;
+        unallocated.push({ inv, line, idx });
+      });
+    });
+    if (!unallocated.length) return '';
+    return \`
+    <div class="card" style="margin-bottom:16px;overflow:hidden;border:2px solid var(--amber)">
+      <div style="padding:10px 14px;border-bottom:1px solid var(--border);background:#fffbeb;display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#92400e">⚡ \${unallocated.length} sale line\${unallocated.length!==1?'s':''} awaiting mob allocation</span>
+        <span style="font-size:11px;color:#92400e">Assign each to a mob to update the ledger</span>
+      </div>
+      \${unallocated.map(({inv, line, idx}) => \`
+      <div style="display:grid;grid-template-columns:90px 1fr 60px 80px 80px 1fr 120px;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">
+        <div style="color:var(--hint)">\${inv.invoice_date}</div>
+        <div>
+          <div style="font-weight:500;color:var(--ink)">\${line.description||'—'}</div>
+          <div style="font-size:10px;color:var(--hint)">\${inv.buyer||inv.agent_name||'—'}</div>
+        </div>
+        <div style="font-weight:600;color:var(--ink)">\${line.head} hd</div>
+        <div style="color:var(--hint)">\${line.avg_weight_kg?line.avg_weight_kg+'kg':line.weight_estimated?'est.':'—'}</div>
+        <div style="color:var(--hint)">\${line.price?'$'+line.price+(line.price_basis==='per_kg'?'/kg':'/hd'):'—'}</div>
+        <div>
+          <select class="form-select ls-alloc-mob" data-invoice-id="\${inv.id}" data-line-idx="\${idx}" data-head="\${line.head}" data-date="\${inv.invoice_date}" data-note="Sale to \${(inv.buyer||inv.agent_name||'').replace(/"/g,'')}" style="font-size:11px">
+            <option value="">Select mob…</option>
+            \${items.map(si=>\`<option value="\${si.id}">\${si.name}</option>\`).join('')}
+          </select>
+        </div>
+        <div>
+          <button class="btn btn-sm btn-primary ls-alloc-btn" data-invoice-id="\${inv.id}" data-line-idx="\${idx}" data-head="\${line.head}" data-date="\${inv.invoice_date}" data-note="Sale to \${(inv.buyer||inv.agent_name||'').replace(/"/g,'')}" style="font-size:11px;opacity:.4;pointer-events:none">Allocate →</button>
+        </div>
+      </div>\`).join('')}
+    </div>\`;
+  })();
+
   const groupHtml = Object.entries(groups).map(([group, groupItems]) => {
     const groupBalance = groupItems.reduce((s, i) => s + (closingBalance[i.id]||0), 0);
     const rowHtml = groupItems.map(item => {
@@ -193,7 +233,7 @@ async function _render(container, farm, period, allPeriods = []) {
     </div>`;
   }).join('');
 
-  wrap.innerHTML = timelineHtml + `
+  wrap.innerHTML = timelineHtml + unallocatedHtml + `
     <!-- Header -->
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
       <div>
@@ -210,48 +250,6 @@ async function _render(container, farm, period, allPeriods = []) {
 
     <!-- Mob grids -->
     ${groupHtml}
-
-    <!-- Unallocated sales panel -->
-    ${(() => {
-      // Find invoice lines that don't have a matching stock_movement with source_ref
-      const allocatedRefs = new Set(movements.filter(m=>m.source_ref).map(m=>m.source_ref));
-      const unallocated = [];
-      pendingInvoices.forEach(inv => {
-        if (!inv.livestock_lines?.length) return;
-        inv.livestock_lines.forEach((line, idx) => {
-          if (!line.head) return;
-          unallocated.push({ inv, line, idx });
-        });
-      });
-      if (!unallocated.length) return '';
-      return `
-      <div class="card" style="margin-bottom:16px;overflow:hidden;border:2px solid var(--amber)">
-        <div style="padding:10px 14px;border-bottom:1px solid var(--border);background:#fffbeb;display:flex;align-items:center;justify-content:space-between">
-          <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#92400e">⚡ ${unallocated.length} sale line${unallocated.length!==1?'s':''} awaiting mob allocation</span>
-          <span style="font-size:11px;color:#92400e">Assign each to a mob to update the ledger</span>
-        </div>
-        ${unallocated.map(({inv, line, idx}) => `
-        <div style="display:grid;grid-template-columns:90px 1fr 60px 80px 80px 1fr 120px;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">
-          <div style="color:var(--hint)">${inv.invoice_date}</div>
-          <div>
-            <div style="font-weight:500;color:var(--ink)">${line.category||''}${line.description?' · '+line.description:''}</div>
-            <div style="font-size:10px;color:var(--hint)">${inv.buyer||inv.agent_name||'—'}</div>
-          </div>
-          <div style="font-weight:600;color:var(--ink)">${line.head} hd</div>
-          <div style="color:var(--hint)">${line.avg_weight_kg?line.avg_weight_kg+'kg':line.weight_estimated?'est.':'—'}</div>
-          <div style="color:var(--hint)">${line.price?'$'+line.price+(line.price_basis==='per_kg'?'/kg':'/hd'):'—'}</div>
-          <div>
-            <select class="form-select ls-alloc-mob" data-invoice-id="${inv.id}" data-line-idx="${idx}" data-head="${line.head}" data-date="${inv.invoice_date}" data-note="Sale to ${(inv.buyer||inv.agent_name||'').replace(/"/g,'')}" style="font-size:11px">
-              <option value="">Select mob…</option>
-              ${items.map(si=>`<option value="${si.id}">${si.name}</option>`).join('')}
-            </select>
-          </div>
-          <div>
-            <button class="btn btn-sm btn-primary ls-alloc-btn" data-invoice-id="${inv.id}" data-line-idx="${idx}" style="font-size:11px;opacity:.4;pointer-events:none">Allocate →</button>
-          </div>
-        </div>`).join('')}
-      </div>`;
-    })()}
 
     <!-- Recent movements -->
     ${periodMovements.length ? `
@@ -302,12 +300,14 @@ async function _render(container, farm, period, allPeriods = []) {
       if (!mobId) return;
       btn.disabled = true; btn.textContent = 'Saving…';
       try {
+        const qtyVal = parseInt(btn.dataset.head, 10);
+        if (!qtyVal || isNaN(qtyVal)) throw new Error('Invalid head count');
         await dbInsert('stock_movements', {
           farm_id: farm.id,
           item_id: mobId,
           location_id: null,
           movement_type: 'sale',
-          qty: parseInt(btn.dataset.head),
+          qty: qtyVal,
           unit: 'head',
           occurred_on: btn.dataset.date,
           source_system: 'invoices',
