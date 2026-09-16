@@ -5,15 +5,27 @@ import { dbSelect, dbInsert } from '../../js/supabase-client.js';
 import { getActiveFarm, canWrite } from '../../js/app-state.js';
 import { toast, openModal, qs } from '../../js/ui.js';
 
-export async function mountLivestock(container, period) {
+export async function mountLivestock(container, initialPeriod) {
   const farm = getActiveFarm();
   container.innerHTML = `<div style="padding:20px 24px;max-width:1100px;margin:0 auto" id="ls-wrap">
     <div style="padding:40px;text-align:center;color:var(--hint)">Loading livestock…</div>
   </div>`;
-  await _render(container, farm, period);
+
+  // Load all periods for this farm, sorted chronologically
+  const allPeriods = await dbSelect('stock_periods',
+    `farm_id=eq.${farm.id}&order=period_start.asc`
+  );
+
+  // Default to the passed period, or the latest open, or the most recent
+  const defaultPeriod = initialPeriod
+    || allPeriods.find(p => p.status === 'open')
+    || allPeriods[allPeriods.length - 1]
+    || null;
+
+  await _render(container, farm, defaultPeriod, allPeriods);
 }
 
-async function _render(container, farm, period) {
+async function _render(container, farm, period, allPeriods = []) {
   const wrap = qs('#ls-wrap', container);
 
   const [items, movements] = await Promise.all([
@@ -21,8 +33,27 @@ async function _render(container, farm, period) {
     dbSelect('stock_movements', `farm_id=eq.${farm.id}&select=item_id,movement_type,signed_qty,qty,unit,occurred_on,note&order=occurred_on.desc`),
   ]);
 
+  // ── Period timeline ─────────────────────────────────────────
+  const timelineHtml = allPeriods.length > 1 ? (() => {
+    const months = allPeriods.map(p => {
+      const d = new Date(p.period_start);
+      const label = d.toLocaleDateString('en-AU', {month:'short', year:'2-digit'});
+      const isActive = period && p.id === period.id;
+      const statusDot = p.status === 'locked' ? '🔒' : p.status === 'review' ? '🔶' : '●';
+      const dotColor = p.status === 'locked' ? 'var(--hint)' : p.status === 'review' ? 'var(--amber)' : 'var(--green)';
+      return `<button class="ls-period-btn" data-period-id="${p.id}"
+        style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 14px;border:none;border-radius:8px;cursor:pointer;background:${isActive?'var(--blue)':'transparent'};transition:background .15s;flex-shrink:0">
+        <span style="font-size:11px;font-weight:${isActive?700:500};color:${isActive?'white':'var(--ink-mid)'}">${label}</span>
+        <span style="font-size:9px;color:${isActive?'rgba(255,255,255,.7)':dotColor}">${statusDot} ${p.status}</span>
+      </button>`;
+    });
+    return `<div style="display:flex;align-items:center;gap:2px;overflow-x:auto;padding:4px 0;margin-bottom:16px;border-bottom:1px solid var(--border-light);padding-bottom:12px">
+      ${months.join('')}
+    </div>`;
+  })() : '';
+
   if (!items.length) {
-    wrap.innerHTML = `
+    wrap.innerHTML = timelineHtml + `
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
         <div>
           <h2 style="font-size:18px;font-weight:700;color:var(--ink)">Livestock</h2>
@@ -46,10 +77,12 @@ async function _render(container, farm, period) {
     }
   });
 
-  // Period movements for this period
+  // Period movements — strictly within this period's dates
   const periodStart = period?.period_start;
-  const periodEnd = period?.period_end;
-  const periodMovements = periodStart ? movements.filter(m => m.occurred_on >= periodStart && m.occurred_on <= periodEnd) : [];
+  const periodEnd   = period?.period_end;
+  const periodMovements = periodStart
+    ? movements.filter(m => m.occurred_on >= periodStart && m.occurred_on <= periodEnd)
+    : movements;
 
   // Period movements by item
   const periodByItem = {};
@@ -58,13 +91,19 @@ async function _render(container, farm, period) {
     if (periodByItem[m.item_id] !== undefined) periodByItem[m.item_id].push(m);
   });
 
-  // Opening balance per item (balance before period start)
+  // Opening balance = all movements BEFORE this period's start date
   const openingBalance = {};
   items.forEach(i => {
-    const prePeriodMovements = periodStart
+    const pre = periodStart
       ? movements.filter(m => m.item_id === i.id && m.occurred_on < periodStart)
       : [];
-    openingBalance[i.id] = prePeriodMovements.reduce((s, m) => s + (parseFloat(m.signed_qty)||0), 0);
+    openingBalance[i.id] = pre.reduce((s, m) => s + (parseFloat(m.signed_qty)||0), 0);
+  });
+
+  // Closing balance = opening + period movements
+  const closingBalance = {};
+  items.forEach(i => {
+    closingBalance[i.id] = openingBalance[i.id] + periodByItem[i.id].reduce((s,m) => s+(parseFloat(m.signed_qty)||0), 0);
   });
 
   // Group by subgroup (breed)
@@ -88,15 +127,15 @@ async function _render(container, farm, period) {
     adjustment: { label: 'Adjustment', sign: 0, color: 'var(--hint)' },
   };
 
-  // Summary totals
-  const totalHead = Object.values(balances).reduce((s, v) => s + v, 0);
+  // Summary totals — use closing balance for current period view
+  const totalHead = Object.values(closingBalance).reduce((s, v) => s + v, 0);
   const totalOpening = Object.values(openingBalance).reduce((s, v) => s + v, 0);
 
   const groupHtml = Object.entries(groups).map(([group, groupItems]) => {
-    const groupBalance = groupItems.reduce((s, i) => s + (balances[i.id]||0), 0);
+    const groupBalance = groupItems.reduce((s, i) => s + (closingBalance[i.id]||0), 0);
     const rowHtml = groupItems.map(item => {
       const opening = openingBalance[item.id] || 0;
-      const closing = balances[item.id] || 0;
+      const closing = closingBalance[item.id] || 0;
       const periodMoves = periodByItem[item.id] || [];
       const attrs = item.attributes || {};
       const classLabel = attrs.class ? attrs.class.charAt(0).toUpperCase() + attrs.class.slice(1) : '';
@@ -140,7 +179,7 @@ async function _render(container, farm, period) {
               <th style="padding:8px 14px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Opening</th>
               <th style="padding:8px 14px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--green);font-weight:600">In</th>
               <th style="padding:8px 14px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--red);font-weight:600">Out</th>
-              <th style="padding:8px 14px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Current</th>
+              <th style="padding:8px 14px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Closing</th>
               <th style="padding:8px 14px;text-align:center;font-size:10px;font-weight:600"></th>
             </tr>
           </thead>
@@ -150,7 +189,7 @@ async function _render(container, farm, period) {
     </div>`;
   }).join('');
 
-  wrap.innerHTML = `
+  wrap.innerHTML = timelineHtml + `
     <!-- Header -->
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
       <div>
@@ -190,16 +229,24 @@ async function _render(container, farm, period) {
       </table>
     </div>` : ''}`;
 
-  // Wire buttons
+  // Wire period timeline buttons
+  wrap.querySelectorAll('.ls-period-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = allPeriods.find(x => x.id === btn.dataset.periodId);
+      if (p) _render(container, farm, p, allPeriods);
+    });
+  });
+
+  // Wire mob buttons
   wrap.querySelectorAll('.ls-add-move').forEach(btn => {
-    btn.addEventListener('click', () => _showMovementForm(container, farm, items, btn.dataset.itemId, btn.dataset.itemName, period));
+    btn.addEventListener('click', () => _showMovementForm(container, farm, items, btn.dataset.itemId, btn.dataset.itemName, period, allPeriods));
   });
   wrap.querySelectorAll('.ls-set-opening').forEach(btn => {
-    btn.addEventListener('click', () => _showOpeningForm(container, farm, btn.dataset.itemId, btn.dataset.itemName, period));
+    btn.addEventListener('click', () => _showOpeningForm(container, farm, btn.dataset.itemId, btn.dataset.itemName, period, allPeriods));
   });
 }
 
-async function _showOpeningForm(container, farm, itemId, itemName, period) {
+async function _showOpeningForm(container, farm, itemId, itemName, period, allPeriods = []) {
   const date = period ? period.period_start : new Date().toISOString().slice(0,10);
   // Use the day before period start as the opening balance date
   const openingDate = period
@@ -243,12 +290,12 @@ async function _showOpeningForm(container, farm, itemId, itemName, period) {
         note: note,
       });
       toast('Opening balance set', 'success');
-      await _render(container, farm, period);
+      await _render(container, farm, period, allPeriods);
     }
   });
 }
 
-async function _showMovementForm(container, farm, items, preItemId, preItemName, period) {
+async function _showMovementForm(container, farm, items, preItemId, preItemName, period, allPeriods = []) {
   const today = new Date().toISOString().slice(0,10);
   const lsItems = items; // already filtered to livestock
 
@@ -331,7 +378,7 @@ async function _showMovementForm(container, farm, items, preItemId, preItemName,
         });
       }
       toast('Movement recorded', 'success');
-      await _render(container, farm, period);
+      await _render(container, farm, period, allPeriods);
     }
   });
 
