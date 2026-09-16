@@ -15,6 +15,13 @@ let _season = currentSeason();
 let _activeTab = 'budget';
 
 export async function mountBudget(container) {
+  // Guard — ensure session is available before making any DB calls
+  const session = getSession();
+  if (!session) {
+    container.innerHTML = '<div class="empty-state"><p>Please log in to access budgets.</p></div>';
+    return;
+  }
+
   await loadCommodities();
 
   container.innerHTML = `

@@ -125,11 +125,11 @@ export function initCommoditySelect(containerId, onSelect = null) {
 
   sel.addEventListener('change', () => {
     if (sel.value === '__add__') {
-      addRow.style.display = 'block';
-      addName.focus();
+      if (addRow) addRow.style.display = 'block';
+      addName?.focus();
       sel.value = '';
     } else {
-      addRow.style.display = 'none';
+      if (addRow) addRow.style.display = 'none';
       const commodity = _commodities.find(c => c.id === sel.value);
       if (onSelect) onSelect(sel.value, commodity);
     }
