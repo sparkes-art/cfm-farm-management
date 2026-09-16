@@ -84,10 +84,11 @@ exports.handler = async (event) => {
     'RULES:\n' +
     '1. sale_date: YYYY-MM-DD format. Convert "01-SEP-2026"→"2026-09-01".\n' +
     '2. All monetary values in AUD only.\n' +
-    '3. description: the full lot description as it appears on the statement (e.g. "Angus x 42 16,297kg @ $5.00"). This is the most important field.\n' +
-    '4. For each lot: estimate price_basis as "per_kg" if live weight is shown, else "per_head".\n' +
-    '5. weight_estimated: true if weight shown as "est" or "approx" or clearly calculated not weighed.\n' +
-    '6. category: best match from: Steer, Heifer, Bull, Cow, PTIC Cow, Cull Cow, Weaner Steer, Weaner Heifer, Wether, Ram, Ewe, Ewe Lamb, Wether Lamb, X-bred Lamb, PTIC Ewe, Cull Ewe.\n\n' +
+    '3. CRITICAL — GST: Livestock sales in Australia are GST-FREE. The gross amount for each lot must be the ex-GST figure. Sale yard statements show a GST amount separately — do NOT include GST in the gross. If a statement shows "Total $58,685 incl. GST" with "GST $5,335", the gross is $53,350 (ex-GST). Always use the ex-GST / net-of-GST figure.\n' +
+    '4. description: the full lot description as it appears on the statement (e.g. "Angus x 42 16,297kg @ $5.00"). This is the most important field.\n' +
+    '5. For each lot: estimate price_basis as "per_kg" if live weight is shown, else "per_head".\n' +
+    '6. weight_estimated: true if weight shown as "est" or "approx" or clearly calculated not weighed.\n' +
+    '7. category: best match from: Steer, Heifer, Bull, Cow, PTIC Cow, Cull Cow, Weaner Steer, Weaner Heifer, Wether, Ram, Ewe, Ewe Lamb, Wether Lamb, X-bred Lamb, PTIC Ewe, Cull Ewe.\n\n' +
     '{\n' +
     '  "agent_name": "auctioneer or buyer company name",\n' +
     '  "sale_date": "YYYY-MM-DD",\n' +
@@ -145,6 +146,31 @@ exports.handler = async (event) => {
       if (m1 && months[m1[2].toUpperCase()]) extracted.sale_date = `${m1[3]}-${String(months[m1[2].toUpperCase()]).padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
       const m2 = extracted.sale_date.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
       if (m2) extracted.sale_date = `${m2[3]}-${m2[2].padStart(2,'0')}-${m2[1].padStart(2,'0')}`;
+    }
+
+    // Post-process: cross-check GST
+    // If we have past corrections from this agent, compare gross figures
+    // If extracted total is ~10% higher than corrected total, it's likely GST-inclusive
+    if (extracted.total_gross && examples.length > 0) {
+      const agentExamples = examples.filter(e => e.corrected_data?.total_gross);
+      if (agentExamples.length > 0) {
+        const exGstTotal = extracted.total_gross / 1.1;
+        const correctedAvg = agentExamples.reduce((s,e) => s + parseFloat(e.corrected_data.total_gross||0), 0) / agentExamples.length;
+        // If ex-GST version is closer to past corrected figures, auto-correct
+        if (correctedAvg > 0 && Math.abs(exGstTotal - correctedAvg) < Math.abs(extracted.total_gross - correctedAvg)) {
+          console.log('[extract-livestock] GST auto-correction applied: ' + extracted.total_gross + ' → ' + exGstTotal.toFixed(2));
+          const gstFactor = extracted.total_gross / exGstTotal;
+          extracted.total_gross = Math.round(exGstTotal * 100) / 100;
+          extracted._gst_corrected = true;
+          // Apply same correction to each lot gross
+          if (extracted.lots) {
+            extracted.lots = extracted.lots.map(l => ({
+              ...l,
+              gross: l.gross ? Math.round(l.gross / gstFactor * 100) / 100 : l.gross,
+            }));
+          }
+        }
+      }
     }
 
     // Save extraction record
