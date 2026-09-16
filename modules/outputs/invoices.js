@@ -1434,8 +1434,7 @@ export async function openLivestockForm(container, existing = null) {
       <input class="form-input ls-gross" type="number" step="0.01" placeholder="0.00" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600">
       <button class="btn btn-ghost ls-remove" style="padding:4px;font-size:16px;color:var(--hint)">✕</button>
     `;
-    // Recalc gross on input
-    let _grossManual = false;
+    // Recalc on any field change
 
     const recalcLine = (changedField) => {
       const headEl   = div.querySelector('.ls-head');
@@ -1445,29 +1444,28 @@ export async function openLivestockForm(container, existing = null) {
       const basis    = div.querySelector('.ls-price-basis').value;
       const head     = parseFloat(headEl.value)   || 0;
       const weight   = parseFloat(weightEl.value) || 0;
-      const price    = parseFloat(priceEl.value)  || 0;
+      const gross    = parseFloat(grossEl.value)  || 0;
 
-      if (changedField === 'gross') {
-        // User typed gross — back-calculate price, mark as manual
-        _grossManual = true;
-        const gross = parseFloat(grossEl.value) || 0;
-        if (head && gross) {
-          if (basis === 'per_kg' && weight) {
-            priceEl.value = (gross / (head * weight)).toFixed(4);
-          } else {
-            priceEl.value = (gross / head).toFixed(2);
-          }
+      // Gross is always the authoritative figure from the document.
+      // Price per kg/head is always derived from gross — never drives gross.
+      if (gross && head) {
+        if (basis === 'per_kg' && weight) {
+          priceEl.value = (gross / (head * weight)).toFixed(4);
+        } else if (basis === 'per_head') {
+          priceEl.value = (gross / head).toFixed(2);
+        } else {
+          priceEl.value = '';
         }
-        recalcTotals();
-        return;
+      } else if (!gross && head) {
+        // No gross yet — allow price entry to calculate gross
+        const price = parseFloat(priceEl.value) || 0;
+        if (changedField === 'price' || changedField === 'head' || changedField === 'weight') {
+          let calcGross = 0;
+          if (basis === 'per_kg' && weight && price) calcGross = head * weight * price;
+          else if (basis === 'per_head' && price) calcGross = head * price;
+          if (calcGross) grossEl.value = calcGross.toFixed(2);
+        }
       }
-
-      // Head/weight/price changed — recalculate gross from inputs
-      _grossManual = false;
-      let gross = 0;
-      if (basis === 'per_kg' && head && weight && price) gross = head * weight * price;
-      else if (basis === 'per_head' && head && price) gross = head * price;
-      grossEl.value = gross ? gross.toFixed(2) : '';
       recalcTotals();
     };
 
