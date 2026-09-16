@@ -33,7 +33,7 @@ async function _render(container, farm, period, allPeriods = []) {
     dbSelect('stock_movements', `farm_id=eq.${farm.id}&select=id,item_id,movement_type,signed_qty,qty,unit,occurred_on,note,source_ref&order=occurred_on.desc`),
     // Livestock invoices in this period that have unallocated lines
     period ? dbSelect('invoices',
-      `farm_id=eq.${farm.id}&master_unit=eq.head&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&select=id,buyer,invoice_date,livestock_lines,agent_name`
+      `farm_id=eq.${farm.id}&master_unit=eq.head&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&select=id,buyer,invoice_date,livestock_lines,agent_name,rcti_files`
     ) : Promise.resolve([]),
   ]);
 
@@ -135,45 +135,9 @@ async function _render(container, farm, period, allPeriods = []) {
   const totalHead = Object.values(closingBalance).reduce((s, v) => s + v, 0);
   const totalOpening = Object.values(openingBalance).reduce((s, v) => s + v, 0);
 
-  // ── Unallocated sales panel (built early, rendered at top) ──
-  const unallocatedHtml = (() => {
-    const unallocated = [];
-    pendingInvoices.forEach(inv => {
-      if (!inv.livestock_lines?.length) return;
-      inv.livestock_lines.forEach((line, idx) => {
-        if (!line.head) return;
-        unallocated.push({ inv, line, idx });
-      });
-    });
-    if (!unallocated.length) return '';
-    return \`
-    <div class="card" style="margin-bottom:16px;overflow:hidden;border:2px solid var(--amber)">
-      <div style="padding:10px 14px;border-bottom:1px solid var(--border);background:#fffbeb;display:flex;align-items:center;justify-content:space-between">
-        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#92400e">⚡ \${unallocated.length} sale line\${unallocated.length!==1?'s':''} awaiting mob allocation</span>
-        <span style="font-size:11px;color:#92400e">Assign each to a mob to update the ledger</span>
-      </div>
-      \${unallocated.map(({inv, line, idx}) => \`
-      <div style="display:grid;grid-template-columns:90px 1fr 60px 80px 80px 1fr 120px;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">
-        <div style="color:var(--hint)">\${inv.invoice_date}</div>
-        <div>
-          <div style="font-weight:500;color:var(--ink)">\${line.description||'—'}</div>
-          <div style="font-size:10px;color:var(--hint)">\${inv.buyer||inv.agent_name||'—'}</div>
-        </div>
-        <div style="font-weight:600;color:var(--ink)">\${line.head} hd</div>
-        <div style="color:var(--hint)">\${line.avg_weight_kg?line.avg_weight_kg+'kg':line.weight_estimated?'est.':'—'}</div>
-        <div style="color:var(--hint)">\${line.price?'$'+line.price+(line.price_basis==='per_kg'?'/kg':'/hd'):'—'}</div>
-        <div>
-          <select class="form-select ls-alloc-mob" data-invoice-id="\${inv.id}" data-line-idx="\${idx}" data-head="\${line.head}" data-date="\${inv.invoice_date}" data-note="Sale to \${(inv.buyer||inv.agent_name||'').replace(/"/g,'')}" style="font-size:11px">
-            <option value="">Select mob…</option>
-            \${items.map(si=>\`<option value="\${si.id}">\${si.name}</option>\`).join('')}
-          </select>
-        </div>
-        <div>
-          <button class="btn btn-sm btn-primary ls-alloc-btn" data-invoice-id="\${inv.id}" data-line-idx="\${idx}" data-head="\${line.head}" data-date="\${inv.invoice_date}" data-note="Sale to \${(inv.buyer||inv.agent_name||'').replace(/"/g,'')}" style="font-size:11px;opacity:.4;pointer-events:none">Allocate →</button>
-        </div>
-      </div>\`).join('')}
-    </div>\`;
-  })();
+  // ── Unallocated sales panel ─────────────────────────────────
+  const unallocatedHtml = _buildUnallocatedPanel(pendingInvoices, items);
+
 
   const groupHtml = Object.entries(groups).map(([group, groupItems]) => {
     const groupBalance = groupItems.reduce((s, i) => s + (closingBalance[i.id]||0), 0);
@@ -476,4 +440,61 @@ async function _showMovementForm(container, farm, items, preItemId, preItemName,
       if (reclassWrap) reclassWrap.style.display = typeEl.value === 'reclass_out' ? '' : 'none';
     });
   }, 50);
+}
+// ── Unallocated sales panel builder ──────────────────────────
+function _buildUnallocatedPanel(pendingInvoices, items) {
+  const unallocated = [];
+  pendingInvoices.forEach(inv => {
+    if (!inv.livestock_lines?.length) return;
+    inv.livestock_lines.forEach((line, idx) => {
+      if (!line.head) return;
+      unallocated.push({ inv, line, idx });
+    });
+  });
+  if (!unallocated.length) return '';
+
+  const mobOpts = items.map(si =>
+    `<option value="${si.id}">${si.name}</option>`
+  ).join('');
+
+  const rows = unallocated.map(({ inv, line, idx }) => {
+    const buyer = (inv.buyer || inv.agent_name || '—').replace(/"/g, '');
+    const docLink = inv.rcti_files?.length
+      ? `<a href="${inv.rcti_files[0].url}" target="_blank" style="font-size:10px;color:var(--blue);text-decoration:none">📄 View statement</a>`
+      : '';
+    const weightStr = line.avg_weight_kg ? line.avg_weight_kg + 'kg' : line.weight_estimated ? 'est.' : '—';
+    const priceStr = line.price ? '$' + line.price + (line.price_basis === 'per_kg' ? '/kg' : '/hd') : '—';
+
+    return [
+      `<div style="display:grid;grid-template-columns:90px 1fr 60px 80px 80px 1fr 120px;`,
+      `gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">`,
+      `<div style="color:var(--hint)">${inv.invoice_date}</div>`,
+      `<div><div style="font-weight:500;color:var(--ink)">${line.description || '—'}</div>`,
+      `<div style="font-size:10px;color:var(--hint)">${buyer}</div>${docLink}</div>`,
+      `<div style="font-weight:600;color:var(--ink)">${line.head} hd</div>`,
+      `<div style="color:var(--hint)">${weightStr}</div>`,
+      `<div style="color:var(--hint)">${priceStr}</div>`,
+      `<div><select class="form-select ls-alloc-mob" `,
+      `data-invoice-id="${inv.id}" data-line-idx="${idx}" `,
+      `data-head="${line.head}" data-date="${inv.invoice_date}" data-note="Sale to ${buyer}" `,
+      `style="font-size:11px"><option value="">Select mob…</option>${mobOpts}</select></div>`,
+      `<div><button class="btn btn-sm btn-primary ls-alloc-btn" `,
+      `data-invoice-id="${inv.id}" data-line-idx="${idx}" `,
+      `data-head="${line.head}" data-date="${inv.invoice_date}" data-note="Sale to ${buyer}" `,
+      `style="font-size:11px;opacity:.4;pointer-events:none">Allocate →</button></div>`,
+      `</div>`,
+    ].join('');
+  }).join('');
+
+  return [
+    `<div class="card" style="margin-bottom:16px;overflow:hidden;border:2px solid var(--amber)">`,
+    `<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:#fffbeb;`,
+    `display:flex;align-items:center;justify-content:space-between">`,
+    `<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#92400e">`,
+    `⚡ ${unallocated.length} sale line${unallocated.length !== 1 ? 's' : ''} awaiting mob allocation</span>`,
+    `<span style="font-size:11px;color:#92400e">Assign each to a mob to update the ledger</span>`,
+    `</div>`,
+    rows,
+    `</div>`,
+  ].join('');
 }
