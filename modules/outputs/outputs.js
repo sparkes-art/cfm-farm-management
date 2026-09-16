@@ -18,12 +18,6 @@ let _invoices = [];
 let _contracts = [];
 let _unsub = null;
 let _activeTab = (() => {
-  // Allow nav links to set initial tab
-  if (window.__cfmInitialTab) {
-    const t = window.__cfmInitialTab;
-    window.__cfmInitialTab = null;
-    return t;
-  }
   const role = getRole();
   if (role === 'investor') return 'investor';
   if (role === 'accounting') return 'admin';
@@ -31,17 +25,6 @@ let _activeTab = (() => {
 })();
 
 // ── Entry point ───────────────────────────────────────────────
-export function switchOutputsTab(tab) {
-  _activeTab = tab;
-  const container = document.querySelector('#module-content');
-  if (container) {
-    container.querySelectorAll('.tab-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.tab === _activeTab);
-    });
-    _loadTab();
-  }
-}
-
 export async function mountOutputs(container) {
   const farm = getActiveFarm();
 
@@ -60,7 +43,7 @@ export async function mountOutputs(container) {
       <button class="tab-btn" data-tab="contracts">Contracts</button>
       <button class="tab-btn" data-tab="prices">Market prices</button>
       <button class="tab-btn" data-tab="invoices">Invoices</button>
-      <button class="tab-btn" data-tab="reconciliation" style="display:none">Reconciliation</button>
+      <button class="tab-btn" data-tab="reconciliation">Reconciliation</button>
     </div>
 
     <div id="tab-content"></div>

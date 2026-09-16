@@ -152,29 +152,6 @@ qs('#btn-logout')?.addEventListener('click', () => {
 });
 
 // Farm settings pencil button — navigate to settings with farm tab active
-// Wire nav sub-items with data-tab to switch tabs within outputs module
-document.querySelectorAll('[data-tab]').forEach(link => {
-  link.addEventListener('click', async (e) => {
-    const tab = link.dataset.tab;
-    const mod = link.dataset.module;
-    if (tab && mod === 'outputs') {
-      // If already on outputs, switch tab directly
-      const state = getState();
-      if (state.activeModule === 'outputs') {
-        e.stopPropagation();
-        const { switchOutputsTab } = await import('../modules/outputs/outputs.js');
-        switchOutputsTab(tab);
-        // Update nav active state
-        document.querySelectorAll('[data-module]').forEach(l => l.classList.remove('active'));
-        link.classList.add('active');
-      } else {
-        // Navigate to outputs first, tab will be picked up via __cfmInitialTab
-        window.__cfmInitialTab = tab;
-      }
-    }
-  });
-});
-
 document.getElementById('btn-farm-settings')?.addEventListener('click', () => {
   _navigateTo('settings');
 });
