@@ -7,6 +7,11 @@
   <link rel="stylesheet" href="/css/design-system.css?v=1783290066771">
   <script>window.__CFM_MAPBOX_TOKEN = 'pk.eyJ1Ijoic2FtdWVsd2lsbGlhbSIsImEiOiJjbXBsc280aHcyOXEyMnBvaGVrNDExdW5pIn0.APAu0LyYKE9CbXvlbYzUbA';</script>
   <script>window.__CFM_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xdmZ1cXZpbmRzZ25vZ2VqYWVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5NTAwMTIsImV4cCI6MjA5NjUyNjAxMn0.EFeaUoz_yXOA34j4yR1LxaD-3755PejUt7qPxVccW7Y';</script>
+  <style>
+    .nav-sub-label { font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--nav-text-muted,rgba(255,255,255,.35));padding:4px 12px 2px;font-weight:600;margin:0 }
+    .nav-sub-item { padding-left:20px !important; font-size:13px }
+    .nav-group-header:hover { background:rgba(255,255,255,.06) }
+  </style>
 </head>
 <body>
 
@@ -61,9 +66,34 @@
   <aside id="sidebar">
     <nav aria-label="Main navigation">
       <p class="nav-section-label">Office</p>
-      <a href="#" data-module="outputs" class="active">
-        <span class="nav-icon">📦</span> Sales
-      </a>
+      <div class="nav-group" id="nav-group-sales">
+        <div class="nav-group-header" onclick="toggleNavGroup('sales')" style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;cursor:pointer;border-radius:var(--radius-sm);color:var(--nav-text)">
+          <span><span class="nav-icon">📦</span> Sales</span>
+          <span class="nav-group-arrow" id="nav-arrow-sales" style="font-size:10px;transition:transform .2s">▾</span>
+        </div>
+        <div class="nav-group-items" id="nav-items-sales" style="padding-left:8px">
+          <p class="nav-sub-label">Dashboards</p>
+          <a href="#" data-module="outputs" data-tab="investor" class="active nav-sub-item">
+            <span class="nav-icon">📊</span> Investor view
+          </a>
+          <a href="#" data-module="outputs" data-tab="overview" class="nav-sub-item">
+            <span class="nav-icon">🚜</span> Manager view
+          </a>
+          <a href="#" data-module="outputs" data-tab="admin" class="nav-sub-item">
+            <span class="nav-icon">⚙️</span> Admin view
+          </a>
+          <p class="nav-sub-label" style="margin-top:8px">Data</p>
+          <a href="#" data-module="outputs" data-tab="contracts" class="nav-sub-item">
+            <span class="nav-icon">📋</span> Contracts
+          </a>
+          <a href="#" data-module="outputs" data-tab="prices" class="nav-sub-item">
+            <span class="nav-icon">📈</span> Market prices
+          </a>
+          <a href="#" data-module="outputs" data-tab="invoices" class="nav-sub-item">
+            <span class="nav-icon">🧾</span> Invoices
+          </a>
+        </div>
+      </div>
       <a href="#" data-module="water">
         <span class="nav-icon">💧</span> Water
       </a>
@@ -96,13 +126,18 @@
       <a href="#" data-module="weather">
         <span class="nav-icon">🌦</span> Weather
       </a>
+      <!-- Acquisitions hidden for now
       <p class="nav-section-label" style="margin-top:8px">Acquisitions</p>
       <a href="#" data-module="acquisitions">
         <span class="nav-icon">🏡</span> Deal Pipeline
       </a>
+      -->
       <p class="nav-section-label" style="margin-top:8px">System</p>
       <a href="#" data-module="paddocks">
         <span class="nav-icon">🗺️</span> Paddocks
+      </a>
+      <a href="#" data-module="outputs" data-tab="reconciliation">
+        <span class="nav-icon">🔁</span> Reconciliation
       </a>
       <a href="#" data-module="settings">
         <span class="nav-icon">⚙️</span> Settings
@@ -148,5 +183,27 @@
 </div>
 
 <script type="module" src="/js/main.js?v=1783290066771"></script>
+  <script>
+    function toggleNavGroup(id) {
+      const items = document.getElementById('nav-items-' + id);
+      const arrow = document.getElementById('nav-arrow-' + id);
+      if (!items) return;
+      const open = items.style.display !== 'none';
+      items.style.display = open ? 'none' : '';
+      if (arrow) arrow.style.transform = open ? 'rotate(-90deg)' : '';
+    }
+    // Wire nav sub-items to switch tab within the module
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('[data-tab]').forEach(link => {
+        link.addEventListener('click', e => {
+          const tab = link.dataset.tab;
+          if (tab) {
+            // Set active tab before module loads
+            window.__cfmInitialTab = tab;
+          }
+        });
+      });
+    });
+  </script>
 </body>
 </html>

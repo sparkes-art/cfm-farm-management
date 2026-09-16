@@ -18,6 +18,12 @@ let _invoices = [];
 let _contracts = [];
 let _unsub = null;
 let _activeTab = (() => {
+  // Allow nav links to set initial tab
+  if (window.__cfmInitialTab) {
+    const t = window.__cfmInitialTab;
+    window.__cfmInitialTab = null;
+    return t;
+  }
   const role = getRole();
   if (role === 'investor') return 'investor';
   if (role === 'accounting') return 'admin';
@@ -25,6 +31,17 @@ let _activeTab = (() => {
 })();
 
 // ── Entry point ───────────────────────────────────────────────
+export function switchOutputsTab(tab) {
+  _activeTab = tab;
+  const container = document.querySelector('#module-content');
+  if (container) {
+    container.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === _activeTab);
+    });
+    _loadTab();
+  }
+}
+
 export async function mountOutputs(container) {
   const farm = getActiveFarm();
 
@@ -43,7 +60,7 @@ export async function mountOutputs(container) {
       <button class="tab-btn" data-tab="contracts">Contracts</button>
       <button class="tab-btn" data-tab="prices">Market prices</button>
       <button class="tab-btn" data-tab="invoices">Invoices</button>
-      <button class="tab-btn" data-tab="reconciliation">Reconciliation</button>
+      <button class="tab-btn" data-tab="reconciliation" style="display:none">Reconciliation</button>
     </div>
 
     <div id="tab-content"></div>
@@ -297,33 +314,35 @@ async function _mountOverview(container) {
       </div>`;
     }).join('');
 
-    // ── Market prices panel ───────────────────────────────────
-    const uniqueComs = [...new Set(Object.keys(priceMap))];
-    const mktPanel = uniqueComs.map(comId => {
-      const name = idToName[comId] || comId;
-      const regions = Object.entries(priceMap[comId]).sort((a,b)=>b[1].date.localeCompare(a[1].date));
-      const preferred = name === 'Cotton Lint' ? cottonRegion : grainSites[name];
-      return `
-      <div style="margin-bottom:12px">
-        <div style="font-size:11px;font-weight:600;color:var(--ink);margin-bottom:6px">${name}</div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          ${regions.slice(0,5).map(([region, data]) => {
-            const isPreferred = region === preferred;
-            const yest = allPrices.filter(p=>p.commodity_id===comId&&p.region===region);
-            const move = yest.length>=2 ? data.price - parseFloat(yest[1].price_per_unit) : null;
-            return `<div style="display:flex;align-items:center;padding:6px 10px;border-radius:6px;background:${isPreferred?'var(--blue-light)':'var(--page-bg)'};gap:8px">
-              <div style="flex:1;font-size:12px;color:${isPreferred?'var(--blue-text)':'var(--ink-mid)'}">
-                ${isPreferred?'<strong>':''}${region}${isPreferred?'</strong>':''} 
-                ${isPreferred?'<span style="font-size:10px;color:var(--blue);margin-left:4px">★ farm site</span>':''}
-              </div>
-              <div style="font-size:13px;font-weight:600;color:${isPreferred?'var(--blue-text)':'var(--ink)'}">${fC(data.price)}/${data.unit||'unit'}</div>
-              ${move!=null?`<div style="font-size:11px;color:${move>=0?'var(--green)':'var(--red)'};min-width:45px;text-align:right">${move>=0?'▲':'▼'}${fC(Math.abs(move))}</div>`:'<div style="min-width:45px"></div>'}
-              <div style="font-size:10px;color:var(--hint);min-width:70px;text-align:right">${data.date}</div>
-            </div>`;
-          }).join('')}
+    // ── Market prices panel — farm's selected sites only ─────
+    const farmSites = [
+      ...Object.entries(grainSites).map(([crop, site]) => ({ crop, site, type: 'grain' })),
+      ...(cottonRegion ? [{ crop: 'Cotton Lint', site: cottonRegion, type: 'cotton' }] : []),
+    ];
+
+    const mktPanel = farmSites.length ? farmSites.map(({ crop, site }) => {
+      // Find commodity id for this crop
+      const com = commodityList.find(c => c.name === crop);
+      if (!com) return '';
+      const regions = priceMap[com.id];
+      if (!regions || !regions[site]) {
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;border-radius:6px;background:var(--page-bg);margin-bottom:4px">
+          <div style="font-size:12px;color:var(--ink-mid)"><strong>${crop}</strong> <span style="font-size:10px;color:var(--hint)">${site}</span></div>
+          <div style="font-size:11px;color:var(--hint)">No price</div>
+        </div>`;
+      }
+      const data = regions[site];
+      const yest = allPrices.filter(p => p.commodity_id === com.id && p.region === site);
+      const move = yest.length >= 2 ? data.price - parseFloat(yest[1].price_per_unit) : null;
+      return `<div style="display:flex;align-items:center;padding:7px 10px;border-radius:6px;background:var(--blue-light);margin-bottom:4px;gap:8px">
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:600;color:var(--blue-text)">${crop}</div>
+          <div style="font-size:10px;color:var(--blue)">${site}</div>
         </div>
+        <div style="font-size:15px;font-weight:600;color:var(--blue-text)">${fC(data.price)}/${data.unit||'unit'}</div>
+        ${move != null ? `<div style="font-size:11px;color:${move >= 0 ? 'var(--green)' : 'var(--red)'};min-width:44px;text-align:right">${move >= 0 ? '▲' : '▼'}${fC(Math.abs(move))}</div>` : '<div style="min-width:44px"></div>'}
       </div>`;
-    }).join('');
+    }).join('') : '<div style="font-size:12px;color:var(--hint)">No sites configured. Add grain sites in farm settings.</div>';
 
     // ── Contract status rows ──────────────────────────────────
     const contractRows = contracts.slice(0,6).map(c => {
@@ -1121,12 +1140,28 @@ async function _mountAdminView(container) {
     </div>`}
 
     <!-- Recent entries -->
-    <div class="card" style="overflow:hidden">
+    <div class="card" style="overflow:hidden;margin-bottom:12px">
       <div style="padding:10px 16px;border-bottom:0.5px solid var(--border);background:var(--page-bg)">
         <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Recent entries</span>
       </div>
       ${recentRows || '<div style="padding:14px 16px;font-size:12px;color:var(--hint)">No invoices entered yet.</div>'}
+    </div>
+
+    <!-- Reconciliation link -->
+    <div class="card" style="padding:14px 16px;display:flex;align-items:center;justify-content:space-between">
+      <div>
+        <div style="font-size:13px;font-weight:500;color:var(--ink)">Xero reconciliation</div>
+        <div style="font-size:11px;color:var(--hint);margin-top:2px">Match invoices to Xero transactions</div>
+      </div>
+      <button class="btn btn-secondary btn-sm" id="btn-go-reconciliation">Open →</button>
     </div>`;
+
+    // Wire reconciliation button
+    container.querySelector('#btn-go-reconciliation')?.addEventListener('click', () => {
+      _activeTab = 'reconciliation';
+      container.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === _activeTab));
+      _loadTab();
+    });
 
     // Wire Xero push buttons
     container.querySelectorAll('.xero-push-btn').forEach(btn => {
