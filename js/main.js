@@ -214,6 +214,25 @@ function _openAddFarmModal(existing = null) {
           <div style="font-size:12px;font-weight:600;color:var(--ink);margin-bottom:10px">Market price settings</div>
 
           <div style="margin-bottom:10px">
+            <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:4px">Year start month</label>
+            <select id="af-year-start" class="form-select">
+              <option value="1"${(existing?.settings?.yearStartMonth||7)===1?' selected':''}>January (calendar year)</option>
+              <option value="7"${(existing?.settings?.yearStartMonth||7)===7?' selected':''}>July (financial year)</option>
+              <option value="10"${(existing?.settings?.yearStartMonth||7)===10?' selected':''}>October (Oct–Sep)</option>
+              <option value="4"${(existing?.settings?.yearStartMonth||7)===4?' selected':''}>April</option>
+              <option value="2"${(existing?.settings?.yearStartMonth||7)===2?' selected':''}>February</option>
+              <option value="3"${(existing?.settings?.yearStartMonth||7)===3?' selected':''}>March</option>
+              <option value="5"${(existing?.settings?.yearStartMonth||7)===5?' selected':''}>May</option>
+              <option value="6"${(existing?.settings?.yearStartMonth||7)===6?' selected':''}>June</option>
+              <option value="8"${(existing?.settings?.yearStartMonth||7)===8?' selected':''}>August</option>
+              <option value="9"${(existing?.settings?.yearStartMonth||7)===9?' selected':''}>September</option>
+              <option value="11"${(existing?.settings?.yearStartMonth||7)===11?' selected':''}>November</option>
+              <option value="12"${(existing?.settings?.yearStartMonth||7)===12?' selected':''}>December</option>
+            </select>
+            <div style="font-size:11px;color:var(--hint);margin-top:3px">Sets the reporting year and stocktake period convention for this farm</div>
+          </div>
+
+          <div style="margin-bottom:10px">
             <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:4px">Cotton region</label>
             <input id="af-cotton-region" class="form-input" type="text" value="${existingCottonRegion}" placeholder="e.g. Lachlan/Sth NSW">
           </div>
@@ -266,6 +285,7 @@ function _openAddFarmModal(existing = null) {
     const farmState = modal.querySelector('#af-state').value;
     const org = modal.querySelector('#af-org').value.trim();
     const cottonRegion = modal.querySelector('#af-cotton-region').value.trim();
+    const yearStartMonth = parseInt(modal.querySelector('#af-year-start')?.value || '7');
 
     if (!name) { alert('Farm name is required'); return; }
     if (!farmId) { alert('Farm ID is required'); return; }
@@ -279,6 +299,7 @@ function _openAddFarmModal(existing = null) {
     const settings = {};
     if (cottonRegion) settings.cottonRegion = cottonRegion;
     if (Object.keys(grainSites).length) settings.grainSites = grainSites;
+    settings.yearStartMonth = yearStartMonth;
 
     btn.disabled = true; btn.textContent = 'Saving…';
 

@@ -32,9 +32,27 @@ async function _render(container) {
     dbSelect('stock_counts', `farm_id=eq.${farm.id}&select=id,period_id,item_id,location_id,counted_qty,expected_qty,variance,reason_code,counted_at&order=counted_at.desc&limit=100`),
   ]);
 
-  // Current period — most recent open one, or create
+  // Current period — most recent open one, or offer to create
   const openPeriod = periods.find(p => p.status === 'open') || periods.find(p => p.status === 'review');
   const now = new Date();
+
+  // Use farm's year start month (1=Jan, 7=Jul, 10=Oct) — default financial year (7)
+  const yearStartMonth = (farm.settings?.yearStartMonth || 7) - 1; // 0-indexed
+
+  // Current month period bounds
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+  const currentMonthEnd   = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().slice(0,10);
+  const hasCurrentPeriod  = periods.some(p => p.period_start === currentMonthStart);
+
+  // Current year label based on farm's year convention
+  const yearLabel = (() => {
+    const m = now.getMonth(); // 0-indexed
+    if (yearStartMonth === 0) return String(now.getFullYear()); // calendar year
+    const startYear = m >= yearStartMonth ? now.getFullYear() : now.getFullYear() - 1;
+    const endYear = startYear + 1;
+    return `${startYear}-${String(endYear).slice(2)}`; // e.g. 2026-27
+  })();
+
   const periodLabel = openPeriod
     ? new Date(openPeriod.period_start).toLocaleDateString('en-AU', {month:'long', year:'numeric'})
     : now.toLocaleDateString('en-AU', {month:'long', year:'numeric'});
@@ -73,6 +91,14 @@ async function _render(container) {
   const statusLabel = openPeriod?.status === 'locked' ? 'Locked' : openPeriod?.status === 'review' ? 'Under review' : 'Open';
 
   dash.innerHTML = `
+    ${!openPeriod && !hasCurrentPeriod && canWrite() ? `
+    <div style="background:#fff8e6;border:1px solid #fcd34d;border-radius:10px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div>
+        <div style="font-size:13px;font-weight:600;color:#92400e">No open period for ${now.toLocaleDateString('en-AU',{month:'long',year:'numeric'})}</div>
+        <div style="font-size:12px;color:#92400e;margin-top:2px;opacity:.8">Open a period to start recording stocktake entries for this month.</div>
+      </div>
+      <button id="btn-open-period" class="btn btn-sm" style="background:#f59e0b;color:white;border:none;white-space:nowrap">Open ${now.toLocaleDateString('en-AU',{month:'long'})} period</button>
+    </div>` : ''}
     <!-- Header -->
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
       <div>
@@ -241,6 +267,17 @@ async function _render(container) {
   `;
 
   // Wire buttons
+  qs('#btn-open-period', container)?.addEventListener('click', async () => {
+    await dbInsert('stock_periods', {
+      farm_id: farm.id,
+      period_start: currentMonthStart,
+      period_end: currentMonthEnd,
+      status: 'open',
+    });
+    toast(`${now.toLocaleDateString('en-AU',{month:'long',year:'numeric'})} period opened`, 'success');
+    await _render(container);
+  });
+
   qs('#stk-go-fuel', container)?.addEventListener('click', () => _navigateTo('fuel', container));
   qs('#stk-go-review', container)?.addEventListener('click', () => _navigateTo('review', container));
   qs('#stk-new-delivery', container)?.addEventListener('click', () => _showDeliveryForm(container, items, locations));
