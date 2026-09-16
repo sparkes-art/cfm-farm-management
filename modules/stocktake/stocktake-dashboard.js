@@ -45,6 +45,7 @@ async function _render(container) {
   const fuelItems = items.filter(i => i.category === 'fuel');
   const chemItems = items.filter(i => i.category === 'chemical');
   const fertItems = items.filter(i => i.category === 'fertiliser');
+  const lsItems   = items.filter(i => i.category === 'livestock');
 
   // Recent readings — this month
   const thisMonth = now.toISOString().slice(0,7);
@@ -65,6 +66,7 @@ async function _render(container) {
     { id: 'chemical', label: 'Chemicals', icon: '🧪', done: periodCounts.filter(c=>items.find(i=>i.id===c.item_id)?.category==='chemical').length, total: chemItems.length, href: 'chemical' },
     { id: 'fertiliser', label: 'Fertiliser', icon: '🌱', done: periodCounts.filter(c=>items.find(i=>i.id===c.item_id)?.category==='fertiliser').length, total: fertItems.length, href: 'fertiliser' },
     { id: 'water', label: 'Bore meters', icon: '💧', done: new Set(recentReadings.filter(r=>r.reading_type==='water_meter').map(r=>r.location_id)).size, total: waterMeters.length, href: 'water' },
+    ...(lsItems.length ? [{ id: 'livestock', label: 'Livestock', icon: '🐄', done: 0, total: lsItems.length, href: 'livestock' }] : []),
   ];
 
   const statusColor = openPeriod?.status === 'locked' ? 'var(--green)' : openPeriod?.status === 'review' ? 'var(--amber)' : 'var(--blue)';
@@ -292,9 +294,29 @@ async function _lockPeriod(container, period) {
   });
 }
 
-function _navigateTo(section, container) {
-  // Will route to sub-sections once built
-  toast(`${section} section coming soon`, 'info');
+async function _navigateTo(section, container) {
+  if (section === 'livestock') {
+    const farm = getActiveFarm();
+    const periods = await dbSelect('stock_periods', `farm_id=eq.${farm.id}&status=in.(open,review)&order=period_start.desc&limit=1`);
+    const period = periods[0] || null;
+    const { mountLivestock } = await import('./livestock.js');
+
+    // Wrap with back button
+    const wrap = qs('#stk-dash', container) || container;
+    wrap.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+        <button id="ls-back" class="btn btn-ghost btn-sm">← Stocktake</button>
+        <span style="font-size:13px;color:var(--hint)">Livestock</span>
+      </div>
+      <div id="ls-content"></div>`;
+
+    const lsContainer = qs('#ls-content', container);
+    await mountLivestock(lsContainer, period);
+
+    qs('#ls-back', container)?.addEventListener('click', () => _render(container));
+  } else {
+    toast(`${section} section coming soon`, 'info');
+  }
 }
 
 async function _showDeliveryForm(container, items, locations) {
