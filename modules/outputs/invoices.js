@@ -1354,10 +1354,17 @@ export async function openLivestockForm(container, existing = null) {
         </div>
 
         <!-- Line headers -->
-        <div style="display:grid;grid-template-columns:110px 1fr 55px 75px 75px 80px 80px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
-          ${['Category','Description','Mob','Head','Avg kg','Est?','Price','Gross',''].map(h =>
-            `<div style="font-size:9px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${h}</div>`
-          ).join('')}
+        <div style="display:grid;grid-template-columns:110px 1fr 55px 75px 55px 90px 90px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
+          ${[
+            {label:'Category',w:'110px'},
+            {label:'Description',w:'1fr'},
+            {label:'Head',w:'55px'},
+            {label:'Avg kg',w:'75px'},
+            {label:'Est?',w:'55px'},
+            {label:'Price basis / Price',w:'90px'},
+            {label:'Gross',w:'90px'},
+            {label:'',w:'30px'},
+          ].map(h => `<div style="font-size:9px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${h.label}</div>`).join('')}
         </div>
 
         <div id="ls-lines"></div>
@@ -1409,7 +1416,7 @@ export async function openLivestockForm(container, existing = null) {
 
   const buildLine = (data = {}) => {
     const div = document.createElement('div');
-    div.style.cssText = 'display:grid;grid-template-columns:110px 1fr 140px 55px 75px 75px 80px 80px 30px;gap:6px;margin-bottom:6px;align-items:center';
+    div.style.cssText = 'display:grid;grid-template-columns:110px 1fr 55px 75px 55px 90px 90px 30px;gap:6px;margin-bottom:6px;align-items:center';
     div.innerHTML = `
       <select class="form-select ls-cat" style="font-size:12px;padding:6px 8px">
         <option value="">Category</option>
@@ -1417,10 +1424,6 @@ export async function openLivestockForm(container, existing = null) {
         <optgroup label="Sheep">${SHEEP_CATS.map(c=>`<option${c===data.category?' selected':''}>${c}</option>`).join('')}</optgroup>
       </select>
       <input class="form-input ls-desc" type="text" placeholder="e.g. 18mo, PTIC" value="${data.description||''}" style="font-size:12px;padding:6px 8px">
-      <select class="form-select ls-mob" style="font-size:11px;padding:5px 6px" title="Link to stocktake mob">
-        <option value="">No mob link</option>
-        ${stockItems.map(si => `<option value="${si.id}"${data.stock_item_id===si.id?' selected':''}>${si.name}</option>`).join('')}
-      </select>
       <input class="form-input ls-head" type="number" min="1" placeholder="0" value="${data.head||''}" style="font-size:12px;padding:6px 8px">
       <input class="form-input ls-weight" type="number" step="0.1" placeholder="kg" value="${data.avg_weight_kg||''}" style="font-size:12px;padding:6px 8px">
       <div style="display:flex;align-items:center;gap:4px">
@@ -1586,7 +1589,6 @@ export async function openLivestockForm(container, existing = null) {
         const line = {
           category: div.querySelector('.ls-cat')?.value,
           description: div.querySelector('.ls-desc')?.value?.trim(),
-          stock_item_id: div.querySelector('.ls-mob')?.value || null,
           head,
           avg_weight_kg: parseFloat(div.querySelector('.ls-weight')?.value) || null,
           weight_estimated: div.querySelector('.ls-est')?.checked || false,
@@ -1662,24 +1664,8 @@ export async function openLivestockForm(container, existing = null) {
         toast('Sale saved', 'success');
       }
 
-      // Post sale movements to stocktake for each linked mob
-      const linkedLines = lines.filter(l => l.stock_item_id && l.head);
-      if (linkedLines.length) {
-        await Promise.all(linkedLines.map(l =>
-          dbInsert('stock_movements', {
-            farm_id: farm.id,
-            item_id: l.stock_item_id,
-            location_id: null,
-            movement_type: 'sale',
-            qty: l.head,
-            unit: 'head',
-            occurred_on: date,
-            source_system: 'invoices',
-            source_ref: savedInvoiceId || null,
-            note: `Sale to ${agent}${l.description ? ' · ' + l.description : ''}`,
-          }).catch(e => console.warn('Stock movement failed:', e))
-        ));
-      }
+      // Lines are saved on the invoice — allocation to mobs happens in Stocktake
+      // No stock_movements posted here; manager allocates in the livestock screen
 
       close();
       await _loadData();
