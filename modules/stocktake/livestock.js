@@ -299,7 +299,7 @@ async function _render(container, farm, period, allPeriods = []) {
           unit: 'head',
           occurred_on: postDate,
           source_system: 'invoices',
-          source_ref: btn.dataset.invoiceId,
+          source_ref: btn.dataset.invoiceId + ':' + btn.dataset.lineIdx,
           note: btn.dataset.note,
         });
         toast('Allocated to mob', 'success');
@@ -336,9 +336,8 @@ async function _render(container, farm, period, allPeriods = []) {
           const qtyVal = parseInt(btn.dataset.head, 10);
           // Delete old movement if it exists
           if (btn.dataset.movementId) {
-            try {
-              await dbDelete('stock_movements', btn.dataset.movementId);
-            } catch(e) { console.warn('Could not delete old movement:', e); }
+            try { await dbDelete('stock_movements', btn.dataset.movementId); }
+            catch(e) { console.warn('Could not delete old movement:', e); }
           }
           // Insert new movement
           const targetPeriod = allPeriods.find(p => btn.dataset.date >= p.period_start && btn.dataset.date <= p.period_end);
@@ -353,7 +352,7 @@ async function _render(container, farm, period, allPeriods = []) {
             unit: 'head',
             occurred_on: postDate,
             source_system: 'invoices',
-            source_ref: btn.dataset.invoiceId,
+            source_ref: btn.dataset.invoiceId + ':' + btn.dataset.lineIdx,
             note: btn.dataset.note,
           });
           toast('Allocation updated', 'success');
@@ -519,11 +518,10 @@ async function _showMovementForm(container, farm, items, preItemId, preItemName,
 }
 // ── Unallocated sales panel builder ──────────────────────────
 function _buildUnallocatedPanel(pendingInvoices, items, movements) {
-  // movements that came from invoices (allocated)
-  const allocatedByInvoice = {};
+  // movements that came from invoices — keyed by "invoiceId:lineIdx"
+  const allocatedByKey = {};
   movements.filter(m => m.source_system === 'invoices' && m.source_ref).forEach(m => {
-    if (!allocatedByInvoice[m.source_ref]) allocatedByInvoice[m.source_ref] = [];
-    allocatedByInvoice[m.source_ref].push(m);
+    allocatedByKey[m.source_ref] = m;
   });
 
   const unallocated = [];
@@ -532,10 +530,10 @@ function _buildUnallocatedPanel(pendingInvoices, items, movements) {
     if (!inv.livestock_lines?.length) return;
     inv.livestock_lines.forEach((line, idx) => {
       if (!line.head) return;
-      // Check if this invoice has an allocated movement
-      const invMovements = allocatedByInvoice[inv.id] || [];
-      if (invMovements.length > 0) {
-        allocated.push({ inv, line, idx, movement: invMovements[idx] || invMovements[0] });
+      const key = inv.id + ':' + idx;
+      const movement = allocatedByKey[key] || null;
+      if (movement) {
+        allocated.push({ inv, line, idx, movement });
       } else {
         unallocated.push({ inv, line, idx });
       }
