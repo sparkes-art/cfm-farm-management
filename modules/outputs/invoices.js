@@ -1337,8 +1337,15 @@ export async function openLivestockForm(container, existing = null) {
           <input class="form-input" id="ls-agent" type="text" value="${existing?.agent_name||''}" placeholder="e.g. Elders, Thomas Foods">
         </div>
         <div>
-          <label class="form-label">Date <span style="color:var(--red)">*</span></label>
-          <input class="form-input" id="ls-date" type="date" value="${existing?.invoice_date||new Date().toISOString().slice(0,10)}">
+          <label class="form-label">Invoice date <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="ls-date" type="date" value="${existing?.invoice_date||new Date().toISOString().slice(0,10)}"
+            oninput="const lf=document.getElementById('ls-left-farm');if(lf&&!lf._manuallyEdited)lf.value=this.value">
+        </div>
+        <div>
+          <label class="form-label">Left farm</label>
+          <input class="form-input" id="ls-left-farm" type="date" value="${existing?.left_farm_date||existing?.invoice_date||new Date().toISOString().slice(0,10)}"
+            oninput="this._manuallyEdited=true">
+          <div style="font-size:10px;color:var(--hint);margin-top:2px">Change if animals left in a different month to invoice</div>
         </div>
         <div>
           <label class="form-label">Sale yard / location</label>
@@ -1576,6 +1583,7 @@ export async function openLivestockForm(container, existing = null) {
       const session = getSession();
       const agent = modal.querySelector('#ls-agent')?.value?.trim();
       const date = modal.querySelector('#ls-date')?.value;
+      const leftFarmDate = modal.querySelector('#ls-left-farm')?.value || date;
       const location = modal.querySelector('#ls-location')?.value?.trim() || null;
       const vendor = modal.querySelector('#ls-vendor')?.value?.trim() || null;
       const commission = 0;
@@ -1651,6 +1659,7 @@ export async function openLivestockForm(container, existing = null) {
         farm_id: farm.id,
         buyer: agent,
         invoice_date: date,
+        left_farm_date: leftFarmDate !== date ? leftFarmDate : null,
         sale_type: 'cash',
         sale_subtype: saleSubtype,
         agent_name: agent,

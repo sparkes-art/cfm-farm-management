@@ -33,7 +33,7 @@ async function _render(container, farm, period, allPeriods = []) {
     dbSelect('stock_movements', `farm_id=eq.${farm.id}&select=id,item_id,movement_type,signed_qty,qty,unit,occurred_on,note,source_ref,source_system&order=occurred_on.desc`),
     // Livestock invoices in this period that have unallocated lines
     period ? dbSelect('invoices',
-      `farm_id=eq.${farm.id}&master_unit=eq.head&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&select=id,buyer,invoice_date,livestock_lines,agent_name,rcti_files`
+      `farm_id=eq.${farm.id}&master_unit=eq.head&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&select=id,buyer,invoice_date,left_farm_date,livestock_lines,agent_name,rcti_files`
     ) : Promise.resolve([]),
   ]);
 
@@ -610,14 +610,14 @@ function _buildUnallocatedPanel(pendingInvoices, items, movements) {
       `<div style="color:var(--hint)">${priceStr}</div>`,
       `<div><select class="form-select ls-alloc-mob" `,
       `data-invoice-id="${inv.id}" data-line-idx="${idx}" `,
-      `data-head="${line.head}" data-date="${inv.invoice_date}" data-note="Sale to ${buyer}" `,
+      `data-head="${line.head}" data-date="${inv.left_farm_date || inv.invoice_date}" data-note="Sale to ${buyer}" `,
       `data-no-weight="${line.no_weight ? '1' : ''}" `,
       `style="font-size:11px"><option value="">Select mob…</option>${mobOpts}</select>`,
       line.no_weight ? `<input type="number" class="form-input ls-alloc-weight" step="0.1" placeholder="Avg kg (est.)" style="font-size:11px;margin-top:4px;padding:4px 8px">` : '',
       `</div>`,
       `<div><button class="btn btn-sm btn-primary ls-alloc-btn" `,
       `data-invoice-id="${inv.id}" data-line-idx="${idx}" `,
-      `data-head="${line.head}" data-date="${inv.invoice_date}" data-note="Sale to ${buyer}" `,
+      `data-head="${line.head}" data-date="${inv.left_farm_date || inv.invoice_date}" data-note="Sale to ${buyer}" `,
       `style="font-size:11px;opacity:.4;pointer-events:none">Allocate →</button></div>`,
       `</div>`,
     ].join('');
@@ -655,7 +655,7 @@ function _buildUnallocatedPanel(pendingInvoices, items, movements) {
       `<div><button class="btn btn-ghost btn-sm ls-realloc-btn" `,
       `data-movement-id="${movement?.id||''}" `,
       `data-invoice-id="${inv.id}" data-line-idx="${idx}" `,
-      `data-head="${line.head}" data-date="${inv.invoice_date}" data-note="Sale to ${buyer}" `,
+      `data-head="${line.head}" data-date="${inv.left_farm_date || inv.invoice_date}" data-note="Sale to ${buyer}" `,
       `style="font-size:11px;color:var(--amber)">✎ Edit</button></div>`,
       `</div>`,
     ].join('');
