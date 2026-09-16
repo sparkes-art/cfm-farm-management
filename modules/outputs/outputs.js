@@ -133,13 +133,15 @@ async function _mountOverview(container) {
     const grainSites = settings.grainSites || {};
     const cottonRegion = settings.cottonRegion || '';
 
-    const [contracts, invoices, budgets, lsInvoices, allPrices, forecasts] = await Promise.all([
+    const [contracts, invoices, budgets, lsInvoices, allPrices, forecasts, stockItems, stockMovements] = await Promise.all([
       dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=neq.head&select=id,gross_amount,total_quality_adj,total_qty,forward_contract_id,batches,status,buyer,invoice_date'),
       dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&master_unit=eq.head&season=eq.' + season + '&select=total_qty,gross_amount'),
       dbSelect('market_prices', 'select=commodity_id,region,price_per_unit,price_date,unit&order=price_date.desc&limit=200'),
       dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.desc'),
+      dbSelect('stock_items', 'farm_id=eq.' + farm.id + '&category=eq.livestock&active=eq.true&select=id,name,subgroup,attributes'),
+      dbSelect('stock_movements', 'farm_id=eq.' + farm.id + '&select=item_id,signed_qty,movement_type,occurred_on'),
     ]);
 
     const fM  = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + Math.round(n).toLocaleString();
@@ -190,6 +192,41 @@ async function _mountOverview(container) {
     const budgetHa = budgets.reduce((s,b)=>s+(parseFloat(b.area_ha)||0),0);
     const totalContractedVal = contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
     const pctInvoiced = totalContractedVal ? Math.round(invoicedRev/totalContractedVal*100) : 0;
+
+    // ── Livestock position ────────────────────────────────────
+    const stockBalances = {};
+    stockItems.forEach(i => { stockBalances[i.id] = 0; });
+    stockMovements.forEach(m => {
+      if (stockBalances[m.item_id] !== undefined)
+        stockBalances[m.item_id] += parseFloat(m.signed_qty) || 0;
+    });
+    const totalOnHand = Object.values(stockBalances).reduce((s,v) => s+v, 0);
+
+    // Group by class for summary
+    const classSummary = {};
+    stockItems.forEach(i => {
+      const cls = i.attributes?.class || 'other';
+      if (!classSummary[cls]) classSummary[cls] = 0;
+      classSummary[cls] += stockBalances[i.id] || 0;
+    });
+    const classOrder = ['bull','cow','heifer','steer','weaner','other'];
+    const classLabel = { bull:'Bulls', cow:'Cows', heifer:'Heifers', steer:'Steers', weaner:'Weaners', other:'Other' };
+
+    // Pending allocations (livestock invoice lines without a stock movement)
+    const pendingPeriods = await dbSelect('stock_periods', 'farm_id=eq.' + farm.id + '&status=eq.open&select=period_start,period_end&limit=1');
+    let pendingAllocations = 0;
+    if (pendingPeriods.length) {
+      const pp = pendingPeriods[0];
+      const pendingLsInv = await dbSelect('invoices',
+        'farm_id=eq.' + farm.id + '&master_unit=eq.head&invoice_date=gte.' + pp.period_start + '&invoice_date=lte.' + pp.period_end + '&select=id,livestock_lines'
+      );
+      const allocatedRefs = new Set(stockMovements.filter(m=>m.source_system==='invoices'&&m.source_ref).map(m=>m.source_ref));
+      pendingLsInv.forEach(inv => {
+        (inv.livestock_lines||[]).forEach((line,idx) => {
+          if (line.head && !allocatedRefs.has(inv.id+':'+idx)) pendingAllocations++;
+        });
+      });
+    }
 
     // ── Needs attention ───────────────────────────────────────
     const attentionItems = [];
@@ -389,6 +426,26 @@ async function _mountOverview(container) {
         <div style="flex:1"><div style="font-size:13px;font-weight:500;color:var(--ink)">${item.title}</div><div style="font-size:11px;color:var(--hint);margin-top:2px">${item.sub}</div></div>
         <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;${badgeStyle[item.level]}">${item.badge}</span>
       </div>`).join('')}
+    </div>` : ''}
+
+    <!-- Livestock mob summary -->
+    ${totalOnHand > 0 ? `
+    <div class="card" style="margin-bottom:16px;overflow:hidden">
+      <div style="padding:10px 16px;border-bottom:0.5px solid var(--border);background:#1a2535;display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:13px;font-weight:600;color:white">🐄 Livestock position</span>
+        <div style="display:flex;gap:16px;font-size:11px">
+          <span style="color:rgba(255,255,255,.6)">On hand <strong style="color:white">${fN(totalOnHand)} head</strong></span>
+          ${lsGross ? `<span style="color:rgba(255,255,255,.6)">Sold YTD <strong style="color:#86efac">${fM(lsGross)}</strong></span>` : ''}
+          ${pendingAllocations ? `<span style="color:#fcd34d;font-weight:600">⚡ ${pendingAllocations} unallocated</span>` : ''}
+        </div>
+      </div>
+      <div style="display:flex;gap:0;flex-wrap:wrap">
+        ${classOrder.filter(cls => (classSummary[cls]||0) > 0).map(cls => `
+        <div style="padding:12px 20px;border-right:0.5px solid var(--border-light);min-width:100px">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">${classLabel[cls]}</div>
+          <div style="font-size:20px;font-weight:600;color:var(--ink)">${fN(classSummary[cls])}</div>
+        </div>`).join('')}
+      </div>
     </div>` : ''}
 
     <!-- Commodity position cards + market prices side by side -->
@@ -810,13 +867,15 @@ async function _mountInvestorView(container) {
     const idToName = {};
     commodityList.forEach(c => { idToName[c.id] = c.name; });
 
-    const [contracts, invoices, budgets, forecasts, harvests, lsInvoices] = await Promise.all([
+    const [contracts, invoices, budgets, forecasts, harvests, lsInvoices, stockItems, stockMoves] = await Promise.all([
       dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=neq.head&select=id,gross_amount,total_quality_adj,total_qty,forward_contract_id,batches,season,status,buyer'),
       dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
       dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.desc'),
       dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&master_unit=eq.head&season=eq.' + season + '&select=total_qty,gross_amount,livestock_lines'),
+      dbSelect('stock_items', 'farm_id=eq.' + farm.id + '&category=eq.livestock&active=eq.true&select=id,name,attributes'),
+      dbSelect('stock_movements', 'farm_id=eq.' + farm.id + '&select=item_id,signed_qty'),
     ]);
 
     const fM = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + Math.round(n).toLocaleString();
@@ -907,6 +966,18 @@ async function _mountInvestorView(container) {
     const lsHead = lsInvoices.reduce((s,i)=>s+(parseFloat(i.total_qty)||0),0);
     const lsGross = lsInvoices.reduce((s,i)=>s+(parseFloat(i.gross_amount)||0),0);
 
+    // ── Livestock ─────────────────────────────────────────────
+    const invStockBalances = {};
+    stockItems.forEach(i => { invStockBalances[i.id] = 0; });
+    stockMoves.forEach(m => { if (invStockBalances[m.item_id] !== undefined) invStockBalances[m.item_id] += parseFloat(m.signed_qty)||0; });
+    const invTotalHead = Object.values(invStockBalances).reduce((s,v)=>s+v,0);
+    const invClassSummary = {};
+    stockItems.forEach(i => {
+      const cls = i.attributes?.class || 'other';
+      if (!invClassSummary[cls]) invClassSummary[cls] = 0;
+      invClassSummary[cls] += invStockBalances[i.id] || 0;
+    });
+
     // ── Downside / risk ───────────────────────────────────────
     const uncontractedVal = openExposure;
     const contractComplete = contracts.filter(c=>c.is_complete).length;
@@ -956,13 +1027,16 @@ async function _mountInvestorView(container) {
           ${['Enterprise','Coverage','Contracted value','Avg price','Status'].map((h,i)=>`<div style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);${i>1?'text-align:right':''}">${h}</div>`).join('')}
         </div>
         ${enterpriseRows || '<div style="padding:14px 18px;font-size:12px;color:var(--hint)">No contracts entered for this season.</div>'}
-        ${lsHead ? `
+        ${invTotalHead > 0 || lsHead > 0 ? `
         <div style="display:grid;grid-template-columns:130px 1fr 90px 90px 90px;gap:0;padding:10px 18px;border-bottom:0.5px solid var(--border-light);align-items:center;font-size:12px">
           <div style="font-weight:600;color:var(--ink)">Livestock</div>
-          <div style="font-size:11px;color:var(--hint)">${Math.round(lsHead)} head sold YTD</div>
-          <div style="text-align:right;font-weight:600;color:var(--green)">${fM(lsGross)}</div>
-          <div style="text-align:right;color:var(--hint)">${lsHead ? fC(lsGross/lsHead) + '/hd' : '—'}</div>
-          <div style="text-align:right">${badge('Realised', 'green')}</div>
+          <div>
+            <div style="font-size:11px;color:var(--hint)">${fN(invTotalHead)} on hand · ${lsHead ? Math.round(lsHead) + ' sold YTD' : 'no sales'}</div>
+            <div style="font-size:10px;color:var(--hint);margin-top:2px">${Object.entries(invClassSummary).filter(([,v])=>v>0).map(([k,v])=>v+' '+k+'s').join(' · ')}</div>
+          </div>
+          <div style="text-align:right;font-weight:600;color:var(--green)">${lsGross ? fM(lsGross) : '—'}</div>
+          <div style="text-align:right;color:var(--hint)">${lsHead ? fC(lsGross/lsHead) + '/hd avg' : '—'}</div>
+          <div style="text-align:right">${lsGross ? badge('Realised', 'green') : badge('No sales', 'blue')}</div>
         </div>` : ''}
       </div>
 
@@ -1004,8 +1078,8 @@ async function _mountInvestorView(container) {
               <span style="font-weight:600;color:var(--ink)">${contractComplete} of ${contracts.length}</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
-              <span style="color:var(--hint)">Livestock exposure</span>
-              <span style="font-weight:600;color:var(--green)">${lsHead ? Math.round(lsHead) + ' hd · cash sales only' : 'None this season'}</span>
+              <span style="color:var(--hint)">Livestock on hand</span>
+              <span style="font-weight:600;color:var(--ink)">${invTotalHead ? fN(invTotalHead) + ' head' : 'None recorded'}</span>
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
               <span style="color:var(--hint)">Reporting basis</span>
@@ -1099,6 +1173,35 @@ async function _mountAdminView(container) {
         <div style="font-size:11px;color:var(--hint);margin-top:2px">cfm-prod</div>
       </div>
     </div>
+
+    <!-- Livestock pending allocations -->
+    ${await (async () => {
+      try {
+        const pp = await dbSelect('stock_periods', 'farm_id=eq.' + farm.id + '&status=eq.open&select=period_start,period_end&limit=1');
+        if (!pp.length) return '';
+        const lsInvs = await dbSelect('invoices',
+          'farm_id=eq.' + farm.id + '&master_unit=eq.head&invoice_date=gte.' + pp[0].period_start + '&invoice_date=lte.' + pp[0].period_end + '&select=id,livestock_lines,buyer'
+        );
+        const allMoves = await dbSelect('stock_movements', 'farm_id=eq.' + farm.id + '&source_system=eq.invoices&select=source_ref');
+        const allocatedRefs = new Set(allMoves.map(m=>m.source_ref));
+        const pending = [];
+        lsInvs.forEach(inv => {
+          (inv.livestock_lines||[]).forEach((line,idx) => {
+            if (line.head && !allocatedRefs.has(inv.id+':'+idx))
+              pending.push({ buyer: inv.buyer, head: line.head, desc: line.description });
+          });
+        });
+        if (!pending.length) return '';
+        return \`<div class="card" style="margin-bottom:16px;overflow:hidden;border:1.5px solid var(--amber)">
+          <div style="padding:10px 16px;border-bottom:0.5px solid var(--border);background:#fffbeb;display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#92400e">🐄 \${pending.length} livestock sale\${pending.length!==1?'s':''} awaiting mob allocation</span>
+            <span style="font-size:11px;color:#92400e">Go to Stocktake → Livestock to allocate</span>
+          </div>
+          \${pending.slice(0,3).map(p=>\`<div style="padding:8px 16px;border-bottom:0.5px solid var(--border-light);font-size:12px;color:var(--ink-mid)">\${p.buyer||'Sale'} · \${p.desc||''} · <strong>\${p.head} hd</strong></div>\`).join('')}
+          \${pending.length > 3 ? \`<div style="padding:8px 16px;font-size:11px;color:var(--hint)">+\${pending.length-3} more</div>\` : ''}
+        </div>\`;
+      } catch(e) { return ''; }
+    })()}
 
     <!-- Work queue -->
     ${workItems.length ? `
