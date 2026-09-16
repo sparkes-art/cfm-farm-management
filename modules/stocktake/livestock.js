@@ -209,6 +209,7 @@ async function _render(container, farm, period, allPeriods = []) {
           <div style="font-size:10px;color:var(--hint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px">Total on hand</div>
           <div style="font-size:20px;font-weight:700;color:var(--ink)">${fN(totalHead)} head</div>
         </div>
+        ${canWrite() ? `<button class="btn btn-secondary btn-sm" id="ls-add-mob" style="white-space:nowrap">+ Add mob</button>` : ''}
       </div>
     </div>
 
