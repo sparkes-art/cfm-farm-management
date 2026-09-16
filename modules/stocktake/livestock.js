@@ -197,21 +197,6 @@ async function _render(container, farm, period, allPeriods = []) {
     </div>`;
   }).join('');
 
-  wrap.innerHTML = timelineHtml + unallocatedHtml + `
-    <!-- Header -->
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
-      <div>
-        <h2 style="font-size:18px;font-weight:700;color:var(--ink)">Livestock</h2>
-        <p style="font-size:13px;color:var(--hint);margin-top:4px">${farm.name} · ${period ? new Date(period.period_start).toLocaleDateString('en-AU',{month:'long',year:'numeric'}) : 'All time'}</p>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <div style="background:white;border:1px solid var(--border);border-radius:8px;padding:10px 16px;text-align:center">
-          <div style="font-size:10px;color:var(--hint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px">Total on hand</div>
-          <div style="font-size:20px;font-weight:700;color:var(--ink)">${fN(totalHead)} head</div>
-        </div>
-        ${canWrite() ? `<button class="btn btn-secondary btn-sm" id="ls-add-mob" style="white-space:nowrap">+ Add mob</button>` : ''}
-      </div>
-    </div>
 
   // ── Period movements table ────────────────────────────────
   // Fetch invoice lines for weight/price reference
@@ -244,6 +229,23 @@ async function _render(container, farm, period, allPeriods = []) {
       <td style="padding:8px 14px;color:var(--hint)">${m.note || ''}</td>
     </tr>`;
   }).join('');
+
+  wrap.innerHTML = timelineHtml + unallocatedHtml + `
+    <!-- Header -->
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+      <div>
+        <h2 style="font-size:18px;font-weight:700;color:var(--ink)">Livestock</h2>
+        <p style="font-size:13px;color:var(--hint);margin-top:4px">${farm.name} · ${period ? new Date(period.period_start).toLocaleDateString('en-AU',{month:'long',year:'numeric'}) : 'All time'}</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div style="background:white;border:1px solid var(--border);border-radius:8px;padding:10px 16px;text-align:center">
+          <div style="font-size:10px;color:var(--hint);text-transform:uppercase;letter-spacing:.07em;margin-bottom:2px">Total on hand</div>
+          <div style="font-size:20px;font-weight:700;color:var(--ink)">${fN(totalHead)} head</div>
+        </div>
+        ${canWrite() ? `<button class="btn btn-secondary btn-sm" id="ls-add-mob" style="white-space:nowrap">+ Add mob</button>` : ''}
+      </div>
+    </div>
+
 
     <!-- Period movements -->
     ${periodMovements.length ? `
