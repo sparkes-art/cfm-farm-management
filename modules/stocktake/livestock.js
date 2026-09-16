@@ -241,7 +241,6 @@ async function _showOpeningForm(container, farm, itemId, itemName, period) {
         occurred_on: dt,
         reason_code: 'opening_balance',
         note: note,
-        created_by: 'office',
       });
       toast('Opening balance set', 'success');
       await _render(container, farm, period);
@@ -316,19 +315,19 @@ async function _showMovementForm(container, farm, items, preItemId, preItemName,
         await dbInsert('stock_movements', {
           farm_id: farm.id, item_id: itemId, location_id: null,
           movement_type: 'reclass_out', qty, unit:'head', occurred_on: date,
-          transfer_id: transferId, note: note||null, created_by:'office',
+          transfer_id: transferId, note: note||null,
         });
         await dbInsert('stock_movements', {
           farm_id: farm.id, item_id: reclassDest, location_id: null,
           movement_type: 'reclass_in', qty, unit:'head', occurred_on: date,
-          transfer_id: transferId, note: note||null, created_by:'office',
+          transfer_id: transferId, note: note||null,
         });
       } else {
         const movType = type === 'purchase' ? 'transfer_in' : type;
         await dbInsert('stock_movements', {
           farm_id: farm.id, item_id: itemId, location_id: null,
           movement_type: movType, qty, unit:'head', occurred_on: date,
-          note: note||null, created_by:'office',
+          note: note||null,
         });
       }
       toast('Movement recorded', 'success');
