@@ -362,6 +362,9 @@ async function _render(container, farm, period, allPeriods = []) {
     });
   });
 
+  // Wire add mob button
+  wrap.querySelector('#ls-add-mob')?.addEventListener('click', () => _showAddMobForm(container, farm, period, allPeriods));
+
   // Wire mob buttons
   wrap.querySelectorAll('.ls-add-move').forEach(btn => {
     btn.addEventListener('click', () => _showMovementForm(container, farm, items, btn.dataset.itemId, btn.dataset.itemName, period, allPeriods));
@@ -628,4 +631,146 @@ function _buildUnallocatedPanel(pendingInvoices, items, movements) {
   ].join('') : '';
 
   return pendingCard + archiveCard;
+}
+
+// ── Add mob form ──────────────────────────────────────────────
+async function _showAddMobForm(container, farm, period, allPeriods) {
+  const CATTLE_CLASSES = ['Calf','Weaner','Heifer','Steer','Cow','Bull'];
+  const SHEEP_CLASSES  = ['Lamb','Weaner','Ewe Lamb','Wether Lamb','Ewe','Wether','Ram'];
+  const currentYear = new Date().getFullYear();
+  const years = Array.from({length:15}, (_,i) => currentYear - i);
+
+  openModal({
+    title: 'Add livestock mob',
+    bodyHTML: `
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Species <span style="color:var(--red)">*</span></label>
+            <select class="form-select" id="am-species">
+              <option value="cattle">Cattle</option>
+              <option value="sheep">Sheep</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Breed / type <span style="color:var(--red)">*</span></label>
+            <input class="form-input" id="am-breed" type="text" placeholder="e.g. Angus, Wagyu X">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Class <span style="color:var(--red)">*</span></label>
+            <select class="form-select" id="am-class">
+              ${CATTLE_CLASSES.map(c=>`<option value="${c.toLowerCase()}">${c}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Sex</label>
+            <select class="form-select" id="am-sex">
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+              <option value="mixed">Mixed</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Birth year</label>
+            <select class="form-select" id="am-year">
+              <option value="">M/A (mixed age)</option>
+              ${years.map(y=>`<option value="${y}">${y}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Mob name <span style="color:var(--red)">*</span></label>
+          <input class="form-input" id="am-name" type="text" placeholder="e.g. Angus Heifers 2024">
+          <div style="font-size:11px;color:var(--hint);margin-top:3px">Auto-filled from selections above — edit if needed</div>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Opening head count</label>
+          <input class="form-input" id="am-opening" type="number" min="0" step="1" placeholder="0 — enter if known">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Notes</label>
+          <input class="form-input" id="am-notes" type="text" placeholder="Optional">
+        </div>
+      </div>`,
+    confirmLabel: 'Add mob',
+    onConfirm: async (modal) => {
+      const breed  = modal.querySelector('#am-breed')?.value?.trim();
+      const cls    = modal.querySelector('#am-class')?.value;
+      const sex    = modal.querySelector('#am-sex')?.value;
+      const year   = modal.querySelector('#am-year')?.value;
+      const name   = modal.querySelector('#am-name')?.value?.trim();
+      const opening = parseInt(modal.querySelector('#am-opening')?.value) || 0;
+      const notes  = modal.querySelector('#am-notes')?.value?.trim() || null;
+
+      if (!breed) { toast('Breed is required', 'error'); return false; }
+      if (!name)  { toast('Mob name is required', 'error'); return false; }
+
+      const attrs = { breed, class: cls, sex };
+      if (year) attrs.birth_year = parseInt(year);
+
+      await dbInsert('stock_items', {
+        farm_id: farm.id,
+        category: 'livestock',
+        name,
+        subgroup: breed,
+        default_unit: 'head',
+        attributes: attrs,
+        active: true,
+        notes,
+      });
+
+      // Post opening balance if provided
+      if (opening > 0 && period) {
+        const openingDate = new Date(new Date(period.period_start).getTime() - 86400000).toISOString().slice(0,10);
+        // Get the new item id
+        const newItems = await dbSelect('stock_items', `farm_id=eq.${farm.id}&name=eq.${encodeURIComponent(name)}&order=created_at.desc&limit=1`);
+        if (newItems[0]) {
+          await dbInsert('stock_movements', {
+            farm_id: farm.id,
+            item_id: newItems[0].id,
+            location_id: null,
+            movement_type: 'adjustment',
+            qty: opening,
+            direction: 1,
+            unit: 'head',
+            occurred_on: openingDate,
+            reason_code: 'opening_balance',
+            note: 'Opening balance',
+          });
+        }
+      }
+
+      toast(`${name} added`, 'success');
+      await _render(container, farm, period, allPeriods);
+    }
+  });
+
+  // Wire auto-name generation
+  setTimeout(() => {
+    const speciesEl = document.getElementById('am-species');
+    const breedEl   = document.getElementById('am-breed');
+    const classEl   = document.getElementById('am-class');
+    const sexEl     = document.getElementById('am-sex');
+    const yearEl    = document.getElementById('am-year');
+    const nameEl    = document.getElementById('am-name');
+
+    // Update class options when species changes
+    speciesEl?.addEventListener('change', () => {
+      const classes = speciesEl.value === 'sheep' ? SHEEP_CLASSES : CATTLE_CLASSES;
+      if (classEl) classEl.innerHTML = classes.map(c=>`<option value="${c.toLowerCase()}">${c}</option>`).join('');
+      autoName();
+    });
+
+    const autoName = () => {
+      if (!nameEl || nameEl._manuallyEdited) return;
+      const parts = [breedEl?.value?.trim(), classEl?.options[classEl?.selectedIndex]?.text, yearEl?.value].filter(Boolean);
+      nameEl.value = parts.join(' ');
+    };
+
+    [breedEl, classEl, sexEl, yearEl].forEach(el => el?.addEventListener('input', autoName));
+    [breedEl, classEl, sexEl, yearEl].forEach(el => el?.addEventListener('change', autoName));
+    nameEl?.addEventListener('input', () => { nameEl._manuallyEdited = true; });
+  }, 50);
 }
