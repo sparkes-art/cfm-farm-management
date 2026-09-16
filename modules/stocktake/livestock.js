@@ -1,7 +1,7 @@
 // modules/stocktake/livestock.js
 // Livestock stocktake — mob ledger, movement entry, opening balances
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js';
+import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js';
 import { getActiveFarm, canWrite } from '../../js/app-state.js';
 import { toast, openModal, qs } from '../../js/ui.js';
 
@@ -30,7 +30,7 @@ async function _render(container, farm, period, allPeriods = []) {
 
   const [items, movements, pendingInvoices] = await Promise.all([
     dbSelect('stock_items', `farm_id=eq.${farm.id}&category=eq.livestock&active=eq.true&order=subgroup,name`),
-    dbSelect('stock_movements', `farm_id=eq.${farm.id}&select=id,item_id,movement_type,signed_qty,qty,unit,occurred_on,note,source_ref&order=occurred_on.desc`),
+    dbSelect('stock_movements', `farm_id=eq.${farm.id}&select=id,item_id,movement_type,signed_qty,qty,unit,occurred_on,note,source_ref,source_system&order=occurred_on.desc`),
     // Livestock invoices in this period that have unallocated lines
     period ? dbSelect('invoices',
       `farm_id=eq.${farm.id}&master_unit=eq.head&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&select=id,buyer,invoice_date,livestock_lines,agent_name,rcti_files`
@@ -136,7 +136,7 @@ async function _render(container, farm, period, allPeriods = []) {
   const totalOpening = Object.values(openingBalance).reduce((s, v) => s + v, 0);
 
   // ── Unallocated sales panel ─────────────────────────────────
-  const unallocatedHtml = _buildUnallocatedPanel(pendingInvoices, items);
+  const unallocatedHtml = _buildUnallocatedPanel(pendingInvoices, items, movements);
 
 
   const groupHtml = Object.entries(groups).map(([group, groupItems]) => {
@@ -212,12 +212,9 @@ async function _render(container, farm, period, allPeriods = []) {
       </div>
     </div>
 
-    <!-- Mob grids -->
-    ${groupHtml}
-
-    <!-- Recent movements -->
+    <!-- Period movements -->
     ${periodMovements.length ? `
-    <div class="card" style="margin-top:16px;overflow:hidden">
+    <div class="card" style="margin-bottom:16px;overflow:hidden">
       <div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--page-bg)">
         <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Period movements</span>
       </div>
@@ -235,7 +232,10 @@ async function _render(container, farm, period, allPeriods = []) {
           </tr>`;
         }).join('')}
       </table>
-    </div>` : ''}`;
+    </div>` : ''}
+
+    <!-- Mob grids -->
+    ${groupHtml}`;
 
   // Wire period timeline buttons
   wrap.querySelectorAll('.ls-period-btn').forEach(btn => {
@@ -266,6 +266,30 @@ async function _render(container, farm, period, allPeriods = []) {
       try {
         const qtyVal = parseInt(btn.dataset.head, 10);
         if (!qtyVal || isNaN(qtyVal)) throw new Error('Invalid head count');
+
+        // Check if the invoice date falls in a locked period
+        const invoiceDate = btn.dataset.date;
+        const targetPeriod = allPeriods.find(p => invoiceDate >= p.period_start && invoiceDate <= p.period_end);
+        const openPeriod = allPeriods.find(p => p.status === 'open');
+
+        let postDate = invoiceDate;
+        if (targetPeriod && targetPeriod.status === 'locked') {
+          if (openPeriod) {
+            const useOpen = confirm(
+              `The period for ${invoiceDate} is locked.\n\n` +
+              `Post this movement to the current open period (${openPeriod.period_start}) instead?\n\n` +
+              `Click Cancel to unlock the locked period first.`
+            );
+            if (!useOpen) {
+              toast('Unlock the period in Supabase then try again', 'info');
+              btn.disabled = false; btn.textContent = 'Allocate →';
+              return;
+            }
+            postDate = openPeriod.period_start;
+          } else {
+            throw new Error(`Period for ${invoiceDate} is locked and no open period exists. Unlock the period first.`);
+          }
+        }
         await dbInsert('stock_movements', {
           farm_id: farm.id,
           item_id: mobId,
@@ -273,7 +297,7 @@ async function _render(container, farm, period, allPeriods = []) {
           movement_type: 'sale',
           qty: qtyVal,
           unit: 'head',
-          occurred_on: btn.dataset.date,
+          occurred_on: postDate,
           source_system: 'invoices',
           source_ref: btn.dataset.invoiceId,
           note: btn.dataset.note,
@@ -284,6 +308,58 @@ async function _render(container, farm, period, allPeriods = []) {
         toast('Allocation failed: ' + e.message, 'error');
         btn.disabled = false; btn.textContent = 'Allocate →';
       }
+    });
+  });
+
+  // Wire re-allocation (edit) buttons
+  wrap.querySelectorAll('.ls-realloc-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      // Build a quick mob picker modal
+      const mobOpts = items.map(i => `<option value="${i.id}">${i.name}</option>`).join('');
+      openModal({
+        title: 'Edit mob allocation',
+        bodyHTML: `
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <p style="font-size:13px;color:var(--hint)">Select the correct mob for this sale line.</p>
+            <div class="form-group">
+              <label class="form-label">Mob</label>
+              <select class="form-select" id="realloc-mob">
+                <option value="">Select mob…</option>
+                ${mobOpts}
+              </select>
+            </div>
+          </div>`,
+        confirmLabel: 'Update allocation',
+        onConfirm: async (modal) => {
+          const newMobId = modal.querySelector('#realloc-mob')?.value;
+          if (!newMobId) { toast('Select a mob', 'error'); return false; }
+          const qtyVal = parseInt(btn.dataset.head, 10);
+          // Delete old movement if it exists
+          if (btn.dataset.movementId) {
+            try {
+              await dbDelete('stock_movements', btn.dataset.movementId);
+            } catch(e) { console.warn('Could not delete old movement:', e); }
+          }
+          // Insert new movement
+          const targetPeriod = allPeriods.find(p => btn.dataset.date >= p.period_start && btn.dataset.date <= p.period_end);
+          const postDate = (targetPeriod && targetPeriod.status !== 'locked') ? btn.dataset.date
+            : (allPeriods.find(p => p.status === 'open')?.period_start || btn.dataset.date);
+          await dbInsert('stock_movements', {
+            farm_id: farm.id,
+            item_id: newMobId,
+            location_id: null,
+            movement_type: 'sale',
+            qty: qtyVal,
+            unit: 'head',
+            occurred_on: postDate,
+            source_system: 'invoices',
+            source_ref: btn.dataset.invoiceId,
+            note: btn.dataset.note,
+          });
+          toast('Allocation updated', 'success');
+          await _render(container, farm, period, allPeriods);
+        }
+      });
     });
   });
 
@@ -442,16 +518,30 @@ async function _showMovementForm(container, farm, items, preItemId, preItemName,
   }, 50);
 }
 // ── Unallocated sales panel builder ──────────────────────────
-function _buildUnallocatedPanel(pendingInvoices, items) {
+function _buildUnallocatedPanel(pendingInvoices, items, movements) {
+  // movements that came from invoices (allocated)
+  const allocatedByInvoice = {};
+  movements.filter(m => m.source_system === 'invoices' && m.source_ref).forEach(m => {
+    if (!allocatedByInvoice[m.source_ref]) allocatedByInvoice[m.source_ref] = [];
+    allocatedByInvoice[m.source_ref].push(m);
+  });
+
   const unallocated = [];
+  const allocated = [];
   pendingInvoices.forEach(inv => {
     if (!inv.livestock_lines?.length) return;
     inv.livestock_lines.forEach((line, idx) => {
       if (!line.head) return;
-      unallocated.push({ inv, line, idx });
+      // Check if this invoice has an allocated movement
+      const invMovements = allocatedByInvoice[inv.id] || [];
+      if (invMovements.length > 0) {
+        allocated.push({ inv, line, idx, movement: invMovements[idx] || invMovements[0] });
+      } else {
+        unallocated.push({ inv, line, idx });
+      }
     });
   });
-  if (!unallocated.length) return '';
+  if (!unallocated.length && !allocated.length) return '';
 
   const mobOpts = items.map(si =>
     `<option value="${si.id}">${si.name}</option>`
@@ -486,8 +576,8 @@ function _buildUnallocatedPanel(pendingInvoices, items) {
     ].join('');
   }).join('');
 
-  return [
-    `<div class="card" style="margin-bottom:16px;overflow:hidden;border:2px solid var(--amber)">`,
+  const pendingCard = unallocated.length ? [
+    `<div class="card" style="margin-bottom:12px;overflow:hidden;border:2px solid var(--amber)">`,
     `<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:#fffbeb;`,
     `display:flex;align-items:center;justify-content:space-between">`,
     `<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#92400e">`,
@@ -496,5 +586,48 @@ function _buildUnallocatedPanel(pendingInvoices, items) {
     `</div>`,
     rows,
     `</div>`,
-  ].join('');
+  ].join('') : '';
+
+  // Allocated / archive section
+  const idToName = {};
+  // items already in scope
+  const archiveRows = allocated.map(({ inv, line, idx, movement }) => {
+    const buyer = (inv.buyer || inv.agent_name || '—').replace(/"/g, '');
+    const mobName = movement ? (items.find(i => i.id === movement.item_id)?.name || movement.item_id) : '—';
+    const docLink = inv.rcti_files?.length
+      ? `<a href="${inv.rcti_files[0].url}" target="_blank" style="font-size:10px;color:var(--blue);text-decoration:none">📄</a>`
+      : '';
+    return [
+      `<div style="display:grid;grid-template-columns:90px 1fr 60px 1fr 100px;`,
+      `gap:8px;padding:9px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">`,
+      `<div style="color:var(--hint)">${inv.invoice_date}</div>`,
+      `<div><span style="color:var(--ink)">${line.description||'—'}</span> `,
+      `<span style="color:var(--hint);font-size:11px">${buyer}</span> ${docLink}</div>`,
+      `<div style="font-weight:600">${line.head} hd</div>`,
+      `<div style="color:var(--green);font-weight:500">→ ${mobName}</div>`,
+      `<div><button class="btn btn-ghost btn-sm ls-realloc-btn" `,
+      `data-movement-id="${movement?.id||''}" `,
+      `data-invoice-id="${inv.id}" data-line-idx="${idx}" `,
+      `data-head="${line.head}" data-date="${inv.invoice_date}" data-note="Sale to ${buyer}" `,
+      `style="font-size:11px;color:var(--amber)">✎ Edit</button></div>`,
+      `</div>`,
+    ].join('');
+  }).join('');
+
+  const archiveCard = allocated.length ? [
+    `<div class="card" style="margin-bottom:12px;overflow:hidden">`,
+    `<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--page-bg);`,
+    `display:flex;align-items:center;justify-content:space-between;cursor:pointer" `,
+    `onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">`,
+    `<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">`,
+    `✓ ${allocated.length} allocated sale${allocated.length!==1?'s':''}</span>`,
+    `<span style="font-size:11px;color:var(--hint)">▾ show/hide</span>`,
+    `</div>`,
+    `<div style="display:none">`,
+    archiveRows,
+    `</div>`,
+    `</div>`,
+  ].join('') : '';
+
+  return pendingCard + archiveCard;
 }
