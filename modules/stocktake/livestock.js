@@ -213,6 +213,38 @@ async function _render(container, farm, period, allPeriods = []) {
       </div>
     </div>
 
+  // ── Period movements table ────────────────────────────────
+  // Fetch invoice lines for weight/price reference
+  const invoiceMap = {};
+  pendingInvoices.forEach(inv => {
+    (inv.livestock_lines || []).forEach((line, idx) => {
+      invoiceMap[inv.id + ':' + idx] = line;
+    });
+  });
+
+  const movementRows = periodMovements.slice(0, 20).map(m => {
+    const item = items.find(i => i.id === m.item_id);
+    const mt = MOVE_TYPES[m.movement_type] || { label: m.movement_type, color: 'var(--hint)' };
+    const qty = parseFloat(m.signed_qty) || 0;
+    // Get weight/price from linked invoice line or movement attributes
+    const invLine = m.source_ref ? invoiceMap[m.source_ref] : null;
+    const attrs = m.attributes ? (typeof m.attributes === 'string' ? JSON.parse(m.attributes) : m.attributes) : null;
+    const avgWt = attrs?.avg_weight_kg || invLine?.avg_weight_kg || null;
+    const price = invLine?.price || null;
+    const priceBasis = invLine?.price_basis || 'per_kg';
+    const showWtPrice = ['sale', 'purchase', 'transfer_in', 'transfer_out'].includes(m.movement_type);
+
+    return `<tr style="border-bottom:1px solid var(--border-light);font-size:12px">
+      <td style="padding:8px 14px;color:var(--hint)">${m.occurred_on}</td>
+      <td style="padding:8px 14px;font-weight:500;color:var(--ink)">${item?.name || '—'}</td>
+      <td style="padding:8px 14px;color:${mt.color}">${mt.label}</td>
+      <td style="padding:8px 14px;text-align:right;font-weight:600;color:${qty > 0 ? 'var(--green)' : 'var(--red)'}">${qty > 0 ? '+' : ''}${fN(qty)}</td>
+      <td style="padding:8px 14px;text-align:right;color:var(--hint)">${showWtPrice && avgWt ? fN(avgWt) + ' kg' : '—'}</td>
+      <td style="padding:8px 14px;text-align:right;color:var(--hint)">${showWtPrice && price ? '$' + price + (priceBasis === 'per_kg' ? '/kg' : '/hd') : '—'}</td>
+      <td style="padding:8px 14px;color:var(--hint)">${m.note || ''}</td>
+    </tr>`;
+  }).join('');
+
     <!-- Period movements -->
     ${periodMovements.length ? `
     <div class="card" style="margin-bottom:16px;overflow:hidden">
@@ -220,18 +252,18 @@ async function _render(container, farm, period, allPeriods = []) {
         <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Period movements</span>
       </div>
       <table style="width:100%;border-collapse:collapse">
-        ${periodMovements.slice(0,20).map(m => {
-          const item = items.find(i=>i.id===m.item_id);
-          const mt = MOVE_TYPES[m.movement_type] || {label:m.movement_type,color:'var(--hint)'};
-          const qty = parseFloat(m.signed_qty)||0;
-          return `<tr style="border-bottom:1px solid var(--border-light);font-size:12px">
-            <td style="padding:8px 14px;color:var(--hint)">${m.occurred_on}</td>
-            <td style="padding:8px 14px;font-weight:500;color:var(--ink)">${item?.name||'—'}</td>
-            <td style="padding:8px 14px;color:${mt.color}">${mt.label}</td>
-            <td style="padding:8px 14px;text-align:right;font-weight:600;color:${qty>0?'var(--green)':'var(--red)'}">${qty>0?'+':''}${fN(qty)}</td>
-            <td style="padding:8px 14px;color:var(--hint)">${m.note||''}</td>
-          </tr>`;
-        }).join('')}
+        <thead>
+          <tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">
+            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Date</th>
+            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Mob</th>
+            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Type</th>
+            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:right">Head</th>
+            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:right">Avg kg</th>
+            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:right">Price</th>
+            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Note</th>
+          </tr>
+        </thead>
+        <tbody>${movementRows}</tbody>
       </table>
     </div>` : ''}
 
@@ -268,6 +300,11 @@ async function _render(container, farm, period, allPeriods = []) {
         const qtyVal = parseInt(btn.dataset.head, 10);
         if (!qtyVal || isNaN(qtyVal)) throw new Error('Invalid head count');
 
+        // Get estimated weight if this was a no-weight invoice line
+        const allocRow = btn.closest('div[style*="grid"]') || btn.parentElement?.parentElement;
+        const estWeightEl = allocRow?.querySelector('.ls-alloc-weight');
+        const estWeight = estWeightEl ? parseFloat(estWeightEl.value) || null : null;
+
         // Check if the invoice date falls in a locked period
         const invoiceDate = btn.dataset.date;
         const targetPeriod = allPeriods.find(p => invoiceDate >= p.period_start && invoiceDate <= p.period_end);
@@ -302,6 +339,7 @@ async function _render(container, farm, period, allPeriods = []) {
           source_system: 'invoices',
           source_ref: btn.dataset.invoiceId + ':' + btn.dataset.lineIdx,
           note: btn.dataset.note,
+          attributes: estWeight ? JSON.stringify({ avg_weight_kg: estWeight, weight_estimated: true }) : null,
         });
         toast('Allocated to mob', 'success');
         await _render(container, farm, period, allPeriods);
@@ -554,7 +592,9 @@ function _buildUnallocatedPanel(pendingInvoices, items, movements) {
     const docLink = inv.rcti_files?.length
       ? `<a href="${inv.rcti_files[0].url}" target="_blank" style="font-size:10px;color:var(--blue);text-decoration:none">📄 View statement</a>`
       : '';
-    const weightStr = line.avg_weight_kg ? line.avg_weight_kg + 'kg' : line.weight_estimated ? 'est.' : '—';
+    const weightStr = line.no_weight
+      ? `<span style="color:var(--amber);font-size:11px">Est. needed</span>`
+      : line.avg_weight_kg ? line.avg_weight_kg + 'kg' : '—';
     const priceStr = line.price ? '$' + line.price + (line.price_basis === 'per_kg' ? '/kg' : '/hd') : '—';
 
     return [
@@ -569,7 +609,10 @@ function _buildUnallocatedPanel(pendingInvoices, items, movements) {
       `<div><select class="form-select ls-alloc-mob" `,
       `data-invoice-id="${inv.id}" data-line-idx="${idx}" `,
       `data-head="${line.head}" data-date="${inv.invoice_date}" data-note="Sale to ${buyer}" `,
-      `style="font-size:11px"><option value="">Select mob…</option>${mobOpts}</select></div>`,
+      `data-no-weight="${line.no_weight ? '1' : ''}" `,
+      `style="font-size:11px"><option value="">Select mob…</option>${mobOpts}</select>`,
+      line.no_weight ? `<input type="number" class="form-input ls-alloc-weight" step="0.1" placeholder="Avg kg (est.)" style="font-size:11px;margin-top:4px;padding:4px 8px">` : '',
+      `</div>`,
       `<div><button class="btn btn-sm btn-primary ls-alloc-btn" `,
       `data-invoice-id="${inv.id}" data-line-idx="${idx}" `,
       `data-head="${line.head}" data-date="${inv.invoice_date}" data-note="Sale to ${buyer}" `,

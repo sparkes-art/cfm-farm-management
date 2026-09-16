@@ -1359,7 +1359,7 @@ export async function openLivestockForm(container, existing = null) {
             {label:'Description',w:'1fr'},
             {label:'Head',w:'55px'},
             {label:'Avg kg',w:'75px'},
-            {label:'Est?',w:'55px'},
+            {label:'No wt?',w:'55px'},
             {label:'Price basis / Price',w:'90px'},
             {label:'Gross',w:'90px'},
             {label:'',w:'30px'},
@@ -1419,10 +1419,10 @@ export async function openLivestockForm(container, existing = null) {
     div.innerHTML = `
       <input class="form-input ls-desc" type="text" placeholder="e.g. 18mo, PTIC" value="${data.description||''}" style="font-size:12px;padding:6px 8px">
       <input class="form-input ls-head" type="number" min="1" placeholder="0" value="${data.head||''}" style="font-size:12px;padding:6px 8px">
-      <input class="form-input ls-weight" type="number" step="0.1" placeholder="kg" value="${data.avg_weight_kg||''}" style="font-size:12px;padding:6px 8px">
-      <div style="display:flex;align-items:center;gap:4px">
-        <input type="checkbox" class="ls-est" ${data.weight_estimated?'checked':''} id="est-${Math.random().toString(36).slice(2)}">
-        <label style="font-size:10px;color:var(--hint)">Est</label>
+      <input class="form-input ls-weight" type="number" step="0.1" placeholder="kg" value="${data.avg_weight_kg&&!data.no_weight?data.avg_weight_kg:''}" style="font-size:12px;padding:6px 8px" ${data.no_weight?'disabled style="opacity:.3;pointer-events:none"':''}>
+      <div style="display:flex;align-items:center;gap:4px;justify-content:center">
+        <input type="checkbox" class="ls-nowt" ${data.no_weight?'checked':''} id="nowt-${Math.random().toString(36).slice(2)}" title="No weight provided — manager estimates at allocation">
+        <label style="font-size:9px;color:var(--hint);cursor:pointer">No wt</label>
       </div>
       <div style="position:relative">
         <select class="form-select ls-price-basis" style="font-size:11px;padding:3px 4px;margin-bottom:3px;width:100%">
@@ -1475,6 +1475,18 @@ export async function openLivestockForm(container, existing = null) {
       div.querySelector('.' + cls).addEventListener('input', () => recalcLine(cls.replace('ls-',''))));
     div.querySelector('.ls-gross').addEventListener('input', () => recalcLine('gross'));
     div.querySelector('.ls-price-basis').addEventListener('change', () => recalcLine('basis'));
+    div.querySelector('.ls-nowt')?.addEventListener('change', function() {
+      const weightEl = div.querySelector('.ls-weight');
+      if (this.checked) {
+        weightEl.value = '';
+        weightEl.disabled = true;
+        weightEl.style.opacity = '.3';
+      } else {
+        weightEl.disabled = false;
+        weightEl.style.opacity = '1';
+      }
+      recalcLine('head');
+    });
     div.querySelector('.ls-remove').addEventListener('click', () => { div.remove(); recalcTotals(); });
     recalcLine();
     return div;
@@ -1512,6 +1524,7 @@ export async function openLivestockForm(container, existing = null) {
       const ext = data.extracted;
       if (!ext) throw new Error('No data returned');
       modal._lsExtractionId = data.extraction_id;
+      modal._extracted = ext;
 
       // Populate header fields
       const set = (id, val) => { const el = modal.querySelector('#' + id); if (el && val) { el.value = val; el.style.borderColor = ''; } };
@@ -1583,8 +1596,9 @@ export async function openLivestockForm(container, existing = null) {
         const line = {
           description: div.querySelector('.ls-desc')?.value?.trim(),
           head,
-          avg_weight_kg: parseFloat(div.querySelector('.ls-weight')?.value) || null,
-          weight_estimated: div.querySelector('.ls-est')?.checked || false,
+          no_weight: div.querySelector('.ls-nowt')?.checked || false,
+          avg_weight_kg: div.querySelector('.ls-nowt')?.checked ? null : (parseFloat(div.querySelector('.ls-weight')?.value) || null),
+          weight_estimated: false,
           price_basis: div.querySelector('.ls-price-basis')?.value,
           price: parseFloat(div.querySelector('.ls-price')?.value) || null,
           gross,
@@ -1612,12 +1626,26 @@ export async function openLivestockForm(container, existing = null) {
         if (res.ok) statementFiles = [...statementFiles, { url:`https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/public/cfm-documents/${path}`, filename:newFile.name }];
       }
 
-      // Save correction
-      if (modal._lsExtractionId) {
-        const corrected = { agent_name: agent, sale_date: date, sale_location: location, commission_amount: commission, lots: lines };
+      // Save correction — merge form values with original extraction to preserve category for AI learning
+      if (modal._lsExtractionId && modal._extracted) {
+        const correctedLots = lines.map((line, i) => {
+          const origLot = modal._extracted?.lots?.[i] || {};
+          return {
+            category: origLot.category || '',    // preserve from extraction — mob picker handles this in stocktake
+            description: line.description || '',
+            head: line.head,
+            avg_weight_kg: line.avg_weight_kg,
+            weight_estimated: line.weight_estimated,
+            price_basis: line.price_basis,
+            price: line.price,
+            gross: line.gross,
+          };
+        });
         fetch('/api/extract-livestock', {
           method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ farm_id: farm.id, save_example: true, extraction_id: modal._lsExtractionId, correction: corrected })
+          body: JSON.stringify({ farm_id: farm.id, save_example: true, extraction_id: modal._lsExtractionId,
+            correction: { agent_name: agent, sale_date: date, sale_location: location, lots: correctedLots }
+          })
         }).catch(()=>{});
       }
 

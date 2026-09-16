@@ -84,19 +84,19 @@ exports.handler = async (event) => {
     'RULES:\n' +
     '1. sale_date: YYYY-MM-DD format. Convert "01-SEP-2026"→"2026-09-01".\n' +
     '2. All monetary values in AUD only.\n' +
-    '3. For each lot: estimate price_basis as "per_kg" if live weight is shown, else "per_head".\n' +
-    '4. weight_estimated: true if weight shown as "est" or "approx" or clearly calculated not weighed.\n' +
-    '5. category: must be one of: Steer, Heifer, Bull, Cow, PTIC Cow, Cull Cow, Weaner Steer, Weaner Heifer, Wether, Ram, Ewe, Ewe Lamb, Wether Lamb, X-bred Lamb, PTIC Ewe, Cull Ewe.\n\n' +
+    '3. description: the full lot description as it appears on the statement (e.g. "Angus x 42 16,297kg @ $5.00"). This is the most important field.\n' +
+    '4. For each lot: estimate price_basis as "per_kg" if live weight is shown, else "per_head".\n' +
+    '5. weight_estimated: true if weight shown as "est" or "approx" or clearly calculated not weighed.\n' +
+    '6. category: best match from: Steer, Heifer, Bull, Cow, PTIC Cow, Cull Cow, Weaner Steer, Weaner Heifer, Wether, Ram, Ewe, Ewe Lamb, Wether Lamb, X-bred Lamb, PTIC Ewe, Cull Ewe.\n\n' +
     '{\n' +
     '  "agent_name": "auctioneer or buyer company name",\n' +
     '  "sale_date": "YYYY-MM-DD",\n' +
     '  "sale_location": "sale yard name or location",\n' +
     '  "vendor_number": "vendor or account number if shown",\n' +
-    '  "commission_amount": 0,\n' +
     '  "lots": [\n' +
     '    {\n' +
     '      "category": "Steer",\n' +
-    '      "description": "18mo description",\n' +
+    '      "description": "full lot description from statement",\n' +
     '      "head": 0,\n' +
     '      "avg_weight_kg": 0,\n' +
     '      "weight_estimated": false,\n' +
