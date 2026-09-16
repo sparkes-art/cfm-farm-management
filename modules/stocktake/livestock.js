@@ -250,8 +250,8 @@ async function _showOpeningForm(container, farm, itemId, itemName, period, allPe
   const date = period ? period.period_start : new Date().toISOString().slice(0,10);
   // Use the day before period start as the opening balance date
   const openingDate = period
-    ? new Date(new Date(date).getTime() - 86400000).toISOString().slice(0,10)
-    : date;
+    ? new Date(new Date(period.period_start).getTime() - 86400000).toISOString().slice(0,10)
+    : new Date(new Date().getFullYear(), 0, 0).toISOString().slice(0,10); // Dec 31 prior year
 
   openModal({
     title: `Opening balance — ${itemName}`,
