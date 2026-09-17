@@ -304,18 +304,18 @@ async function _loadData() {
   const gradeLabel = document.getElementById('mp-grade-label');
   const gradeMap = { Wheat: 'APW1', Barley: 'BAR1', Canola: 'CAN1', 'Faba Beans': 'FAB2', Lentils: 'NIPT1' };
   const grade = gradeMap[commodity?.name] || null;
+  const cottonRegion = farm?.settings?.cottonRegion || null;
+  const effectiveRegion = grainSite || (commodity?.name === 'Cotton Lint' ? cottonRegion : null);
 
-  if (siteLabel) siteLabel.textContent = grainSite ? '· ' + grainSite : '';
+  if (siteLabel) siteLabel.textContent = effectiveRegion ? '· ' + effectiveRegion : '';
   if (gradeLabel) gradeLabel.textContent = grade ? 'Grade: ' + grade + ' · Price history' : 'Price history';
 
-  // Build query — only show prices for this farm's configured delivery site/region
-  // Global prices (farm_id IS NULL) are scoped by region to avoid showing other farms' data
+  // Build query — show prices for this farm's configured region (grain site or cotton region)
+  // Global prices (no farm_id) are included when they match the farm's region
   let priceQuery = 'commodity_id=eq.' + _selectedCommodityId + '&price_date=gte.' + cutoffStr + '&select=*&order=price_date.asc';
-  if (grainSite) {
-    // Filter to this farm's configured site only
-    priceQuery += '&region=eq.' + encodeURIComponent(grainSite);
+  if (effectiveRegion) {
+    priceQuery += '&region=eq.' + encodeURIComponent(effectiveRegion);
   } else if (farm) {
-    // Only show this farm's manually entered prices
     priceQuery += '&farm_id=eq.' + farm.id;
   }
 
