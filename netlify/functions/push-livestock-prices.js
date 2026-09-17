@@ -95,28 +95,37 @@ async function fetchIndicator(indicator) {
     console.log(`[${indicator.name}] Page fetched (${html.length} chars), snippet:`, snippet);
 
     // Try multiple extraction patterns
+    // Cattle indicators are typically 200-800 c/kg — avoid matching years like 2026
     const priceMatch =
-      html.match(/(\d{3,4}(?:\.\d+)?)\s*(?:c\/kg|¢\/kg|cents per kg)/i) ||
-      html.match(/current[^"]*?[:\s]+(\d{3,4}(?:\.\d+)?)/i) ||
-      html.match(/<[^>]*class="[^"]*(?:price|indicator|value|current)[^"]*"[^>]*>\s*(\d{3,4}(?:\.\d+)?)/i) ||
-      html.match(/<strong[^>]*>(\d{3,4}(?:\.\d+)?)<\/strong>/i) ||
-      html.match(/data-value="(\d{3,4}(?:\.\d+)?)"/i) ||
-      html.match(/>(\d{3,4}(?:\.\d+)?)\s*</);
+      html.match(/(\d{3}(?:\.\d+)?)\s*(?:c\/kg|¢\/kg|cents per kg)/i) ||
+      html.match(/data-value="(\d{3}(?:\.\d+)?)"/i) ||
+      html.match(/"currentValue"\s*:\s*(\d{3}(?:\.\d+)?)/i) ||
+      html.match(/class="[^"]*(?:indicator-value|current-price|price-value)[^"]*"[^>]*>\s*(\d{3}(?:\.\d+)?)/i) ||
+      html.match(/<strong[^>]*>\s*(\d{3}(?:\.\d+)?)\s*<\/strong>/i);
 
     if (priceMatch) {
-      return {
-        indicator: indicator.name,
-        label: indicator.label,
-        unit: indicator.unit,
-        price: parseFloat(priceMatch[1]),
-        date: new Date().toISOString().split('T')[0],
-        source: 'html_scrape',
-      };
+      const price = parseFloat(priceMatch[1]);
+      // Sanity check — cattle indicators should be 100-1500 c/kg
+      if (price < 100 || price > 1500) {
+        console.error(`[${indicator.name}] Price ${price} out of expected range (100-1500), likely a parsing error`);
+      } else {
+        return {
+          indicator: indicator.name,
+          label: indicator.label,
+          unit: indicator.unit,
+          price,
+          date: new Date().toISOString().split('T')[0],
+          source: 'html_scrape',
+        };
+      }
     }
 
-    // Log the full HTML if we still can't find it
-    console.error(`[${indicator.name}] Could not extract price. Full HTML:`, html.slice(0, 5000));
-    throw new Error('Could not extract price from page');
+    // The price is embedded in a Power BI iframe — we need a different approach
+    // Log a targeted search of the HTML for debugging
+    const powerBiMatch = html.match(/powerbi\.com[^"']*/i);
+    console.error(`[${indicator.name}] Could not extract price from HTML. PowerBI ref: ${powerBiMatch?.[0]||'none'}`);
+    console.error(`[${indicator.name}] HTML excerpt around 'indicator':`, html.match(/.{0,200}indicator.{0,200}/i)?.[0]);
+    throw new Error('Could not extract price from page — data may be in Power BI iframe');
 
   } catch (err) {
     console.error(`[${indicator.name}] Failed:`, err.message);
@@ -127,15 +136,16 @@ async function fetchIndicator(indicator) {
 async function upsertPrice(result) {
   if (!result?.price || isNaN(result.price)) return;
 
-  // Find or create a commodity for cattle indicators
+  // Find the commodity for cattle indicators (must exist in DB)
   const comRes = await fetch(
-    `${SUPABASE_URL}/rest/v1/commodities?name=eq.Cattle+Indicators&select=id`,
+    `${SUPABASE_URL}/rest/v1/commodities?name=eq.Cattle%20Indicators&select=id`,
     { headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}` } }
   );
   const coms = await comRes.json();
   let commodityId = coms?.[0]?.id;
 
   if (!commodityId) {
+    // Try inserting without is_livestock column
     const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/commodities`, {
       method: 'POST',
       headers: {
@@ -144,8 +154,13 @@ async function upsertPrice(result) {
         'Content-Type': 'application/json',
         'Prefer': 'return=representation',
       },
-      body: JSON.stringify({ name: 'Cattle Indicators', is_livestock: true }),
+      body: JSON.stringify({ name: 'Cattle Indicators' }),
     });
+    if (!insertRes.ok) {
+      const err = await insertRes.text();
+      console.error('Could not create Cattle Indicators commodity:', err);
+      return;
+    }
     const inserted = await insertRes.json();
     commodityId = inserted?.[0]?.id;
   }
