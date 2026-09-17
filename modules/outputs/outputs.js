@@ -121,359 +121,147 @@ async function _loadTab() {
 async function _mountOverview(container) {
   const farm = getActiveFarm();
   if (!farm) { container.innerHTML = '<div class="empty-state"><p>No farm selected.</p></div>'; return; }
-  const season = getActiveSeason() || currentSeason();
   container.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>';
 
   try {
     await loadCommodities();
     const commodityList = getCommodities();
-    const idToName = {}; commodityList.forEach(c => { idToName[c.id] = c.name; });
     const settings = farm.settings || {};
     const cottonRegion = settings.cottonRegion || '';
     const grainSites = settings.grainSites || {};
 
-    const [contracts, invoices, budgets, harvests, forecasts, allPrices,
-           lsInvoices, stockItems, stockMovements] = await Promise.all([
-      dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
-      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=neq.head&select=id,gross_amount,total_quality_adj,total_qty,forward_contract_id,batches,status,buyer,invoice_date'),
-      dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
-      dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
-      dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.desc'),
-      dbSelect('market_prices', 'select=commodity_id,region,price_per_unit,price_date,unit&order=price_date.desc&limit=200'),
-      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&master_unit=eq.head&season=eq.' + season + '&select=id,total_qty,gross_amount,livestock_lines,invoice_date,left_farm_date,buyer'),
-      dbSelect('stock_items', 'farm_id=eq.' + farm.id + '&category=eq.livestock&active=eq.true&select=id,name,subgroup,attributes&order=subgroup,name'),
-      dbSelect('stock_movements', 'farm_id=eq.' + farm.id + '&select=id,item_id,signed_qty,qty,movement_type,occurred_on,source_ref,source_system,note&order=occurred_on.desc'),
-    ]);
+    // Fetch 14 days of prices for rolling average + movement
+    const allPrices = await dbSelect('market_prices',
+      'select=commodity_id,region,price_per_unit,price_date,unit&order=price_date.desc&limit=500'
+    );
 
-    const fM  = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + Math.round(n).toLocaleString();
-    const fN  = (n,dp=0) => n == null ? '—' : formatNumber(n,dp);
-    const fN2 = (n) => n == null ? '—' : formatNumber(n,2);
-    const fC  = (n,dp=2) => n == null ? '—' : formatCurrency(n,dp);
-    const pctBar = (pct, color, h='4px') => '<div style="height:'+h+';background:var(--border-light);border-radius:2px;overflow:hidden;margin-top:4px"><div style="height:100%;width:'+Math.min(100,pct||0)+'%;background:'+color+';border-radius:2px"></div></div>';
+    const fC = (n, dp=2) => n == null ? '—' : formatCurrency(n, dp);
+    const fPct = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
 
-    // ── Contract / invoiced position ─────────────────────────
-    const totalContractedVal = contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
-    let invoicedRev = 0, invoicedQty = 0;
-    invoices.forEach(inv => {
-      if (inv.batches) { const b=typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches; b.forEach(bt=>{const sl=(bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa');if(sl.length){invoicedRev+=sl.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);invoicedQty+=parseFloat(bt.qty)||0;}}); }
-      else { invoicedRev+=(parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0); }
-    });
-    const pctInvoiced = totalContractedVal ? Math.round(invoicedRev/totalContractedVal*100) : 0;
-    const pendingInvoices = invoices.filter(i=>i.status==='pending');
-
-    // ── Market prices (farm gate) ─────────────────────────────
-    const priceMap = {};
-    allPrices.forEach(p => {
-      if (!priceMap[p.commodity_id]) priceMap[p.commodity_id] = {};
-      if (!priceMap[p.commodity_id][p.region]) priceMap[p.commodity_id][p.region] = { price: parseFloat(p.price_per_unit), date: p.price_date, unit: p.unit };
-    });
-    const farmGatePrice = (comId, comName) => {
-      const regions = priceMap[comId]; if (!regions) return null;
-      const preferred = comName === 'Cotton Lint' ? cottonRegion : grainSites[comName];
-      if (preferred && regions[preferred]) return { ...regions[preferred], region: preferred };
-      const all = Object.entries(regions).map(([r,v])=>({...v,region:r})).sort((a,b)=>b.date.localeCompare(a.date));
-      return all[0] || null;
-    };
-
-    // ── Cropping summary (budget vs actual) ──────────────────
-    const cropRows = budgets.map(b => {
-      const name = idToName[b.commodity_id] || b.commodity || 'Other';
-      const budArea = parseFloat(b.area_ha)||0;
-      const budYield = parseFloat(b.budgeted_yield_per_ha||b.yield_per_ha)||0;
-      const budProd = parseFloat(b.budgeted_production)||(budArea*budYield);
-      const budPrice = parseFloat(b.price)||0;
-      // Harvest actuals
-      const hvsts = harvests.filter(h=>h.budget_id===b.id || h.commodity_id===b.commodity_id);
-      const hvstArea = hvsts.reduce((s,h)=>s+(parseFloat(h.area_ha)||0),0);
-      const hvstProd = hvsts.reduce((s,h)=>s+(parseFloat(h.actual_production)||0),0);
-      const hvstYield = hvstArea ? hvstProd/hvstArea : null;
-      // Forecast
-      const fcstMap2 = {};
-      forecasts.filter(f=>f.budget_id===b.id||f.commodity_id===b.commodity_id).forEach(f=>{ if(!fcstMap2[b.id]||f.forecast_date>fcstMap2[b.id].forecast_date) fcstMap2[b.id]=f; });
-      const fcst = fcstMap2[b.id];
-      const fcstProd = fcst ? parseFloat(fcst.forecast_production)||(parseFloat(fcst.area_ha||budArea)*parseFloat(fcst.yield_per_ha||budYield)) : null;
-      // Contracts for this commodity
-      const comContracts = contracts.filter(c=>idToName[c.commodity_id]===name||c.commodity===name);
-      const contractedQty = comContracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0),0);
-      const contractedVal = comContracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
-      const avgContractPrice = contractedQty ? contractedVal/contractedQty : null;
-      // Market price
-      const mkt = farmGatePrice(b.commodity_id, name);
-      // Invoiced
-      const comInvoicedRev = invoices.filter(i=>comContracts.some(c=>c.id===i.forward_contract_id)).reduce((s,i)=>{
-        if(i.batches){const bs=typeof i.batches==='string'?JSON.parse(i.batches):i.batches;return s+bs.flatMap(bt=>(bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa')).reduce((ss,l)=>ss+(parseFloat(l.amount)||0),0);}
-        return s+(parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0);
-      },0);
-      // Harvest complete flag (harvested area < budget area)
-      const harvComplete = hvstArea > 0 && budArea > 0 && hvstArea < budArea * 0.98;
-      return { name, budArea, budYield, budProd, budPrice, hvstArea, hvstProd, hvstYield, fcstProd, contractedQty, contractedVal, avgContractPrice, comInvoicedRev, mkt, unit: b.unit||'t', harvComplete };
-    });
-
-    // ── Livestock position ────────────────────────────────────
-    const stockBalances = {};
-    stockItems.forEach(i => { stockBalances[i.id] = 0; });
-    stockMovements.forEach(m => { if (stockBalances[m.item_id] !== undefined) stockBalances[m.item_id] += parseFloat(m.signed_qty)||0; });
-
-    // Year start for this farm
-    const yearStartMonth = (farm.settings?.yearStartMonth || 7) - 1;
-    const now = new Date();
-    const yearStart = new Date(now.getMonth() >= yearStartMonth ? now.getFullYear() : now.getFullYear()-1, yearStartMonth, 1);
-    const yearStartStr = yearStart.toISOString().slice(0,10);
-
-    // YTD movements per item
-    const ytdByItem = {};
-    stockItems.forEach(i => { ytdByItem[i.id] = { in:0, out:0, sales:0, deaths:0, naturalIncrease:0, purchases:0 }; });
-    stockMovements.filter(m => m.occurred_on >= yearStartStr).forEach(m => {
-      if (!ytdByItem[m.item_id]) return;
-      const qty = parseFloat(m.signed_qty)||0;
-      const absQty = Math.abs(parseFloat(m.qty)||0);
-      if (qty > 0) ytdByItem[m.item_id].in += qty;
-      if (qty < 0) ytdByItem[m.item_id].out += Math.abs(qty);
-      if (m.movement_type === 'sale') ytdByItem[m.item_id].sales += absQty;
-      if (m.movement_type === 'death') ytdByItem[m.item_id].deaths += absQty;
-      if (m.movement_type === 'natural_increase') ytdByItem[m.item_id].naturalIncrease += absQty;
-      if (m.movement_type === 'transfer_in') ytdByItem[m.item_id].purchases += absQty;
-    });
-
-    // Opening balance per item (before yearStart)
-    const openingByItem = {};
-    stockItems.forEach(i => {
-      openingByItem[i.id] = stockMovements.filter(m => m.item_id===i.id && m.occurred_on < yearStartStr).reduce((s,m)=>s+(parseFloat(m.signed_qty)||0),0);
-    });
-
-    // Sales revenue from livestock invoices
-    const lsGross = lsInvoices.reduce((s,i)=>s+(parseFloat(i.gross_amount)||0),0);
-    const lsHead  = lsInvoices.reduce((s,i)=>s+(parseFloat(i.total_qty)||0),0);
-    const lsAvgPerHead = lsHead ? lsGross/lsHead : null;
-
-    // Group by class for the mob table
-    const classOrder = ['bull','cow','heifer','steer','weaner','calf','other'];
-    const classLabel = { bull:'Bulls', cow:'Cows', heifer:'Heifers', steer:'Steers', weaner:'Weaners', calf:'Calves', other:'Other' };
-    const mobsByClass = {};
-    classOrder.forEach(cls => { mobsByClass[cls] = []; });
-    stockItems.forEach(i => {
-      const cls = i.attributes?.class || 'other';
-      const bucket = mobsByClass[cls] || mobsByClass['other'];
-      bucket.push(i);
-    });
-
-    const totalOnHand = Object.values(stockBalances).reduce((s,v)=>s+v,0);
-    const totalOpening = Object.values(openingByItem).reduce((s,v)=>s+v,0);
-    const totalSales = Object.values(ytdByItem).reduce((s,v)=>s+v.sales,0);
-    const totalDeaths = Object.values(ytdByItem).reduce((s,v)=>s+v.deaths,0);
-    const totalNI = Object.values(ytdByItem).reduce((s,v)=>s+v.naturalIncrease,0);
-    const totalPurchases = Object.values(ytdByItem).reduce((s,v)=>s+v.purchases,0);
-
-    // Pending livestock allocations
-    const allocatedRefs = new Set(stockMovements.filter(m=>m.source_system==='invoices'&&m.source_ref).map(m=>m.source_ref));
-    let pendingAllocations = 0;
-    lsInvoices.forEach(inv => { (inv.livestock_lines||[]).forEach((_,idx) => { if(!allocatedRefs.has(inv.id+':'+idx)) pendingAllocations++; }); });
-
-    // ── Build mob table rows ──────────────────────────────────
-    const mobTableRows = classOrder.map(cls => {
-      const mobs = mobsByClass[cls].filter(i => openingByItem[i.id] > 0 || stockBalances[i.id] > 0 || ytdByItem[i.id]?.in > 0);
-      if (!mobs.length) return '';
-      const clsOpening = mobs.reduce((s,i)=>s+openingByItem[i.id],0);
-      const clsClosing = mobs.reduce((s,i)=>s+(stockBalances[i.id]||0),0);
-      const clsNI = mobs.reduce((s,i)=>s+ytdByItem[i.id].naturalIncrease,0);
-      const clsPurchases = mobs.reduce((s,i)=>s+ytdByItem[i.id].purchases,0);
-      const clsSales = mobs.reduce((s,i)=>s+ytdByItem[i.id].sales,0);
-      const clsDeaths = mobs.reduce((s,i)=>s+ytdByItem[i.id].deaths,0);
-      const headerRow = '<tr style="background:#1a2535">' +
-        '<td style="padding:6px 12px;font-size:11px;font-weight:600;color:white" colspan="7">' + classLabel[cls] + '</td></tr>';
-      const mobRows = mobs.map(i => {
-        const ytd = ytdByItem[i.id];
-        const opening = openingByItem[i.id] || 0;
-        const closing = stockBalances[i.id] || 0;
-        const attrs = i.attributes || {};
-        const detail = [attrs.birth_year ? 'b.' + attrs.birth_year : '', attrs.subgroup || ''].filter(Boolean).join(' · ');
-        return '<tr class="mob-row" style="border-bottom:0.5px solid var(--border-light)">' +
-          '<td style="padding:8px 12px;font-size:12px;color:var(--ink)">' + i.name + (detail ? '<div style="font-size:10px;color:var(--hint)">' + detail + '</div>' : '') + '</td>' +
-          '<td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--hint)">' + (opening||'—') + '</td>' +
-          '<td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--green)">' + (ytd.naturalIncrease ? '+'+fN(ytd.naturalIncrease) : '—') + '</td>' +
-          '<td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--blue)">' + (ytd.purchases ? '+'+fN(ytd.purchases) : '—') + '</td>' +
-          '<td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--amber)">' + (ytd.sales ? '-'+fN(ytd.sales) : '—') + '</td>' +
-          '<td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--red)">' + (ytd.deaths ? '-'+fN(ytd.deaths) : '—') + '</td>' +
-          '<td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--ink)">' + fN(closing) + '</td>' +
-          '</tr>';
-      }).join('');
-      const subtotalRow = '<tr style="background:var(--page-bg);border-top:1px solid var(--border)">' +
-        '<td style="padding:6px 12px;font-size:11px;font-weight:600;color:var(--ink)">' + classLabel[cls] + ' total</td>' +
-        '<td style="padding:6px 12px;text-align:right;font-size:11px;font-weight:600;color:var(--hint)">' + fN(clsOpening) + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;font-size:11px;font-weight:600;color:var(--green)">' + (clsNI?'+'+fN(clsNI):'—') + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;font-size:11px;font-weight:600;color:var(--blue)">' + (clsPurchases?'+'+fN(clsPurchases):'—') + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;font-size:11px;font-weight:600;color:var(--amber)">' + (clsSales?'-'+fN(clsSales):'—') + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;font-size:11px;font-weight:600;color:var(--red)">' + (clsDeaths?'-'+fN(clsDeaths):'—') + '</td>' +
-        '<td style="padding:6px 12px;text-align:right;font-size:13px;font-weight:700;color:var(--ink)">' + fN(clsClosing) + '</td>' +
-        '</tr>';
-      return headerRow + mobRows + subtotalRow;
-    }).join('');
-
-    // ── Needs attention ───────────────────────────────────────
-    const attentionItems = [];
-    if (pendingAllocations) attentionItems.push({ level:'amber', title: pendingAllocations + ' livestock sale' + (pendingAllocations!==1?'s':'') + ' awaiting mob allocation', sub:'Go to Stocktake → Livestock to allocate', badge:'Action required' });
-    if (pendingInvoices.length) attentionItems.push({ level:'amber', title: pendingInvoices.length + ' invoice' + (pendingInvoices.length!==1?'s':'') + ' pending Xero sync', sub:pendingInvoices.slice(0,2).map(i=>(i.buyer||'Invoice')+' · '+fM((parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0))).join(' · '), badge:'Pending' });
-    cropRows.filter(r=>r.harvComplete).forEach(r => attentionItems.push({ level:'amber', title: r.name + ' harvest area incomplete', sub: fN(r.hvstArea) + ' ha harvested of ' + fN(r.budArea) + ' ha budgeted — check if complete', badge:'Check' }));
-    const dotColor = { red:'var(--red)', amber:'var(--amber)', green:'var(--green)' };
-    const badgeStyle = { red:'background:#fcebeb;color:#a32d2d', amber:'background:#faeeda;color:#854f0b', green:'background:#eaf3de;color:#3b6d11' };
-
-    // ── Farm gate prices for this farm ────────────────────────
+    // Farm's preferred sites
     const farmSites = [
-      ...Object.entries(grainSites).map(([crop,site])=>({ crop, site })),
-      ...(cottonRegion ? [{ crop:'Cotton Lint', site:cottonRegion }] : []),
+      ...Object.entries(grainSites).map(([crop, site]) => ({ crop, site })),
+      ...(cottonRegion ? [{ crop: 'Cotton Lint', site: cottonRegion }] : []),
     ];
 
-    container.innerHTML = [
-      // Header
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">',
-      '<h2 style="font-size:var(--text-md);font-weight:600">Manager view — ' + season + '</h2>',
-      '<div style="font-size:11px;color:var(--hint)">' + new Date().toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'}) + '</div>',
-      '</div>',
+    // Build price cards
+    const priceCards = farmSites.map(({ crop, site }) => {
+      const com = commodityList.find(c => c.name === crop);
+      if (!com) return '';
 
-      // Needs attention
-      attentionItems.length ? '<div class="card" style="margin-bottom:16px;overflow:hidden">' +
-        '<div style="padding:10px 16px;border-bottom:0.5px solid var(--border);background:var(--page-bg)"><span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">⚡ Needs attention</span></div>' +
-        attentionItems.map(item=>'<div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:0.5px solid var(--border-light)">' +
-          '<div style="width:7px;height:7px;border-radius:50%;background:'+dotColor[item.level]+';flex-shrink:0"></div>' +
-          '<div style="flex:1"><div style="font-size:13px;font-weight:500;color:var(--ink)">'+item.title+'</div><div style="font-size:11px;color:var(--hint);margin-top:2px">'+item.sub+'</div></div>' +
-          '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;'+badgeStyle[item.level]+'">'+item.badge+'</span></div>').join('') +
-        '</div>' : '',
+      // All history for this commodity + site, sorted newest first
+      const history = allPrices
+        .filter(p => p.commodity_id === com.id && p.region === site)
+        .sort((a, b) => b.price_date.localeCompare(a.price_date));
 
-      // Main grid — two columns
-      '<div style="display:grid;grid-template-columns:1fr 320px;gap:14px;align-items:start">',
-      '<div>',
-
-      // ── Livestock mob table ──
-      stockItems.length ? [
-        '<div class="card" style="overflow:hidden;margin-bottom:14px">',
-        '<div style="padding:10px 16px;background:#1a2535;display:flex;align-items:center;justify-content:space-between">',
-        '<span style="font-size:13px;font-weight:600;color:white">🐄 Livestock — ' + season + '</span>',
-        '<div style="display:flex;gap:14px;font-size:11px">',
-        '<span style="color:rgba(255,255,255,.6)">Opening <strong style="color:white">'+fN(totalOpening)+' hd</strong></span>',
-        totalNI ? '<span style="color:#86efac">NI +'+fN(totalNI)+'</span>' : '',
-        totalPurchases ? '<span style="color:#93c5fd">Purchases +'+fN(totalPurchases)+'</span>' : '',
-        totalSales ? '<span style="color:#fcd34d">Sales -'+fN(totalSales)+'</span>' : '',
-        totalDeaths ? '<span style="color:#fca5a5">Deaths -'+fN(totalDeaths)+'</span>' : '',
-        '<span style="color:rgba(255,255,255,.6)">Closing <strong style="color:white">'+fN(totalOnHand)+' hd</strong></span>',
-        '</div></div>',
-        '<table style="width:100%;border-collapse:collapse">',
-        '<thead><tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">',
-        ['Mob','Opening','Nat. inc.','Purchases','Sales','Deaths','Closing'].map((h,i) =>
-          '<th style="padding:6px '+(i===0?'12':'8')+'px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:'+(i===0?'left':'right')+'">'+h+'</th>'
-        ).join(''),
-        '</tr></thead><tbody>',
-        mobTableRows || '<tr><td colspan="7" style="padding:16px;text-align:center;color:var(--hint)">No livestock data — enter opening balances in Stocktake</td></tr>',
-        '</tbody>',
-        // Grand total
-        '<tfoot><tr style="background:var(--page-bg);border-top:2px solid var(--border)">',
-        '<td style="padding:8px 12px;font-size:12px;font-weight:700;color:var(--ink)">Total</td>',
-        '<td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:700">'+fN(totalOpening)+'</td>',
-        '<td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:700;color:var(--green)">'+(totalNI?'+'+fN(totalNI):'—')+'</td>',
-        '<td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:700;color:var(--blue)">'+(totalPurchases?'+'+fN(totalPurchases):'—')+'</td>',
-        '<td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:700;color:var(--amber)">'+(totalSales?'-'+fN(totalSales):'—')+'</td>',
-        '<td style="padding:8px 12px;text-align:right;font-size:12px;font-weight:700;color:var(--red)">'+(totalDeaths?'-'+fN(totalDeaths):'—')+'</td>',
-        '<td style="padding:8px 12px;text-align:right;font-size:14px;font-weight:700;color:var(--ink)">'+fN(totalOnHand)+'</td>',
-        '</tr>',
-        // Livestock sales summary if any
-        lsGross ? '<tr style="background:#eaf3de"><td style="padding:6px 12px;font-size:11px;color:var(--green)" colspan="3">Livestock sales YTD: '+fM(lsGross)+' gross</td>' +
-          '<td style="padding:6px 12px;text-align:right;font-size:11px;color:var(--green)" colspan="2">'+fN(lsHead)+' head sold</td>' +
-          '<td style="padding:6px 12px;text-align:right;font-size:11px;color:var(--green)" colspan="2">'+fM(lsAvgPerHead)+'/hd avg</td></tr>' : '',
-        '</tfoot></table></div>',
-      ].join('') : '',
-
-      // ── Cropping summary ──
-      cropRows.length ? [
-        '<div class="card" style="overflow:hidden;margin-bottom:14px">',
-        '<div style="padding:10px 16px;background:var(--page-bg);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">',
-        '<span style="font-size:13px;font-weight:600;color:var(--ink)">🌾 Cropping — ' + season + '</span>',
-        '<span style="font-size:11px;color:var(--hint)">Budget vs actual</span></div>',
-        '<table style="width:100%;border-collapse:collapse">',
-        '<thead><tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">',
-        ['Commodity','Bud. ha','Hvst. ha','Bud. yield','Act. yield','Contracted','Avg $','Invoiced','Market'].map((h,i)=>
-          '<th style="padding:6px '+(i===0?'12':'8')+'px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:'+(i===0?'left':'right')+'">'+h+'</th>'
-        ).join(''),
-        '</tr></thead><tbody>',
-        cropRows.map((r,i) => {
-          const hvstPct = r.budArea ? Math.round(r.hvstArea/r.budArea*100) : null;
-          const yieldVarPct = r.hvstYield && r.budYield ? Math.round((r.hvstYield-r.budYield)/r.budYield*100) : null;
-          const incompleteFlag = r.harvComplete ? ' <span style="font-size:9px;padding:1px 5px;background:#faeeda;color:#854f0b;border-radius:4px;margin-left:4px">⚠ partial</span>' : '';
-          return '<tr class="data-row" style="border-bottom:0.5px solid var(--border-light);background:'+(i%2===1?'#f9fafb':'')+'">' +
-            '<td style="padding:8px 12px;font-size:12px;font-weight:600;color:var(--ink)">'+r.name+incompleteFlag+'</td>' +
-            '<td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--hint)">'+fN(r.budArea)+' ha</td>' +
-            '<td style="padding:8px 8px;text-align:right;font-size:12px;color:'+(r.hvstArea?'var(--green)':'var(--hint)')+'">'+
-              (r.hvstArea ? fN(r.hvstArea)+' ha'+(hvstPct&&hvstPct<99?' <span style="font-size:10px;opacity:.7">'+hvstPct+'%</span>':'') : '—')+'</td>' +
-            '<td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--hint)">'+fN2(r.budYield)+' '+r.unit+'/ha</td>' +
-            '<td style="padding:8px 8px;text-align:right;font-size:12px;color:'+(r.hvstYield?(yieldVarPct>=0?'var(--green)':'var(--red)'):'var(--hint)')+'">'+
-              (r.hvstYield ? fN2(r.hvstYield)+' '+r.unit+'/ha'+(yieldVarPct!=null?' <span style="font-size:10px">'+(yieldVarPct>=0?'+':'')+yieldVarPct+'%</span>':'') : r.fcstProd ? '<span style="color:var(--amber)">fcst '+fN(r.fcstProd)+' '+r.unit+'</span>' : '—')+'</td>' +
-            '<td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--blue)">'+fN(r.contractedQty)+' '+r.unit+'</td>' +
-            '<td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--ink)">'+fC(r.avgContractPrice)+'</td>' +
-            '<td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--green)">'+fM(r.comInvoicedRev)+'</td>' +
-            '<td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--hint)">'+
-              (r.mkt ? fC(r.mkt.price)+'/'+r.unit : '—')+'</td>' +
-            '</tr>';
-        }).join(''),
-        '</tbody></table></div>',
-      ].join('') : '',
-
-      // ── Contract status ──
-      contracts.length ? [
-        '<div class="card" style="overflow:hidden;margin-bottom:14px">',
-        '<div style="padding:10px 16px;background:var(--page-bg);border-bottom:1px solid var(--border)">',
-        '<span style="font-size:13px;font-weight:600;color:var(--ink)">📋 Contract status</span></div>',
-        contracts.map(c => {
-          const invQty = invoices.filter(i=>i.forward_contract_id===c.id).reduce((s,i)=>{
-            if(i.batches){const b=typeof i.batches==='string'?JSON.parse(i.batches):i.batches;return s+b.filter(bt=>(bt.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa')).reduce((ss,bt)=>ss+(parseFloat(bt.qty)||0),0);}
-            return s+(parseFloat(i.total_qty)||0);
-          },0);
-          const qty=parseFloat(c.quantity)||0; const pct=qty?Math.round(invQty/qty*100):0;
-          const status=c.is_complete?'Complete':invQty===0?'Not started':'Filling';
-          const sc=c.is_complete?'var(--green)':invQty===0?'var(--hint)':'var(--blue)';
-          return '<div style="display:flex;align-items:center;padding:9px 14px;border-bottom:0.5px solid var(--border-light);font-size:12px;gap:10px">' +
-            '<div style="flex:1"><span style="font-weight:600">'+c.contract_number+'</span> <span style="color:var(--hint)">'+idToName[c.commodity_id]+'</span></div>' +
-            '<div style="color:var(--hint);min-width:120px">'+fN(invQty)+' / '+fN(qty)+' '+(c.unit||'')+'</div>' +
-            '<div style="min-width:80px"><div style="height:4px;background:var(--border-light);border-radius:2px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+(c.is_complete?'var(--green)':'var(--blue)')+';border-radius:2px"></div></div><div style="font-size:10px;color:var(--hint);margin-top:2px">'+pct+'%</div></div>' +
-            '<div style="color:'+sc+';font-weight:500;min-width:80px;text-align:right">'+status+'</div>' +
-            '</div>';
-        }).join('') +
+      if (!history.length) return [
+        '<div class="card" style="padding:16px 18px;margin-bottom:12px">',
+        '<div style="font-size:13px;font-weight:600;color:var(--ink)">' + crop + '</div>',
+        '<div style="font-size:11px;color:var(--hint);margin-top:2px">' + site + '</div>',
+        '<div style="font-size:12px;color:var(--hint);margin-top:8px">No price data</div>',
         '</div>',
-      ].join('') : '',
+      ].join('');
 
-      '</div>', // end left column
+      const latest = parseFloat(history[0].price_per_unit);
+      const latestDate = history[0].price_date;
+      const unit = history[0].unit || 't';
+      const prev = history.length > 1 ? parseFloat(history[1].price_per_unit) : null;
 
-      // ── Right sidebar — farm gate prices ──
-      '<div>',
-      farmSites.length ? [
-        '<div class="card" style="overflow:hidden;margin-bottom:14px">',
-        '<div style="padding:10px 14px;border-bottom:0.5px solid var(--border);background:var(--page-bg)">',
-        '<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Farm gate prices</span></div>',
-        '<div style="padding:10px 12px">',
-        farmSites.map(({crop, site}) => {
-          const com = commodityList.find(c=>c.name===crop);
-          if (!com) return '';
-          const data = priceMap[com.id]?.[site];
-          const prev = allPrices.filter(p=>p.commodity_id===com.id&&p.region===site);
-          const move = prev.length>=2 ? data?.price - parseFloat(prev[1].price_per_unit) : null;
-          return '<div style="padding:8px 10px;border-radius:6px;background:var(--blue-light);margin-bottom:6px">' +
-            '<div style="font-size:12px;font-weight:600;color:var(--blue-text)">'+crop+'</div>' +
-            '<div style="font-size:10px;color:var(--blue);margin-bottom:4px">'+site+'</div>' +
-            '<div style="display:flex;align-items:center;justify-content:space-between">' +
-            '<span style="font-size:16px;font-weight:700;color:var(--blue-text)">'+(data?fC(data.price)+'/'+(data.unit||'t'):'No price')+'</span>' +
-            (move!=null?'<span style="font-size:11px;color:'+(move>=0?'var(--green)':'var(--red)')+'">'+( move>=0?'▲':'▼')+fC(Math.abs(move))+'</span>':'') +
-            '</div>' +
-            (data?'<div style="font-size:9px;color:var(--blue);margin-top:2px">'+data.date+'</div>':'') +
-            '</div>';
-        }).join('') +
-        '</div></div>',
-      ].join('') : '',
-      '</div>', // end right column
-      '</div>', // end grid
+      // Daily movement
+      const dayMove = prev != null ? latest - prev : null;
+      const dayMovePct = prev ? ((latest - prev) / prev * 100) : null;
+      const moveColor = dayMove == null ? 'var(--hint)' : dayMove >= 0 ? '#16a34a' : '#dc2626';
+      const moveArrow = dayMove == null ? '' : dayMove >= 0 ? '▲' : '▼';
+
+      // 14-day rolling average
+      const cutoff = new Date(latestDate);
+      cutoff.setDate(cutoff.getDate() - 14);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+      const window14 = history.filter(p => p.price_date >= cutoffStr);
+      const avg14 = window14.length
+        ? window14.reduce((s, p) => s + parseFloat(p.price_per_unit), 0) / window14.length
+        : null;
+      const vsAvg = avg14 != null ? latest - avg14 : null;
+      const vsAvgPct = avg14 ? ((latest - avg14) / avg14 * 100) : null;
+      const avgColor = vsAvg == null ? 'var(--hint)' : vsAvg >= 0 ? '#16a34a' : '#dc2626';
+
+      return [
+        '<div class="card" style="padding:16px 18px;margin-bottom:12px">',
+
+        // Header
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">',
+        '<div>',
+        '<div style="font-size:13px;font-weight:700;color:var(--ink)">' + crop + '</div>',
+        '<div style="font-size:11px;color:var(--hint);margin-top:1px">' + site + '</div>',
+        '</div>',
+        '<div style="font-size:10px;color:var(--hint);text-align:right">' + new Date(latestDate).toLocaleDateString('en-AU', {day:'numeric',month:'short'}) + '</div>',
+        '</div>',
+
+        // Current price — large
+        '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">',
+        '<span style="font-size:26px;font-weight:700;color:var(--ink)">' + fC(latest) + '</span>',
+        '<span style="font-size:13px;color:var(--hint)">/' + unit + '</span>',
+        '</div>',
+
+        // Daily movement
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--page-bg);border-radius:6px;margin-bottom:6px">',
+        '<span style="font-size:11px;color:var(--hint)">Day</span>',
+        '<div style="display:flex;align-items:center;gap:6px">',
+        dayMove != null
+          ? '<span style="font-size:13px;font-weight:600;color:' + moveColor + '">' + moveArrow + ' ' + fC(Math.abs(dayMove)) + '</span>' +
+            '<span style="font-size:11px;color:' + moveColor + '">(' + fPct(dayMovePct) + ')</span>'
+          : '<span style="font-size:12px;color:var(--hint)">—</span>',
+        '</div>',
+        '</div>',
+
+        // 14-day rolling average
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--page-bg);border-radius:6px">',
+        '<span style="font-size:11px;color:var(--hint)">14-day avg</span>',
+        '<div style="display:flex;align-items:center;gap:6px">',
+        avg14 != null
+          ? '<span style="font-size:12px;color:var(--hint)">' + fC(avg14) + '</span>' +
+            '<span style="font-size:11px;font-weight:600;color:' + avgColor + '">' +
+            (vsAvg >= 0 ? '▲' : '▼') + ' ' + fC(Math.abs(vsAvg)) +
+            ' (' + fPct(vsAvgPct) + ')</span>'
+          : '<span style="font-size:12px;color:var(--hint)">Insufficient data</span>',
+        '</div>',
+        '</div>',
+
+        // Mini sparkline bar (14-day visual)
+        window14.length > 1 ? (() => {
+          const vals = window14.map(p => parseFloat(p.price_per_unit)).reverse();
+          const min = Math.min(...vals), max = Math.max(...vals);
+          const range = max - min || 1;
+          const bars = vals.map(v => {
+            const h = Math.max(2, Math.round(((v - min) / range) * 24));
+            const c = v >= latest ? '#16a34a' : '#94a3b8';
+            return '<div style="flex:1;height:' + h + 'px;background:' + c + ';border-radius:1px;align-self:flex-end"></div>';
+          }).join('');
+          return '<div style="display:flex;align-items:flex-end;gap:2px;height:28px;margin-top:10px;padding:0 2px">' + bars + '</div>';
+        })() : '',
+
+        '</div>',
+      ].join('');
+    }).join('');
+
+    container.innerHTML = [
+      '<div style="padding:0;max-width:420px">',
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">',
+      '<h2 style="font-size:15px;font-weight:600;color:var(--ink)">Farm gate prices</h2>',
+      '<span style="font-size:11px;color:var(--hint)">' + farm.name + '</span>',
+      '</div>',
+      farmSites.length
+        ? priceCards || '<div class="card" style="padding:16px;color:var(--hint)">No market price data available.</div>'
+        : '<div class="card" style="padding:16px;color:var(--hint)">No delivery sites configured. Add grain sites in farm settings.</div>',
+      '</div>',
     ].join('');
 
   } catch(err) {
     console.error('Manager view error:', err);
-    container.innerHTML = '<div class="empty-state"><p>Error loading manager view: ' + err.message + '</p></div>';
+    container.innerHTML = '<div class="empty-state"><p>Error: ' + err.message + '</p></div>';
   }
 }
+
 
 
 
