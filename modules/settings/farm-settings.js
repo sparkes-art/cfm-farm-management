@@ -9,6 +9,28 @@ const COTTON_REGIONS = [
   'Mungindi/St George', 'Namoi Valley', 'Macquarie Valley', 'Lachlan/Sth NSW', 'NT / WA'
 ];
 
+// CropConnect sites — confirmed from BID_PUBLIC API 17 Sep 2026
+// Used in settings form catchment picker
+const ALL_CC_SITES = {
+  'NSW': ['Ardlethan','Baradine','Barellan','Barmedman','Barnes Crossing','Bellata','Boggabilla',
+    'Boggabri','Boree Creek','Bribbaree','Burren Junction','Calleen','Caroona','Coleambally',
+    'Condobolin','Coolamon','Coonamble','Cootamundra','Croppa Creek','Curlewis','Delungra',
+    'Dubbo','Dunedoo','Forbes','Gilgandra','Goolgowi','Grenfell','Gunnedah','Gurley','Gwabegar',
+    'Inverell','Lake Cargelligo','Leeton','Manildra','Merrywinebone','Moree Sub','Moulamein',
+    'Mullaley','Narrabri Sub','Narromine','Peak Hill','Pilliga','Rankins Springs','Quandialla',
+    'Temora','Trangie','Tullamore','Ungarie','Walgett','Warialda','Wee Waa','West Wyalong',
+    'Whitton','Wyalong'],
+  'QLD': ['Biloela','Boggabilla','Brookstead','Bungunya','Capella','Cecil Plains',
+    'Condamine','Dalby','Dirranbandi','Goondiwindi','Inglewood','Millmerran','Miles','Moonie',
+    'Oakey','Pittsworth','Roma','St George','Stanthorpe','Toowoomba','Toobeah','Wallumbilla','Warwick'],
+  'VIC': ['Ardmore','Ballarat','Barnawartha','Berriwillock','Berrybank','Beulah','Boort',
+    'Charlton','Dimboola','Donald','Dunolly','Elmore','Hopetoun','Horsham','Kaniva','Kerang',
+    'Lascelles','Manangatang','Mildura','Nullawil','Ouyen','Rainbow','Sea Lake','Ultima',
+    'Woomelang','Woorinen'],
+  'SA': ['Cleve','Keith','Loxton','Mallala','Murray Bridge','Port Pirie','Snowtown',
+    'Tailem Bend','Wallaroo','Wudinna'],
+  'WA': ['Albany','Esperance','Geraldton','Kwinana','Merredin','Moora','Northam'],
+};
 // CropConnect sites — 142 sites confirmed from BID_PUBLIC API 17 Sep 2026
 // Grouped by state for the dropdown
 const CC_SITES = {
@@ -148,50 +170,44 @@ export async function mountFarmSettings(container, onSave) {
         <hr class="divider">
 
         <div class="form-group">
-          <label class="form-label">Grain delivery sites &amp; grades</label>
-          <p class="form-helper" style="margin-bottom:14px">For each commodity, set up to three delivery sites in priority order, plus the primary grade to display. The system shows the primary site price first — falling back to secondary, then tertiary if no bids exist at the preferred site. Prices are pulled from GrainCorp CropConnect.</p>
+          <label class="form-label">Grain catchment sites</label>
+          <p class="form-helper" style="margin-bottom:12px">Select all CropConnect sites relevant to this farm. When displaying grain prices, the system shows the best available bid from within this catchment. Add neighbouring sites — a wider catchment gives better fallback when your closest site has no bid for a commodity.</p>
+          <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:12px">
+            ${Object.entries(ALL_CC_SITES).map(([state, sites]) => `
+              <div style="margin-bottom:12px">
+                <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:6px">${state}</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">
+                  ${sites.map(site => `
+                    <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;padding:2px 0">
+                      <input type="checkbox" class="grain-catchment-check" value="${site}"
+                        ${(settings.grainCatchment || []).includes(site) ? 'checked' : ''}>
+                      ${site}
+                    </label>`).join('')}
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <div class="form-group">
+          <label class="form-label">Grain watchlist</label>
+          <p class="form-helper" style="margin-bottom:12px">Select which commodity and grade combinations to show on the manager view. The system finds the best bid within your catchment for each selection.</p>
           ${GRAIN_COMMODITIES.map(com => {
-            const s = settings.grainSites?.[com] || {};
-            // Support old string format (LDC) — treat as primary
-            const pri = typeof s === 'string' ? s : (s.primary || '');
-            const sec = typeof s === 'string' ? '' : (s.secondary || '');
-            const ter = typeof s === 'string' ? '' : (s.tertiary || '');
-            const grade = typeof s === 'string' ? '' : (s.grade || '');
-            const gradeOptions = (CC_GRADES[com] || []).map(g =>
-              `<option value="${g}" ${grade === g ? 'selected' : ''}>${g}</option>`
-            ).join('');
-            const siteOptions = (priority) => {
-              const current = priority === 'primary' ? pri : priority === 'secondary' ? sec : ter;
-              return Object.entries(CC_SITES).map(([state, sites]) =>
-                `<optgroup label="${state}">${sites.map(site =>
-                  `<option value="${site}" ${current === site ? 'selected' : ''}>${site}</option>`
-                ).join('')}</optgroup>`
-              ).join('');
-            };
+            const watched = settings.grainWatchlist?.[com] || [];
             return `
-            <div style="margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:6px">
-              <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:10px">${com}</div>
-              <div style="display:grid;grid-template-columns:80px 1fr 80px 1fr;gap:8px;align-items:center;margin-bottom:8px">
-                <label style="font-size:12px;color:var(--ink-mid)">Primary</label>
-                <select class="form-select grain-site-select" data-commodity="${com}" data-priority="primary">
-                  <option value="">— not grown —</option>${siteOptions('primary')}
-                </select>
-                <label style="font-size:12px;color:var(--ink-mid)">Grade</label>
-                <select class="form-select grain-grade-select" data-commodity="${com}">
-                  <option value="">— select —</option>${gradeOptions}
-                </select>
-              </div>
-              <div style="display:grid;grid-template-columns:80px 1fr;gap:8px;align-items:center;margin-bottom:6px">
-                <label style="font-size:12px;color:var(--ink-mid)">Secondary</label>
-                <select class="form-select grain-site-select" data-commodity="${com}" data-priority="secondary">
-                  <option value="">— not set —</option>${siteOptions('secondary')}
-                </select>
-              </div>
-              <div style="display:grid;grid-template-columns:80px 1fr;gap:8px;align-items:center">
-                <label style="font-size:12px;color:var(--ink-mid)">Tertiary</label>
-                <select class="form-select grain-site-select" data-commodity="${com}" data-priority="tertiary">
-                  <option value="">— not set —</option>${siteOptions('tertiary')}
-                </select>
+            <div style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);border-radius:6px">
+              <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:8px">${com}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                ${(CC_GRADES[com] || []).map(grade => `
+                  <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;
+                    padding:4px 8px;border:1px solid var(--border);border-radius:4px;
+                    background:${watched.includes(grade) ? 'var(--accent-light)' : 'transparent'}">
+                    <input type="checkbox" class="grain-watchlist-check" 
+                      data-commodity="${com}" value="${grade}"
+                      ${watched.includes(grade) ? 'checked' : ''}>
+                    ${grade}
+                  </label>`).join('')}
               </div>
             </div>`;
           }).join('')}
@@ -267,17 +283,17 @@ export async function mountFarmSettings(container, onSave) {
       if (cottonRegion) newSettings.cottonRegion = cottonRegion;
       else delete newSettings.cottonRegion;
 
-      // Save grain delivery sites (primary/secondary/tertiary + grade per commodity)
-      const grainSites = {};
+      // Save grain catchment sites
+      const grainCatchment = Array.from(container.querySelectorAll('.grain-catchment-check:checked')).map(el => el.value);
+      newSettings.grainCatchment = grainCatchment.length ? grainCatchment : null;
+
+      // Save grain watchlist (commodity → [grades])
+      const grainWatchlist = {};
       GRAIN_COMMODITIES.forEach(com => {
-        const selects = container.querySelectorAll(`.grain-site-select[data-commodity="${com}"]`);
-        const gradeEl = container.querySelector(`.grain-grade-select[data-commodity="${com}"]`);
-        const entry = {};
-        selects.forEach(sel => { if (sel.value) entry[sel.dataset.priority] = sel.value; });
-        if (gradeEl?.value) entry.grade = gradeEl.value;
-        if (Object.keys(entry).length) grainSites[com] = entry;
+        const checked = Array.from(container.querySelectorAll(`.grain-watchlist-check[data-commodity="${com}"]:checked`)).map(el => el.value);
+        if (checked.length) grainWatchlist[com] = checked;
       });
-      newSettings.grainSites = grainSites;
+      newSettings.grainWatchlist = Object.keys(grainWatchlist).length ? grainWatchlist : null;
 
       // Save livestock saleyards
       const livestockSaleyards = {};

@@ -158,21 +158,30 @@ async function _mountOverview(container) {
     const fN = (n, dp=0) => n == null ? '—' : Number(n).toLocaleString('en-AU', {minimumFractionDigits:dp, maximumFractionDigits:dp});
     const fPct = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
 
-    // Farm's preferred sites — handle both old LDC (string) and new CropConnect (object) format
+    // Farm's grain watchlist — commodity+grade pairs to show, best bid within catchment
+    const grainCatchment = settings.grainCatchment || [];
+    const grainWatchlist = settings.grainWatchlist || {};
     const farmSites = [];
+
+    // New format: grainWatchlist = { Wheat: ['APW1','H2'], Barley: ['BAR1'] }
+    Object.entries(grainWatchlist).forEach(([crop, grades]) => {
+      grades.forEach(grade => {
+        farmSites.push({ crop, grade, type: 'cc', catchment: grainCatchment });
+      });
+    });
+
+    // Old LDC/CropConnect per-commodity format fallback
     Object.entries(grainSites).forEach(([crop, setting]) => {
-      if (!setting) return;
+      if (!setting || grainWatchlist[crop]) return; // skip if already in new format
       if (typeof setting === 'string') {
-        // Old LDC format — single site string
         farmSites.push({ crop, site: setting, grade: null, type: 'ldc' });
-      } else {
-        // New CropConnect format — {primary, secondary, tertiary, grade}
-        farmSites.push({
-          crop, grade: setting.grade || null, type: 'cc',
-          sites: [setting.primary, setting.secondary, setting.tertiary].filter(Boolean),
-        });
+      } else if (setting.primary) {
+        const grade = setting.grade || null;
+        farmSites.push({ crop, grade, type: 'cc',
+          catchment: [setting.primary, setting.secondary, setting.tertiary].filter(Boolean) });
       }
     });
+
     if (cottonRegion) farmSites.push({ crop: 'Cotton Lint', site: cottonRegion, grade: null, type: 'cotton' });
 
     // Livestock indicators from farm settings — use master price data
@@ -259,13 +268,22 @@ async function _mountOverview(container) {
       let history = [];
       let sourceLabel = site || (sites?.[0]) || '';
 
-      if (type === 'cc' && sites?.length && grade) {
-        // CropConnect: try primary → secondary → tertiary site
-        for (const s of sites) {
-          const key = `${s}|${grade}`;
-          const h = allPrices.filter(p => p.commodity_id === com.id && p.region === key)
+      if (type === 'cc' && catchment?.length && grade) {
+        // CropConnect: find best bid within catchment for this grade
+        const catchmentKeys = catchment.map(s => `${s}|${grade}`);
+        const catchmentPrices = allPrices
+          .filter(p => p.commodity_id === com.id && catchmentKeys.includes(p.region))
+          .sort((a, b) => b.price_date.localeCompare(a.price_date) || parseFloat(b.price_per_unit) - parseFloat(a.price_per_unit));
+        if (catchmentPrices.length) {
+          // Group by date, pick best price on most recent date
+          const latestDate = catchmentPrices[0].price_date;
+          const todayPrices = catchmentPrices.filter(p => p.price_date === latestDate);
+          const best = todayPrices.reduce((a, b) => parseFloat(a.price_per_unit) >= parseFloat(b.price_per_unit) ? a : b);
+          sourceLabel = best.region.split('|')[0]; // site name
+          // Build history from that site+grade
+          history = allPrices
+            .filter(p => p.commodity_id === com.id && p.region === best.region)
             .sort((a, b) => b.price_date.localeCompare(a.price_date));
-          if (h.length) { history = h; sourceLabel = s; break; }
         }
       } else {
         // LDC or Cotton — simple region match
