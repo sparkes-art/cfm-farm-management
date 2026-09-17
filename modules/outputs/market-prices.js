@@ -138,6 +138,48 @@ export async function mountMarketPrices(container) {
 
     <!-- Hidden file input for Excel import -->
     <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" style="display:none">
+
+    <!-- Livestock indicator manual entry -->
+    ${canWrite() ? `
+    <div class="card" style="margin-top:20px;overflow:hidden">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);background:var(--page-bg);display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <span style="font-size:13px;font-weight:600;color:var(--ink)">🐄 Livestock indicators — manual entry</span>
+          <span style="font-size:11px;color:var(--hint);margin-left:8px">Enter from MLA daily report · will be replaced by automated feed once set up</span>
+        </div>
+        <span id="ls-indicator-date-label" style="font-size:11px;color:var(--hint)"></span>
+      </div>
+      <div style="padding:16px">
+        <div style="display:grid;grid-template-columns:130px 1fr 1fr 1fr 1fr 120px;gap:10px;align-items:end;margin-bottom:8px">
+          <div>
+            <label style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);display:block;margin-bottom:4px">Date</label>
+            <input class="form-input" id="ls-ind-date" type="date" value="${new Date().toISOString().slice(0,10)}" style="font-size:12px;padding:6px 8px">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);display:block;margin-bottom:4px">EYCI <span style="font-weight:400;color:var(--hint)">(c/kg cwt)</span></label>
+            <input class="form-input ls-ind-val" data-name="EYCI" data-unit="c/kg cwt" type="number" step="0.01" placeholder="e.g. 589.25" style="font-size:12px;padding:6px 8px">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);display:block;margin-bottom:4px">Heavy Steer <span style="font-weight:400;color:var(--hint)">(c/kg lwt)</span></label>
+            <input class="form-input ls-ind-val" data-name="Heavy Steer" data-unit="c/kg lwt" type="number" step="0.01" placeholder="e.g. 454.77" style="font-size:12px;padding:6px 8px">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);display:block;margin-bottom:4px">Feeder Steer <span style="font-weight:400;color:var(--hint)">(c/kg lwt)</span></label>
+            <input class="form-input ls-ind-val" data-name="Feeder Steer" data-unit="c/kg lwt" type="number" step="0.01" placeholder="e.g. 412.50" style="font-size:12px;padding:6px 8px">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);display:block;margin-bottom:4px">Restocker Heifer <span style="font-weight:400;color:var(--hint)">(c/kg lwt)</span></label>
+            <input class="form-input ls-ind-val" data-name="Restocker Heifer" data-unit="c/kg lwt" type="number" step="0.01" placeholder="e.g. 398.00" style="font-size:12px;padding:6px 8px">
+          </div>
+          <div>
+            <button class="btn btn-primary" id="btn-save-ls-indicators" style="width:100%;font-size:12px">Save</button>
+          </div>
+        </div>
+        <div id="ls-recent-indicators" style="margin-top:12px;border-top:1px solid var(--border-light);padding-top:12px">
+          <div style="font-size:11px;color:var(--hint)">Loading recent entries…</div>
+        </div>
+      </div>
+    </div>` : ''}
   `;
 
   container.querySelectorAll('.commodity-pill').forEach(btn => {
@@ -171,6 +213,56 @@ export async function mountMarketPrices(container) {
       if (file) _importExcel(file);
       e.target.value = '';
     });
+
+    // Livestock indicator save
+    qs('#btn-save-ls-indicators', container)?.addEventListener('click', async () => {
+      const btn = qs('#btn-save-ls-indicators', container);
+      const date = qs('#ls-ind-date', container)?.value;
+      if (!date) { toast('Select a date', 'error'); return; }
+
+      const inputs = container.querySelectorAll('.ls-ind-val');
+      const entries = [];
+      inputs.forEach(inp => {
+        const val = parseFloat(inp.value);
+        if (val && !isNaN(val)) entries.push({ name: inp.dataset.name, unit: inp.dataset.unit, price: val });
+      });
+      if (!entries.length) { toast('Enter at least one indicator value', 'error'); return; }
+
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        // Find or create the Cattle Indicators commodity
+        const coms = await dbSelect('commodities', 'name=eq.Cattle%20Indicators&select=id');
+        let commodityId = coms?.[0]?.id;
+        if (!commodityId) {
+          const ins = await dbInsert('commodities', { name: 'Cattle Indicators' });
+          commodityId = ins?.[0]?.id;
+        }
+        if (!commodityId) throw new Error('Could not find Cattle Indicators commodity');
+
+        // Upsert each indicator
+        await Promise.all(entries.map(e =>
+          dbUpsert('market_prices', {
+            commodity_id: commodityId,
+            region: e.name,
+            price_per_unit: e.price,
+            unit: e.unit,
+            price_date: date,
+          }, 'commodity_id,region,price_date')
+        ));
+
+        toast(`${entries.length} indicator${entries.length > 1 ? 's' : ''} saved`, 'success');
+        // Clear inputs
+        inputs.forEach(inp => { inp.value = ''; });
+        // Reload recent
+        await _loadRecentLsIndicators(container);
+      } catch(e) {
+        toast('Save failed: ' + e.message, 'error');
+      }
+      btn.disabled = false; btn.textContent = 'Save';
+    });
+
+    // Load recent livestock indicators
+    await _loadRecentLsIndicators(container);
   }
 
   // Chart range buttons
@@ -734,3 +826,48 @@ window.__cfmDeletePrice = async (id) => {
   _renderTable();
   _renderChart();
 };
+// ── Livestock indicator recent entries ────────────────────────
+async function _loadRecentLsIndicators(container) {
+  const wrap = qs('#ls-recent-indicators', container);
+  if (!wrap) return;
+
+  try {
+    const coms = await dbSelect('commodities', 'name=eq.Cattle%20Indicators&select=id');
+    const commodityId = coms?.[0]?.id;
+    if (!commodityId) { wrap.innerHTML = '<div style="font-size:11px;color:var(--hint)">No entries yet.</div>'; return; }
+
+    const recent = await dbSelect('market_prices',
+      `commodity_id=eq.${commodityId}&order=price_date.desc&limit=20&select=region,price_per_unit,unit,price_date`
+    );
+
+    if (!recent.length) { wrap.innerHTML = '<div style="font-size:11px;color:var(--hint)">No entries yet. Enter today\'s MLA figures above.</div>'; return; }
+
+    // Group by date
+    const byDate = {};
+    recent.forEach(r => {
+      if (!byDate[r.price_date]) byDate[r.price_date] = [];
+      byDate[r.price_date].push(r);
+    });
+
+    const INDICATOR_ORDER = ['EYCI', 'Heavy Steer', 'Feeder Steer', 'Restocker Heifer'];
+
+    wrap.innerHTML = Object.entries(byDate).slice(0, 5).map(([date, rows]) => {
+      const dateLabel = new Date(date).toLocaleDateString('en-AU', {weekday:'short', day:'numeric', month:'short'});
+      const cols = INDICATOR_ORDER.map(name => {
+        const r = rows.find(x => x.region === name);
+        return `<div>
+          <div style="font-size:9px;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${name}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--ink)">${r ? parseFloat(r.price_per_unit).toFixed(2) : '—'}</div>
+          ${r ? `<div style="font-size:9px;color:var(--hint)">${r.unit}</div>` : ''}
+        </div>`;
+      }).join('');
+      return `<div style="display:grid;grid-template-columns:110px 1fr 1fr 1fr 1fr;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-light);align-items:center">
+        <div style="font-size:11px;font-weight:600;color:var(--ink)">${dateLabel}</div>
+        ${cols}
+      </div>`;
+    }).join('');
+
+  } catch(e) {
+    wrap.innerHTML = `<div style="font-size:11px;color:var(--red)">Error loading: ${e.message}</div>`;
+  }
+}
