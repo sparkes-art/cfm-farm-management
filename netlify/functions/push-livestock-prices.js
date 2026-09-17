@@ -8,11 +8,12 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://nqvfuqvindsgnogejaei.s
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // MLA indicators to fetch — slug maps to getembedinfo endpoint
+// Confirmed working slugs from browser inspection 17 Sep 2026
 const INDICATORS = [
-  { slug: 'eyci',         name: 'EYCI',         label: 'Eastern Young Cattle Indicator', unit: 'c/kg cwt' },
-  { slug: 'heavysteer',   name: 'Heavy Steer',  label: 'Heavy Steer Indicator',          unit: 'c/kg lwt' },
-  { slug: 'feedersteer',  name: 'Feeder Steer', label: 'Feeder Steer Indicator',         unit: 'c/kg lwt' },
-  { slug: 'restocker',    name: 'Restocker',    label: 'Restocker Yearling Steer',       unit: 'c/kg lwt' },
+  { slug: 'eyci',        name: 'EYCI',         label: 'Eastern Young Cattle Indicator', unit: 'c/kg cwt', pageSlug: 'eycireport' },
+  { slug: 'heavysteer',  name: 'Heavy Steer',  label: 'Heavy Steer Indicator',          unit: 'c/kg lwt', pageSlug: 'heavysteer' },
+  { slug: 'feedersteer', name: 'Feeder Steer', label: 'Feeder Steer Indicator',         unit: 'c/kg lwt', pageSlug: 'feedersteer' },
+  { slug: 'restockeryearlingheifer', name: 'Restocker Heifer', label: 'Restocker Yearling Heifer', unit: 'c/kg lwt', pageSlug: 'restockeryearlingheifer' },
 ];
 
 // Power BI DAX query to get the latest price and date from the dataset
@@ -81,18 +82,26 @@ async function fetchIndicator(indicator) {
     }
 
     // Step 3: Fallback — scrape the indicator page HTML for the current value
-    const pageRes = await fetch(
-      `https://www.mla.com.au/prices-markets/cattle/${indicator.slug}/`,
-      { headers: { 'User-Agent': 'CFM-FarmManagement/1.0' } }
-    );
-    if (!pageRes.ok) throw new Error(`Page fetch ${pageRes.status}`);
+    // MLA URLs: https://www.mla.com.au/prices-markets/cattle/{pageSlug}/
+    const mlaUrl = `https://www.mla.com.au/prices-markets/cattle/${indicator.pageSlug}/`;
+    const pageRes = await fetch(mlaUrl, {
+      headers: { 'User-Agent': 'CFM-FarmManagement/1.0 (samuel@cfm.com.au)' }
+    });
+    if (!pageRes.ok) throw new Error(`Page fetch ${pageRes.status} for ${mlaUrl}`);
     const html = await pageRes.text();
 
-    // Extract the current indicator value from the page
-    // MLA typically shows the value in a prominent span or div
-    const priceMatch = html.match(/(\d+\.?\d*)\s*(?:c\/kg|¢\/kg)/i)
-      || html.match(/currentValue['":\s]+(\d+\.?\d*)/i)
-      || html.match(/<strong[^>]*>(\d+\.?\d*)<\/strong>/i);
+    // Log a snippet to help debug if extraction fails
+    const snippet = html.slice(0, 3000);
+    console.log(`[${indicator.name}] Page fetched (${html.length} chars), snippet:`, snippet);
+
+    // Try multiple extraction patterns
+    const priceMatch =
+      html.match(/(\d{3,4}(?:\.\d+)?)\s*(?:c\/kg|¢\/kg|cents per kg)/i) ||
+      html.match(/current[^"]*?[:\s]+(\d{3,4}(?:\.\d+)?)/i) ||
+      html.match(/<[^>]*class="[^"]*(?:price|indicator|value|current)[^"]*"[^>]*>\s*(\d{3,4}(?:\.\d+)?)/i) ||
+      html.match(/<strong[^>]*>(\d{3,4}(?:\.\d+)?)<\/strong>/i) ||
+      html.match(/data-value="(\d{3,4}(?:\.\d+)?)"/i) ||
+      html.match(/>(\d{3,4}(?:\.\d+)?)\s*</);
 
     if (priceMatch) {
       return {
@@ -105,6 +114,8 @@ async function fetchIndicator(indicator) {
       };
     }
 
+    // Log the full HTML if we still can't find it
+    console.error(`[${indicator.name}] Could not extract price. Full HTML:`, html.slice(0, 5000));
     throw new Error('Could not extract price from page');
 
   } catch (err) {
