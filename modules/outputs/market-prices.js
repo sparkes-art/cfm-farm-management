@@ -2,7 +2,7 @@
 // Manual market price entry + Excel import (col A: date, col B: price)
 // Price history chart per commodity
 
-import { dbSelect, dbInsert, dbDelete, dbUpsert } from '../../js/supabase-client.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js';
 import { getActiveFarm } from '../../js/app-state.js?v=1783407307562';
 import { getSession, canWrite } from '../../js/app-state.js?v=1783407307562';
 import { loadCommodities, getCommodities, commodityOptions } from '../../js/commodities.js?v=1783407307562';
@@ -241,13 +241,13 @@ export async function mountMarketPrices(container) {
 
         // Upsert each indicator
         await Promise.all(entries.map(e =>
-          dbUpsert('market_prices', {
+          dbUpsert('market_prices', [{
             commodity_id: commodityId,
             region: e.name,
             price_per_unit: e.price,
             unit: e.unit,
             price_date: date,
-          }, 'commodity_id,region,price_date')
+          }], 'commodity_id,region,price_date')
         ));
 
         toast(`${entries.length} indicator${entries.length > 1 ? 's' : ''} saved`, 'success');
@@ -308,11 +308,16 @@ async function _loadData() {
   if (siteLabel) siteLabel.textContent = grainSite ? '· ' + grainSite : '';
   if (gradeLabel) gradeLabel.textContent = grade ? 'Grade: ' + grade + ' · Price history' : 'Price history';
 
-  // Build query — filter by farm's grain site if available, otherwise show all
-  // Filter by farm for manual prices, or show all (grain prices have no farm_id)
+  // Build query — only show prices for this farm's configured delivery site/region
+  // Global prices (farm_id IS NULL) are scoped by region to avoid showing other farms' data
   let priceQuery = 'commodity_id=eq.' + _selectedCommodityId + '&price_date=gte.' + cutoffStr + '&select=*&order=price_date.asc';
-  if (farm && !grainSite) priceQuery += '&or=(farm_id.eq.' + farm.id + ',farm_id.is.null)';
-  if (grainSite) priceQuery += '&region=eq.' + encodeURIComponent(grainSite);
+  if (grainSite) {
+    // Filter to this farm's configured site only
+    priceQuery += '&region=eq.' + encodeURIComponent(grainSite);
+  } else if (farm) {
+    // Only show this farm's manually entered prices
+    priceQuery += '&farm_id=eq.' + farm.id;
+  }
 
   const queries = [
     dbSelect('market_prices', priceQuery),
@@ -601,10 +606,15 @@ function _drawChart(canvas, labels, data, salePoints = []) {
 // ── Add price modal ───────────────────────────────────────────
 function _addPriceModal() {
   const farm = getActiveFarm();
-  const commodities = getCommodities();
+  const commodities = getCommodities().filter(c => !c.is_livestock);
   const commOptions = commodities.map(c =>
     `<option value="${c.id}" ${c.id === _selectedCommodityId ? 'selected' : ''}>${c.name}</option>`
   ).join('');
+
+  // Get the farm's preferred site for the selected commodity (used as region)
+  const settings = farm?.settings || {};
+  const grainSites = settings.grainSites || {};
+  const cottonRegion = settings.cottonRegion || '';
 
   openModal({
     title: 'Add market price',
@@ -629,8 +639,8 @@ function _addPriceModal() {
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Source <span class="text-muted">(optional)</span></label>
-          <input class="form-input" id="mp-source" type="text" placeholder="e.g. Manual, LDC" value="Manual">
+          <label class="form-label">Delivery site / region</label>
+          <input class="form-input" id="mp-region" type="text" placeholder="e.g. GOOLGOWI LDC">
         </div>
         <div class="form-group">
           <label class="form-label">Grade <span class="text-muted">(optional)</span></label>
@@ -642,28 +652,52 @@ function _addPriceModal() {
       const commodityId = qs('#mp-commodity', modal)?.value;
       const date = qs('#mp-date', modal)?.value;
       const price = parseFloat(qs('#mp-price', modal)?.value || 0);
+      const region = qs('#mp-region', modal)?.value?.trim();
       if (!commodityId) throw new Error('Please select a commodity');
       if (!date || !price) throw new Error('Please enter a date and price');
+      if (!region) throw new Error('Please enter a delivery site or region');
 
-      await dbUpsert('market_prices', [{
-        commodity_id: commodityId,
-        farm_id: farm?.id || null,
-        price_date: date,
-        price_per_unit: price,
-        source: qs('#mp-source', modal)?.value?.trim() || 'Manual',
-        grade: qs('#mp-grade', modal)?.value?.trim() || null,
-        created_by: getSession()?.user?.id,
-      }]);
+      // Use dbInsert with on-conflict update
+      const existing = await dbSelect('market_prices',
+        `commodity_id=eq.${commodityId}&region=eq.${encodeURIComponent(region)}&price_date=eq.${date}&select=id`
+      );
+      if (existing.length) {
+        await dbUpdate('market_prices', existing[0].id, {
+          price_per_unit: price,
+          grade: qs('#mp-grade', modal)?.value?.trim() || null,
+        });
+      } else {
+        await dbInsert('market_prices', {
+          commodity_id: commodityId,
+          region,
+          price_date: date,
+          price_per_unit: price,
+          unit: 't',
+          grade: qs('#mp-grade', modal)?.value?.trim() || null,
+        });
+      }
 
-      // Switch to the newly added commodity
       _selectedCommodityId = commodityId;
-
       toast('Price saved', 'success');
       await _loadData();
       _renderTable();
       _renderChart();
     },
   });
+
+  // Auto-fill region when commodity changes
+  setTimeout(() => {
+    const comEl = document.getElementById('mp-commodity');
+    const regionEl = document.getElementById('mp-region');
+    const fillRegion = () => {
+      const comName = comEl?.options[comEl?.selectedIndex]?.text;
+      if (!comName || !regionEl) return;
+      if (comName === 'Cotton Lint' && cottonRegion) regionEl.value = cottonRegion;
+      else if (grainSites[comName]) regionEl.value = grainSites[comName];
+    };
+    comEl?.addEventListener('change', fillRegion);
+    fillRegion();
+  }, 50);
 }
 
 // ── Excel import ──────────────────────────────────────────────
