@@ -199,26 +199,25 @@ async function _mountOverview(container) {
       })() : '';
 
       return [
-        '<div class="card" style="padding:16px 18px;margin-bottom:12px">',
-        '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">',
-        '<div><div style="font-size:13px;font-weight:700;color:var(--ink)">'+name+'</div>',
-        '<div style="font-size:11px;color:var(--hint);margin-top:1px">'+sourceLabel+' · '+unit+'</div></div>',
-        '<div style="font-size:10px;color:var(--hint)">'+new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'})+'</div>',
-        '</div>',
-        '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">',
-        '<span style="font-size:26px;font-weight:700;color:var(--ink)">'+latest.toFixed(2)+'</span>',
-        '<span style="font-size:13px;color:var(--hint)">'+unit+'</span>',
-        '</div>',
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--page-bg);border-radius:6px;margin-bottom:6px">',
-        '<span style="font-size:11px;color:var(--hint)">Day</span>',
-        '<div style="display:flex;align-items:center;gap:6px">',
-        dayMove!=null ? '<span style="font-size:13px;font-weight:600;color:'+moveColor+'">'+moveArrow+' '+Math.abs(dayMove).toFixed(2)+'</span><span style="font-size:11px;color:'+moveColor+'"> ('+fPct(dayMovePct)+')</span>' : '<span style="font-size:12px;color:var(--hint)">—</span>',
+        '<div class="card" style="padding:12px 14px;margin-bottom:8px">',
+        '<div style="display:flex;align-items:center;justify-content:space-between">',
+        '<div>',
+        '<div style="font-size:11px;font-weight:600;color:var(--ink)">'+name+'</div>',
+        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">'+sourceLabel+' · '+unit+'</div>',
+        '<div style="display:flex;align-items:baseline;gap:5px">',
+        '<span style="font-size:22px;font-weight:700;color:var(--ink)">'+latest.toFixed(2)+'</span>',
+        '<span style="font-size:11px;color:var(--hint)">'+unit+'</span>',
         '</div></div>',
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--page-bg);border-radius:6px">',
-        '<span style="font-size:11px;color:var(--hint)">14-day avg</span>',
-        avg14!=null ? '<span style="font-size:11px;font-weight:600;color:'+avgColor+'">'+avg14.toFixed(2)+' '+(vsAvg>=0?'▲':'▼')+' '+Math.abs(vsAvg).toFixed(2)+' ('+fPct(vsAvgPct)+')</span>' : '<span style="font-size:12px;color:var(--hint)">No data</span>',
+        '<div style="text-align:right;min-width:90px">',
+        '<div style="font-size:10px;color:var(--hint);margin-bottom:2px">'+new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'})+'</div>',
+        dayMove!=null
+          ? '<div style="font-size:12px;font-weight:600;color:'+moveColor+'">'+moveArrow+' '+Math.abs(dayMove).toFixed(2)+' <span style="font-size:10px;font-weight:400">('+fPct(dayMovePct)+')</span></div>'
+          : '<div style="font-size:11px;color:var(--hint)">—</div>',
+        avg14!=null
+          ? '<div style="font-size:10px;color:var(--hint);margin-top:3px">14d '+avg14.toFixed(2)+' <span style="color:'+avgColor+'">'+(vsAvg>=0?'▲':'▼')+fPct(vsAvgPct)+'</span></div>'
+          : '',
         '</div>',
-        bars,'</div>',
+        '</div></div>',
       ].join('');
     }).join('');
 
@@ -264,60 +263,28 @@ async function _mountOverview(container) {
       const avgColor = vsAvg == null ? 'var(--hint)' : vsAvg >= 0 ? '#16a34a' : '#dc2626';
 
       return [
-        '<div class="card" style="padding:16px 18px;margin-bottom:12px">',
-
-        // Header
-        '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">',
+        '<div class="card" style="padding:12px 14px;margin-bottom:8px">',
+        '<div style="display:flex;align-items:center;justify-content:space-between">',
+        // Left — name + price
         '<div>',
-        '<div style="font-size:13px;font-weight:700;color:var(--ink)">' + crop + '</div>',
-        '<div style="font-size:11px;color:var(--hint);margin-top:1px">' + site + '</div>',
+        '<div style="font-size:11px;font-weight:600;color:var(--ink)">' + crop + '</div>',
+        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + site + '</div>',
+        '<div style="display:flex;align-items:baseline;gap:5px">',
+        '<span style="font-size:22px;font-weight:700;color:var(--ink)">' + fC(latest) + '</span>',
+        '<span style="font-size:11px;color:var(--hint)">/' + unit + '</span>',
         '</div>',
-        '<div style="font-size:10px;color:var(--hint);text-align:right">' + new Date(latestDate).toLocaleDateString('en-AU', {day:'numeric',month:'short'}) + '</div>',
         '</div>',
-
-        // Current price — large
-        '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">',
-        '<span style="font-size:26px;font-weight:700;color:var(--ink)">' + fC(latest) + '</span>',
-        '<span style="font-size:13px;color:var(--hint)">/' + unit + '</span>',
-        '</div>',
-
-        // Daily movement
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--page-bg);border-radius:6px;margin-bottom:6px">',
-        '<span style="font-size:11px;color:var(--hint)">Day</span>',
-        '<div style="display:flex;align-items:center;gap:6px">',
+        // Right — day + 14d avg
+        '<div style="text-align:right;min-width:90px">',
+        '<div style="font-size:10px;color:var(--hint);margin-bottom:2px">' + new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) + '</div>',
         dayMove != null
-          ? '<span style="font-size:13px;font-weight:600;color:' + moveColor + '">' + moveArrow + ' ' + fC(Math.abs(dayMove)) + '</span>' +
-            '<span style="font-size:11px;color:' + moveColor + '">(' + fPct(dayMovePct) + ')</span>'
-          : '<span style="font-size:12px;color:var(--hint)">—</span>',
-        '</div>',
-        '</div>',
-
-        // 14-day rolling average
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--page-bg);border-radius:6px">',
-        '<span style="font-size:11px;color:var(--hint)">14-day avg</span>',
-        '<div style="display:flex;align-items:center;gap:6px">',
+          ? '<div style="font-size:12px;font-weight:600;color:' + moveColor + '">' + moveArrow + ' ' + fC(Math.abs(dayMove)) + ' <span style="font-size:10px;font-weight:400">(' + fPct(dayMovePct) + ')</span></div>'
+          : '<div style="font-size:11px;color:var(--hint)">—</div>',
         avg14 != null
-          ? '<span style="font-size:12px;color:var(--hint)">' + fC(avg14) + '</span>' +
-            '<span style="font-size:11px;font-weight:600;color:' + avgColor + '">' +
-            (vsAvg >= 0 ? '▲' : '▼') + ' ' + fC(Math.abs(vsAvg)) +
-            ' (' + fPct(vsAvgPct) + ')</span>'
-          : '<span style="font-size:12px;color:var(--hint)">Insufficient data</span>',
+          ? '<div style="font-size:10px;color:var(--hint);margin-top:3px">14d ' + fC(avg14) + ' <span style="color:' + avgColor + '">' + (vsAvg >= 0 ? '▲' : '▼') + fPct(vsAvgPct) + '</span></div>'
+          : '',
         '</div>',
         '</div>',
-
-        // Mini sparkline bar (14-day visual)
-        window14.length > 1 ? (() => {
-          const vals = window14.map(p => parseFloat(p.price_per_unit)).reverse();
-          const min = Math.min(...vals), max = Math.max(...vals);
-          const range = max - min || 1;
-          const bars = vals.map(v => {
-            const h = Math.max(2, Math.round(((v - min) / range) * 24));
-            const c = v >= latest ? '#16a34a' : '#94a3b8';
-            return '<div style="flex:1;height:' + h + 'px;background:' + c + ';border-radius:1px;align-self:flex-end"></div>';
-          }).join('');
-          return '<div style="display:flex;align-items:flex-end;gap:2px;height:28px;margin-top:10px;padding:0 2px">' + bars + '</div>';
-        })() : '',
-
         '</div>',
       ].join('');
     }).join('');

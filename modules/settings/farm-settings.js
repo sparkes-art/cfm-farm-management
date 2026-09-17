@@ -25,6 +25,48 @@ const GRAIN_SITES = [
 
 const GRAIN_COMMODITIES = ['Wheat', 'Barley', 'Canola', 'Faba Beans', 'Lentils'];
 
+// MLA saleyards — confirmed from GET /saleyard 17 Sep 2026
+const MLA_SALEYARDS = [
+  { id: 'ARM', name: 'Armidale', state: 'NSW' },
+  { id: 'CAS', name: 'Casino', state: 'NSW' },
+  { id: 'COO', name: 'Coonamble', state: 'NSW' },
+  { id: 'DUB', name: 'Dubbo', state: 'NSW' },
+  { id: 'FOR', name: 'Forbes', state: 'NSW' },
+  { id: 'GLE', name: 'Glen Innes', state: 'NSW' },
+  { id: 'GOU', name: 'Goulburn', state: 'NSW' },
+  { id: 'GRI', name: 'Griffith', state: 'NSW' },
+  { id: 'GUN', name: 'Gunnedah', state: 'NSW' },
+  { id: 'GUY', name: 'Guyra', state: 'NSW' },
+  { id: 'INV', name: 'Inverell', state: 'NSW' },
+  { id: 'SCO', name: 'Scone', state: 'NSW' },
+  { id: 'TAM', name: 'Tamworth', state: 'NSW' },
+  { id: 'TEN', name: 'Tenterfield', state: 'NSW' },
+  { id: 'WAG', name: 'Wagga', state: 'NSW' },
+  { id: 'WAL', name: 'Walcha', state: 'NSW' },
+  { id: 'DAL', name: 'Dalby', state: 'QLD' },
+  { id: 'ROM', name: 'Roma', state: 'QLD' },
+  { id: 'CHA', name: 'Charters Towers', state: 'QLD' },
+  { id: 'BAL', name: 'Ballarat', state: 'VIC' },
+  { id: 'BAN', name: 'Barnawartha', state: 'VIC' },
+  { id: 'ECH', name: 'Echuca', state: 'VIC' },
+  { id: 'ELD', name: 'Elders Pakenham', state: 'VIC' },
+  { id: 'SHE', name: 'Shepparton', state: 'VIC' },
+  { id: 'WOD', name: 'Wodonga', state: 'VIC' },
+  { id: 'ADP', name: 'SA Livestock Exchange', state: 'SA' },
+  { id: 'MTE', name: 'Mt Gambier', state: 'SA' },
+  { id: 'ASP', name: 'Alice Springs', state: 'NT' },
+  { id: 'KAT', name: 'Katherine', state: 'NT' },
+].sort((a, b) => a.name.localeCompare(b.name));
+
+const MLA_INDICATORS = [
+  'EYCI', 'NYCI', 'WYCI',
+  'Heavy Steer', 'Feeder Steer', 'Feeder Heifer',
+  'Restocker Yearling Steer', 'Restocker Yearling Heifer',
+  'Processor Cow', 'Heavy Dairy Cow', 'Online Young Cattle',
+  'Trade Lamb', 'Merino Lamb', 'Heavy Lamb', 'Light Lamb',
+  'Restocker Lamb', 'Mutton', 'Online Lamb', 'Online Sheep',
+];
+
 export async function mountFarmSettings(container, onSave) {
   const farm = getActiveFarm();
   if (!farm) {
@@ -102,6 +144,48 @@ export async function mountFarmSettings(container, onSave) {
           <button class="btn btn-primary" id="fs-save">Save changes</button>
           <button class="btn btn-secondary" id="fs-cancel">Cancel</button>
         </div>
+
+        <hr class="divider">
+
+        <div class="form-group">
+          <label class="form-label">Livestock saleyards</label>
+          <p class="form-helper" style="margin-bottom:12px">Set up to three saleyards in priority order. When displaying livestock prices, the system uses the primary saleyard first — falling back to secondary, then tertiary, then the national indicator if no sales are recorded at the chosen yards.</p>
+          ${['primary', 'secondary', 'tertiary'].map(priority => `
+            <div style="display:grid;grid-template-columns:90px 1fr;align-items:center;gap:12px;margin-bottom:10px">
+              <label style="font-size:var(--text-sm);font-weight:500;color:var(--ink-mid);text-transform:capitalize">${priority}</label>
+              <select class="form-select ls-saleyard-select" data-priority="${priority}" id="fs-saleyard-${priority}">
+                <option value="">— not set —</option>
+                ${['NSW','QLD','VIC','SA','NT'].map(state => `
+                  <optgroup label="${state}">
+                    ${MLA_SALEYARDS.filter(s => s.state === state).map(s =>
+                      `<option value="${s.id}" ${settings.livestockSaleyards?.[priority] === s.id ? 'selected' : ''}>${s.name}</option>`
+                    ).join('')}
+                  </optgroup>
+                `).join('')}
+              </select>
+            </div>
+          `).join('')}
+        </div>
+
+        <hr class="divider">
+
+        <div class="form-group">
+          <label class="form-label">Livestock indicators to display</label>
+          <p class="form-helper" style="margin-bottom:12px">Select the MLA indicators relevant to this farm's livestock enterprise. These appear in the farm gate prices panel on the manager view.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+            ${MLA_INDICATORS.map(ind => `
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:4px 0">
+                <input type="checkbox" class="ls-indicator-check" value="${ind}"
+                  ${(settings.livestockIndicators || ['EYCI','Heavy Steer','Feeder Steer']).includes(ind) ? 'checked' : ''}>
+                ${ind}
+              </label>
+            `).join('')}
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:20px">
+          <button class="btn btn-primary" id="fs-save-bottom">Save changes</button>
+        </div>
         <div id="fs-feedback" style="margin-top:10px;font-size:var(--text-sm)"></div>
       </div>
     </div>
@@ -132,6 +216,17 @@ export async function mountFarmSettings(container, onSave) {
         if (sel.value) grainSites[sel.dataset.commodity] = sel.value;
       });
       newSettings.grainSites = grainSites;
+
+      // Save livestock saleyards
+      const livestockSaleyards = {};
+      container.querySelectorAll('.ls-saleyard-select').forEach(sel => {
+        if (sel.value) livestockSaleyards[sel.dataset.priority] = sel.value;
+      });
+      newSettings.livestockSaleyards = Object.keys(livestockSaleyards).length ? livestockSaleyards : null;
+
+      // Save livestock indicators
+      const livestockIndicators = Array.from(container.querySelectorAll('.ls-indicator-check:checked')).map(el => el.value);
+      newSettings.livestockIndicators = livestockIndicators.length ? livestockIndicators : null;
 
       await dbUpdate('farms', farm.id, {
         name,
@@ -170,6 +265,8 @@ export async function mountFarmSettings(container, onSave) {
   qs('#fs-cancel', container)?.addEventListener('click', () => {
     if (onSave) onSave(null);
   });
+
+  qs('#fs-save-bottom', container)?.addEventListener('click', () => qs('#fs-save', container)?.click());
 
   // Xero connection section
   const xeroSection = document.createElement('div');
