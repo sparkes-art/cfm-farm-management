@@ -119,6 +119,64 @@ export async function mountFarmSettings(container, onSave) {
 
   const settings = farm.settings || {};
 
+  // Load CropConnect sites dynamically from market_prices
+  // Grouped by state using a known state lookup
+  const STATE_LOOKUP = {
+    'NSW': ['Ardlethan','Baradine','Barellan','Barmedman','Barnes Crossing','Bellata','Biloela',
+      'Boggabilla','Boggabri','Boree Creek','Bribbaree','Burren Junction','Calleen','Caragabal',
+      'Caroona','Coleambally','Condobolin','Coolamon','Coonamble','Cootamundra','Croppa Creek',
+      'Cryon','Cunningar','Curlewis','Delungra','Dubbo','Dunedoo','Edgeroi','Emerald Hill',
+      'Euabalong West','Garah','Gilgandra','Goolgowi','Greenethorpe','Grong Grong','Gular',
+      'Gunnedah','Gurley','Hillston','Inverell','Junee Sub','Kikoira','Koorngoo',
+      'Lake Cargelligo','Leeton','Macalister','Maimuru','Manildra','Merah North','Merriwagga',
+      'Merrywinebone','Milbrulong','Milvale','Mirrool','Moree Sub','Moulamein','Mullaley',
+      'Narrabri Sub','Narromine','Peak Hill','Pilliga','Rankins Springs','Quandialla',
+      'Temora','Trangie','Tullamore','Ungarie','Walgett','Warialda','Wee Waa','West Wyalong',
+      'Whitton','Wyalong'],
+    'QLD': ['Biloela','Boggabilla','Brookstead','Bungunya','Capella','Cecil Plains',
+      'Condamine','Dalby West','Dirranbandi','Goondiwindi East','Goondiwindi West','Inglewood',
+      'Macalister','Meandarra','Millmerran','Miles','Moonie','Moura','Oakey','Pittsworth',
+      'Roma','St George','Stanthorpe','Toowoomba','Toobeah','Wallumbilla','Warwick'],
+    'VIC': ['Ardmore','Ballarat','Barnawartha','Berriwillock','Berrybank','Beulah','Boort',
+      'Brocklesby','Carpolac','Carwarp','Charlton','Corio','Deniliquin','Dimboola','Donald',
+      'Dookie','Dunolly Sub','Elmore','Geelong Terminal','Hamilton','Henty West','Hopetoun',
+      'Jeparit','Lillimur','Manangatang','Mildura','Mitiamo','Nullawil','Ouyen','Rainbow',
+      'Sea Lake','Ultima','Woomelang','Woorinen'],
+    'SA': ['Cleve','Keith','Loxton','Mallala','Murray Bridge','Port Pirie','Snowtown',
+      'Tailem Bend','Wallaroo','Wudinna'],
+    'WA': ['Albany','Esperance','Geraldton','Kwinana','Merredin','Moora','Northam'],
+    'Other': [], // catches any new sites not yet in the lookup
+  };
+
+  // Fetch live site list from Supabase
+  let liveSites = [];
+  try {
+    const rows = await dbSelect('market_prices',
+      'select=region&source_label=eq.CropConnect&limit=2000'
+    );
+    const siteSet = new Set();
+    rows.forEach(r => {
+      const site = r.region?.split('|')[0];
+      if (site) siteSet.add(site);
+    });
+    liveSites = [...siteSet].sort();
+  } catch(e) {
+    console.warn('Could not load live CC sites:', e.message);
+  }
+
+  // Group live sites by state
+  const sitesByState = { NSW:[], QLD:[], VIC:[], SA:[], WA:[], Other:[] };
+  liveSites.forEach(site => {
+    let placed = false;
+    for (const [state, stateSites] of Object.entries(STATE_LOOKUP)) {
+      if (state === 'Other') continue;
+      if (stateSites.includes(site)) { sitesByState[state].push(site); placed = true; break; }
+    }
+    if (!placed) sitesByState.Other.push(site);
+  });
+  // Remove empty states
+  Object.keys(sitesByState).forEach(s => { if (!sitesByState[s].length) delete sitesByState[s]; });
+
   container.innerHTML = `
     <div class="page-header">
       <div>
@@ -173,7 +231,9 @@ export async function mountFarmSettings(container, onSave) {
           <label class="form-label">Grain catchment sites</label>
           <p class="form-helper" style="margin-bottom:12px">Select all CropConnect sites relevant to this farm. When displaying grain prices, the system shows the best available bid from within this catchment. Add neighbouring sites — a wider catchment gives better fallback when your closest site has no bid for a commodity.</p>
           <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:12px">
-            ${Object.entries(ALL_CC_SITES).map(([state, sites]) => `
+            ${liveSites.length === 0
+              ? '<div style="color:var(--hint);font-size:12px">Run the CropConnect price function first to populate the site list.</div>'
+              : Object.entries(sitesByState).map(([state, sites]) => `
               <div style="margin-bottom:12px">
                 <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:6px">${state}</div>
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">
