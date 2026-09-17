@@ -43,16 +43,29 @@ const DEFAULT_GRADES = {
 };
 
 async function getAllBids() {
-  // SAP OData requires $filter etc literal, but spaces in values must be encoded
-  const filter = encodeURIComponent('(BidSustainable eq true) and (BidNonSustainable eq true)');
-  const url = `${CC_API}/AllBidsSet?$filter=${filter}&$top=5000&$format=json`;
-  console.log(`[push-cropconnect-prices] Fetching bids...`);
-  const res = await fetch(url, { headers: CC_HEADERS });
+  // Step 1: establish SAP session by hitting the public settings endpoint
+  // (mirrors what the browser does on page load)
+  const sessionRes = await fetch(
+    'https://cropconnect.com.au/sap/opu/odata/SAP/CCGLOBAL_PUBLIC/GlobalSettingsSet(1)?$select=CurrentTime,UTCDifference&$format=json',
+    { headers: { ...CC_HEADERS, Accept: 'application/json' } }
+  );
+  // Extract session cookie from response
+  const rawCookie = sessionRes.headers.get('set-cookie') || '';
+  const sessionCookie = rawCookie.split(';')[0]; // take first cookie pair only
+  console.log(`[push-cropconnect-prices] Session status: ${sessionRes.status}, cookie: ${sessionCookie ? 'yes' : 'none'}`);
+
+  // Step 2: fetch all bids, passing session cookie if we got one
+  const bidHeaders = { ...CC_HEADERS, Accept: 'application/json' };
+  if (sessionCookie) bidHeaders['Cookie'] = sessionCookie;
+
+  const url = `https://cropconnect.com.au/sap/opu/odata/SAP/BID_PUBLIC/AllBidsSet?$top=5000&$format=json`;
+  const res = await fetch(url, { headers: bidHeaders });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`CropConnect API error: ${res.status} — ${body.slice(0, 200)}`);
+    throw new Error(`CropConnect API error: ${res.status} — ${body.slice(0, 300)}`);
   }
   const data = await res.json();
+  console.log(`[push-cropconnect-prices] Got ${data.d.results.length} bids`);
   return data.d.results;
 }
 
