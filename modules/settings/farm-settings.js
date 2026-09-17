@@ -148,11 +148,14 @@ export async function mountFarmSettings(container, onSave) {
     'Other': [], // catches any new sites not yet in the lookup
   };
 
-  // Fetch live site list from Supabase
+  // Fetch live site list from Supabase — get one day's worth which covers all sites
   let liveSites = [];
   try {
+    // Fetch just today/yesterday's data — one day has all active sites
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
     const rows = await dbSelect('market_prices',
-      'select=region&source_label=eq.CropConnect&limit=2000'
+      `select=region&source_label=eq.CropConnect&price_date=gte.${yesterday}&limit=5000`
     );
     const siteSet = new Set();
     rows.forEach(r => {
