@@ -146,8 +146,9 @@ async function fetchReport(endpoint, commodityId, regionFn) {
 export default async function handler(req) {
   const url = new URL(req?.url || 'http://localhost');
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-  const weekAgo   = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
-  const fromDate  = url.searchParams.get('fromDate') || weekAgo;
+  // Default to single day (yesterday) to keep function fast
+  // Pass ?fromDate=2026-01-01 for backfill
+  const fromDate  = url.searchParams.get('fromDate') || yesterday;
   const toDate    = url.searchParams.get('toDate')   || yesterday;
 
   console.log(`[push-livestock-prices] ${fromDate} → ${toDate}`);
