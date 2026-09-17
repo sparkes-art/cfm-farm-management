@@ -140,11 +140,22 @@ async function _mountOverview(container) {
     const fN = (n, dp=0) => n == null ? '—' : Number(n).toLocaleString('en-AU', {minimumFractionDigits:dp, maximumFractionDigits:dp});
     const fPct = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
 
-    // Farm's preferred sites
-    const farmSites = [
-      ...Object.entries(grainSites).map(([crop, site]) => ({ crop, site })),
-      ...(cottonRegion ? [{ crop: 'Cotton Lint', site: cottonRegion }] : []),
-    ];
+    // Farm's preferred sites — handle both old LDC (string) and new CropConnect (object) format
+    const farmSites = [];
+    Object.entries(grainSites).forEach(([crop, setting]) => {
+      if (!setting) return;
+      if (typeof setting === 'string') {
+        // Old LDC format — single site string
+        farmSites.push({ crop, site: setting, grade: null, type: 'ldc' });
+      } else {
+        // New CropConnect format — {primary, secondary, tertiary, grade}
+        farmSites.push({
+          crop, grade: setting.grade || null, type: 'cc',
+          sites: [setting.primary, setting.secondary, setting.tertiary].filter(Boolean),
+        });
+      }
+    });
+    if (cottonRegion) farmSites.push({ crop: 'Cotton Lint', site: cottonRegion, grade: null, type: 'cotton' });
 
     // Livestock indicators from farm settings — use master price data
     // Livestock indicators from farm settings — saleyard fallback logic
@@ -222,26 +233,42 @@ async function _mountOverview(container) {
     }).join('');
 
     // Build price cards
-    const priceCards = farmSites.map(({ crop, site }) => {
+    const priceCards = farmSites.map(({ crop, site, sites, grade, type }) => {
       const com = commodityList.find(c => c.name === crop);
       if (!com) return '';
 
-      // All history for this commodity + site, sorted newest first
-      const history = allPrices
-        .filter(p => p.commodity_id === com.id && p.region === site)
-        .sort((a, b) => b.price_date.localeCompare(a.price_date));
+      // Resolve history using site fallback
+      let history = [];
+      let sourceLabel = site || (sites?.[0]) || '';
+
+      if (type === 'cc' && sites?.length && grade) {
+        // CropConnect: try primary → secondary → tertiary site
+        for (const s of sites) {
+          const key = `${s}|${grade}`;
+          const h = allPrices.filter(p => p.commodity_id === com.id && p.region === key)
+            .sort((a, b) => b.price_date.localeCompare(a.price_date));
+          if (h.length) { history = h; sourceLabel = s; break; }
+        }
+      } else {
+        // LDC or Cotton — simple region match
+        const region = site;
+        history = allPrices.filter(p => p.commodity_id === com.id && p.region === region)
+          .sort((a, b) => b.price_date.localeCompare(a.price_date));
+      }
+
+      const unit = grade ? '$/t · ' + grade : 't';
 
       if (!history.length) return [
-        '<div class="card" style="padding:16px 18px;margin-bottom:12px">',
-        '<div style="font-size:13px;font-weight:600;color:var(--ink)">' + crop + '</div>',
-        '<div style="font-size:11px;color:var(--hint);margin-top:2px">' + site + '</div>',
-        '<div style="font-size:12px;color:var(--hint);margin-top:8px">No price data</div>',
+        '<div class="card" style="padding:12px 14px;margin-bottom:8px">',
+        '<div style="font-size:11px;font-weight:600;color:var(--ink)">' + crop + '</div>',
+        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + sourceLabel + (grade ? ' · ' + grade : '') + '</div>',
+        '<div style="font-size:12px;color:var(--hint);margin-top:8px">No price data yet</div>',
         '</div>',
       ].join('');
 
       const latest = parseFloat(history[0].price_per_unit);
       const latestDate = history[0].price_date;
-      const unit = history[0].unit || 't';
+      const displayUnit = history[0].unit || 't';
       const prev = history.length > 1 ? parseFloat(history[1].price_per_unit) : null;
 
       // Daily movement
@@ -268,10 +295,10 @@ async function _mountOverview(container) {
         // Left — name + price
         '<div>',
         '<div style="font-size:11px;font-weight:600;color:var(--ink)">' + crop + '</div>',
-        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + site + '</div>',
+        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + sourceLabel + (grade ? ' · ' + grade : '') + '</div>',
         '<div style="display:flex;align-items:baseline;gap:5px">',
         '<span style="font-size:22px;font-weight:700;color:var(--ink)">' + fC(latest) + '</span>',
-        '<span style="font-size:11px;color:var(--hint)">/' + unit + '</span>',
+        '<span style="font-size:11px;color:var(--hint)">/' + displayUnit + '</span>',
         '</div>',
         '</div>',
         // Right — day + 14d avg

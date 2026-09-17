@@ -9,19 +9,40 @@ const COTTON_REGIONS = [
   'Mungindi/St George', 'Namoi Valley', 'Macquarie Valley', 'Lachlan/Sth NSW', 'NT / WA'
 ];
 
-// LDC Grains SE sites — full names matching CSV site code lookup
-const GRAIN_SITES = [
-  'ARDLETHAN LDC',
-  'COOLAMON LDC',
-  'ELMORE LDC',
-  'GOOLGOWI LDC',
-  'KYALITE LDC',
-  'MOREE LDC',
-  'NULLAWIL LDC',
-  'TELFORD LDC',
-  'THE ROCK LDC',
-  'WOORINEN LDC',
-].sort();
+// CropConnect sites — 142 sites confirmed from BID_PUBLIC API 17 Sep 2026
+// Grouped by state for the dropdown
+const CC_SITES = {
+  'NSW': ['Ardlethan','Baradine','Barellan','Barmedman','Barnes Crossing','Bellata','Boggabilla',
+    'Boggabri','Boree Creek','Bribbaree','Burren Junction','Calleen','Caroona','Coleambally',
+    'Condobolin','Coolamon','Coonamble','Cootamundra','Croppa Creek','Curlewis','Delungra',
+    'Dubbo','Dunedoo','Forbes','Gilgandra','Goolgowi','Grenfell','Gunnedah','Gurley','Gwabegar',
+    'Inverell','Lake Cargelligo','Leeton','Manildra','Merrywinebone','Moree Sub','Moulamein',
+    'Mullaley','Narrabri Sub','Narromine','Peak Hill','Pilliga','Rankins Springs','Quandialla',
+    'Temora','Trangie','Tullamore','Ungarie','Walgett','Warialda','Wee Waa','West Wyalong',
+    'Whitton','Wyalong'],
+  'QLD': ['Biloela','Boggabilla','Brookstead','Bungunya','Capella','Cecil Plains','Cleve',
+    'Condamine','Dalby','Dirranbandi','Goondiwindi','Inglewood','Millmerran','Miles','Moonie',
+    'Oakey','Pittsworth','Roma','St George','Stanthorpe','Toowoomba','Toobeah','Wallumbilla','Warwick'],
+  'VIC': ['Ardmore','Ballarat','Barnawartha','Berriwillock','Berrybank','Beulah','Boort',
+    'Boree Creek','Carwarp','Charlton','Dimboola','Donald','Dunolly','Elmore','Hopetoun',
+    'Horsham','Kaniva','Kerang','Lascelles','Manangatang','Mildura','Nullawil','Ouyen',
+    'Rainbow','Sea Lake','Ultima','Woomelang','Woorinen'],
+  'SA': ['Cleve','Keith','Loxton','Mallala','Murray Bridge','Port Pirie','Snowtown','Tailem Bend',
+    'Wallaroo','Wudinna'],
+  'WA': ['Albany','Esperance','Geraldton','Kwinana','Merredin','Moora','Northam'],
+};
+const CC_GRADES = {
+  'Wheat':      ['APW1','APW','ASW1','ASW','H1','H2','AH','FEED','SFW1','SFW'],
+  'Barley':     ['BAR1','BAR','F1BAR','FBAR','MALT1','MALT','FEED'],
+  'Canola':     ['CAN1','CAN','CNTW','OPT'],
+  'Chickpeas':  ['DESI1','DESI','KABULI','KAB1'],
+  'Faba Beans': ['FAB1','FAB2','FAB','FBFEED'],
+  'Lentils':    ['NIPT1','NIPT','LENTIL','LFEED'],
+  'Sorghum':    ['SOR1','SOR','FEED'],
+  'Oats':       ['OAT1','OAT','FEED'],
+  'Durum':      ['DUR1','DUR','BISCUIT'],
+  'Field Peas': ['FP1','FP','FPFEED'],
+};
 
 const GRAIN_COMMODITIES = ['Wheat', 'Barley', 'Canola', 'Faba Beans', 'Lentils'];
 
@@ -127,17 +148,53 @@ export async function mountFarmSettings(container, onSave) {
         <hr class="divider">
 
         <div class="form-group">
-          <label class="form-label">Grain delivery sites</label>
-          <p class="form-helper" style="margin-bottom:12px">Select the delivery site for each grain commodity — used to show relevant site prices from the LDC daily grain price feed.</p>
-          ${GRAIN_COMMODITIES.map(com => `
-            <div style="display:grid;grid-template-columns:120px 1fr;align-items:center;gap:12px;margin-bottom:10px">
-              <label style="font-size:var(--text-sm);font-weight:500;color:var(--ink-mid)">${com}</label>
-              <select class="form-select grain-site-select" data-commodity="${com}" id="fs-grain-${com.replace(/\s/g, '-')}">
-                <option value="">Not grown / not applicable</option>
-                ${GRAIN_SITES.map(s => `<option value="${s}" ${settings.grainSites?.[com] === s ? 'selected' : ''}>${s}</option>`).join('')}
-              </select>
-            </div>
-          `).join('')}
+          <label class="form-label">Grain delivery sites &amp; grades</label>
+          <p class="form-helper" style="margin-bottom:14px">For each commodity, set up to three delivery sites in priority order, plus the primary grade to display. The system shows the primary site price first — falling back to secondary, then tertiary if no bids exist at the preferred site. Prices are pulled from GrainCorp CropConnect.</p>
+          ${GRAIN_COMMODITIES.map(com => {
+            const s = settings.grainSites?.[com] || {};
+            // Support old string format (LDC) — treat as primary
+            const pri = typeof s === 'string' ? s : (s.primary || '');
+            const sec = typeof s === 'string' ? '' : (s.secondary || '');
+            const ter = typeof s === 'string' ? '' : (s.tertiary || '');
+            const grade = typeof s === 'string' ? '' : (s.grade || '');
+            const gradeOptions = (CC_GRADES[com] || []).map(g =>
+              `<option value="${g}" ${grade === g ? 'selected' : ''}>${g}</option>`
+            ).join('');
+            const siteOptions = (priority) => {
+              const current = priority === 'primary' ? pri : priority === 'secondary' ? sec : ter;
+              return Object.entries(CC_SITES).map(([state, sites]) =>
+                `<optgroup label="${state}">${sites.map(site =>
+                  `<option value="${site}" ${current === site ? 'selected' : ''}>${site}</option>`
+                ).join('')}</optgroup>`
+              ).join('');
+            };
+            return `
+            <div style="margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:6px">
+              <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:10px">${com}</div>
+              <div style="display:grid;grid-template-columns:80px 1fr 80px 1fr;gap:8px;align-items:center;margin-bottom:8px">
+                <label style="font-size:12px;color:var(--ink-mid)">Primary</label>
+                <select class="form-select grain-site-select" data-commodity="${com}" data-priority="primary">
+                  <option value="">— not grown —</option>${siteOptions('primary')}
+                </select>
+                <label style="font-size:12px;color:var(--ink-mid)">Grade</label>
+                <select class="form-select grain-grade-select" data-commodity="${com}">
+                  <option value="">— select —</option>${gradeOptions}
+                </select>
+              </div>
+              <div style="display:grid;grid-template-columns:80px 1fr;gap:8px;align-items:center;margin-bottom:6px">
+                <label style="font-size:12px;color:var(--ink-mid)">Secondary</label>
+                <select class="form-select grain-site-select" data-commodity="${com}" data-priority="secondary">
+                  <option value="">— not set —</option>${siteOptions('secondary')}
+                </select>
+              </div>
+              <div style="display:grid;grid-template-columns:80px 1fr;gap:8px;align-items:center">
+                <label style="font-size:12px;color:var(--ink-mid)">Tertiary</label>
+                <select class="form-select grain-site-select" data-commodity="${com}" data-priority="tertiary">
+                  <option value="">— not set —</option>${siteOptions('tertiary')}
+                </select>
+              </div>
+            </div>`;
+          }).join('')}
         </div>
 
         <div style="display:flex;gap:10px;margin-top:20px">
@@ -210,10 +267,15 @@ export async function mountFarmSettings(container, onSave) {
       if (cottonRegion) newSettings.cottonRegion = cottonRegion;
       else delete newSettings.cottonRegion;
 
-      // Save grain delivery sites
+      // Save grain delivery sites (primary/secondary/tertiary + grade per commodity)
       const grainSites = {};
-      document.querySelectorAll('.grain-site-select').forEach(sel => {
-        if (sel.value) grainSites[sel.dataset.commodity] = sel.value;
+      GRAIN_COMMODITIES.forEach(com => {
+        const selects = container.querySelectorAll(`.grain-site-select[data-commodity="${com}"]`);
+        const gradeEl = container.querySelector(`.grain-grade-select[data-commodity="${com}"]`);
+        const entry = {};
+        selects.forEach(sel => { if (sel.value) entry[sel.dataset.priority] = sel.value; });
+        if (gradeEl?.value) entry.grade = gradeEl.value;
+        if (Object.keys(entry).length) grainSites[com] = entry;
       });
       newSettings.grainSites = grainSites;
 

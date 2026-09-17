@@ -297,24 +297,43 @@ async function _loadData() {
   // Get commodity name to find farm's grain site
   const commodities = getCommodities();
   const commodity = commodities.find(c => c.id === _selectedCommodityId);
-  const grainSite = farm?.settings?.grainSites?.[commodity?.name] || null;
+  const comName = commodity?.name;
+  const grainSetting = farm?.settings?.grainSites?.[comName] || null;
 
-  // Update site/grade labels in UI
+  // Support both old string format (LDC) and new object format (CropConnect)
+  const isCropConnect = grainSetting && typeof grainSetting === 'object';
+  const grainSitePrimary   = isCropConnect ? (grainSetting.primary   || null) : grainSetting;
+  const grainSiteSecondary = isCropConnect ? (grainSetting.secondary || null) : null;
+  const grainSiteTertiary  = isCropConnect ? (grainSetting.tertiary  || null) : null;
+  const grainGrade         = isCropConnect ? (grainSetting.grade     || null) : null;
+  const cottonRegion = farm?.settings?.cottonRegion || null;
+
+  // Build the ordered list of region keys to try (CropConnect: "Site|Grade", LDC: site name)
+  const regionCandidates = [];
+  if (comName !== 'Cotton Lint') {
+    if (grainSitePrimary && grainGrade)   regionCandidates.push(`${grainSitePrimary}|${grainGrade}`);
+    if (grainSiteSecondary && grainGrade) regionCandidates.push(`${grainSiteSecondary}|${grainGrade}`);
+    if (grainSiteTertiary && grainGrade)  regionCandidates.push(`${grainSiteTertiary}|${grainGrade}`);
+    // LDC fallback (old format)
+    if (grainSitePrimary && !grainGrade)  regionCandidates.push(grainSitePrimary);
+  }
+
+  // Site label for display
   const siteLabel = document.getElementById('mp-site-label');
   const gradeLabel = document.getElementById('mp-grade-label');
-  const gradeMap = { Wheat: 'APW1', Barley: 'BAR1', Canola: 'CAN1', 'Faba Beans': 'FAB2', Lentils: 'NIPT1' };
-  const grade = gradeMap[commodity?.name] || null;
-  const cottonRegion = farm?.settings?.cottonRegion || null;
-  const effectiveRegion = grainSite || (commodity?.name === 'Cotton Lint' ? cottonRegion : null);
+  const displaySite = grainSitePrimary || (comName === 'Cotton Lint' ? cottonRegion : null);
+  if (siteLabel) siteLabel.textContent = displaySite ? '· ' + displaySite : '';
+  if (gradeLabel) gradeLabel.textContent = grainGrade ? 'Grade: ' + grainGrade + ' · Price history' : 'Price history';
 
-  if (siteLabel) siteLabel.textContent = effectiveRegion ? '· ' + effectiveRegion : '';
-  if (gradeLabel) gradeLabel.textContent = grade ? 'Grade: ' + grade + ' · Price history' : 'Price history';
-
-  // Build query — show prices for this farm's configured region (grain site or cotton region)
-  // Global prices (no farm_id) are included when they match the farm's region
+  // Build query — try primary region first, fall back through candidates
+  // For chart we fetch all candidates and pick the one with the most recent data
   let priceQuery = 'commodity_id=eq.' + _selectedCommodityId + '&price_date=gte.' + cutoffStr + '&select=*&order=price_date.asc';
-  if (effectiveRegion) {
-    priceQuery += '&region=eq.' + encodeURIComponent(effectiveRegion);
+  if (comName === 'Cotton Lint' && cottonRegion) {
+    priceQuery += '&region=eq.' + encodeURIComponent(cottonRegion);
+  } else if (regionCandidates.length) {
+    // Fetch all candidate regions — resolve fallback client-side
+    const regionFilter = regionCandidates.map(r => encodeURIComponent(r)).join(',');
+    priceQuery += '&region=in.(' + regionFilter + ')';
   } else if (farm) {
     priceQuery += '&farm_id=eq.' + farm.id;
   }
