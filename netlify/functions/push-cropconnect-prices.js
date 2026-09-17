@@ -43,10 +43,19 @@ const DEFAULT_GRADES = {
 };
 
 async function getAllBids() {
-  // Fetch all current bids in one call (up to 5000 — typical is ~2700)
-  const url = `${CC_API}/AllBidsSet?$filter=(BidSustainable%20eq%20true)%20and%20(BidNonSustainable%20eq%20true)&$top=5000&$format=json`;
+  // Build URL without pre-encoded filter — let the server handle it
+  const params = new URLSearchParams({
+    '$filter': '(BidSustainable eq true) and (BidNonSustainable eq true)',
+    '$top': '5000',
+    '$format': 'json',
+  });
+  const url = `${CC_API}/AllBidsSet?${params}`;
+  console.log(`[push-cropconnect-prices] Fetching: ${url}`);
   const res = await fetch(url, { headers: CC_HEADERS });
-  if (!res.ok) throw new Error(`CropConnect API error: ${res.status}`);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`CropConnect API error: ${res.status} — ${body.slice(0, 200)}`);
+  }
   const data = await res.json();
   return data.d.results;
 }

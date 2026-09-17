@@ -44,7 +44,7 @@ const CC_GRADES = {
   'Field Peas': ['FP1','FP','FPFEED'],
 };
 
-const GRAIN_COMMODITIES = ['Wheat', 'Barley', 'Canola', 'Faba Beans', 'Lentils'];
+const GRAIN_COMMODITIES = ['Wheat', 'Barley', 'Canola', 'Faba Beans', 'Lentils', 'Sorghum'];
 
 // MLA saleyards — confirmed from GET /saleyard 17 Sep 2026
 const MLA_SALEYARDS = [
