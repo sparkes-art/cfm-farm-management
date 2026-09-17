@@ -287,7 +287,7 @@ async function _mountOverview(container) {
         const closing = stockBalances[i.id] || 0;
         const attrs = i.attributes || {};
         const detail = [attrs.birth_year ? 'b.' + attrs.birth_year : '', attrs.subgroup || ''].filter(Boolean).join(' · ');
-        return '<tr style="border-bottom:0.5px solid var(--border-light)" onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background=''">' +
+        return '<tr class="mob-row" style="border-bottom:0.5px solid var(--border-light)">' +
           '<td style="padding:8px 12px;font-size:12px;color:var(--ink)">' + i.name + (detail ? '<div style="font-size:10px;color:var(--hint)">' + detail + '</div>' : '') + '</td>' +
           '<td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--hint)">' + (opening||'—') + '</td>' +
           '<td style="padding:8px 12px;text-align:right;font-size:12px;color:var(--green)">' + (ytd.naturalIncrease ? '+'+fN(ytd.naturalIncrease) : '—') + '</td>' +
@@ -397,7 +397,7 @@ async function _mountOverview(container) {
           const hvstPct = r.budArea ? Math.round(r.hvstArea/r.budArea*100) : null;
           const yieldVarPct = r.hvstYield && r.budYield ? Math.round((r.hvstYield-r.budYield)/r.budYield*100) : null;
           const incompleteFlag = r.harvComplete ? ' <span style="font-size:9px;padding:1px 5px;background:#faeeda;color:#854f0b;border-radius:4px;margin-left:4px">⚠ partial</span>' : '';
-          return '<tr style="border-bottom:0.5px solid var(--border-light);'+(i%2===1?'background:var(--page-bg)':'')+'" onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background=''+(i%2===1?'var(--page-bg)':'')+''">' +
+          return '<tr style="border-bottom:0.5px solid var(--border-light);'+(i%2===1?'background:var(--page-bg)':'')+'"  onmouseleave="this.style.background=''+(i%2===1?'var(--page-bg)':'')+''">' +
             '<td style="padding:8px 12px;font-size:12px;font-weight:600;color:var(--ink)">'+r.name+incompleteFlag+'</td>' +
             '<td style="padding:8px 8px;text-align:right;font-size:12px;color:var(--hint)">'+fN(r.budArea)+' ha</td>' +
             '<td style="padding:8px 8px;text-align:right;font-size:12px;color:'+(r.hvstArea?'var(--green)':'var(--hint)')+'">'+
@@ -938,7 +938,7 @@ async function _mountInvestorView(container) {
       const coverageBadge = complete ? badge('Complete', 'green') : pct >= 100 ? badge('Fully covered', 'green') : pct >= 50 ? badge('Partial', 'amber') : badge('Open', 'red');
       return `
       <div style="display:grid;grid-template-columns:130px 1fr 90px 90px 90px;gap:0;padding:10px 18px;border-bottom:0.5px solid var(--border-light);align-items:center;font-size:12px"
-        onmouseenter="this.style.background='var(--blue-light)'" onmouseleave="this.style.background=''">
+        onmouseenter="this.style.background='#f0f7ff'" onmouseleave="this.style.background=''">
         <div style="font-weight:600;color:var(--ink)">${name}</div>
         <div>
           ${pct != null ? `<div style="font-size:11px;color:var(--hint);margin-bottom:3px">${contractedQty.toLocaleString()} ${unit} contracted${d.budgetProd ? ' of ' + d.budgetProd.toLocaleString() + ' budgeted' : ''}</div>` : ''}
