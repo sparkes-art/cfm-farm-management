@@ -259,6 +259,25 @@ function _openAddFarmModal(existing = null) {
           </div>
 
           <div style="margin-bottom:10px">
+            <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:6px">Livestock saleyards <span style="font-weight:400;color:var(--hint)">(for local price data)</span></label>
+            <div style="display:grid;grid-template-columns:70px 1fr;gap:6px;align-items:center">
+              <span style="font-size:12px;color:var(--ink-mid)">Primary</span>
+              <input class="form-input af-saleyard" data-priority="primary" type="text" 
+                value="${existingSettings.livestockSaleyards?.primary||''}" 
+                placeholder="e.g. GUN" style="font-size:12px;padding:5px 8px" maxlength="5">
+              <span style="font-size:12px;color:var(--ink-mid)">Secondary</span>
+              <input class="form-input af-saleyard" data-priority="secondary" type="text"
+                value="${existingSettings.livestockSaleyards?.secondary||''}"
+                placeholder="e.g. TAM" style="font-size:12px;padding:5px 8px" maxlength="5">
+              <span style="font-size:12px;color:var(--ink-mid)">Tertiary</span>
+              <input class="form-input af-saleyard" data-priority="tertiary" type="text"
+                value="${existingSettings.livestockSaleyards?.tertiary||''}"
+                placeholder="e.g. ARM" style="font-size:12px;padding:5px 8px" maxlength="5">
+            </div>
+            <div style="font-size:10px;color:var(--hint);margin-top:4px">MLA saleyard codes — GUN=Gunnedah, TAM=Tamworth, ARM=Armidale, INV=Inverell, DUB=Dubbo, SCO=Scone</div>
+          </div>
+
+          <div style="margin-bottom:10px">
             <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:4px">Cotton region</label>
             <input id="af-cotton-region" class="form-input" type="text" value="${existingCottonRegion}" placeholder="e.g. Lachlan/Sth NSW">
           </div>
@@ -313,6 +332,9 @@ function _openAddFarmModal(existing = null) {
     const cottonRegion = modal.querySelector('#af-cotton-region').value.trim();
     const yearStartMonth = parseInt(modal.querySelector('#af-year-start')?.value || '7');
     const livestockIndicators = Array.from(modal.querySelectorAll('.af-ls-ind:checked')).map(el => el.value);
+    const saleyardInputs = modal.querySelectorAll('.af-saleyard');
+    const livestockSaleyards = {};
+    saleyardInputs.forEach(inp => { if (inp.value.trim()) livestockSaleyards[inp.dataset.priority] = inp.value.trim().toUpperCase(); });
 
     if (!name) { alert('Farm name is required'); return; }
     if (!farmId) { alert('Farm ID is required'); return; }
@@ -328,6 +350,7 @@ function _openAddFarmModal(existing = null) {
     if (Object.keys(grainSites).length) settings.grainSites = grainSites;
     settings.yearStartMonth = yearStartMonth;
     if (livestockIndicators.length) settings.livestockIndicators = livestockIndicators;
+    if (Object.keys(livestockSaleyards).length) settings.livestockSaleyards = livestockSaleyards;
 
     btn.disabled = true; btn.textContent = 'Saving…';
 
