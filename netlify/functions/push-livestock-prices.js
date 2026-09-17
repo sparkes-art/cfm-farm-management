@@ -89,16 +89,36 @@ async function fetchReport(endpoint, commodityId, regionFn) {
   const data = await res.json();
   if (!data?.data?.length) return 0;
 
-  const rows = data.data.map(r => ({
-    commodity_id: commodityId,
-    region: regionFn(r),
-    price_per_unit: Math.round(parseFloat(r.indicator_value) * 100) / 100,
-    unit: ALL_INDICATORS.find(i => i.id === r.indicator_id)?.unit || 'c/kg lwt',
-    price_date: r.calendar_date,
-    // Store head_count in attributes for fallback logic
-    attributes: r.head_count != null ? { head_count: r.head_count } : null,
-  }));
+  // MLA repeats the same rolling-average value across multiple days when no new sale occurs
+  // Deduplicate: for each region, only keep the most recent entry for each unique value
+  // This prevents stale carry-forward values from overwriting correct current data
+  const byRegion = {};
+  for (const r of data.data) {
+    const region = regionFn(r);
+    const value = Math.round(parseFloat(r.indicator_value) * 100) / 100;
+    if (!byRegion[region]) byRegion[region] = [];
+    byRegion[region].push({ date: r.calendar_date, value, headCount: r.head_count });
+  }
 
+  // For each region, find the most recent date and its value
+  const rows = [];
+  for (const [region, entries] of Object.entries(byRegion)) {
+    // Sort by date desc, take the most recent
+    entries.sort((a, b) => b.date.localeCompare(a.date));
+    const latest = entries[0];
+    // Skip if head_count is 0 (no actual sales — pure carry-forward)
+    if (latest.headCount != null && latest.headCount === 0) continue;
+    rows.push({
+      commodity_id: commodityId,
+      region,
+      price_per_unit: latest.value,
+      unit: ALL_INDICATORS.find(i => i.id === parseInt(endpoint.match(/indicatorID=(\d+)/)?.[1]))?.unit || 'c/kg lwt',
+      price_date: latest.date,
+      attributes: latest.headCount != null ? { head_count: latest.headCount } : null,
+    });
+  }
+
+  if (!rows.length) return 0;
   await upsertRows(rows);
   return rows.length;
 }
