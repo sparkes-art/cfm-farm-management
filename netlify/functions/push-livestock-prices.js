@@ -1,210 +1,119 @@
-// netlify/functions/push-livestock-prices.js
-// Fetches MLA livestock indicator prices — national + saleyard level
-// API: https://api-mlastatistics.mla.com.au (no auth required)
-// Runs at 8pm UTC = 6am AEST
+// netlify/functions/push-livestock-saleyards.js
+// Fetches ALL saleyard-level MLA livestock indicator prices globally
+// No farm dependency — stores everything, farms filter their view
+// 8 API calls per day (one per cattle indicator), ~3 seconds
+// Runs at 8:30pm UTC = 6:30am AEST, 30 mins after national indicators
 
-export const config = { schedule: '0 20 * * *' };
+export const config = { schedule: '30 20 * * *' };
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://nqvfuqvindsgnogejaei.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const MLA_API = 'https://api-mlastatistics.mla.com.au';
 
-// All MLA livestock indicators — confirmed from GET /indicator 17 Sep 2026
-const ALL_INDICATORS = [
-  { id: 0,  name: 'EYCI',                     species: 'Cattle', unit: 'c/kg cwt' },
-  { id: 1,  name: 'WYCI',                      species: 'Cattle', unit: 'c/kg cwt' },
-  { id: 2,  name: 'Restocker Yearling Steer',  species: 'Cattle', unit: 'c/kg lwt' },
-  { id: 3,  name: 'Feeder Steer',              species: 'Cattle', unit: 'c/kg lwt' },
-  { id: 4,  name: 'Heavy Steer',               species: 'Cattle', unit: 'c/kg lwt' },
-  { id: 5,  name: 'Heavy Dairy Cow',           species: 'Cattle', unit: 'c/kg lwt' },
-  { id: 6,  name: 'Light Lamb',                species: 'Sheep',  unit: 'c/kg cwt' },
-  { id: 7,  name: 'Trade Lamb',                species: 'Sheep',  unit: 'c/kg cwt' },
-  { id: 8,  name: 'Heavy Lamb',                species: 'Sheep',  unit: 'c/kg cwt' },
-  { id: 9,  name: 'Merino Lamb',               species: 'Sheep',  unit: 'c/kg cwt' },
-  { id: 10, name: 'Restocker Lamb',            species: 'Sheep',  unit: 'c/kg cwt' },
-  { id: 11, name: 'Mutton',                    species: 'Sheep',  unit: 'c/kg cwt' },
-  { id: 12, name: 'Restocker Yearling Heifer', species: 'Cattle', unit: 'c/kg lwt' },
-  { id: 13, name: 'Processor Cow',             species: 'Cattle', unit: 'c/kg lwt' },
-  { id: 14, name: 'NYCI',                      species: 'Cattle', unit: 'c/kg lwt' },
-  { id: 15, name: 'Online Young Cattle',        species: 'Cattle', unit: 'c/kg lwt' },
-  { id: 16, name: 'Online Lamb',               species: 'Sheep',  unit: '$/head'   },
-  { id: 17, name: 'Feeder Heifer',             species: 'Cattle', unit: 'c/kg lwt' },
-  { id: 18, name: 'Online Sheep',              species: 'Sheep',  unit: '$/head'   },
+// Cattle indicators with saleyard-level reporting confirmed from API 18 Sep 2026
+// /report/6 without saleyardID returns all saleyards in one call
+const CATTLE_INDICATORS = [
+  { id: 0,  name: 'EYCI',                     unit: 'c/kg cwt' },
+  { id: 2,  name: 'Restocker Yearling Steer',  unit: 'c/kg lwt' },
+  { id: 3,  name: 'Feeder Steer',              unit: 'c/kg lwt' },
+  { id: 4,  name: 'Heavy Steer',               unit: 'c/kg lwt' },
+  { id: 5,  name: 'Heavy Dairy Cow',           unit: 'c/kg lwt' },
+  { id: 12, name: 'Restocker Yearling Heifer', unit: 'c/kg lwt' },
+  { id: 13, name: 'Processor Cow',             unit: 'c/kg lwt' },
+  { id: 17, name: 'Feeder Heifer',             unit: 'c/kg lwt' },
 ];
 
-// Saleyards to fetch — pulled from all farms' settings at runtime
-// Hardcoding common ones here as a baseline; function also reads from Supabase farms
-const BASELINE_SALEYARDS = ['GUN', 'TAM', 'ARM', 'INV', 'DUB', 'SCO'];
-
-async function getAllFarmSaleyards() {
+async function getCattleId() {
   const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/farms?select=settings`,
+    `${SUPABASE_URL}/rest/v1/commodities?name=eq.Cattle%20Indicators&select=id`,
     { headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}` } }
   );
-  const farms = await res.json();
-  const saleyards = new Set(BASELINE_SALEYARDS);
-  farms.forEach(f => {
-    const ls = f.settings?.livestockSaleyards;
-    if (ls?.primary) saleyards.add(ls.primary);
-    if (ls?.secondary) saleyards.add(ls.secondary);
-    if (ls?.tertiary) saleyards.add(ls.tertiary);
-  });
-  return [...saleyards];
+  return (await res.json())?.[0]?.id;
 }
 
-async function getOrCreateCommodityId(species) {
-  const name = species === 'Sheep' ? 'Sheep Indicators' : 'Cattle Indicators';
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/commodities?name=eq.${encodeURIComponent(name)}&select=id`,
-    { headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}` } }
-  );
-  const rows = await res.json();
-  if (rows?.[0]?.id) return rows[0].id;
-  const ins = await fetch(`${SUPABASE_URL}/rest/v1/commodities`, {
-    method: 'POST',
-    headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
-    body: JSON.stringify({ name }),
-  });
-  return (await ins.json())?.[0]?.id;
-}
-
-async function upsertRows(rows) {
-  if (!rows.length) return;
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/market_prices`, {
-    method: 'POST',
-    headers: {
-      'apikey': SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-      'Content-Type': 'application/json',
-      // Use the actual constraint name from the DB
-      'Prefer': 'resolution=merge-duplicates,return=minimal',
-    },
-    body: JSON.stringify(rows),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    // If duplicate key, try individual upserts with explicit conflict handling
-    if (err.includes('23505')) {
-      for (const row of rows) {
-        await fetch(`${SUPABASE_URL}/rest/v1/market_prices`, {
-          method: 'POST',
-          headers: {
-            'apikey': SUPABASE_SERVICE_KEY,
-            'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'resolution=merge-duplicates,return=minimal',
-          },
-          body: JSON.stringify([row]),
-        });
-      }
-      return;
-    }
-    throw new Error(`Supabase: ${err}`);
-  }
-}
-
-async function fetchReport(endpoint, commodityId, regionFn) {
-  const res = await fetch(endpoint, { headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  if (!data?.data?.length) return 0;
-
-  // MLA repeats the same rolling-average value across multiple days when no new sale occurs
-  // Deduplicate: for each region, only keep the most recent entry for each unique value
-  // This prevents stale carry-forward values from overwriting correct current data
-  const byRegion = {};
-  for (const r of data.data) {
-    const region = regionFn(r);
-    const value = Math.round(parseFloat(r.indicator_value) * 100) / 100;
-    if (!byRegion[region]) byRegion[region] = [];
-    byRegion[region].push({ date: r.calendar_date, value, headCount: r.head_count });
-  }
-
-  // For each region, find the most recent date and its value
+async function fetchAllSaleyards(indicatorId, fromDate, toDate) {
+  // Fetch all pages for this indicator
   const rows = [];
-  for (const [region, entries] of Object.entries(byRegion)) {
-    // Sort by date desc, take the most recent
-    entries.sort((a, b) => b.date.localeCompare(a.date));
-    const latest = entries[0];
-    // Skip if head_count is 0 (no actual sales — pure carry-forward)
-    if (latest.headCount != null && latest.headCount === 0) continue;
-    rows.push({
-      commodity_id: commodityId,
-      region,
-      price_per_unit: latest.value,
-      unit: ALL_INDICATORS.find(i => i.id === parseInt(endpoint.match(/indicatorID=(\d+)/)?.[1]))?.unit || 'c/kg lwt',
-      price_date: latest.date,
-      attributes: latest.headCount != null ? { head_count: latest.headCount } : null,
-    });
+  let page = 1;
+  while (true) {
+    const url = `${MLA_API}/report/6?indicatorID=${indicatorId}&fromDate=${fromDate}&toDate=${toDate}&page=${page}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) break;
+    const data = await res.json();
+    if (!data?.data?.length) break;
+    rows.push(...data.data);
+    if (data.data.length < 100) break;
+    page++;
   }
-
-  if (!rows.length) return 0;
-  await upsertRows(rows);
-  return rows.length;
+  return rows;
 }
 
 export default async function handler(req) {
   const url = new URL(req?.url || 'http://localhost');
   const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-  // Default to single day (yesterday) to keep function fast
-  // Pass ?fromDate=2026-01-01 for backfill
   const fromDate  = url.searchParams.get('fromDate') || yesterday;
   const toDate    = url.searchParams.get('toDate')   || yesterday;
 
-  console.log(`[push-livestock-prices] ${fromDate} → ${toDate}`);
+  console.log(`[push-livestock-saleyards] ${fromDate} → ${toDate}`);
 
-  const cattleId = await getOrCreateCommodityId('Cattle');
-  const sheepId  = await getOrCreateCommodityId('Sheep');
-  const saleyards = await getAllFarmSaleyards();
-
-  console.log(`[push-livestock-prices] Saleyards: ${saleyards.join(', ')}`);
+  const cattleId = await getCattleId();
+  if (!cattleId) return new Response(JSON.stringify({ error: 'No cattle commodity ID' }), { status: 500 });
 
   let totalSaved = 0;
-  const errors = [];
 
-  // 1. Fetch national indicators (report/5)
-  for (const ind of ALL_INDICATORS) {
-    const comId = ind.species === 'Sheep' ? sheepId : cattleId;
-    try {
-      const endpoint = `${MLA_API}/report/5?indicatorID=${ind.id}&fromDate=${fromDate}&toDate=${toDate}`;
-      const saved = await fetchReport(endpoint, comId, r => ind.name);
-      totalSaved += saved;
-      if (saved) console.log(`[National:${ind.name}] ${saved} rows`);
-    } catch(e) {
-      errors.push({ type: 'national', name: ind.name, error: e.message });
-      console.error(`[National:${ind.name}] ${e.message}`);
-    }
-  }
+  // Fetch all indicators in parallel — only 8 calls
+  const results = await Promise.all(
+    CATTLE_INDICATORS.map(async ind => {
+      const rows = await fetchAllSaleyards(ind.id, fromDate, toDate);
+      console.log(`[${ind.name}] ${rows.length} saleyard rows`);
 
-  // 2. Fetch saleyard-level data for cattle indicators — parallelise across saleyards
-  const cattleIndicators = ALL_INDICATORS.filter(i => i.species === 'Cattle');
+      if (!rows.length) return 0;
 
-  // Run all saleyard+indicator combos in parallel (batched to avoid overwhelming the API)
-  const saleyardJobs = [];
-  for (const saleyardId of saleyards) {
-    for (const ind of cattleIndicators) {
-      saleyardJobs.push({ saleyardId, ind });
-    }
-  }
-
-  // Process in batches of 10 parallel requests
-  const BATCH_SIZE = 10;
-  for (let i = 0; i < saleyardJobs.length; i += BATCH_SIZE) {
-    const batch = saleyardJobs.slice(i, i + BATCH_SIZE);
-    await Promise.all(batch.map(async ({ saleyardId, ind }) => {
-      try {
-        const endpoint = `${MLA_API}/report/6?indicatorID=${ind.id}&saleyardID=${saleyardId}&fromDate=${fromDate}&toDate=${toDate}`;
-        const saved = await fetchReport(endpoint, cattleId, r => `${saleyardId}:${ind.name}`);
-        if (saved) totalSaved += saved;
-      } catch(e) {
-        if (!e.message.includes('HTTP 4')) {
-          errors.push({ type: 'saleyard', name: `${saleyardId}:${ind.name}`, error: e.message });
+      // For each saleyard, keep only the most recent date with actual sales
+      const bySaleyard = {};
+      for (const r of rows) {
+        if (!r.head_count || r.head_count === 0) continue;
+        const key = r.saleyard_id;
+        if (!bySaleyard[key] || r.calendar_date > bySaleyard[key].calendar_date) {
+          bySaleyard[key] = r;
         }
       }
-    }));
-  }
-  console.log(`[push-livestock-prices] Done — ${totalSaved} rows, ${errors.length} errors`);
-  return new Response(JSON.stringify({ saved: totalSaved, errors: errors.slice(0,10), fromDate, toDate }), {
+
+      const upsertRows = Object.values(bySaleyard).map(r => ({
+        commodity_id: cattleId,
+        region: `${r.saleyard_id}:${ind.name}`,
+        price_per_unit: Math.round(parseFloat(r.indicator_value) * 100) / 100,
+        unit: ind.unit,
+        price_date: r.calendar_date,
+        attributes: { head_count: r.head_count },
+      }));
+
+      if (!upsertRows.length) return 0;
+
+      const upsertRes = await fetch(`${SUPABASE_URL}/rest/v1/market_prices`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_SERVICE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates,return=minimal',
+        },
+        body: JSON.stringify(upsertRows),
+      });
+
+      if (!upsertRes.ok) {
+        console.error(`[${ind.name}] Upsert failed: ${await upsertRes.text()}`);
+        return 0;
+      }
+
+      return upsertRows.length;
+    })
+  );
+
+  totalSaved = results.reduce((a, b) => a + b, 0);
+  console.log(`[push-livestock-saleyards] Done — ${totalSaved} rows saved`);
+
+  return new Response(JSON.stringify({ saved: totalSaved, fromDate, toDate }), {
     headers: { 'Content-Type': 'application/json' },
   });
 }
