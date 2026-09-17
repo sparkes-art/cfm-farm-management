@@ -43,8 +43,10 @@ const DEFAULT_GRADES = {
 };
 
 async function getAllBids() {
-  const url = `${CC_API}/AllBidsSet?$filter=(BidSustainable eq true) and (BidNonSustainable eq true)&$top=5000&$format=json`;
-  console.log(`[push-cropconnect-prices] Fetching: ${url}`);
+  // SAP OData requires $filter etc literal, but spaces in values must be encoded
+  const filter = encodeURIComponent('(BidSustainable eq true) and (BidNonSustainable eq true)');
+  const url = `${CC_API}/AllBidsSet?$filter=${filter}&$top=5000&$format=json`;
+  console.log(`[push-cropconnect-prices] Fetching bids...`);
   const res = await fetch(url, { headers: CC_HEADERS });
   if (!res.ok) {
     const body = await res.text();
