@@ -136,6 +136,8 @@ async function _mountOverview(container) {
     );
 
     const fC = (n, dp=2) => n == null ? '—' : formatCurrency(n, dp);
+    const fM = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + Math.round(n).toLocaleString();
+    const fN = (n, dp=0) => n == null ? '—' : Number(n).toLocaleString('en-AU', {minimumFractionDigits:dp, maximumFractionDigits:dp});
     const fPct = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
 
     // Farm's preferred sites
@@ -244,15 +246,127 @@ async function _mountOverview(container) {
       ].join('');
     }).join('');
 
+    // ── Commodity position ────────────────────────────────────
+    const season = getActiveSeason() || currentSeason();
+    const [contracts, invoices, budgets, harvests] = await Promise.all([
+      dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
+      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=neq.head&select=id,gross_amount,total_quality_adj,total_qty,forward_contract_id,batches,status'),
+      dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
+      dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
+    ]);
+
+    await loadCommodities();
+    const commodityList2 = getCommodities();
+    const idToName = {}; commodityList2.forEach(c => { idToName[c.id] = c.name; });
+
+    // Group budgets by commodity
+    const comMap = {};
+    budgets.forEach(b => {
+      const name = idToName[b.commodity_id] || b.commodity || 'Other';
+      if (!comMap[name]) comMap[name] = { name, commodity_id: b.commodity_id, budArea:0, budProd:0, budPrice:0, unit: b.unit||'t', contracts:[], invoicedQty:0, invoicedRev:0, harvestedProd:0 };
+      comMap[name].budArea += parseFloat(b.area_ha)||0;
+      comMap[name].budProd += parseFloat(b.budgeted_production)||((parseFloat(b.area_ha)||0)*(parseFloat(b.budgeted_yield_per_ha||b.yield_per_ha)||0));
+      comMap[name].budPrice = parseFloat(b.price)||comMap[name].budPrice;
+    });
+
+    // Add contracts
+    contracts.forEach(c => {
+      const name = idToName[c.commodity_id] || c.commodity || 'Other';
+      if (comMap[name]) comMap[name].contracts.push(c);
+    });
+
+    // Add harvest actuals
+    harvests.forEach(h => {
+      const name = idToName[h.commodity_id] || h.commodity || 'Other';
+      if (comMap[name]) comMap[name].harvestedProd += parseFloat(h.actual_production)||0;
+    });
+
+    // Add invoiced revenue
+    invoices.forEach(inv => {
+      const c = contracts.find(c => c.id === inv.forward_contract_id);
+      if (!c) return;
+      const name = idToName[c.commodity_id] || c.commodity || 'Other';
+      if (!comMap[name]) return;
+      let qty = 0, rev = 0;
+      if (inv.batches) {
+        const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;
+        b.forEach(bt => { const sl=(bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa'); if(sl.length){qty+=parseFloat(bt.qty)||0;rev+=sl.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);}});
+      } else { qty+=parseFloat(inv.total_qty)||0; rev+=(parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0); }
+      comMap[name].invoicedQty += qty;
+      comMap[name].invoicedRev += rev;
+    });
+
+    const comCards = Object.values(comMap).map(com => {
+      const contractedQty = com.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0),0);
+      const contractedVal = com.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
+      const avgContractPrice = contractedQty ? contractedVal/contractedQty : null;
+      // Production figure — harvested > budget forecast
+      const production = com.harvestedProd || com.budProd;
+      const prodLabel = com.harvestedProd ? 'Harvested' : com.budProd ? 'Budget' : null;
+      const pctContracted = production ? Math.min(100, Math.round(contractedQty/production*100)) : null;
+      const pctInvoiced = contractedQty ? Math.min(100, Math.round(com.invoicedQty/contractedQty*100)) : null;
+      const uncontracted = Math.max(0, production - contractedQty);
+
+      return [
+        '<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">',
+        // Header
+        '<div style="padding:8px 14px;background:#1a2535;display:flex;align-items:center;justify-content:space-between">',
+        '<span style="font-size:12px;font-weight:600;color:white">' + com.name + '</span>',
+        prodLabel ? '<span style="font-size:10px;color:rgba(255,255,255,.5)">' + prodLabel + ' ' + fN(production) + ' ' + com.unit + '</span>' : '',
+        '</div>',
+        // Stats row
+        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:0.5px solid var(--border-light)">',
+        // Contracted
+        '<div style="padding:10px 12px;border-right:0.5px solid var(--border-light)">',
+        '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:3px">Contracted</div>',
+        '<div style="font-size:16px;font-weight:700;color:var(--ink)">' + fN(contractedQty) + ' ' + com.unit + '</div>',
+        '<div style="font-size:10px;color:var(--hint);margin-top:1px">' + fC(avgContractPrice) + '/' + com.unit + ' avg</div>',
+        pctContracted != null ? '<div style="height:3px;background:var(--border-light);border-radius:2px;margin-top:5px;overflow:hidden"><div style="height:100%;width:'+pctContracted+'%;background:#3b82f6;border-radius:2px"></div></div>' : '',
+        pctContracted != null ? '<div style="font-size:9px;color:var(--hint);margin-top:2px">'+pctContracted+'% of '+prodLabel+'</div>' : '',
+        '</div>',
+        // Total contracted value
+        '<div style="padding:10px 12px;border-right:0.5px solid var(--border-light)">',
+        '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:3px">Contract value</div>',
+        '<div style="font-size:16px;font-weight:700;color:var(--ink)">' + fM(contractedVal) + '</div>',
+        uncontracted > 0 ? '<div style="font-size:10px;color:#d97706;margin-top:1px">'+fN(uncontracted)+' '+com.unit+' open</div>' : '<div style="font-size:10px;color:#16a34a;margin-top:1px">Fully contracted ✓</div>',
+        '</div>',
+        // Invoiced / paid
+        '<div style="padding:10px 12px">',
+        '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:3px">Invoiced</div>',
+        '<div style="font-size:16px;font-weight:700;color:' + (com.invoicedRev > 0 ? '#16a34a' : 'var(--ink)') + '">' + fM(com.invoicedRev) + '</div>',
+        '<div style="font-size:10px;color:var(--hint);margin-top:1px">' + fN(com.invoicedQty) + ' ' + com.unit + (pctInvoiced != null ? ' · ' + pctInvoiced + '%' : '') + '</div>',
+        pctInvoiced != null ? '<div style="height:3px;background:var(--border-light);border-radius:2px;margin-top:5px;overflow:hidden"><div style="height:100%;width:'+pctInvoiced+'%;background:#16a34a;border-radius:2px"></div></div>' : '',
+        '</div>',
+        '</div>',
+        '</div>',
+      ].join('');
+    }).join('');
+
     container.innerHTML = [
-      '<div style="padding:0;max-width:420px">',
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">',
-      '<h2 style="font-size:15px;font-weight:600;color:var(--ink)">Farm gate prices</h2>',
+      '<div style="display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start">',
+
+      // LEFT — Farm gate prices
+      '<div>',
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">',
+      '<h2 style="font-size:14px;font-weight:600;color:var(--ink)">Farm gate prices</h2>',
       '<span style="font-size:11px;color:var(--hint)">' + farm.name + '</span>',
       '</div>',
       farmSites.length
         ? priceCards || '<div class="card" style="padding:16px;color:var(--hint)">No market price data available.</div>'
-        : '<div class="card" style="padding:16px;color:var(--hint)">No delivery sites configured. Add grain sites in farm settings.</div>',
+        : '<div class="card" style="padding:16px;color:var(--hint)">No delivery sites configured.</div>',
+      '</div>',
+
+      // RIGHT — Commodity position
+      '<div>',
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">',
+      '<h2 style="font-size:14px;font-weight:600;color:var(--ink)">Commodity position</h2>',
+      '<span style="font-size:11px;color:var(--hint)">' + season + '</span>',
+      '</div>',
+      Object.keys(comMap).length
+        ? comCards
+        : '<div class="card" style="padding:16px;color:var(--hint)">No budgets or contracts for this season.</div>',
+      '</div>',
+
       '</div>',
     ].join('');
 
