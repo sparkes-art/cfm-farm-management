@@ -130,10 +130,28 @@ async function _mountOverview(container) {
     const cottonRegion = settings.cottonRegion || '';
     const grainSites = settings.grainSites || {};
 
+    // Get livestock commodity IDs for targeted price fetch
+    const cattleComId = commodityList.find(c => c.name === 'Cattle Indicators')?.id || null;
+    const sheepComId  = commodityList.find(c => c.name === 'Sheep Indicators')?.id  || null;
+
     // Fetch 14 days of prices for rolling average + movement
-    const allPrices = await dbSelect('market_prices',
-      'select=commodity_id,region,price_per_unit,price_date,unit&order=price_date.desc&limit=1000'
-    );
+    // Fetch prices separately — grain/cotton and livestock
+    // CropConnect alone generates 1000+ rows so a single limited query misses livestock
+    const [grainPrices, livestockPrices] = await Promise.all([
+      dbSelect('market_prices',
+        'select=commodity_id,region,price_per_unit,price_date,unit&source_label=eq.CropConnect&order=price_date.desc&limit=500'
+      ).catch(() => []),
+      dbSelect('market_prices',
+        'select=commodity_id,region,price_per_unit,price_date,unit,attributes&order=price_date.desc&limit=500'
+        + '&commodity_id=in.(' + [cattleComId, sheepComId].filter(Boolean).join(',') + ')'
+      ).catch(() => []),
+    ]);
+    // Also fetch cotton/LDC prices (no source_label or non-CropConnect)
+    const cottonPrices = cottonRegion ? await dbSelect('market_prices',
+      'select=commodity_id,region,price_per_unit,price_date,unit&region=eq.' + encodeURIComponent(cottonRegion) + '&order=price_date.desc&limit=100'
+    ).catch(() => []) : [];
+
+    const allPrices = [...grainPrices, ...livestockPrices, ...cottonPrices];
 
     const fC = (n, dp=2) => n == null ? '—' : formatCurrency(n, dp);
     const fM = (n) => n == null ? '—' : n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n/1e3).toFixed(0) + 'k' : '$' + Math.round(n).toLocaleString();
