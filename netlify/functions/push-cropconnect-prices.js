@@ -43,41 +43,40 @@ const DEFAULT_GRADES = {
 };
 
 async function getAllBids() {
-  // Step 1: hit BID_PUBLIC service root to establish its SAP session
+  // Step 1: hit BID_PUBLIC service root to establish SAP session
   const sessionRes = await fetch(
     'https://cropconnect.com.au/sap/opu/odata/SAP/BID_PUBLIC/?$format=json',
     { headers: { ...CC_HEADERS, 'x-csrf-token': 'Fetch' } }
   );
   const rawCookie = sessionRes.headers.get('set-cookie') || '';
-  const csrfToken = sessionRes.headers.get('x-csrf-token') || '';
-  // Collect all Set-Cookie values
   const sessionCookie = rawCookie.split(',').map(c => c.split(';')[0].trim()).join('; ');
-  console.log(`[push-cropconnect-prices] Session: ${sessionRes.status}, cookie: ${sessionCookie ? 'yes' : 'none'}, csrf: ${csrfToken ? 'yes' : 'none'}`);
+  console.log(`[push-cropconnect-prices] Session: ${sessionRes.status}, cookie: ${sessionCookie ? 'yes' : 'none'}`);
 
   const bidHeaders = { ...CC_HEADERS, Accept: 'application/json' };
   if (sessionCookie) bidHeaders['Cookie'] = sessionCookie;
-  if (csrfToken) bidHeaders['x-csrf-token'] = csrfToken;
 
-  // Step 2: try without any filter first — if this works, filtering is the issue
-  const urlNoFilter = `https://cropconnect.com.au/sap/opu/odata/SAP/BID_PUBLIC/AllBidsSet?$top=5&$format=json`;
-  const r1 = await fetch(urlNoFilter, { headers: bidHeaders });
-  console.log(`[push-cropconnect-prices] No-filter test: ${r1.status}`);
+  // Step 2: page through all bids in batches of 100 using $skip
+  const PAGE = 100;
+  let allResults = [];
+  let skip = 0;
 
-  if (!r1.ok) {
-    const body = await r1.text();
-    throw new Error(`CropConnect API error: ${r1.status} — ${body.slice(0, 300)}`);
+  while (true) {
+    const url = `https://cropconnect.com.au/sap/opu/odata/SAP/BID_PUBLIC/AllBidsSet?$top=${PAGE}&$skip=${skip}&$inlinecount=allpages&$format=json`;
+    const res = await fetch(url, { headers: bidHeaders });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Page ${skip}-${skip+PAGE} error: ${res.status} — ${body.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    const results = data.d.results;
+    const total = parseInt(data.d.__count || '0');
+    allResults = allResults.concat(results);
+    console.log(`[push-cropconnect-prices] Page ${skip}: got ${results.length} (total: ${total})`);
+    if (allResults.length >= total || results.length < PAGE) break;
+    skip += PAGE;
   }
 
-  // Step 3: if no-filter works, fetch all bids with top=5000
-  const urlAll = `https://cropconnect.com.au/sap/opu/odata/SAP/BID_PUBLIC/AllBidsSet?$top=5000&$format=json`;
-  const res = await fetch(urlAll, { headers: bidHeaders });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Full fetch error: ${res.status} — ${body.slice(0, 200)}`);
-  }
-  const data = await res.json();
-  console.log(`[push-cropconnect-prices] Got ${data.d.results.length} bids`);
-  return data.d.results;
+  return allResults;
 }
 
 async function getOrCreateCommodityId(name) {
