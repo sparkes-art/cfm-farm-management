@@ -52,3 +52,6 @@
 
 [functions.import-paddocks]
   timeout = 26
+
+[functions.push-livestock-prices]
+  timeout = 30
