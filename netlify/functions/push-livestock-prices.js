@@ -76,11 +76,31 @@ async function upsertRows(rows) {
       'apikey': SUPABASE_SERVICE_KEY,
       'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
       'Content-Type': 'application/json',
+      // Use the actual constraint name from the DB
       'Prefer': 'resolution=merge-duplicates,return=minimal',
     },
     body: JSON.stringify(rows),
   });
-  if (!res.ok) throw new Error(`Supabase: ${await res.text()}`);
+  if (!res.ok) {
+    const err = await res.text();
+    // If duplicate key, try individual upserts with explicit conflict handling
+    if (err.includes('23505')) {
+      for (const row of rows) {
+        await fetch(`${SUPABASE_URL}/rest/v1/market_prices`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_SERVICE_KEY,
+            'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'resolution=merge-duplicates,return=minimal',
+          },
+          body: JSON.stringify([row]),
+        });
+      }
+      return;
+    }
+    throw new Error(`Supabase: ${err}`);
+  }
 }
 
 async function fetchReport(endpoint, commodityId, regionFn) {
@@ -155,24 +175,33 @@ export default async function handler(req) {
     }
   }
 
-  // 2. Fetch saleyard-level data for cattle indicators only (report/6)
+  // 2. Fetch saleyard-level data for cattle indicators — parallelise across saleyards
   const cattleIndicators = ALL_INDICATORS.filter(i => i.species === 'Cattle');
-  for (const ind of cattleIndicators) {
-    for (const saleyardId of saleyards) {
+
+  // Run all saleyard+indicator combos in parallel (batched to avoid overwhelming the API)
+  const saleyardJobs = [];
+  for (const saleyardId of saleyards) {
+    for (const ind of cattleIndicators) {
+      saleyardJobs.push({ saleyardId, ind });
+    }
+  }
+
+  // Process in batches of 10 parallel requests
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < saleyardJobs.length; i += BATCH_SIZE) {
+    const batch = saleyardJobs.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(async ({ saleyardId, ind }) => {
       try {
         const endpoint = `${MLA_API}/report/6?indicatorID=${ind.id}&saleyardID=${saleyardId}&fromDate=${fromDate}&toDate=${toDate}`;
-        // Region stored as "SALEYARDID:IndicatorName" e.g. "GUN:Heavy Steer"
         const saved = await fetchReport(endpoint, cattleId, r => `${saleyardId}:${ind.name}`);
-        totalSaved += saved;
+        if (saved) totalSaved += saved;
       } catch(e) {
-        // Many saleyard/indicator combos have no data — suppress noise
         if (!e.message.includes('HTTP 4')) {
           errors.push({ type: 'saleyard', name: `${saleyardId}:${ind.name}`, error: e.message });
         }
       }
-    }
+    }));
   }
-
   console.log(`[push-livestock-prices] Done — ${totalSaved} rows, ${errors.length} errors`);
   return new Response(JSON.stringify({ saved: totalSaved, errors: errors.slice(0,10), fromDate, toDate }), {
     headers: { 'Content-Type': 'application/json' },
