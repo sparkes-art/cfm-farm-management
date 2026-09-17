@@ -163,6 +163,7 @@ export async function mountFarmSettings(container, onSave) {
       if (site) siteSet.add(site);
     });
     liveSites = [...siteSet].sort();
+    console.log('[farm-settings] Live CC sites loaded:', liveSites.length, liveSites.includes('Emerald Hill') ? '✓ Emerald Hill found' : '✗ Emerald Hill MISSING', liveSites.slice(0,5));
   } catch(e) {
     console.warn('Could not load live CC sites:', e.message);
   }
