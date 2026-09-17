@@ -132,7 +132,7 @@ async function _mountOverview(container) {
 
     // Fetch 14 days of prices for rolling average + movement
     const allPrices = await dbSelect('market_prices',
-      'select=commodity_id,region,price_per_unit,price_date,unit&order=price_date.desc&limit=500'
+      'select=commodity_id,region,price_per_unit,price_date,unit&order=price_date.desc&limit=1000'
     );
 
     const fC = (n, dp=2) => n == null ? '—' : formatCurrency(n, dp);
@@ -145,6 +145,74 @@ async function _mountOverview(container) {
       ...Object.entries(grainSites).map(([crop, site]) => ({ crop, site })),
       ...(cottonRegion ? [{ crop: 'Cotton Lint', site: cottonRegion }] : []),
     ];
+
+    // Livestock indicators from farm settings — use master price data
+    const lsIndicatorNames = farm.settings?.livestockIndicators || [];
+    const lsCards = lsIndicatorNames.map(name => {
+      const history = allPrices
+        .filter(p => p.region === name)
+        .sort((a, b) => b.price_date.localeCompare(a.price_date));
+
+      if (!history.length) return [
+        '<div class="card" style="padding:16px 18px;margin-bottom:12px">',
+        '<div style="font-size:13px;font-weight:700;color:var(--ink)">' + name + '</div>',
+        '<div style="font-size:12px;color:var(--hint);margin-top:8px">No data yet</div>',
+        '</div>',
+      ].join('');
+
+      const latest = parseFloat(history[0].price_per_unit);
+      const latestDate = history[0].price_date;
+      const unit = history[0].unit || 'c/kg';
+      const prev = history.length > 1 ? parseFloat(history[1].price_per_unit) : null;
+      const dayMove = prev != null ? latest - prev : null;
+      const dayMovePct = prev ? ((latest - prev) / prev * 100) : null;
+      const moveColor = dayMove == null ? 'var(--hint)' : dayMove >= 0 ? '#16a34a' : '#dc2626';
+      const moveArrow = dayMove == null ? '' : dayMove >= 0 ? '▲' : '▼';
+
+      const cutoff = new Date(latestDate);
+      cutoff.setDate(cutoff.getDate() - 14);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+      const window14 = history.filter(p => p.price_date >= cutoffStr);
+      const avg14 = window14.length ? window14.reduce((s, p) => s + parseFloat(p.price_per_unit), 0) / window14.length : null;
+      const vsAvg = avg14 != null ? latest - avg14 : null;
+      const vsAvgPct = avg14 ? ((latest - avg14) / avg14 * 100) : null;
+      const avgColor = vsAvg == null ? 'var(--hint)' : vsAvg >= 0 ? '#16a34a' : '#dc2626';
+
+      const bars = window14.length > 1 ? (() => {
+        const vals = window14.map(p => parseFloat(p.price_per_unit)).reverse();
+        const min = Math.min(...vals), max = Math.max(...vals), range = max - min || 1;
+        return '<div style="display:flex;align-items:flex-end;gap:2px;height:28px;margin-top:10px;padding:0 2px">' +
+          vals.map(v => {
+            const h = Math.max(2, Math.round(((v - min) / range) * 24));
+            const c = v >= latest ? '#16a34a' : '#94a3b8';
+            return '<div style="flex:1;height:' + h + 'px;background:' + c + ';border-radius:1px;align-self:flex-end"></div>';
+          }).join('') + '</div>';
+      })() : '';
+
+      return [
+        '<div class="card" style="padding:16px 18px;margin-bottom:12px">',
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">',
+        '<div><div style="font-size:13px;font-weight:700;color:var(--ink)">' + name + '</div>',
+        '<div style="font-size:11px;color:var(--hint);margin-top:1px">' + unit + '</div></div>',
+        '<div style="font-size:10px;color:var(--hint)">' + new Date(latestDate).toLocaleDateString('en-AU', {day:'numeric',month:'short'}) + '</div>',
+        '</div>',
+        '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">',
+        '<span style="font-size:26px;font-weight:700;color:var(--ink)">' + latest.toFixed(2) + '</span>',
+        '<span style="font-size:13px;color:var(--hint)">' + unit + '</span>',
+        '</div>',
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--page-bg);border-radius:6px;margin-bottom:6px">',
+        '<span style="font-size:11px;color:var(--hint)">Day</span>',
+        '<div style="display:flex;align-items:center;gap:6px">',
+        dayMove != null ? '<span style="font-size:13px;font-weight:600;color:' + moveColor + '">' + moveArrow + ' ' + Math.abs(dayMove).toFixed(2) + '</span><span style="font-size:11px;color:' + moveColor + '">(' + fPct(dayMovePct) + ')</span>' : '<span style="font-size:12px;color:var(--hint)">—</span>',
+        '</div></div>',
+        '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--page-bg);border-radius:6px">',
+        '<span style="font-size:11px;color:var(--hint)">14-day avg</span>',
+        avg14 != null ? '<span style="font-size:11px;font-weight:600;color:' + avgColor + '">' + avg14.toFixed(2) + ' ' + (vsAvg >= 0 ? '▲' : '▼') + ' ' + Math.abs(vsAvg).toFixed(2) + ' (' + fPct(vsAvgPct) + ')</span>' : '<span style="font-size:12px;color:var(--hint)">Insufficient data</span>',
+        '</div>',
+        bars,
+        '</div>',
+      ].join('');
+    }).join('');
 
     // Build price cards
     const priceCards = farmSites.map(({ crop, site }) => {
@@ -354,6 +422,7 @@ async function _mountOverview(container) {
       farmSites.length
         ? priceCards || '<div class="card" style="padding:16px;color:var(--hint)">No market price data available.</div>'
         : '<div class="card" style="padding:16px;color:var(--hint)">No delivery sites configured.</div>',
+      lsIndicatorNames.length ? '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:14px 0 8px">Livestock indicators</div>' + lsCards : '',
       '</div>',
 
       // RIGHT — Commodity position

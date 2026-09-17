@@ -233,6 +233,32 @@ function _openAddFarmModal(existing = null) {
           </div>
 
           <div style="margin-bottom:10px">
+            <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:6px">Livestock indicators to display</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px" id="af-ls-indicators">
+              ${[
+                {name:'EYCI', label:'EYCI (c/kg cwt)'},
+                {name:'NYCI', label:'NYCI (c/kg lwt)'},
+                {name:'Heavy Steer', label:'Heavy Steer'},
+                {name:'Feeder Steer', label:'Feeder Steer'},
+                {name:'Feeder Heifer', label:'Feeder Heifer'},
+                {name:'Restocker Yearling Steer', label:'Restocker Steer'},
+                {name:'Restocker Yearling Heifer', label:'Restocker Heifer'},
+                {name:'Processor Cow', label:'Processor Cow'},
+                {name:'Trade Lamb', label:'Trade Lamb'},
+                {name:'Merino Lamb', label:'Merino Lamb'},
+                {name:'Heavy Lamb', label:'Heavy Lamb'},
+                {name:'Mutton', label:'Mutton'},
+              ].map(ind => {
+                const checked = (existingSettings.livestockIndicators || ['EYCI','Heavy Steer','Feeder Steer']).includes(ind.name);
+                return `<label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;padding:3px 0">
+                  <input type="checkbox" class="af-ls-ind" value="${ind.name}" ${checked ? 'checked' : ''}> ${ind.label}
+                </label>`;
+              }).join('')}
+            </div>
+            <div style="font-size:11px;color:var(--hint);margin-top:4px">These indicators will show in the farm gate prices panel</div>
+          </div>
+
+          <div style="margin-bottom:10px">
             <label style="font-size:12px;font-weight:500;color:var(--ink);display:block;margin-bottom:4px">Cotton region</label>
             <input id="af-cotton-region" class="form-input" type="text" value="${existingCottonRegion}" placeholder="e.g. Lachlan/Sth NSW">
           </div>
@@ -286,6 +312,7 @@ function _openAddFarmModal(existing = null) {
     const org = modal.querySelector('#af-org').value.trim();
     const cottonRegion = modal.querySelector('#af-cotton-region').value.trim();
     const yearStartMonth = parseInt(modal.querySelector('#af-year-start')?.value || '7');
+    const livestockIndicators = Array.from(modal.querySelectorAll('.af-ls-ind:checked')).map(el => el.value);
 
     if (!name) { alert('Farm name is required'); return; }
     if (!farmId) { alert('Farm ID is required'); return; }
@@ -300,6 +327,7 @@ function _openAddFarmModal(existing = null) {
     if (cottonRegion) settings.cottonRegion = cottonRegion;
     if (Object.keys(grainSites).length) settings.grainSites = grainSites;
     settings.yearStartMonth = yearStartMonth;
+    if (livestockIndicators.length) settings.livestockIndicators = livestockIndicators;
 
     btn.disabled = true; btn.textContent = 'Saving…';
 
