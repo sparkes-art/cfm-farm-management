@@ -260,7 +260,7 @@ async function _mountOverview(container) {
     }).join('');
 
     // Build price cards
-    const priceCards = farmSites.map(({ crop, site, sites, grade, type }) => {
+    const priceCards = farmSites.map(({ crop, site, sites, catchment, grade, type }) => {
       const com = commodityList.find(c => c.name === crop);
       if (!com) return '';
 
