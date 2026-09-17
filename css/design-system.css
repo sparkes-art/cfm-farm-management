@@ -1115,3 +1115,8 @@ body {
     overflow: hidden;
   }
 }
+
+/* ── Table row hover ─────────────────────────────────────── */
+tr.mob-row:hover,
+tr.data-row:hover,
+.hover-row:hover { background: var(--blue-light) !important; }

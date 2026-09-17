@@ -1104,8 +1104,7 @@ export function openInvoiceForm(container, existing = null) {
         (c.commodity||'').toLowerCase().includes(lower);
     });
     contractOpts.innerHTML = matches.length
-      ? matches.map(c => `<div class="con-opt" data-id="${c.id}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border-light);font-size:13px"
-          onmouseenter="this.style.background='var(--page-bg)'" onmouseleave="this.style.background=''">
+      ? matches.map(c => `<div class="con-opt" data-id="${c.id}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border-light);font-size:13px">
           <strong>${c.contract_number||'—'}</strong> — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}
         </div>`).join('')
       : '<div style="padding:10px 14px;color:var(--hint);font-size:13px">No contracts found</div>';

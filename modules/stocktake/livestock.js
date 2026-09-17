@@ -155,9 +155,7 @@ async function _render(container, farm, period, allPeriods = []) {
       const moveOut = periodMoves.filter(m => (parseFloat(m.signed_qty)||0) < 0).reduce((s,m) => s+(parseFloat(m.signed_qty)||0), 0);
 
       return `
-      <tr style="border-bottom:1px solid var(--border-light)" 
-        onmouseenter="this.style.background='var(--blue-light)'" 
-        onmouseleave="this.style.background=''">
+      <tr style="border-bottom:1px solid var(--border-light)">
         <td style="padding:10px 14px">
           <div style="font-size:13px;font-weight:500;color:var(--ink)">${item.name}</div>
           <div style="font-size:11px;color:var(--hint);margin-top:1px">${[classLabel, birthYr ? 'b.'+birthYr : '', sex].filter(Boolean).join(' · ')}</div>
