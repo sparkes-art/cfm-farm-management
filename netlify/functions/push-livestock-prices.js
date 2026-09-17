@@ -1,211 +1,177 @@
 // netlify/functions/push-livestock-prices.js
-// Fetches MLA livestock indicator prices daily via Power BI embed tokens
-// Runs at 6am AEST (20:00 UTC)
+// Fetches MLA livestock indicator prices via the MLA Statistics API
+// https://www.mla.com.au/prices-markets/statistics/api/
+// Runs at 8pm UTC = 6am AEST / 7am AEDT
 
 export const config = { schedule: '0 20 * * *' };
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://nqvfuqvindsgnogejaei.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// MLA indicators to fetch — slug maps to getembedinfo endpoint
-// Confirmed working slugs from browser inspection 17 Sep 2026
-const INDICATORS = [
-  { slug: 'eyci',        name: 'EYCI',         label: 'Eastern Young Cattle Indicator', unit: 'c/kg cwt', pageSlug: 'eycireport' },
-  { slug: 'heavysteer',  name: 'Heavy Steer',  label: 'Heavy Steer Indicator',          unit: 'c/kg lwt', pageSlug: 'heavysteer' },
-  { slug: 'feedersteer', name: 'Feeder Steer', label: 'Feeder Steer Indicator',         unit: 'c/kg lwt', pageSlug: 'feedersteer' },
-  { slug: 'restockeryearlingheifer', name: 'Restocker Heifer', label: 'Restocker Yearling Heifer', unit: 'c/kg lwt', pageSlug: 'restockeryearlingheifer' },
+// MLA Statistics API — public REST, no auth, 100 records per page
+// Endpoint confirmed from https://www.mla.com.au/prices-markets/statistics/api/
+const MLA_API_BASE = 'https://www.mla.com.au/api/v1';
+
+// The indicators we want — these match the "Indicator" field names in the API response
+const TARGET_INDICATORS = [
+  { apiName: 'Eastern Young Cattle Indicator', storeName: 'EYCI',            unit: 'c/kg cwt' },
+  { apiName: 'National Heavy Steer Indicator', storeName: 'Heavy Steer',     unit: 'c/kg lwt' },
+  { apiName: 'National Feeder Steer Indicator',storeName: 'Feeder Steer',    unit: 'c/kg lwt' },
+  { apiName: 'Restocker Yearling Heifer',       storeName: 'Restocker Heifer',unit: 'c/kg lwt' },
 ];
 
-// Power BI DAX query to get the latest price and date from the dataset
-// The table/column names are inferred from standard MLA indicator report structure
-const buildDaxQuery = (reportId) => ({
-  queries: [{
-    query: `
-      EVALUATE
-      TOPN(
-        1,
-        SELECTCOLUMNS(
-          'Indicator',
-          "Date", 'Indicator'[Date],
-          "Price", 'Indicator'[Price]
-        ),
-        'Indicator'[Date], DESC
-      )
-    `
-  }],
-  serializerSettings: { includeNulls: true },
-});
+async function fetchLatestIndicators() {
+  // Try several likely endpoint patterns — we'll confirm which works from the response
+  const endpoints = [
+    `${MLA_API_BASE}/livestock-indicators?country=Australia&page=1`,
+    `${MLA_API_BASE}/prices/livestock-indicators?page=1`,
+    `${MLA_API_BASE}/statistics/livestock-indicators?page=1`,
+    `${MLA_API_BASE}/nlrs-indicators?page=1`,
+    `https://www.mla.com.au/api/livestock-indicators?page=1`,
+    `https://api.mla.com.au/v1/livestock-indicators?page=1`,
+  ];
 
-async function fetchIndicator(indicator) {
-  try {
-    // Step 1: Get Power BI embed token (no auth required)
-    const embedRes = await fetch(
-      `https://app.nlrsreports.mla.com.au/indicators/${indicator.slug}/getembedinfo`,
-      { headers: { 'User-Agent': 'CFM-FarmManagement/1.0 (samuel@cfm.com.au)' } }
-    );
-    if (!embedRes.ok) throw new Error(`getembedinfo ${embedRes.status}`);
-    const embedData = await embedRes.json();
-
-    const accessToken = embedData.accessToken;
-    const reportConfig = embedData.reportConfig?.[0];
-    const datasetId = reportConfig?.datasetId;
-    const groupId = embedData.groupId;
-
-    if (!accessToken) throw new Error('No access token in embed response');
-
-    // Step 2: If we have a datasetId, query it directly
-    // Otherwise fall back to scraping the HTML page for the latest value
-    if (datasetId && groupId) {
-      const queryUrl = `https://api.powerbi.com/v1.0/myorg/groups/${groupId}/datasets/${datasetId}/executeQueries`;
-      const queryRes = await fetch(queryUrl, {
-        method: 'POST',
+  for (const url of endpoints) {
+    try {
+      console.log(`[MLA] Trying: ${url}`);
+      const res = await fetch(url, {
         headers: {
-          'Authorization': `EmbedToken ${accessToken}`,
-          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'CFM-FarmManagement/1.0 (insights@cfma.com.au)',
         },
-        body: JSON.stringify(buildDaxQuery(datasetId)),
       });
-
-      if (queryRes.ok) {
-        const data = await queryRes.json();
-        const rows = data?.results?.[0]?.tables?.[0]?.rows;
-        if (rows?.length) {
-          return {
-            indicator: indicator.name,
-            label: indicator.label,
-            unit: indicator.unit,
-            price: parseFloat(rows[0]['[Price]']),
-            date: rows[0]['[Date]']?.split('T')[0] || new Date().toISOString().split('T')[0],
-          };
-        }
+      console.log(`[MLA] ${url} → ${res.status} ${res.headers.get('content-type')}`);
+      if (res.ok) {
+        const data = await res.json();
+        console.log(`[MLA] Success! Keys: ${Object.keys(data).join(', ')}, Sample: ${JSON.stringify(data).slice(0, 300)}`);
+        return { url, data };
       }
+    } catch (e) {
+      console.log(`[MLA] ${url} → Error: ${e.message}`);
     }
-
-    // Step 3: Fallback — scrape the indicator page HTML for the current value
-    // MLA URLs: https://www.mla.com.au/prices-markets/cattle/{pageSlug}/
-    const mlaUrl = `https://www.mla.com.au/prices-markets/cattle/${indicator.pageSlug}/`;
-    const pageRes = await fetch(mlaUrl, {
-      headers: { 'User-Agent': 'CFM-FarmManagement/1.0 (samuel@cfm.com.au)' }
-    });
-    if (!pageRes.ok) throw new Error(`Page fetch ${pageRes.status} for ${mlaUrl}`);
-    const html = await pageRes.text();
-
-    // Log a snippet to help debug if extraction fails
-    const snippet = html.slice(0, 3000);
-    console.log(`[${indicator.name}] Page fetched (${html.length} chars), snippet:`, snippet);
-
-    // Try multiple extraction patterns
-    // Cattle indicators are typically 200-800 c/kg — avoid matching years like 2026
-    const priceMatch =
-      html.match(/(\d{3}(?:\.\d+)?)\s*(?:c\/kg|¢\/kg|cents per kg)/i) ||
-      html.match(/data-value="(\d{3}(?:\.\d+)?)"/i) ||
-      html.match(/"currentValue"\s*:\s*(\d{3}(?:\.\d+)?)/i) ||
-      html.match(/class="[^"]*(?:indicator-value|current-price|price-value)[^"]*"[^>]*>\s*(\d{3}(?:\.\d+)?)/i) ||
-      html.match(/<strong[^>]*>\s*(\d{3}(?:\.\d+)?)\s*<\/strong>/i);
-
-    if (priceMatch) {
-      const price = parseFloat(priceMatch[1]);
-      // Sanity check — cattle indicators should be 100-1500 c/kg
-      if (price < 100 || price > 1500) {
-        console.error(`[${indicator.name}] Price ${price} out of expected range (100-1500), likely a parsing error`);
-      } else {
-        return {
-          indicator: indicator.name,
-          label: indicator.label,
-          unit: indicator.unit,
-          price,
-          date: new Date().toISOString().split('T')[0],
-          source: 'html_scrape',
-        };
-      }
-    }
-
-    // The price is embedded in a Power BI iframe — we need a different approach
-    // Log a targeted search of the HTML for debugging
-    const powerBiMatch = html.match(/powerbi\.com[^"']*/i);
-    console.error(`[${indicator.name}] Could not extract price from HTML. PowerBI ref: ${powerBiMatch?.[0]||'none'}`);
-    console.error(`[${indicator.name}] HTML excerpt around 'indicator':`, html.match(/.{0,200}indicator.{0,200}/i)?.[0]);
-    throw new Error('Could not extract price from page — data may be in Power BI iframe');
-
-  } catch (err) {
-    console.error(`[${indicator.name}] Failed:`, err.message);
-    return null;
   }
+  return null;
 }
 
-async function upsertPrice(result) {
-  if (!result?.price || isNaN(result.price)) return;
-
-  // Find the commodity for cattle indicators (must exist in DB)
-  const comRes = await fetch(
+async function getOrCreateCommodityId() {
+  const res = await fetch(
     `${SUPABASE_URL}/rest/v1/commodities?name=eq.Cattle%20Indicators&select=id`,
     { headers: { 'apikey': SUPABASE_SERVICE_KEY, 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}` } }
   );
-  const coms = await comRes.json();
-  let commodityId = coms?.[0]?.id;
+  const data = await res.json();
+  if (data?.[0]?.id) return data[0].id;
 
-  if (!commodityId) {
-    // Try inserting without is_livestock column
-    const insertRes = await fetch(`${SUPABASE_URL}/rest/v1/commodities`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_SERVICE_KEY,
-        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation',
-      },
-      body: JSON.stringify({ name: 'Cattle Indicators' }),
-    });
-    if (!insertRes.ok) {
-      const err = await insertRes.text();
-      console.error('Could not create Cattle Indicators commodity:', err);
-      return;
-    }
-    const inserted = await insertRes.json();
-    commodityId = inserted?.[0]?.id;
-  }
-
-  if (!commodityId) { console.error('Could not get/create Cattle Indicators commodity'); return; }
-
-  // Upsert into market_prices using region = indicator name
-  const upsertRes = await fetch(`${SUPABASE_URL}/rest/v1/market_prices`, {
+  const ins = await fetch(`${SUPABASE_URL}/rest/v1/commodities`, {
     method: 'POST',
     headers: {
       'apikey': SUPABASE_SERVICE_KEY,
       'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
       'Content-Type': 'application/json',
-      'Prefer': 'resolution=merge-duplicates,return=representation',
+      'Prefer': 'return=representation',
     },
-    body: JSON.stringify({
-      commodity_id: commodityId,
-      region: result.indicator,
-      price_per_unit: result.price,
-      unit: result.unit,
-      price_date: result.date,
-      source_label: result.label,
-    }),
+    body: JSON.stringify({ name: 'Cattle Indicators' }),
   });
+  const insData = await ins.json();
+  return insData?.[0]?.id;
+}
 
-  if (!upsertRes.ok) {
-    const err = await upsertRes.text();
-    console.error(`Upsert failed for ${result.indicator}:`, err);
-  } else {
-    console.log(`[${result.indicator}] Saved: ${result.price} ${result.unit} on ${result.date}`);
+async function saveIndicator(commodityId, name, price, unit, date) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/market_prices`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_SERVICE_KEY,
+      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates,return=minimal',
+    },
+    body: JSON.stringify([{
+      commodity_id: commodityId,
+      region: name,
+      price_per_unit: price,
+      unit,
+      price_date: date,
+    }]),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    console.error(`[${name}] Save failed: ${err}`);
+    return false;
   }
+  console.log(`[${name}] Saved: ${price} ${unit} on ${date}`);
+  return true;
 }
 
 export default async function handler() {
-  console.log('[push-livestock-prices] Starting MLA indicator fetch...');
+  console.log('[push-livestock-prices] Starting MLA Statistics API fetch...');
 
-  const results = await Promise.all(INDICATORS.map(fetchIndicator));
-  const valid = results.filter(Boolean);
+  const result = await fetchLatestIndicators();
+  
+  if (!result) {
+    console.error('[push-livestock-prices] All API endpoints failed');
+    return new Response(JSON.stringify({ error: 'All endpoints failed' }), { status: 500 });
+  }
 
-  console.log(`[push-livestock-prices] Got ${valid.length}/${INDICATORS.length} indicators`);
+  const { url, data } = result;
+  console.log(`[push-livestock-prices] Got data from: ${url}`);
 
-  await Promise.all(valid.map(upsertPrice));
+  // Parse the response — handle different possible response shapes
+  const records = data?.data || data?.records || data?.results || 
+                  (Array.isArray(data) ? data : null);
 
-  console.log('[push-livestock-prices] Done');
-  return new Response(JSON.stringify({ fetched: valid.length, total: INDICATORS.length }), {
+  if (!records?.length) {
+    console.log('[push-livestock-prices] No records found in response:', JSON.stringify(data).slice(0, 500));
+    return new Response(JSON.stringify({ error: 'No records', response: data }), { status: 200 });
+  }
+
+  console.log(`[push-livestock-prices] Got ${records.length} records. First: ${JSON.stringify(records[0])}`);
+
+  const commodityId = await getOrCreateCommodityId();
+  if (!commodityId) {
+    return new Response(JSON.stringify({ error: 'Could not get commodity ID' }), { status: 500 });
+  }
+
+  // Find the most recent date in the data
+  const today = new Date().toISOString().split('T')[0];
+  let saved = 0;
+
+  for (const indicator of TARGET_INDICATORS) {
+    // Find matching record — try several field name patterns
+    const match = records.find(r =>
+      r.Indicator === indicator.apiName ||
+      r.indicator === indicator.apiName ||
+      r.IndicatorName === indicator.apiName ||
+      r.indicator_name === indicator.apiName ||
+      r.name === indicator.apiName
+    );
+
+    if (!match) {
+      console.log(`[${indicator.storeName}] Not found in response. Available: ${[...new Set(records.map(r => r.Indicator || r.indicator || r.name))].slice(0,5).join(', ')}`);
+      continue;
+    }
+
+    // Extract price value — try several field name patterns
+    const price = parseFloat(
+      match['Indicator Value'] ?? match.IndicatorValue ?? match.indicator_value ??
+      match.Price ?? match.price ?? match.value ?? match.Value ?? 0
+    );
+
+    // Extract date
+    const dateStr = match.Date ?? match.date ?? match.WeekEnding ?? match.week_ending ?? today;
+    const date = dateStr.includes('/') 
+      ? dateStr.split('/').reverse().join('-')  // DD/MM/YYYY → YYYY-MM-DD
+      : dateStr.split('T')[0];
+
+    if (!price || isNaN(price)) {
+      console.log(`[${indicator.storeName}] No valid price in record: ${JSON.stringify(match)}`);
+      continue;
+    }
+
+    const ok = await saveIndicator(commodityId, indicator.storeName, price, indicator.unit, date);
+    if (ok) saved++;
+  }
+
+  console.log(`[push-livestock-prices] Done — saved ${saved}/${TARGET_INDICATORS.length}`);
+  return new Response(JSON.stringify({ saved, total: TARGET_INDICATORS.length, sourceUrl: url }), {
     headers: { 'Content-Type': 'application/json' },
   });
 }
