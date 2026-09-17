@@ -43,13 +43,7 @@ const DEFAULT_GRADES = {
 };
 
 async function getAllBids() {
-  // Build URL without pre-encoded filter — let the server handle it
-  const params = new URLSearchParams({
-    '$filter': '(BidSustainable eq true) and (BidNonSustainable eq true)',
-    '$top': '5000',
-    '$format': 'json',
-  });
-  const url = `${CC_API}/AllBidsSet?${params}`;
+  const url = `${CC_API}/AllBidsSet?$filter=(BidSustainable eq true) and (BidNonSustainable eq true)&$top=5000&$format=json`;
   console.log(`[push-cropconnect-prices] Fetching: ${url}`);
   const res = await fetch(url, { headers: CC_HEADERS });
   if (!res.ok) {
