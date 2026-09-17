@@ -43,26 +43,37 @@ const DEFAULT_GRADES = {
 };
 
 async function getAllBids() {
-  // Step 1: establish SAP session by hitting the public settings endpoint
-  // (mirrors what the browser does on page load)
+  // Step 1: hit BID_PUBLIC service root to establish its SAP session
   const sessionRes = await fetch(
-    'https://cropconnect.com.au/sap/opu/odata/SAP/CCGLOBAL_PUBLIC/GlobalSettingsSet(1)?$select=CurrentTime,UTCDifference&$format=json',
-    { headers: { ...CC_HEADERS, Accept: 'application/json' } }
+    'https://cropconnect.com.au/sap/opu/odata/SAP/BID_PUBLIC/?$format=json',
+    { headers: { ...CC_HEADERS, 'x-csrf-token': 'Fetch' } }
   );
-  // Extract session cookie from response
   const rawCookie = sessionRes.headers.get('set-cookie') || '';
-  const sessionCookie = rawCookie.split(';')[0]; // take first cookie pair only
-  console.log(`[push-cropconnect-prices] Session status: ${sessionRes.status}, cookie: ${sessionCookie ? 'yes' : 'none'}`);
+  const csrfToken = sessionRes.headers.get('x-csrf-token') || '';
+  // Collect all Set-Cookie values
+  const sessionCookie = rawCookie.split(',').map(c => c.split(';')[0].trim()).join('; ');
+  console.log(`[push-cropconnect-prices] Session: ${sessionRes.status}, cookie: ${sessionCookie ? 'yes' : 'none'}, csrf: ${csrfToken ? 'yes' : 'none'}`);
 
-  // Step 2: fetch all bids, passing session cookie if we got one
   const bidHeaders = { ...CC_HEADERS, Accept: 'application/json' };
   if (sessionCookie) bidHeaders['Cookie'] = sessionCookie;
+  if (csrfToken) bidHeaders['x-csrf-token'] = csrfToken;
 
-  const url = `https://cropconnect.com.au/sap/opu/odata/SAP/BID_PUBLIC/AllBidsSet?$top=5000&$format=json`;
-  const res = await fetch(url, { headers: bidHeaders });
+  // Step 2: try without any filter first — if this works, filtering is the issue
+  const urlNoFilter = `https://cropconnect.com.au/sap/opu/odata/SAP/BID_PUBLIC/AllBidsSet?$top=5&$format=json`;
+  const r1 = await fetch(urlNoFilter, { headers: bidHeaders });
+  console.log(`[push-cropconnect-prices] No-filter test: ${r1.status}`);
+
+  if (!r1.ok) {
+    const body = await r1.text();
+    throw new Error(`CropConnect API error: ${r1.status} — ${body.slice(0, 300)}`);
+  }
+
+  // Step 3: if no-filter works, fetch all bids with top=5000
+  const urlAll = `https://cropconnect.com.au/sap/opu/odata/SAP/BID_PUBLIC/AllBidsSet?$top=5000&$format=json`;
+  const res = await fetch(urlAll, { headers: bidHeaders });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`CropConnect API error: ${res.status} — ${body.slice(0, 300)}`);
+    throw new Error(`Full fetch error: ${res.status} — ${body.slice(0, 200)}`);
   }
   const data = await res.json();
   console.log(`[push-cropconnect-prices] Got ${data.d.results.length} bids`);
