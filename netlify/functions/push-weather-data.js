@@ -11,14 +11,15 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BOM_API = 'https://api.weather.bom.gov.au/v1';
 
 async function db(path, opts = {}) {
+  const { headers: extraHeaders, ...restOpts } = opts;
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...restOpts,
     headers: {
       'apikey': SUPABASE_SERVICE_KEY,
       'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
       'Content-Type': 'application/json',
-      ...opts.headers,
+      ...(extraHeaders || {}),
     },
-    ...opts,
   });
   if (!res.ok) throw new Error(`DB error: ${await res.text()}`);
   return res.json().catch(() => null);
