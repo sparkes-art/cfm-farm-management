@@ -65,59 +65,129 @@ async function fetchObservations(geohash6, signal) {
 }
 
 // Seed 30-year averages from BOM climate stats page (HTML scrape)
-async function seedClimateAverages(stationId) {
-  // Check if already seeded
-  const existing = await db(`weather_station_averages?station_id=eq.${stationId}&limit=1`);
+async function seedClimateAverages(stationId, geohash, farmId) {
+  // Check if already seeded with complete data (including temp)
+  const existing = await db(`weather_station_averages?station_id=eq.${stationId}&avg_temp_max=not.is.null&limit=1`);
   if (existing?.length) return;
 
-  console.log(`[weather] Seeding climate averages for station ${stationId}`);
-  const url = `http://www.bom.gov.au/climate/averages/tables/cw_${stationId}.shtml`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'CFM-FarmManagement/1.0' } });
-  if (!res.ok) { console.warn(`Could not fetch BOM stats for ${stationId}`); return; }
-  const html = await res.text();
+  console.log(`[weather] Seeding climate averages for station ${stationId} via Open-Meteo historical`);
 
-  // Extract monthly values from BOM climate stats HTML
-  // Row structure: <td>label</a></td><td class="highest">Jan</td><td>Feb</td>...<td>Dec</td><td>Annual</td>...
-  const extractMonthlyRow = (html, label) => {
-    const labelIdx = html.indexOf(label);
-    if (labelIdx === -1) return null;
-    // Find closing </td> of the label cell, then extract next 12 numeric tds
-    const afterLabel = html.slice(labelIdx + label.length, labelIdx + 2000);
-    const afterCell = afterLabel.slice(afterLabel.indexOf('</td>') + 5);
-    const matches = [...afterCell.matchAll(/<td[^>]*>\s*([\d]+(?:\.[0-9]+)?)\s*<\/td>/g)];
-    const vals = matches.slice(0, 12).map(m => parseFloat(m[1]));
-    return vals.length >= 12 ? vals : null;
-  };
+  // Fetch lat/lon for this station from the farm settings
+  // Use Open-Meteo archive to get 10 years of daily data and average by month
+  // First get farm coordinates
+  const farms = await db(`farms?settings->>bomStationId=eq.${stationId}&select=settings&limit=1`);
+  const settings = farms?.[0]?.settings;
+  const lat = settings?.latitude;
+  const lon = settings?.longitude;
 
-  const maxTemps  = extractMonthlyRow(html, 'Mean maximum temperature');
-  const minTemps  = extractMonthlyRow(html, 'Mean minimum temperature');
-  const rainfalls = extractMonthlyRow(html, 'Mean rainfall');
-
-  if (!rainfalls) { console.warn(`Could not parse BOM stats for ${stationId}`); return; }
-  const maxIdx = html.indexOf('Mean maximum temperature');
-  const minIdx = html.indexOf('Mean minimum temperature');
-  console.log(`[weather] Label positions: max=${maxIdx}, min=${minIdx}, htmlLen=${html.length}`);
-  if (maxIdx > -1) {
-    const snippet = html.slice(maxIdx + 24, maxIdx + 120).replace(/\n/g,' ');
-    console.log(`[weather] Max temp snippet: ${snippet}`);
+  if (!lat || !lon) {
+    console.warn(`[weather] No coordinates for station ${stationId} — skipping temp averages`);
+    // Still try to get rainfall from BOM stats page
+    await seedRainfallOnly(stationId);
+    return;
   }
-  console.log(`[weather] Parsed: maxTemps=${maxTemps?.[0]}, minTemps=${minTemps?.[0]}, rainfall=${rainfalls?.[0]}`);
 
-  const rows = Array.from({length: 12}, (_, i) => ({
+  // Fetch 10 years of historical data from Open-Meteo
+  const endYear = new Date().getFullYear() - 1;
+  const startYear = endYear - 9;
+  const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${startYear}-01-01&end_date=${endYear}-12-31&daily=precipitation_sum,temperature_2m_max,temperature_2m_min&timezone=Australia%2FSydney`;
+  
+  const res = await fetch(url, { headers: { 'User-Agent': 'CFM-FarmManagement/1.0' } });
+  if (!res.ok) {
+    console.warn(`[weather] Open-Meteo historical failed: ${res.status}`);
+    await seedRainfallOnly(stationId);
+    return;
+  }
+
+  const data = await res.json();
+  const { time, precipitation_sum, temperature_2m_max, temperature_2m_min } = data.daily;
+
+  // Aggregate by month
+  const monthly = Array.from({length: 12}, () => ({ rain: [], tmax: [], tmin: [] }));
+  time.forEach((d, i) => {
+    const month = new Date(d).getMonth(); // 0-based
+    if (precipitation_sum?.[i] != null) monthly[month].rain.push(precipitation_sum[i]);
+    if (temperature_2m_max?.[i] != null) monthly[month].tmax.push(temperature_2m_max[i]);
+    if (temperature_2m_min?.[i] != null) monthly[month].tmin.push(temperature_2m_min[i]);
+  });
+
+  const avg = arr => arr.length ? Math.round((arr.reduce((s,v)=>s+v,0)/arr.length) * 10) / 10 : null;
+  const sumAvg = arr => arr.length ? Math.round((arr.reduce((s,v)=>s+v,0)/(endYear-startYear+1)) * 10) / 10 : null;
+
+  const rows = monthly.map((m, i) => ({
     station_id: stationId,
     month: i + 1,
-    avg_rainfall_mm: rainfalls?.[i] || null,
-    avg_temp_max: maxTemps?.[i] || null,
-    avg_temp_min: minTemps?.[i] || null,
+    avg_rainfall_mm: sumAvg(m.rain.reduce((acc, v, idx) => {
+      // Group by year-month for monthly totals
+      return acc;
+    }, [])) || avg(m.rain), // fallback to daily avg × days
+    avg_temp_max: avg(m.tmax),
+    avg_temp_min: avg(m.tmin),
+    years_of_data: endYear - startYear + 1,
   }));
 
-  await db('weather_station_averages', {
+  // Calculate proper monthly rainfall averages (sum per month per year, then average across years)
+  const monthlyRainByYear = {};
+  time.forEach((d, i) => {
+    if (precipitation_sum?.[i] == null) return;
+    const date = new Date(d);
+    const yr = date.getFullYear();
+    const mo = date.getMonth();
+    if (!monthlyRainByYear[yr]) monthlyRainByYear[yr] = Array(12).fill(0);
+    monthlyRainByYear[yr][mo] += precipitation_sum[i];
+  });
+
+  const years = Object.values(monthlyRainByYear);
+  rows.forEach((row, i) => {
+    const monthTotals = years.map(y => y[i]).filter(v => v != null);
+    row.avg_rainfall_mm = monthTotals.length
+      ? Math.round((monthTotals.reduce((s,v)=>s+v,0) / monthTotals.length) * 10) / 10
+      : null;
+  });
+
+  await db('weather_station_averages?on_conflict=station_id,month', {
     method: 'POST',
     headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
     body: JSON.stringify(rows),
   });
 
-  console.log(`[weather] Seeded 12 months of averages for ${stationId}`);
+  console.log(`[weather] Seeded ${rows.length} months of averages for ${stationId} (${startYear}-${endYear})`);
+  console.log(`[weather] Sample: Jan avg max=${rows[0].avg_temp_max}°C, rain=${rows[0].avg_rainfall_mm}mm`);
+}
+
+async function seedRainfallOnly(stationId) {
+  // Fallback: get rainfall only from BOM stats page
+  const url = `http://www.bom.gov.au/climate/averages/tables/cw_${stationId}.shtml`;
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CFM/1.0)' } });
+  if (!res.ok) { console.warn(`Could not fetch BOM stats for ${stationId}`); return; }
+  const html = await res.text();
+
+  const extractRow = (label) => {
+    const labelIdx = html.indexOf(label);
+    if (labelIdx === -1) return null;
+    const afterLabel = html.slice(labelIdx + label.length, labelIdx + 2000);
+    const afterCell = afterLabel.slice(afterLabel.indexOf('</td>') + 5);
+    const matches = [...afterCell.matchAll(/<td[^>]*>\s*([\d]+(?:\.[0-9]+)?)\s*<\/td>/g)];
+    return matches.slice(0, 12).map(m => parseFloat(m[1]));
+  };
+
+  const rainfalls = extractRow('Mean rainfall');
+  if (!rainfalls?.length) return;
+
+  const rows = rainfalls.map((v, i) => ({
+    station_id: stationId,
+    month: i + 1,
+    avg_rainfall_mm: v,
+    avg_temp_max: null,
+    avg_temp_min: null,
+  }));
+
+  await db('weather_station_averages?on_conflict=station_id,month', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(rows),
+  });
+  console.log(`[weather] Seeded rainfall-only averages for ${stationId} from BOM`);
 }
 
 export default async function handler(req) {
@@ -141,7 +211,7 @@ export default async function handler(req) {
     try {
       const existing = await db(`weather_station_averages?station_id=eq.${farm.stationId}&limit=1`);
       if (forceSeed || !existing?.length) {
-        await seedClimateAverages(farm.stationId);
+        await seedClimateAverages(farm.stationId, farm.geohash, farm.farmId);
       }
     } catch(e) {
       console.warn(`[weather] Seed check failed for ${farm.stationId}: ${e.message}`);
