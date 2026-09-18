@@ -94,6 +94,13 @@ async function seedClimateAverages(stationId) {
   const rainfalls = extractMonthlyRow(html, 'Mean rainfall');
 
   if (!rainfalls) { console.warn(`Could not parse BOM stats for ${stationId}`); return; }
+  const maxIdx = html.indexOf('Mean maximum temperature');
+  const minIdx = html.indexOf('Mean minimum temperature');
+  console.log(`[weather] Label positions: max=${maxIdx}, min=${minIdx}, htmlLen=${html.length}`);
+  if (maxIdx > -1) {
+    const snippet = html.slice(maxIdx + 24, maxIdx + 120).replace(/\n/g,' ');
+    console.log(`[weather] Max temp snippet: ${snippet}`);
+  }
   console.log(`[weather] Parsed: maxTemps=${maxTemps?.[0]}, minTemps=${minTemps?.[0]}, rainfall=${rainfalls?.[0]}`);
 
   const rows = Array.from({length: 12}, (_, i) => ({
