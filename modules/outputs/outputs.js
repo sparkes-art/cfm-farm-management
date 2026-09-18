@@ -1887,6 +1887,20 @@ async function _loadWeatherPanel(farm, season) {
   const n = allMonths.length;
   const barGap = 2;
 
+  // GDD cumulative arrays
+  let gcum = 0, gltacum = 0;
+  const gddCumActual = allMonths.map(m => {
+    if (!m.isFuture && m.gdd !== null) gcum += m.gdd;
+    return m.isFuture ? null : gcum;
+  });
+  const gddCumLTA = allMonths.map(m => {
+    if (m.ltaTempMax !== null && m.ltaTempMin !== null) {
+      const days = new Date(m.year, m.month, 0).getDate();
+      gltacum += Math.max(0, ((m.ltaTempMax + m.ltaTempMin) / 2 - gddBase) * days);
+    }
+    return Math.round(gltacum);
+  });
+
   panel.innerHTML = `
     <!-- Snapshot strip -->
     <div style="background:var(--page-bg);border-radius:8px;padding:8px 12px;margin-bottom:8px;border:0.5px solid var(--border)">
