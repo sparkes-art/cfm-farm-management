@@ -170,11 +170,13 @@ async function _mountOverview(container) {
     // Farm's grain watchlist — commodity+grade pairs to show, best bid within catchment
     const farmSites = [];
 
-    // New format: grainWatchlist = { Wheat: ['APW1','H2'], Barley: ['BAR1'] }
+    // New format: grainWatchlist = { Wheat: ['APW1','APW'], Barley: ['BAR1'] }
+    // One entry per commodity — grade list is priority order, first available wins
     Object.entries(grainWatchlist).forEach(([crop, grades]) => {
-      grades.forEach(grade => {
-        farmSites.push({ crop, grade, type: 'cc', catchment: grainCatchment });
-      });
+      if (grades.length) {
+        // Pass all grades in priority order — card builder picks first with data
+        farmSites.push({ crop, grades, type: 'cc', catchment: grainCatchment });
+      }
     });
 
     // Old LDC/CropConnect per-commodity format fallback
@@ -248,18 +250,17 @@ async function _mountOverview(container) {
         '<div style="display:flex;align-items:center;justify-content:space-between">',
         '<div>',
         '<div style="font-size:11px;font-weight:600;color:var(--ink)">'+name+'</div>',
-        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">'+sourceLabel+' · '+unit+'</div>',
+        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">'+new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'})+' · '+sourceLabel+' · '+unit+'</div>',
         '<div style="display:flex;align-items:baseline;gap:5px">',
         '<span style="font-size:22px;font-weight:700;color:var(--ink)">'+latest.toFixed(2)+'</span>',
         '<span style="font-size:11px;color:var(--hint)">'+unit+'</span>',
         '</div></div>',
-        '<div style="text-align:right;min-width:90px">',
-        '<div style="font-size:10px;color:var(--hint);margin-bottom:2px">'+new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'})+'</div>',
+        '<div style="text-align:right;min-width:110px">',
         dayMove!=null
-          ? '<div style="font-size:12px;font-weight:600;color:'+moveColor+'">'+moveArrow+' '+Math.abs(dayMove).toFixed(2)+' <span style="font-size:10px;font-weight:400">('+fPct(dayMovePct)+')</span></div>'
+          ? '<div style="font-size:12px;font-weight:600;color:'+moveColor+'">'+moveArrow+' '+Math.abs(dayMove).toFixed(2)+' <span style="font-size:10px;font-weight:400;color:'+moveColor+'">(24-hr '+fPct(dayMovePct)+')</span></div>'
           : '<div style="font-size:11px;color:var(--hint)">—</div>',
         avg14!=null
-          ? '<div style="font-size:10px;color:var(--hint);margin-top:3px">14d '+avg14.toFixed(2)+' <span style="color:'+avgColor+'">'+(vsAvg>=0?'▲':'▼')+fPct(vsAvgPct)+'</span></div>'
+          ? '<div style="font-size:10px;color:var(--hint);margin-top:3px">14-day avg: '+avg14.toFixed(2)+' <span style="color:'+avgColor+'">'+(vsAvg>=0?'▲':'▼')+fPct(vsAvgPct)+'</span></div>'
           : '',
         '</div>',
         '</div></div>',
@@ -267,30 +268,33 @@ async function _mountOverview(container) {
     }).join('');
 
     // Build price cards
-    const priceCards = farmSites.map(({ crop, site, sites, catchment, grade, type }) => {
+    const priceCards = farmSites.map(({ crop, site, catchment, grade, grades, type }) => {
       const com = commodityList.find(c => c.name === crop);
       if (!com) return '';
 
-      // Resolve history using site fallback
       let history = [];
-      let sourceLabel = site || (sites?.[0]) || '';
+      let sourceLabel = site || '';
+      let resolvedGrade = grade || null;
 
-      if (type === 'cc' && catchment?.length && grade) {
-        // CropConnect: find best bid within catchment for this grade
-        const catchmentKeys = catchment.map(s => `${s}|${grade}`);
-        const catchmentPrices = allPrices
-          .filter(p => p.commodity_id === com.id && catchmentKeys.includes(p.region))
-          .sort((a, b) => b.price_date.localeCompare(a.price_date) || parseFloat(b.price_per_unit) - parseFloat(a.price_per_unit));
-        if (catchmentPrices.length) {
-          // Group by date, pick best price on most recent date
-          const latestDate = catchmentPrices[0].price_date;
-          const todayPrices = catchmentPrices.filter(p => p.price_date === latestDate);
-          const best = todayPrices.reduce((a, b) => parseFloat(a.price_per_unit) >= parseFloat(b.price_per_unit) ? a : b);
-          sourceLabel = best.region.split('|')[0]; // site name
-          // Build history from that site+grade
-          history = allPrices
-            .filter(p => p.commodity_id === com.id && p.region === best.region)
-            .sort((a, b) => b.price_date.localeCompare(a.price_date));
+      if (type === 'cc' && catchment?.length) {
+        // Grade priority fallback: try each grade in order until we find data in catchment
+        const gradeList = grades || (grade ? [grade] : []);
+        for (const g of gradeList) {
+          const catchmentKeys = catchment.map(s => `${s}|${g}`);
+          const catchmentPrices = allPrices
+            .filter(p => p.commodity_id === com.id && catchmentKeys.includes(p.region))
+            .sort((a, b) => b.price_date.localeCompare(a.price_date) || parseFloat(b.price_per_unit) - parseFloat(a.price_per_unit));
+          if (catchmentPrices.length) {
+            const latestDate = catchmentPrices[0].price_date;
+            const todayPrices = catchmentPrices.filter(p => p.price_date === latestDate);
+            const best = todayPrices.reduce((a, b) => parseFloat(a.price_per_unit) >= parseFloat(b.price_per_unit) ? a : b);
+            sourceLabel = best.region.split('|')[0];
+            resolvedGrade = g;
+            history = allPrices
+              .filter(p => p.commodity_id === com.id && p.region === best.region)
+              .sort((a, b) => b.price_date.localeCompare(a.price_date));
+            break; // found data for this grade — stop
+          }
         }
       } else {
         // LDC or Cotton — simple region match
@@ -299,12 +303,12 @@ async function _mountOverview(container) {
           .sort((a, b) => b.price_date.localeCompare(a.price_date));
       }
 
-      const unit = grade ? '$/t · ' + grade : 't';
+      const unit = resolvedGrade || 't';
 
       if (!history.length) return [
         '<div class="card" style="padding:12px 14px;margin-bottom:8px">',
         '<div style="font-size:11px;font-weight:600;color:var(--ink)">' + crop + '</div>',
-        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + sourceLabel + (grade ? ' · ' + grade : '') + '</div>',
+        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + sourceLabel + (resolvedGrade ? ' · ' + resolvedGrade : '') + '</div>',
         '<div style="font-size:12px;color:var(--hint);margin-top:8px">No price data yet</div>',
         '</div>',
       ].join('');
@@ -338,20 +342,19 @@ async function _mountOverview(container) {
         // Left — name + price
         '<div>',
         '<div style="font-size:11px;font-weight:600;color:var(--ink)">' + crop + '</div>',
-        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + sourceLabel + (grade ? ' · ' + grade : '') + '</div>',
+        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) + ' · ' + sourceLabel + (resolvedGrade ? ' · ' + resolvedGrade : '') + '</div>',
         '<div style="display:flex;align-items:baseline;gap:5px">',
         '<span style="font-size:22px;font-weight:700;color:var(--ink)">' + fC(latest) + '</span>',
         '<span style="font-size:11px;color:var(--hint)">/' + displayUnit + '</span>',
         '</div>',
         '</div>',
-        // Right — day + 14d avg
-        '<div style="text-align:right;min-width:90px">',
-        '<div style="font-size:10px;color:var(--hint);margin-bottom:2px">' + new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) + '</div>',
+        // Right — 24-hr + 14-day
+        '<div style="text-align:right;min-width:110px">',
         dayMove != null
-          ? '<div style="font-size:12px;font-weight:600;color:' + moveColor + '">' + moveArrow + ' ' + fC(Math.abs(dayMove)) + ' <span style="font-size:10px;font-weight:400">(' + fPct(dayMovePct) + ')</span></div>'
+          ? '<div style="font-size:12px;font-weight:600;color:' + moveColor + '">' + moveArrow + ' ' + fC(Math.abs(dayMove)) + ' <span style="font-size:10px;font-weight:400;color:' + moveColor + '">(24-hr ' + fPct(dayMovePct) + ')</span></div>'
           : '<div style="font-size:11px;color:var(--hint)">—</div>',
         avg14 != null
-          ? '<div style="font-size:10px;color:var(--hint);margin-top:3px">14d ' + fC(avg14) + ' <span style="color:' + avgColor + '">' + (vsAvg >= 0 ? '▲' : '▼') + fPct(vsAvgPct) + '</span></div>'
+          ? '<div style="font-size:10px;color:var(--hint);margin-top:3px">14-day avg: ' + fC(avg14) + ' <span style="color:' + avgColor + '">' + (vsAvg >= 0 ? '▲' : '▼') + fPct(vsAvgPct) + '</span></div>'
           : '',
         '</div>',
         '</div>',
@@ -458,16 +461,18 @@ async function _mountOverview(container) {
     container.innerHTML = [
       '<div style="display:grid;grid-template-columns:380px 1fr;gap:16px;align-items:start">',
 
-      // LEFT — Farm gate prices
+      // LEFT — Farm gate prices (grain + livestock combined)
       '<div>',
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">',
+      '<div style="margin-bottom:12px">',
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">',
       '<h2 style="font-size:14px;font-weight:600;color:var(--ink)">Farm gate prices</h2>',
       '<span style="font-size:11px;color:var(--hint)">' + farm.name + '</span>',
       '</div>',
-      farmSites.length
-        ? priceCards || '<div class="card" style="padding:16px;color:var(--hint)">No market price data available.</div>'
-        : '<div class="card" style="padding:16px;color:var(--hint)">No delivery sites configured.</div>',
-      lsIndicatorNames.length ? '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:14px 0 8px">Livestock indicators</div>' + lsCards : '',
+      '<p style="font-size:10px;color:var(--hint);line-height:1.4;margin:0">Prices sourced from third-party market data. Verify bids independently before any trading or business decisions.</p>',
+      '</div>',
+      (farmSites.length || lsIndicatorNames.length)
+        ? (priceCards + lsCards) || '<div class="card" style="padding:16px;color:var(--hint)">No market price data available yet.</div>'
+        : '<div class="card" style="padding:16px;color:var(--hint)">No sites or indicators configured — set up in Farm Settings.</div>',
       '</div>',
 
       // RIGHT — Commodity position
