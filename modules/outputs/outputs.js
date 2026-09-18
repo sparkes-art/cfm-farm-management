@@ -633,8 +633,9 @@ async function _mountOverview(container) {
     // Load weather panel if station configured
     if (farm.settings?.weather?.bomStationId) {
       _loadWeatherPanel(farm, season).catch(e => {
+        console.error('[weather panel error]', e.message, e.stack);
         const panel = document.getElementById('wx-panel');
-        if (panel) panel.innerHTML = '<div style="font-size:11px;color:var(--hint)">Weather data unavailable</div>';
+        if (panel) panel.innerHTML = '<div style="font-size:11px;color:var(--hint)">Weather error: ' + e.message + '</div>';
       });
     }
 
