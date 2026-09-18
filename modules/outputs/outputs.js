@@ -400,10 +400,11 @@ async function _mountOverview(container) {
         name, commodity_id: b.commodity_id,
         budProd: 0, budPrice: 0, unit: b.unit||'t',
         contracts: [], invoicedQty: 0, invoicedRev: 0, invoicedQA: 0,
-        harvestedProd: 0, isLivestock: false,
+        harvestedProd: 0, isLivestock: false, isHarvestComplete: false,
       };
       comMap[name].budProd += parseFloat(b.budgeted_production)||((parseFloat(b.area_ha)||0)*(parseFloat(b.budgeted_yield_per_ha||b.yield_per_ha)||0));
       comMap[name].budPrice = parseFloat(b.price)||comMap[name].budPrice;
+      if (b.is_harvest_complete) comMap[name].isHarvestComplete = true;
     });
 
     // Contracts
@@ -470,8 +471,10 @@ async function _mountOverview(container) {
       const avgContractPrice = contractedQty ? contractedVal/contractedQty : null;
 
       const harvestPct  = com.budProd ? Math.min(100,(com.harvestedProd/com.budProd)*100) : 0;
-      const forecastTotal = com.budProd || com.harvestedProd;
-      const stage = com.harvestedProd > 0 && harvestPct >= 99 ? 'Harvest'
+      // If marked complete, use actual harvest as the final figure; otherwise use budget as forecast
+      const forecastTotal = com.isHarvestComplete ? com.harvestedProd : (com.budProd || com.harvestedProd);
+      const stage = com.isHarvestComplete ? 'Harvest ✓'
+                  : com.harvestedProd > 0 && harvestPct >= 99 ? 'Harvest'
                   : com.harvestedProd > 0 ? 'In harvest' : 'Budget';
 
       const soldPct = forecastTotal ? Math.min(150,(contractedQty/forecastTotal)*100) : null;
@@ -501,8 +504,8 @@ async function _mountOverview(container) {
         forecastTotal ? '<span style="font-size:10px;color:var(--hint)">' + fN(forecastTotal) + ' ' + com.unit + '</span>' : '',
         '</div>',
 
-        // Harvest progress — only if partial
-        com.harvestedProd > 0 && harvestPct < 99 ? [
+        // Harvest progress — only if partial and not marked complete
+        com.harvestedProd > 0 && harvestPct < 99 && !com.isHarvestComplete ? [
           '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">',
           '<span style="font-size:10px;color:var(--hint);width:90px;flex-shrink:0">Harvest</span>',
           '<div style="flex:1">' + bar(harvestPct,'#94a3b8') + '</div>',

@@ -752,9 +752,25 @@ function _renderHarvest(container) {
         const fcastArea = forecastByCommCropType[s.commCropKey] || 0;
         const pctComplete = fcastArea && s.area ? Math.round((s.area / fcastArea) * 100) : null;
 
+        // Check if harvest is marked complete for this commodity
+        const budgetsForCom = _budgets.filter(b =>
+          (b.commodity_id || b.commodity) === s.commodityId &&
+          (b.crop_type_id || '') === s.cropTypeId
+        );
+        const isComplete = budgetsForCom.some(b => b.is_harvest_complete);
+        const budgetIds = budgetsForCom.map(b => b.id);
+
         return `
           <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:0.5px solid var(--border-light)">
-            <p style="font-size:13px;font-weight:700;color:var(--ink);margin:0 0 10px">${s.commodity}${s.cropType ? ' · ' + s.cropType : ''}</p>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+              <p style="font-size:13px;font-weight:700;color:var(--ink);margin:0">${s.commodity}${s.cropType ? ' · ' + s.cropType : ''}</p>
+              ${canWrite() ? `<button class="btn ${isComplete ? 'btn-secondary' : 'btn-secondary'} harvest-complete-btn"
+                data-budget-ids="${budgetIds.join(',')}"
+                data-complete="${isComplete ? '1' : '0'}"
+                style="font-size:11px;padding:4px 10px;${isComplete ? 'color:var(--green);border-color:var(--green)' : 'color:var(--hint)'}">
+                ${isComplete ? '✓ Harvest complete' : 'Mark harvest complete'}
+              </button>` : isComplete ? '<span style="font-size:11px;color:var(--green);font-weight:600">✓ Harvest complete</span>' : ''}
+            </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start">
               <!-- Left: stat cards -->
               <div style="display:flex;gap:0;border:1px solid var(--border-light);border-radius:8px;overflow:hidden">
@@ -887,6 +903,26 @@ function _renderHarvest(container) {
       </tbody>
     </table>
   `;
+
+  // Harvest complete toggle
+  wrap.querySelectorAll('.harvest-complete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const ids = btn.dataset.budgetIds.split(',').filter(Boolean);
+      const nowComplete = btn.dataset.complete !== '1';
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        await Promise.all(ids.map(id => dbUpdate('budgets', id, { is_harvest_complete: nowComplete })));
+        // Update local state
+        _budgets.forEach(b => { if (ids.includes(b.id)) b.is_harvest_complete = nowComplete; });
+        _renderHarvest(container);
+        toast(nowComplete ? 'Harvest marked complete' : 'Harvest reopened', 'success');
+      } catch(e) {
+        toast('Failed: ' + e.message, 'error');
+        btn.disabled = false;
+      }
+    });
+  });
 
   // Inline edit save on blur/change
   wrap.querySelectorAll('.harvest-inline').forEach(inp => {
