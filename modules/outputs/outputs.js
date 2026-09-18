@@ -1868,15 +1868,20 @@ async function _loadWeatherPanel(farm, season) {
         ${rainVar != null ? `<span style="font-size:12px;font-weight:600;color:${rainVarColor}">${rainVar >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(rainVar))}mm vs avg</span>` : ''}
       </div>
       ${hasAnyData ? `
-      <div style="display:flex;align-items:flex-end;gap:3px;height:${barH}px;margin-bottom:6px">
-        ${months.map(m => {
-          const rainH = m.ltaRain ? Math.max(2, Math.round((m.rain / barMax) * barH)) : Math.max(2, Math.round((m.rain / barMax) * barH));
+      <div style="display:flex;align-items:flex-end;gap:2px;height:${barH}px;margin-bottom:2px;position:relative">
+        ${months.map((m, i) => {
+          const rainH = Math.max(m.rain > 0 ? 2 : 0, Math.round((m.rain / barMax) * barH));
           const ltaH  = m.ltaRain ? Math.max(1, Math.round((m.ltaRain / barMax) * barH)) : 0;
-          return `<div style="flex:1;display:flex;align-items:flex-end;gap:1px;position:relative" title="${m.label}: ${m.rain}mm actual${m.ltaRain ? ', ' + m.ltaRain + 'mm avg' : ''}${m.rainSource==='gauge' ? ' (gauge)' : ''}">
-            <div style="flex:1;height:${rainH}px;background:${m.rainSource==='gauge'?'#16a34a':'#2a78d6'};border-radius:2px 2px 0 0"></div>
-            ${ltaH ? `<div style="flex:1;height:${ltaH}px;background:#d3d1c7;border-radius:2px 2px 0 0"></div>` : ''}
+          const ltaPct = m.ltaRain ? Math.round((m.ltaRain / barMax) * 100) : 0;
+          return `<div style="flex:1;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-end;position:relative;height:100%" title="${m.label}: ${m.rain}mm${m.ltaRain ? ' · avg '+Math.round(m.ltaRain)+'mm' : ''}${m.rainSource==='gauge' ? ' (gauge)' : ''}">
+            <div style="height:${rainH}px;background:${m.rainSource==='gauge'?'#16a34a':'#2a78d6'};border-radius:2px 2px 0 0;position:relative">
+              ${ltaH ? `<div style="position:absolute;bottom:${ltaH - rainH}px;left:0;right:0;height:2px;background:#b4b2a9;border-radius:1px"></div>` : ''}
+            </div>
           </div>`;
         }).join('')}
+      </div>
+      <div style="display:flex;gap:2px;margin-bottom:6px">
+        ${months.map(m => `<div style="flex:1;text-align:center;font-size:8px;color:var(--hint)">${m.label}</div>`).join('')}
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between">
         <div style="display:flex;gap:10px;font-size:10px;color:var(--hint)">
