@@ -266,45 +266,50 @@ async function _mountOverview(container) {
       ].join('');
     }).join('');
 
-    // Build price cards
-    const priceCards = farmSites.map(({ crop, site, sites, catchment, grade, type }) => {
+    // Build price cards — one per commodity, grade priority fallback
+    const priceCards = farmSites.map(({ crop, site, catchment, grades, grade, type }) => {
       const com = commodityList.find(c => c.name === crop);
       if (!com) return '';
 
-      // Resolve history using site fallback
       let history = [];
-      let sourceLabel = site || (sites?.[0]) || '';
+      let sourceLabel = site || '';
+      let resolvedGrade = grade || null;
+      let resolvedRegion = '';
 
-      if (type === 'cc' && catchment?.length && grade) {
-        // CropConnect: find best bid within catchment for this grade
-        const catchmentKeys = catchment.map(s => `${s}|${grade}`);
-        const catchmentPrices = allPrices
-          .filter(p => p.commodity_id === com.id && catchmentKeys.includes(p.region))
-          .sort((a, b) => b.price_date.localeCompare(a.price_date) || parseFloat(b.price_per_unit) - parseFloat(a.price_per_unit));
-        if (catchmentPrices.length) {
-          // Group by date, pick best price on most recent date
-          const latestDate = catchmentPrices[0].price_date;
-          const todayPrices = catchmentPrices.filter(p => p.price_date === latestDate);
-          const best = todayPrices.reduce((a, b) => parseFloat(a.price_per_unit) >= parseFloat(b.price_per_unit) ? a : b);
-          sourceLabel = best.region.split('|')[0]; // site name
-          // Build history from that site+grade
-          history = allPrices
-            .filter(p => p.commodity_id === com.id && p.region === best.region)
-            .sort((a, b) => b.price_date.localeCompare(a.price_date));
+      if (type === 'cc' && catchment?.length) {
+        // Try each grade in priority order until we find data in catchment
+        const gradeList = grades || (grade ? [grade] : []);
+        for (const g of gradeList) {
+          const catchmentKeys = catchment.map(s => `${s}|${g}`);
+          const catchmentPrices = allPrices
+            .filter(p => p.commodity_id === com.id && catchmentKeys.includes(p.region))
+            .sort((a, b) => b.price_date.localeCompare(a.price_date) || parseFloat(b.price_per_unit) - parseFloat(a.price_per_unit));
+          if (catchmentPrices.length) {
+            const latestDate = catchmentPrices[0].price_date;
+            const todayPrices = catchmentPrices.filter(p => p.price_date === latestDate);
+            const best = todayPrices.reduce((a, b) => parseFloat(a.price_per_unit) >= parseFloat(b.price_per_unit) ? a : b);
+            sourceLabel = best.region.split('|')[0];
+            resolvedGrade = g;
+            resolvedRegion = best.region;
+            history = allPrices
+              .filter(p => p.commodity_id === com.id && p.region === best.region)
+              .sort((a, b) => b.price_date.localeCompare(a.price_date));
+            break;
+          }
         }
       } else {
         // LDC or Cotton — simple region match
-        const region = site;
-        history = allPrices.filter(p => p.commodity_id === com.id && p.region === region)
+        resolvedRegion = site;
+        history = allPrices.filter(p => p.commodity_id === com.id && p.region === site)
           .sort((a, b) => b.price_date.localeCompare(a.price_date));
       }
 
-      const unit = grade ? '$/t · ' + grade : 't';
+      const unit = resolvedGrade || 't';
 
       if (!history.length) return [
         '<div class="card" style="padding:12px 14px;margin-bottom:8px">',
         '<div style="font-size:11px;font-weight:600;color:var(--ink)">' + crop + '</div>',
-        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + sourceLabel + (grade ? ' · ' + grade : '') + '</div>',
+        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + sourceLabel + (resolvedGrade ? ' · ' + resolvedGrade : '') + '</div>',
         '<div style="font-size:12px;color:var(--hint);margin-top:8px">No price data yet</div>',
         '</div>',
       ].join('');
@@ -335,7 +340,7 @@ async function _mountOverview(container) {
       return [
         '<div class="card" style="padding:12px 14px;margin-bottom:8px;cursor:pointer"',
         ' data-expand-crop="' + crop + '"',
-        ' data-expand-region="' + (resolvedGrade ? sourceLabel + '|' + resolvedGrade : '') + '"',
+        ' data-expand-region="' + resolvedRegion + '"',
         ' data-expand-grade="' + (resolvedGrade||'') + '"',
         ' data-expand-comid="' + com.id + '">',
         '<div style="display:flex;align-items:center;justify-content:space-between">',
