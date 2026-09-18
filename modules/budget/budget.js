@@ -753,18 +753,22 @@ function _renderHarvest(container) {
         const pctComplete = fcastArea && s.area ? Math.round((s.area / fcastArea) * 100) : null;
 
         // Check if harvest is marked complete for this commodity
-        const budgetsForCom = _budgets.filter(b =>
-          (b.commodity_id || b.commodity) === s.commodityId &&
-          (b.crop_type_id || '') === s.cropTypeId
-        );
+        const budgetsForCom = _budgets.filter(b => {
+          const bComId = b.commodity_id || b.commodity || '';
+          const bCtId  = b.crop_type_id || '';
+          return bComId === s.commodityId && bCtId === s.cropTypeId;
+        });
         const isComplete = budgetsForCom.some(b => b.is_harvest_complete);
-        const budgetIds = budgetsForCom.map(b => b.id);
+        const budgetIds = budgetsForCom.map(b => b.id).filter(Boolean);
+
+        // Override % complete to 100 when marked complete
+        const displayPct = isComplete ? 100 : pctComplete;
 
         return `
           <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:0.5px solid var(--border-light)">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
               <p style="font-size:13px;font-weight:700;color:var(--ink);margin:0">${s.commodity}${s.cropType ? ' · ' + s.cropType : ''}</p>
-              ${canWrite() ? `<button class="btn ${isComplete ? 'btn-secondary' : 'btn-secondary'} harvest-complete-btn"
+              ${canWrite() ? `<button class="btn btn-secondary harvest-complete-btn"
                 data-budget-ids="${budgetIds.join(',')}"
                 data-complete="${isComplete ? '1' : '0'}"
                 style="font-size:11px;padding:4px 10px;${isComplete ? 'color:var(--green);border-color:var(--green)' : 'color:var(--hint)'}">
@@ -776,7 +780,7 @@ function _renderHarvest(container) {
               <div style="display:flex;gap:0;border:1px solid var(--border-light);border-radius:8px;overflow:hidden">
                 ${[
                   ['Area harvested', s.area ? formatNumber(s.area,1)+' ha' : '—', 'var(--ink)'],
-                  ['% Complete', pctComplete != null ? pctComplete+'%' : '—', pctComplete >= 100 ? 'var(--green)' : pctComplete >= 75 ? 'var(--blue)' : 'var(--amber)'],
+                  ['% Complete', displayPct != null ? displayPct+'%' : '—', displayPct >= 100 ? 'var(--green)' : displayPct >= 75 ? 'var(--blue)' : 'var(--amber)'],
                   ['Production', s.production ? formatNumber(s.production,0)+' '+s.unit : '—', 'var(--ink)'],
                   ['Yield / ha', yieldHa ? formatNumber(yieldHa,2) : '—', 'var(--ink)'],
                   ['Turnout', turnout ? formatNumber(turnout,1)+'%' : '—', 'var(--ink)'],
