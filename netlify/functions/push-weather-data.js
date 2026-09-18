@@ -47,9 +47,10 @@ async function getFarmStations() {
 }
 
 // Fetch today's observations from BOM
-async function fetchObservations(geohash6) {
+async function fetchObservations(geohash6, signal) {
   const url = `${BOM_API}/locations/${geohash6}/observations`;
   const res = await fetch(url, {
+    signal,
     headers: { Accept: 'application/json', 'User-Agent': 'CFM-FarmManagement/1.0 (insights@cfma.com.au)' }
   });
   if (!res.ok) throw new Error(`BOM obs error: ${res.status}`);
@@ -121,13 +122,22 @@ export default async function handler(req) {
   let saved = 0;
   const errors = [];
 
+  // Seed climate averages for any new stations (only if ?seed=1 param or first time)
+  const forceSeed = url.searchParams.get('seed') === '1';
+  if (forceSeed) {
+    for (const farm of stations) {
+      await seedClimateAverages(farm.stationId);
+    }
+  }
+
   for (const farm of stations) {
     try {
-      // Seed climate averages if not done yet
-      await seedClimateAverages(farm.stationId);
+      // Skip seed check — averages seeded separately via ?seed=1 param
 
-      // Fetch current observations
-      const obs = await fetchObservations(farm.geohash.slice(0, 6));
+      // Fetch current observations with timeout
+      const obsController = new AbortController();
+      const obsTimeout = setTimeout(() => obsController.abort(), 8000);
+      const obs = await fetchObservations(farm.geohash.slice(0, 6), obsController.signal).finally(() => clearTimeout(obsTimeout));
       if (!obs) { errors.push({ farm: farm.farmName, error: 'No obs data' }); continue; }
 
       // Build row
