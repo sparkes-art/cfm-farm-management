@@ -170,11 +170,12 @@ async function _mountOverview(container) {
     // Farm's grain watchlist — commodity+grade pairs to show, best bid within catchment
     const farmSites = [];
 
-    // New format: grainWatchlist = { Wheat: ['APW1','H2'], Barley: ['BAR1'] }
+    // New format: grainWatchlist = { Wheat: ['APW1','APW'], Barley: ['BAR1'] }
+    // One entry per commodity — grades array is priority order, first with data wins
     Object.entries(grainWatchlist).forEach(([crop, grades]) => {
-      grades.forEach(grade => {
-        farmSites.push({ crop, grade, type: 'cc', catchment: grainCatchment });
-      });
+      if (grades.length) {
+        farmSites.push({ crop, grades, type: 'cc', catchment: grainCatchment });
+      }
     });
 
     // Old LDC/CropConnect per-commodity format fallback
