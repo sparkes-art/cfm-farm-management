@@ -460,89 +460,83 @@ async function _mountOverview(container) {
     }
 
     // ── Bar helper
-    const bar = (pct, color, bgColor='var(--border-light)') =>
-      '<div style="height:4px;background:'+bgColor+';border-radius:2px;margin-top:4px;overflow:hidden">' +
-      '<div style="height:100%;width:'+Math.min(100,Math.max(0,pct))+'%;background:'+color+';border-radius:2px;transition:width .3s"></div></div>';
+    const bar = (pct, color, bg='var(--border-light)') =>
+      '<div style="height:3px;background:'+bg+';border-radius:2px;margin-top:3px;overflow:hidden">' +
+      '<div style="height:100%;width:'+Math.min(100,Math.max(0,pct))+'%;background:'+color+';border-radius:2px"></div></div>';
 
     const comCards = Object.values(comMap).map(com => {
       const contractedQty = com.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0),0);
       const contractedVal = com.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
       const avgContractPrice = contractedQty ? contractedVal/contractedQty : null;
 
-      // Stage: Harvest (partial or complete) > Budget
-      const harvestPct  = com.budProd ? Math.min(100, (com.harvestedProd/com.budProd)*100) : 0;
-      // Expected total = budget (best estimate of full crop; harvest fills in progressively)
+      const harvestPct  = com.budProd ? Math.min(100,(com.harvestedProd/com.budProd)*100) : 0;
       const forecastTotal = com.budProd || com.harvestedProd;
-      const stage = com.harvestedProd > 0 && harvestPct >= 99 ? 'Harvest' :
-                    com.harvestedProd > 0 ? 'In harvest' : 'Budget';
+      const stage = com.harvestedProd > 0 && harvestPct >= 99 ? 'Harvest'
+                  : com.harvestedProd > 0 ? 'In harvest' : 'Budget';
 
-      // Sold % against forecast total
-      const soldPct = forecastTotal ? Math.min(150, (contractedQty/forecastTotal)*100) : null;
-
-      // Colour: if harvest nearly done and under 80% sold → amber/red
+      const soldPct = forecastTotal ? Math.min(150,(contractedQty/forecastTotal)*100) : null;
       const soldColor = soldPct == null ? '#3b82f6'
         : soldPct >= 100 ? '#16a34a'
         : (harvestPct > 80 && soldPct < 60) ? '#dc2626'
         : (harvestPct > 50 && soldPct < 40) ? '#d97706'
         : '#3b82f6';
 
-      // Price to budget variance
       const priceVar = avgContractPrice && com.budPrice ? avgContractPrice - com.budPrice : null;
       const priceVarPct = priceVar && com.budPrice ? (priceVar/com.budPrice)*100 : null;
       const priceVarColor = priceVar == null ? 'var(--hint)' : priceVar >= 0 ? '#16a34a' : '#dc2626';
 
-      // QA per unit
       const qaPerUnit = com.invoicedQty ? com.invoicedQA/com.invoicedQty : null;
-      const invoicedAvgPrice = com.invoicedQty ? (com.invoicedRev/com.invoicedQty) : null;
+      const invoicedAvgPrice = com.invoicedQty ? com.invoicedRev/com.invoicedQty : null;
+      const invoicedTotal = com.invoicedRev + com.invoicedQA;
 
       return [
-        '<div class="card" style="padding:12px 14px;margin-bottom:8px">',
+        '<div class="card" style="padding:10px 12px;margin-bottom:6px">',
 
-        // Header row — name + stage badge + production figure
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">',
-        '<div style="display:flex;align-items:center;gap:8px">',
+        // Title row
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">',
+        '<div style="display:flex;align-items:center;gap:6px">',
         '<span style="font-size:12px;font-weight:700;color:var(--ink)">' + com.name + '</span>',
-        '<span style="font-size:9px;font-weight:600;padding:2px 6px;border-radius:10px;background:var(--page-bg);color:var(--hint)">' + stage + '</span>',
+        '<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:var(--page-bg);color:var(--hint)">' + stage + '</span>',
         '</div>',
-        forecastTotal ? '<span style="font-size:10px;color:var(--hint)">' + fN(forecastTotal) + ' ' + com.unit + (com.harvestedProd > 0 && com.budProd > 0 ? ' · ' + Math.round(harvestPct) + '% harvested' : '') + '</span>' : '',
+        forecastTotal ? '<span style="font-size:10px;color:var(--hint)">' + fN(forecastTotal) + ' ' + com.unit + '</span>' : '',
         '</div>',
 
-        // Harvest progress bar (only if in-season and partial harvest)
+        // Harvest progress — only if partial
         com.harvestedProd > 0 && harvestPct < 99 ? [
-          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1px">',
-          '<span style="font-size:10px;color:var(--hint)">Harvest progress</span>',
-          '<span style="font-size:10px;font-weight:600;color:var(--ink)">' + Math.round(harvestPct) + '% · ' + fN(com.harvestedProd) + ' ' + com.unit + '</span>',
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">',
+          '<span style="font-size:10px;color:var(--hint);width:90px;flex-shrink:0">Harvest</span>',
+          '<div style="flex:1">' + bar(harvestPct,'#94a3b8') + '</div>',
+          '<span style="font-size:10px;font-weight:600;color:var(--ink);width:30px;text-align:right">' + Math.round(harvestPct) + '%</span>',
+          '<span style="font-size:10px;color:var(--hint)">' + fN(com.harvestedProd) + ' ' + com.unit + '</span>',
           '</div>',
-          bar(harvestPct, '#94a3b8'),
         ].join('') : '',
 
-        // Fwd sold row (grain/cotton only)
+        // Fwd sold — grain/cotton only
         !com.isLivestock ? [
-          '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;margin-bottom:1px">',
-          '<span style="font-size:10px;color:var(--hint)">Fwd. sold</span>',
-          '<div style="display:flex;align-items:center;gap:8px">',
-          soldPct != null ? '<span style="font-size:10px;font-weight:600;color:'+soldColor+'">' + Math.round(soldPct) + '%</span>' : '',
-          avgContractPrice ? '<span style="font-size:10px;color:var(--ink)">' + fC(avgContractPrice) + ' avg</span>' : '',
-          priceVar != null ? '<span style="font-size:10px;font-weight:600;color:'+priceVarColor+'">' + (priceVar>=0?'▲':'▼') + ' ' + fC(Math.abs(priceVar)) + ' vs budget (' + (priceVarPct>=0?'+':'') + priceVarPct.toFixed(1) + '%)</span>' : '',
-          '</div></div>',
-          soldPct != null ? bar(soldPct, soldColor) : '',
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">',
+          '<span style="font-size:10px;color:var(--hint);width:90px;flex-shrink:0">Fwd. sold</span>',
+          '<div style="flex:1">' + (soldPct != null ? bar(soldPct, soldColor) : '') + '</div>',
+          '<span style="font-size:10px;font-weight:600;color:'+soldColor+';width:30px;text-align:right">' + (soldPct!=null?Math.round(soldPct)+'%':'—') + '</span>',
+          '<div style="display:flex;align-items:center;gap:4px">',
+          avgContractPrice ? '<span style="font-size:10px;color:var(--ink)">' + fC(avgContractPrice) + '</span>' : '',
+          priceVar != null ? '<span style="font-size:10px;font-weight:600;color:'+priceVarColor+'">' + (priceVar>=0?'▲':'▼') + fC(Math.abs(priceVar)) + ' (' + (priceVarPct>=0?'+':'') + priceVarPct.toFixed(1) + '%)</span>' : '',
+          '</div>',
+          '</div>',
         ].join('') : '',
 
-        // Invoiced / paid row
-        com.invoicedRev > 0 ? [
-          '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;margin-bottom:1px">',
-          '<span style="font-size:10px;color:var(--hint)">Invoiced / paid</span>',
-          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">',
-          '<span style="font-size:10px;font-weight:600;color:#16a34a">' + fM(com.invoicedRev + com.invoicedQA) + '</span>',
+        // Invoiced / paid
+        com.invoicedRev > 0 || com.isLivestock ? [
+          '<div style="display:flex;align-items:center;gap:8px">',
+          '<span style="font-size:10px;color:var(--hint);width:90px;flex-shrink:0">Invoiced</span>',
+          '<div style="flex:1">' + (contractedQty ? bar(com.invoicedQty/contractedQty*100,'#16a34a') : '') + '</div>',
+          '<span style="font-size:10px;font-weight:600;color:#16a34a;width:30px;text-align:right">' + (invoicedTotal ? fM(invoicedTotal) : '—') + '</span>',
+          '<div style="display:flex;align-items:center;gap:4px">',
           com.invoicedQty ? '<span style="font-size:10px;color:var(--hint)">' + fN(com.invoicedQty) + ' ' + com.unit + '</span>' : '',
           invoicedAvgPrice ? '<span style="font-size:10px;color:var(--ink)">' + fC(invoicedAvgPrice) + '/' + com.unit + '</span>' : '',
-          qaPerUnit != null && qaPerUnit !== 0 ? '<span style="font-size:10px;color:' + (qaPerUnit>=0?'#16a34a':'#dc2626') + '">QA ' + (qaPerUnit>=0?'+':'') + fC(qaPerUnit) + '/' + com.unit + '</span>' : '',
-          '</div></div>',
-          contractedQty ? bar(com.invoicedQty/contractedQty*100, '#16a34a') : '',
+          qaPerUnit ? '<span style="font-size:10px;font-weight:600;color:' + (qaPerUnit>=0?'#16a34a':'#dc2626') + '">QA ' + (qaPerUnit>=0?'+':'') + fC(qaPerUnit) + '</span>' : '',
+          '</div>',
+          '</div>',
         ].join('') : '',
-
-        // No activity yet
-        !com.isLivestock && !contractedQty && !com.invoicedRev ? '<div style="font-size:10px;color:var(--hint);margin-top:4px">No contracts or invoices yet</div>' : '',
 
         '</div>',
       ].join('');
