@@ -124,11 +124,19 @@ export default async function handler(req) {
   let saved = 0;
   const errors = [];
 
-  // Seed climate averages for any new stations (only if ?seed=1 param or first time)
+  // Auto-seed climate averages for any station not yet seeded (runs once per station, fast thereafter)
   const forceSeed = url.searchParams.get('seed') === '1';
-  if (forceSeed) {
-    for (const farm of stations) {
-      await seedClimateAverages(farm.stationId);
+  const seededStations = new Set();
+  for (const farm of stations) {
+    if (seededStations.has(farm.stationId)) continue;
+    seededStations.add(farm.stationId);
+    try {
+      const existing = await db(`weather_station_averages?station_id=eq.${farm.stationId}&limit=1`);
+      if (forceSeed || !existing?.length) {
+        await seedClimateAverages(farm.stationId);
+      }
+    } catch(e) {
+      console.warn(`[weather] Seed check failed for ${farm.stationId}: ${e.message}`);
     }
   }
 
