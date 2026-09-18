@@ -76,17 +76,16 @@ async function seedClimateAverages(stationId) {
   if (!res.ok) { console.warn(`Could not fetch BOM stats for ${stationId}`); return; }
   const html = await res.text();
 
-  // Extract monthly values from BOM climate stats HTML
-  // BOM tables have data in <td> cells after each row header
+  // Extract monthly values from BOM climate stats HTML using table row parsing
+  // Each data row has: label td, then 12 monthly value tds, then annual + other cols
   const extractMonthlyRow = (html, label) => {
-    // Find the row containing the label
     const labelIdx = html.indexOf(label);
     if (labelIdx === -1) return null;
-    // Extract all numeric td values after this label (next 12-15 tds)
-    const section = html.slice(labelIdx, labelIdx + 3000);
+    // Find the section after this label and extract the next 12 numeric td values
+    const section = html.slice(labelIdx + label.length, labelIdx + 2000);
     const matches = [...section.matchAll(/<td[^>]*>\s*([\d.]+)\s*<\/td>/g)];
     const vals = matches.slice(0, 12).map(m => parseFloat(m[1]));
-    return vals.length === 12 ? vals : null;
+    return vals.length >= 12 ? vals : null;
   };
 
   const maxTemps  = extractMonthlyRow(html, 'Mean maximum temperature');

@@ -1785,19 +1785,24 @@ async function _loadWeatherPanel(farm, season) {
   const gddBase = wx.gddBase || 10;
   if (stationLabel) stationLabel.textContent = wx.bomStationName + ' · BOM';
 
-  // Season year
+  // Season year — derive from the active season string (e.g. "2026-27" or "2026")
   const yearStart = farm.settings?.yearStartMonth || 1;
   const now = new Date();
-  const seasonYear = yearStart === 1 ? now.getFullYear()
-    : (now.getMonth() + 1 >= yearStart ? now.getFullYear() : now.getFullYear() - 1);
+  // Parse season year from the season string passed in
+  const seasonStartYear = season ? parseInt(season.split('-')[0]) : null;
+  const seasonYear = seasonStartYear || (yearStart === 1 ? now.getFullYear()
+    : (now.getMonth() + 1 >= yearStart ? now.getFullYear() : now.getFullYear() - 1));
   const startDate = `${seasonYear}-${String(yearStart).padStart(2,'0')}-01`;
+  const endDate = yearStart === 1
+    ? `${seasonYear}-12-31`
+    : `${seasonYear + 1}-${String(yearStart - 1).padStart(2,'0')}-${new Date(seasonYear+1, yearStart-1, 0).getDate()}`;
 
   const [obsRows, overrideRows, avgRows] = await Promise.all([
     dbSelect('weather_observations',
-      `farm_id=eq.${farm.id}&station_id=eq.${stationId}&obs_date=gte.${startDate}&order=obs_date.asc&limit=500`
+      `farm_id=eq.${farm.id}&station_id=eq.${stationId}&obs_date=gte.${startDate}&obs_date=lte.${endDate}&order=obs_date.asc&limit=500`
     ).catch(() => []),
     dbSelect('weather_monthly_overrides',
-      `farm_id=eq.${farm.id}&year=gte.${seasonYear}&order=year.asc,month.asc`
+      `farm_id=eq.${farm.id}&year=gte.${seasonYear}&year=lte.${seasonYear+1}&order=year.asc,month.asc`
     ).catch(() => []),
     dbSelect('weather_station_averages',
       `station_id=eq.${stationId}&order=month.asc`
@@ -1812,7 +1817,7 @@ async function _loadWeatherPanel(farm, season) {
     const monthKey = `${yr}-${String(mo).padStart(2,'0')}`;
     const monthObs = obsRows.filter(r => r.obs_date.startsWith(monthKey));
     const override = overrideRows.find(r => r.year === yr && r.month === mo);
-    const isFuture = new Date(yr, mo - 1, 1) > now;
+    const isFuture = new Date(yr, mo - 1, 1) > now && seasonYear === (seasonStartYear || now.getFullYear());
 
     const actualRain = override
       ? { value: parseFloat(override.rainfall_mm), source: 'gauge' }
