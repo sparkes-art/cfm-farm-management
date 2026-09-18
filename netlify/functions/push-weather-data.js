@@ -76,14 +76,15 @@ async function seedClimateAverages(stationId) {
   if (!res.ok) { console.warn(`Could not fetch BOM stats for ${stationId}`); return; }
   const html = await res.text();
 
-  // Extract monthly values from BOM climate stats HTML using table row parsing
-  // Each data row has: label td, then 12 monthly value tds, then annual + other cols
+  // Extract monthly values from BOM climate stats HTML
+  // Row structure: <td>label</a></td><td class="highest">Jan</td><td>Feb</td>...<td>Dec</td><td>Annual</td>...
   const extractMonthlyRow = (html, label) => {
     const labelIdx = html.indexOf(label);
     if (labelIdx === -1) return null;
-    // Find the section after this label and extract the next 12 numeric td values
-    const section = html.slice(labelIdx + label.length, labelIdx + 2000);
-    const matches = [...section.matchAll(/<td[^>]*>\s*([\d.]+)\s*<\/td>/g)];
+    // Find closing </td> of the label cell, then extract next 12 numeric tds
+    const afterLabel = html.slice(labelIdx + label.length, labelIdx + 2000);
+    const afterCell = afterLabel.slice(afterLabel.indexOf('</td>') + 5);
+    const matches = [...afterCell.matchAll(/<td[^>]*>\s*([\d]+(?:\.[0-9]+)?)\s*<\/td>/g)];
     const vals = matches.slice(0, 12).map(m => parseFloat(m[1]));
     return vals.length >= 12 ? vals : null;
   };
@@ -93,6 +94,7 @@ async function seedClimateAverages(stationId) {
   const rainfalls = extractMonthlyRow(html, 'Mean rainfall');
 
   if (!rainfalls) { console.warn(`Could not parse BOM stats for ${stationId}`); return; }
+  console.log(`[weather] Parsed: maxTemps=${maxTemps?.[0]}, minTemps=${minTemps?.[0]}, rainfall=${rainfalls?.[0]}`);
 
   const rows = Array.from({length: 12}, (_, i) => ({
     station_id: stationId,
