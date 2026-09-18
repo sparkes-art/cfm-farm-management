@@ -474,10 +474,9 @@ async function _mountOverview(container) {
       '<h2 style="font-size:14px;font-weight:600;color:var(--ink)">Farm gate prices</h2>',
       '<span style="font-size:11px;color:var(--hint)">' + farm.name + '</span>',
       '</div>',
-      farmSites.length
-        ? priceCards || '<div class="card" style="padding:16px;color:var(--hint)">No market price data available.</div>'
-        : '<div class="card" style="padding:16px;color:var(--hint)">No delivery sites configured.</div>',
-      lsIndicatorNames.length ? '<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin:14px 0 8px">Livestock indicators</div>' + lsCards : '',
+      (farmSites.length || lsIndicatorNames.length)
+        ? (priceCards + lsCards)
+        : '<div class="card" style="padding:16px;color:var(--hint)">No prices configured — set up in Farm Settings.</div>',
       '</div>',
 
       // RIGHT — Commodity position
@@ -1387,10 +1386,13 @@ async function _openPriceChart(farm, crop, region, resolvedGrade, commodityId, s
     // Draw chart using canvas
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvas.offsetWidth * dpr;
+    // Wait one frame so the modal is laid out and canvas has a real offsetWidth
+    await new Promise(r => requestAnimationFrame(r));
+    const W = canvas.offsetWidth || 700;
+    canvas.width = W * dpr;
     canvas.height = 300 * dpr;
     ctx.scale(dpr, dpr);
-    const W = canvas.offsetWidth, H = 300;
+    const H = 300;
     const PAD = { top: 20, right: 20, bottom: 40, left: 55 };
     const cW = W - PAD.left - PAD.right;
     const cH = H - PAD.top - PAD.bottom;
