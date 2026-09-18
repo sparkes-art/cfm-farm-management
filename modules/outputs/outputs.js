@@ -2077,5 +2077,3 @@ async function _loadWeatherPanel(farm, season) {
     _openWeatherOverrideModal(farm, allMonths.filter(m => !m.isFuture), overrideRows, () => _loadWeatherPanel(farm, season));
   });
 }
-
-}
