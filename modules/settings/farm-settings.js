@@ -154,9 +154,6 @@ export async function mountFarmSettings(container, onSave) {
   } catch(e) {
     console.warn('Could not load CC sites:', e.message);
   }
-  } catch(e) {
-    console.warn('Could not load live CC sites:', e.message);
-  }
 
   // Group live sites by state
   const sitesByState = { NSW:[], QLD:[], VIC:[], SA:[], WA:[], Other:[] };
