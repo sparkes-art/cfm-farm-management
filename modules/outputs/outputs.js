@@ -380,12 +380,13 @@ async function _mountOverview(container) {
 
     // ── Commodity position ────────────────────────────────────
     const season = getActiveSeason() || currentSeason();
-    const [contracts, invoices, lsInvoices, budgets, harvests] = await Promise.all([
+    const [contracts, invoices, lsInvoices, budgets, harvests, forecasts] = await Promise.all([
       dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=neq.head&select=id,gross_amount,total_quality_adj,total_qty,forward_contract_id,batches,status'),
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=eq.head&select=id,gross_amount,total_quality_adj,total_qty,status'),
       dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
       dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
+      dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=forecast_date.desc').catch(() => []),
     ]);
 
     await loadCommodities();
@@ -401,10 +402,26 @@ async function _mountOverview(container) {
         budProd: 0, budPrice: 0, unit: b.unit||'t',
         contracts: [], invoicedQty: 0, invoicedRev: 0, invoicedQA: 0,
         harvestedProd: 0, isLivestock: false, isHarvestComplete: false,
+        fcstProd: 0,
       };
       comMap[name].budProd += parseFloat(b.budgeted_production)||((parseFloat(b.area_ha)||0)*(parseFloat(b.budgeted_yield_per_ha||b.yield_per_ha)||0));
       comMap[name].budPrice = parseFloat(b.price)||comMap[name].budPrice;
       if (b.is_harvest_complete) comMap[name].isHarvestComplete = true;
+    });
+
+    // Add latest forecast per commodity
+    const fcstByBudget = {};
+    forecasts.forEach(f => {
+      const k = f.budget_id || f.commodity_id || 'x';
+      if (!fcstByBudget[k] || f.forecast_date > fcstByBudget[k].forecast_date) fcstByBudget[k] = f;
+    });
+    Object.values(fcstByBudget).forEach(f => {
+      const b = budgets.find(b => b.id === f.budget_id);
+      if (!b) return;
+      const name = idToName[b.commodity_id] || b.commodity || 'Other';
+      if (comMap[name]) {
+        comMap[name].fcstProd += parseFloat(f.forecast_production) || ((parseFloat(f.area_ha||b.area_ha||0)) * (parseFloat(f.yield_per_ha||0)));
+      }
     });
 
     // Contracts
@@ -466,10 +483,16 @@ async function _mountOverview(container) {
       const avgContractPrice = contractedQty ? contractedVal/contractedQty : null;
 
       const harvestPct   = com.budProd ? Math.min(100,(com.harvestedProd/com.budProd)*100) : 0;
-      const forecastTotal = com.isHarvestComplete ? com.harvestedProd : (com.budProd || com.harvestedProd);
-      const stage = com.isHarvestComplete ? 'Complete'
+      // Production hierarchy: harvest complete → harvest actual; else forecast if exists; else budget
+      const hasForecast = com.fcstProd > 0;
+      const forecastTotal = com.isHarvestComplete ? com.harvestedProd
+                          : com.harvestedProd > 0 ? (hasForecast ? com.fcstProd : com.budProd)
+                          : (hasForecast ? com.fcstProd : com.budProd);
+      const stage = com.isHarvestComplete ? 'Harvested'
                   : com.harvestedProd > 0 && harvestPct >= 99 ? 'Harvested'
-                  : com.harvestedProd > 0 ? 'In harvest' : 'Budget';
+                  : com.harvestedProd > 0 ? 'In harvest'
+                  : hasForecast ? 'Re-forecast'
+                  : 'Budget';
 
       const soldPct = forecastTotal ? Math.min(999,(contractedQty/forecastTotal)*100) : null;
       const soldColor = soldPct == null ? 'var(--ink)'
@@ -493,11 +516,11 @@ async function _mountOverview(container) {
         ' data-pos-commodity="' + com.name + '"',
         ' data-pos-comid="' + (com.commodity_id||'') + '">',
 
-        // Single compact row
+        // Row 1: name + key metrics + expand
         '<div style="display:flex;align-items:center;justify-content:space-between">',
 
         // Left: name + stage
-        '<div style="min-width:120px">',
+        '<div style="min-width:130px">',
         '<div style="display:flex;align-items:center;gap:6px">',
         '<span style="font-size:12px;font-weight:700;color:var(--ink)">' + com.name + '</span>',
         '<span style="font-size:9px;color:' + stageColor + ';font-weight:600">' + stage + '</span>',
@@ -505,10 +528,9 @@ async function _mountOverview(container) {
         forecastTotal ? '<div style="font-size:10px;color:var(--hint);margin-top:1px">' + fN(forecastTotal) + ' ' + com.unit + '</div>' : '',
         '</div>',
 
-        // Middle: key metrics inline
+        // Middle: key metrics
         '<div style="display:flex;align-items:center;gap:16px;flex:1;justify-content:center">',
 
-        // Fwd sold %
         !com.isLivestock && soldPct != null ? [
           '<div style="text-align:center">',
           '<div style="font-size:16px;font-weight:700;color:' + soldColor + '">' + Math.round(soldPct) + '%</div>',
@@ -516,7 +538,6 @@ async function _mountOverview(container) {
           '</div>',
         ].join('') : '',
 
-        // Avg contract price
         !com.isLivestock && avgContractPrice ? [
           '<div style="text-align:center">',
           '<div style="font-size:16px;font-weight:700;color:var(--ink)">' + fC(avgContractPrice) + '</div>',
@@ -524,7 +545,6 @@ async function _mountOverview(container) {
           '</div>',
         ].join('') : '',
 
-        // Price vs budget
         !com.isLivestock && priceVar != null ? [
           '<div style="text-align:center">',
           '<div style="font-size:16px;font-weight:700;color:' + priceVarColor + '">' + (priceVar>=0?'▲':'▼') + fC(Math.abs(priceVar)) + '</div>',
@@ -532,7 +552,6 @@ async function _mountOverview(container) {
           '</div>',
         ].join('') : '',
 
-        // Invoiced total
         invoicedTotal ? [
           '<div style="text-align:center">',
           '<div style="font-size:16px;font-weight:700;color:#16a34a">' + fM(invoicedTotal) + '</div>',
@@ -542,10 +561,20 @@ async function _mountOverview(container) {
 
         '</div>',
 
-        // Right: expand icon
+        // Right: expand
         '<div style="font-size:14px;color:var(--hint);padding-left:8px" title="View detail">⤢</div>',
-
         '</div>',
+
+        // Row 2: secondary figures in muted smaller text
+        '<div style="display:flex;align-items:center;gap:16px;margin-top:6px;padding-top:6px;border-top:0.5px solid var(--border-light);flex-wrap:wrap">',
+        !com.isLivestock && com.budPrice ? '<span style="font-size:10px;color:var(--hint)">Budget ' + fC(com.budPrice) + '/' + com.unit + '</span>' : '',
+        !com.isLivestock && hasForecast && com.fcstProd !== com.budProd ? '<span style="font-size:10px;color:var(--hint)">Forecast ' + fN(com.fcstProd) + ' ' + com.unit + '</span>' : '',
+        com.harvestedProd > 0 && !com.isHarvestComplete ? '<span style="font-size:10px;color:var(--hint)">Harvested ' + fN(com.harvestedProd) + ' ' + com.unit + ' (' + Math.round(harvestPct) + '%)</span>' : '',
+        !com.isLivestock && contractedQty ? '<span style="font-size:10px;color:var(--hint)">Contracted ' + fN(contractedQty) + ' ' + com.unit + '</span>' : '',
+        com.invoicedQty ? '<span style="font-size:10px;color:var(--hint)">' + fN(com.invoicedQty) + ' ' + com.unit + ' paid' + (qaPerUnit ? ' · QA ' + (qaPerUnit>=0?'+':'') + fC(qaPerUnit) + '/' + com.unit : '') + '</span>' : '',
+        com.isLivestock && com.invoicedQty ? '<span style="font-size:10px;color:var(--hint)">' + fN(com.invoicedQty) + ' head · ' + (com.invoicedQty ? fC(invoicedTotal/com.invoicedQty) + '/head' : '') + '</span>' : '',
+        '</div>',
+
         '</div>',
       ].join('');
     }).join('');
