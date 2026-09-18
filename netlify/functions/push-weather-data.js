@@ -76,26 +76,22 @@ async function seedClimateAverages(stationId) {
   if (!res.ok) { console.warn(`Could not fetch BOM stats for ${stationId}`); return; }
   const html = await res.text();
 
-  // Extract monthly values — BOM tables follow predictable pattern
-  // Mean max temp row: "Mean maximum temperature (°C)"
-  // Mean min temp row: "Mean minimum temperature (°C)"
-  // Mean rainfall row: "Mean rainfall (mm)"
-  const extractRow = (label) => {
-    const regex = new RegExp(label + '[\\s\\S]*?(<td[^>]*>[\\d.]+</td>\\s*){12}');
-    const match = html.match(regex);
-    if (!match) return null;
-    const vals = [];
-    const tdRegex = /<td[^>]*>([\d.]+)<\/td>/g;
-    let m;
-    // Skip ahead to after the label
-    const section = html.slice(html.indexOf(label));
-    const sectionTds = section.match(/<td[^>]*>[\d.]+<\/td>/g) || [];
-    return sectionTds.slice(0, 12).map(td => parseFloat(td.replace(/<[^>]+>/g, '')));
+  // Extract monthly values from BOM climate stats HTML
+  // BOM tables have data in <td> cells after each row header
+  const extractMonthlyRow = (html, label) => {
+    // Find the row containing the label
+    const labelIdx = html.indexOf(label);
+    if (labelIdx === -1) return null;
+    // Extract all numeric td values after this label (next 12-15 tds)
+    const section = html.slice(labelIdx, labelIdx + 3000);
+    const matches = [...section.matchAll(/<td[^>]*>\s*([\d.]+)\s*<\/td>/g)];
+    const vals = matches.slice(0, 12).map(m => parseFloat(m[1]));
+    return vals.length === 12 ? vals : null;
   };
 
-  const maxTemps  = extractRow('Mean maximum temperature');
-  const minTemps  = extractRow('Mean minimum temperature');
-  const rainfalls = extractRow('Mean rainfall');
+  const maxTemps  = extractMonthlyRow(html, 'Mean maximum temperature');
+  const minTemps  = extractMonthlyRow(html, 'Mean minimum temperature');
+  const rainfalls = extractMonthlyRow(html, 'Mean rainfall');
 
   if (!rainfalls) { console.warn(`Could not parse BOM stats for ${stationId}`); return; }
 
