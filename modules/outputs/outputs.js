@@ -134,13 +134,22 @@ async function _mountOverview(container) {
     const cattleComId = commodityList.find(c => c.name === 'Cattle Indicators')?.id || null;
     const sheepComId  = commodityList.find(c => c.name === 'Sheep Indicators')?.id  || null;
 
-    // Fetch 14 days of prices for rolling average + movement
-    // Fetch prices separately — grain/cotton and livestock
-    // CropConnect alone generates 1000+ rows so a single limited query misses livestock
+    // Fetch prices — filter grain by farm's catchment+watchlist to avoid row limit issues
+    const grainCatchment = settings.grainCatchment || [];
+    const grainWatchlist = settings.grainWatchlist || {};
+    const watchedGrades = Object.values(grainWatchlist).flat();
+    const catchmentRegions = grainCatchment.flatMap(site =>
+      watchedGrades.map(grade => `${site}|${grade}`)
+    );
+
     const [grainPrices, livestockPrices] = await Promise.all([
-      dbSelect('market_prices',
-        'select=commodity_id,region,price_per_unit,price_date,unit&source_label=eq.CropConnect&order=price_date.desc&limit=500'
-      ).catch(() => []),
+      catchmentRegions.length
+        ? dbSelect('market_prices',
+            'select=commodity_id,region,price_per_unit,price_date,unit&source_label=eq.CropConnect'
+            + '&region=in.(' + catchmentRegions.map(r => encodeURIComponent(r)).join(',') + ')'
+            + '&order=price_date.desc&limit=2000'
+          ).catch(() => [])
+        : Promise.resolve([]),
       dbSelect('market_prices',
         'select=commodity_id,region,price_per_unit,price_date,unit,attributes&order=price_date.desc&limit=500'
         + '&commodity_id=in.(' + [cattleComId, sheepComId].filter(Boolean).join(',') + ')'
@@ -159,8 +168,6 @@ async function _mountOverview(container) {
     const fPct = (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%';
 
     // Farm's grain watchlist — commodity+grade pairs to show, best bid within catchment
-    const grainCatchment = settings.grainCatchment || [];
-    const grainWatchlist = settings.grainWatchlist || {};
     const farmSites = [];
 
     // New format: grainWatchlist = { Wheat: ['APW1','H2'], Barley: ['BAR1'] }
