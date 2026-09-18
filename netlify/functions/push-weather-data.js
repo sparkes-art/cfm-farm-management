@@ -153,7 +153,7 @@ export default async function handler(req) {
         source: 'BOM',
       };
 
-      await db('weather_observations', {
+      await db('weather_observations?on_conflict=farm_id,station_id,obs_date', {
         method: 'POST',
         headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify([row]),
