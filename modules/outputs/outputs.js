@@ -245,22 +245,29 @@ async function _mountOverview(container) {
       })() : '';
 
       return [
-        '<div class="card" style="padding:12px 14px;margin-bottom:8px">',
+        '<div class="card" style="padding:12px 14px;margin-bottom:8px;cursor:pointer"',
+        ' data-expand-crop="' + name + '"',
+        ' data-expand-region="' + name + '"',
+        ' data-expand-grade=""',
+        ' data-expand-comid="' + (allPrices.find(p => p.region === name)?.commodity_id || '') + '"',
+        ' data-expand-livestock="1">',
         '<div style="display:flex;align-items:center;justify-content:space-between">',
         '<div>',
+        '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px">',
         '<div style="font-size:11px;font-weight:600;color:var(--ink)">'+name+'</div>',
-        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">'+sourceLabel+' · '+unit+'</div>',
+        '<div style="font-size:10px;color:var(--hint)">'+new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'})+' · '+sourceLabel+' · '+unit+'</div>',
+        '</div>',
         '<div style="display:flex;align-items:baseline;gap:5px">',
         '<span style="font-size:22px;font-weight:700;color:var(--ink)">'+latest.toFixed(2)+'</span>',
         '<span style="font-size:11px;color:var(--hint)">'+unit+'</span>',
         '</div></div>',
-        '<div style="text-align:right;min-width:90px">',
-        '<div style="font-size:10px;color:var(--hint);margin-bottom:2px">'+new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'})+'</div>',
+        '<div style="text-align:right;min-width:110px">',
+        '<div style="font-size:14px;color:var(--hint);margin-bottom:4px" title="View chart">⤢</div>',
         dayMove!=null
-          ? '<div style="font-size:12px;font-weight:600;color:'+moveColor+'">'+moveArrow+' '+Math.abs(dayMove).toFixed(2)+' <span style="font-size:10px;font-weight:400">('+fPct(dayMovePct)+')</span></div>'
+          ? '<div style="font-size:12px;font-weight:600;color:'+moveColor+'">'+moveArrow+' '+Math.abs(dayMove).toFixed(2)+' <span style="font-size:10px;font-weight:400;color:'+moveColor+'">(24-hr '+fPct(dayMovePct)+')</span></div>'
           : '<div style="font-size:11px;color:var(--hint)">—</div>',
         avg14!=null
-          ? '<div style="font-size:10px;color:var(--hint);margin-top:3px">14d '+avg14.toFixed(2)+' <span style="color:'+avgColor+'">'+(vsAvg>=0?'▲':'▼')+fPct(vsAvgPct)+'</span></div>'
+          ? '<div style="font-size:10px;color:var(--hint);margin-top:3px">14-day avg: '+avg14.toFixed(2)+' <span style="color:'+avgColor+'">'+(vsAvg>=0?'▲':'▼')+fPct(vsAvgPct)+'</span></div>'
           : '',
         '</div>',
         '</div></div>',
@@ -347,8 +354,10 @@ async function _mountOverview(container) {
         '<div style="display:flex;align-items:center;justify-content:space-between">',
         // Left — name + price
         '<div>',
+        '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px">',
         '<div style="font-size:11px;font-weight:600;color:var(--ink)">' + crop + '</div>',
-        '<div style="font-size:10px;color:var(--hint);margin-bottom:4px">' + new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) + ' · ' + sourceLabel + (resolvedGrade ? ' · ' + resolvedGrade : '') + '</div>',
+        '<div style="font-size:10px;color:var(--hint)">' + new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) + ' · ' + sourceLabel + (resolvedGrade ? ' · ' + resolvedGrade : '') + '</div>',
+        '</div>',
         '<div style="display:flex;align-items:baseline;gap:5px">',
         '<span style="font-size:22px;font-weight:700;color:var(--ink)">' + fC(latest) + '</span>',
         '<span style="font-size:11px;color:var(--hint)">/' + displayUnit + '</span>',
@@ -496,8 +505,8 @@ async function _mountOverview(container) {
     // Wire expand buttons on grain/cotton price cards
     container.querySelectorAll('[data-expand-crop]').forEach(card => {
       card.addEventListener('click', () => {
-        const { expandCrop: crop, expandRegion: region, expandGrade: grade, expandComid: comId } = card.dataset;
-        if (region && comId) _openPriceChart(farm, crop, region, grade, comId, season);
+        const { expandCrop: crop, expandRegion: region, expandGrade: grade, expandComid: comId, expandLivestock } = card.dataset;
+        if (region && comId) _openPriceChart(farm, crop, region, grade, comId, season, !!expandLivestock);
       });
     });
 
@@ -1319,7 +1328,7 @@ async function _mountAdminView(container) {
   }
 }
 // ── Price chart modal ─────────────────────────────────────────
-async function _openPriceChart(farm, crop, region, resolvedGrade, commodityId, season) {
+async function _openPriceChart(farm, crop, region, resolvedGrade, commodityId, season, isLivestock = false) {
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
   modal.innerHTML = `
@@ -1339,10 +1348,13 @@ async function _openPriceChart(farm, crop, region, resolvedGrade, commodityId, s
       </div>
       <div style="padding:20px">
         <canvas id="price-chart-canvas" style="width:100%;height:300px"></canvas>
-        <div id="price-chart-legend" style="margin-top:12px;display:flex;gap:16px;font-size:11px;color:var(--hint)">
+        <div id="price-chart-legend" style="margin-top:12px;display:flex;gap:16px;font-size:11px;color:var(--hint);flex-wrap:wrap">
           <span><span style="display:inline-block;width:20px;height:2px;background:#3b82f6;vertical-align:middle;margin-right:4px"></span>Market price</span>
+          ${isLivestock ? '' : `
+          <span><span style="display:inline-block;width:20px;height:2px;background:#9333ea;border-top:2px dashed #9333ea;vertical-align:middle;margin-right:4px"></span>Budget price</span>
           <span><span style="display:inline-block;width:8px;height:8px;background:#16a34a;border-radius:50%;vertical-align:middle;margin-right:4px"></span>Forward contract</span>
           <span><span style="display:inline-block;width:8px;height:8px;background:#f59e0b;border-radius:50%;vertical-align:middle;margin-right:4px"></span>Invoiced sale</span>
+          `}
         </div>
         <div id="price-chart-loading" style="text-align:center;padding:40px;color:var(--hint)">Loading chart data…</div>
       </div>
@@ -1364,17 +1376,21 @@ async function _openPriceChart(farm, crop, region, resolvedGrade, commodityId, s
     cutoff.setMonth(cutoff.getMonth() - months);
     const cutoffStr = cutoff.toISOString().split('T')[0];
 
-    const [prices, contracts, invoices] = await Promise.all([
+    const [prices, contracts, invoices, budgets] = await Promise.all([
       dbSelect('market_prices',
         `commodity_id=eq.${commodityId}&region=eq.${encodeURIComponent(region)}&price_date=gte.${cutoffStr}&order=price_date.asc&limit=500`
       ).catch(() => []),
-      dbSelect('forward_contracts',
+      isLivestock ? Promise.resolve([]) : dbSelect('forward_contracts',
         `farm_id=eq.${farm.id}&commodity_id=eq.${commodityId}&crop_year=eq.${season}&select=price_per_unit,quantity,sale_date,delivery_start&order=sale_date.asc`
       ).catch(() => []),
-      dbSelect('invoices',
+      isLivestock ? Promise.resolve([]) : dbSelect('invoices',
         `farm_id=eq.${farm.id}&season=eq.${season}&master_unit=neq.head&select=invoice_date,gross_amount,total_quality_adj,total_qty,forward_contract_id&order=invoice_date.asc`
       ).catch(() => []),
+      isLivestock ? Promise.resolve([]) : dbSelect('budgets',
+        `farm_id=eq.${farm.id}&season=eq.${season}&commodity_id=eq.${commodityId}&select=price&limit=1`
+      ).catch(() => []),
     ]);
+    const budgetPrice = budgets?.[0]?.price ? parseFloat(budgets[0].price) : null;
 
     loading.style.display = 'none';
     canvas.style.display = 'block';
@@ -1410,6 +1426,7 @@ async function _openPriceChart(farm, crop, region, resolvedGrade, commodityId, s
     // All price values for scale
     const allVals = [
       ...prices.map(p => parseFloat(p.price_per_unit)),
+      ...(budgetPrice ? [budgetPrice] : []),
       ...contracts.filter(c => c.sale_date >= cutoffStr).map(c => parseFloat(c.price_per_unit)),
       ...linkedInvoices.map(inv => {
         const qty = parseFloat(inv.total_qty) || 1;
@@ -1462,6 +1479,24 @@ async function _openPriceChart(farm, crop, region, resolvedGrade, commodityId, s
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
     ctx.stroke();
+
+    // Budget price — horizontal dashed purple line
+    if (budgetPrice && budgetPrice > 0) {
+      const by = toY(budgetPrice);
+      ctx.beginPath();
+      ctx.strokeStyle = '#9333ea';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([6, 4]);
+      ctx.moveTo(PAD.left, by);
+      ctx.lineTo(PAD.left + cW, by);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Label
+      ctx.fillStyle = '#9333ea';
+      ctx.font = 'bold 10px system-ui';
+      ctx.textAlign = 'left';
+      ctx.fillText('Budget $' + Math.round(budgetPrice), PAD.left + 4, by - 4);
+    }
 
     // Contract dots (green)
     contracts.filter(c => c.sale_date >= cutoffStr && c.price_per_unit).forEach(c => {
