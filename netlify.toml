@@ -57,4 +57,4 @@
   timeout = 30
 
   [functions.push-weather-data]
-  timeout = 60
+  timeout = 30

@@ -48,10 +48,16 @@ async function getFarmStations() {
 
 // Fetch today's observations from BOM
 async function fetchObservations(geohash6, signal) {
+  // Try the BOM API - may be slow from server environments
   const url = `${BOM_API}/locations/${geohash6}/observations`;
   const res = await fetch(url, {
     signal,
-    headers: { Accept: 'application/json', 'User-Agent': 'CFM-FarmManagement/1.0 (insights@cfma.com.au)' }
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'Mozilla/5.0 (compatible; CFM-FarmManagement/1.0)',
+      'Origin': 'https://www.bom.gov.au',
+      'Referer': 'https://www.bom.gov.au/',
+    }
   });
   if (!res.ok) throw new Error(`BOM obs error: ${res.status}`);
   const data = await res.json();
@@ -136,7 +142,7 @@ export default async function handler(req) {
 
       // Fetch current observations with timeout
       const obsController = new AbortController();
-      const obsTimeout = setTimeout(() => obsController.abort(), 8000);
+      const obsTimeout = setTimeout(() => obsController.abort(), 25000);
       const obs = await fetchObservations(farm.geohash.slice(0, 6), obsController.signal).finally(() => clearTimeout(obsTimeout));
       if (!obs) { errors.push({ farm: farm.farmName, error: 'No obs data' }); continue; }
 
