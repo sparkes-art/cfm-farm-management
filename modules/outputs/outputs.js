@@ -1782,20 +1782,18 @@ async function _loadWeatherPanel(farm, season) {
   const wx = farm.settings.weather;
   const stationId = wx.bomStationId;
   const gddBase = wx.gddBase || 10;
-
   if (stationLabel) stationLabel.textContent = wx.bomStationName + ' · BOM';
 
-  // Determine season start date
+  // Season year
   const yearStart = farm.settings?.yearStartMonth || 1;
   const now = new Date();
   const seasonYear = yearStart === 1 ? now.getFullYear()
     : (now.getMonth() + 1 >= yearStart ? now.getFullYear() : now.getFullYear() - 1);
   const startDate = `${seasonYear}-${String(yearStart).padStart(2,'0')}-01`;
 
-  // Fetch data in parallel
   const [obsRows, overrideRows, avgRows] = await Promise.all([
     dbSelect('weather_observations',
-      `farm_id=eq.${farm.id}&station_id=eq.${stationId}&obs_date=gte.${startDate}&order=obs_date.asc&limit=400`
+      `farm_id=eq.${farm.id}&station_id=eq.${stationId}&obs_date=gte.${startDate}&order=obs_date.asc&limit=500`
     ).catch(() => []),
     dbSelect('weather_monthly_overrides',
       `farm_id=eq.${farm.id}&year=gte.${seasonYear}&order=year.asc,month.asc`
@@ -1805,219 +1803,279 @@ async function _loadWeatherPanel(farm, season) {
     ).catch(() => []),
   ]);
 
-  // Build monthly summaries
-  const months = [];
-  const today = new Date();
-  let m = yearStart;
-  let y = seasonYear;
-  while (new Date(y, m - 1, 1) <= today) {
-    const monthKey = `${y}-${String(m).padStart(2,'0')}`;
+  // Build full 12-month array regardless of whether data exists
+  const allMonths = [];
+  for (let i = 0; i < 12; i++) {
+    let mo = yearStart + i; let yr = seasonYear;
+    if (mo > 12) { mo -= 12; yr++; }
+    const monthKey = `${yr}-${String(mo).padStart(2,'0')}`;
     const monthObs = obsRows.filter(r => r.obs_date.startsWith(monthKey));
+    const override = overrideRows.find(r => r.year === yr && r.month === mo);
+    const isFuture = new Date(yr, mo - 1, 1) > now;
 
-    // Rainfall: check override first, then sum daily
-    const override = overrideRows.find(r => r.year === y && r.month === m);
     const actualRain = override
       ? { value: parseFloat(override.rainfall_mm), source: 'gauge' }
-      : { value: monthObs.reduce((s, r) => s + (parseFloat(r.rainfall_mm) || 0), 0), source: 'BOM' };
+      : { value: monthObs.reduce((s, r) => s + (parseFloat(r.rainfall_mm) || 0), 0), source: monthObs.length ? 'BOM' : null };
 
-    // GDD: sum of (max+min)/2 - base, floored at 0
     const gdd = monthObs.reduce((s, r) => {
       const avg = ((parseFloat(r.temp_max) || 0) + (parseFloat(r.temp_min) || 0)) / 2;
       return s + Math.max(0, avg - gddBase);
     }, 0);
 
-    // LTA
-    const lta = avgRows.find(a => a.month === m);
+    const lta = avgRows.find(a => a.month === mo);
 
-    months.push({
-      label: new Date(y, m - 1, 1).toLocaleDateString('en-AU', { month: 'short' }),
-      month: m, year: y,
-      rain: Math.round(actualRain.value * 10) / 10,
-      rainSource: actualRain.source,
-      gdd: Math.round(gdd),
-      ltaRain: lta?.avg_rainfall_mm || null,
+    allMonths.push({
+      label: new Date(yr, mo - 1, 1).toLocaleDateString('en-AU', { month: 'short' }),
+      month: mo, year: yr, isFuture,
+      rain: isFuture ? null : Math.round(actualRain.value * 10) / 10,
+      rainSource: isFuture ? null : (override ? 'gauge' : (monthObs.length ? 'BOM' : null)),
+      gdd: isFuture ? null : Math.round(gdd),
+      ltaRain: lta?.avg_rainfall_mm ? parseFloat(lta.avg_rainfall_mm) : null,
+      ltaTempMax: lta?.avg_temp_max ? parseFloat(lta.avg_temp_max) : null,
+      ltaTempMin: lta?.avg_temp_min ? parseFloat(lta.avg_temp_min) : null,
       hasData: monthObs.length > 0 || !!override,
     });
-
-    m++;
-    if (m > 12) { m = 1; y++; }
-    if (months.length > 24) break; // safety
   }
 
-  // Totals
-  const totalRain = months.reduce((s, m) => s + (m.rain || 0), 0);
-  const totalGDD = months.reduce((s, m) => s + (m.gdd || 0), 0);
-  const ltaToDate = months.reduce((s, m) => s + (m.ltaRain || 0), 0);
-  const rainVar = ltaToDate ? totalRain - ltaToDate : null;
+  const pastMonths = allMonths.filter(m => !m.isFuture);
+  const totalRain = pastMonths.reduce((s, m) => s + (m.rain || 0), 0);
+  const totalGDD  = pastMonths.reduce((s, m) => s + (m.gdd  || 0), 0);
+  const ltaToDate = pastMonths.reduce((s, m) => s + (m.ltaRain || 0), 0);
+  const rainVar   = ltaToDate ? totalRain - ltaToDate : null;
   const rainVarColor = rainVar == null ? '#64748b' : rainVar >= 0 ? '#16a34a' : '#dc2626';
+  const hasData   = pastMonths.some(m => m.hasData);
 
-  const hasAnyData = months.some(m => m.hasData);
+  // Cumulative arrays for both actual and LTA
+  let cumRain = 0, cumLTA = 0;
+  const cumActual = allMonths.map(m => {
+    if (!m.isFuture && m.rain !== null) cumRain += m.rain;
+    return m.isFuture ? null : Math.round(cumRain);
+  });
+  const cumAvg = allMonths.map(m => {
+    if (m.ltaRain !== null) cumLTA += m.ltaRain;
+    return Math.round(cumLTA);
+  });
 
-  // Build HTML
-  const barMax = Math.max(...months.map(m => Math.max(m.rain || 0, m.ltaRain || 0)), 10);
-  const barH = 48; // px height of bar area
+  // Chart dimensions
+  const W = 340, H_RAIN = 140, H_GDD = 120;
+  const PAD = { top: 8, right: 52, bottom: 22, left: 36 };
+  const cW = W - PAD.left - PAD.right;
+  const cRainH = H_RAIN - PAD.top - PAD.bottom;
+  const cGddH  = H_GDD  - PAD.top - PAD.bottom;
+  const n = allMonths.length;
+  const barW = Math.floor(cW / n) - 2;
+
+  // Rainfall scales
+  const maxMonthly = Math.max(...allMonths.map(m => Math.max(m.rain || 0, m.ltaRain || 0)), 20);
+  const maxCum = Math.max(...cumAvg, ...cumActual.filter(v => v !== null), 10);
+
+  const toBarX = i => PAD.left + Math.round((i / n) * cW) + 1;
+  const toBarH = v => Math.round((v / maxMonthly) * cRainH);
+  const toCumY = v => PAD.top + cRainH - Math.round((v / maxCum) * cRainH);
+  const toGddX = i => PAD.left + Math.round((i / (n - 1)) * cW);
+  const toGddY = (v, max) => PAD.top + cGddH - Math.round((v / max) * cGddH);
+
+  // GDD cumulative
+  let gcum = 0, gltacum = 0;
+  const gddCumActual = allMonths.map(m => { if (!m.isFuture && m.gdd !== null) gcum += m.gdd; return m.isFuture ? null : gcum; });
+  // LTA GDD from avg temps
+  const gddCumLTA = allMonths.map(m => {
+    if (m.ltaTempMax !== null && m.ltaTempMin !== null) {
+      const days = new Date(m.year, m.month, 0).getDate();
+      gltacum += Math.max(0, ((m.ltaTempMax + m.ltaTempMin) / 2 - gddBase) * days);
+    }
+    return Math.round(gltacum);
+  });
+  const maxGDD = Math.max(...gddCumActual.filter(v => v !== null), ...gddCumLTA, 1);
+
+  // Axis label helpers
+  const rainAxisVals = [0, Math.round(maxMonthly/2), Math.round(maxMonthly)];
+  const cumAxisVals  = [0, Math.round(maxCum/2), Math.round(maxCum)];
+
+  // ── Snapshot calculations ──
+  const todayStr = now.toISOString().split('T')[0];
+  const todayObs = obsRows.find(r => r.obs_date === todayStr);
+
+  const curMonthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const curMonthObs = obsRows.filter(r => r.obs_date.startsWith(curMonthKey));
+  const curOverride = overrideRows.find(r => r.year === now.getFullYear() && r.month === now.getMonth()+1);
+
+  const prevDate = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const prevMonthKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth()+1).padStart(2,'0')}`;
+  const prevMonthObs = obsRows.filter(r => r.obs_date.startsWith(prevMonthKey));
+  const prevOverride = overrideRows.find(r => r.year === prevDate.getFullYear() && r.month === prevDate.getMonth()+1);
+
+  const curMonthRain = curOverride ? parseFloat(curOverride.rainfall_mm)
+    : curMonthObs.reduce((s,r) => s+(parseFloat(r.rainfall_mm)||0), 0);
+  const prevMonthRain = prevOverride ? parseFloat(prevOverride.rainfall_mm)
+    : prevMonthObs.reduce((s,r) => s+(parseFloat(r.rainfall_mm)||0), 0);
+
+  const curMaxTemp  = curMonthObs.length ? Math.max(...curMonthObs.map(r => parseFloat(r.temp_max)||0)) : null;
+  const curMinTemp  = curMonthObs.length ? Math.min(...curMonthObs.map(r => parseFloat(r.temp_min)||99)) : null;
+  const prevMaxTemp = prevMonthObs.length ? Math.max(...prevMonthObs.map(r => parseFloat(r.temp_max)||0)) : null;
+  const prevMinTemp = prevMonthObs.length ? Math.min(...prevMonthObs.map(r => parseFloat(r.temp_min)||99)) : null;
+
+  const curLabel  = now.toLocaleDateString('en-AU', { month: 'short' });
+  const prevLabel = prevDate.toLocaleDateString('en-AU', { month: 'short' });
+
+  const snap = (label, rain, tmax, tmin, rainSource) => `
+    <div style="text-align:center;padding:0 8px;border-right:0.5px solid var(--border-light)">
+      <div style="font-size:10px;color:var(--hint);margin-bottom:4px;font-weight:600">${label}</div>
+      <div style="font-size:13px;font-weight:700;color:#2a78d6">${rain != null ? Math.round(rain*10)/10+'mm' : '—'}${rainSource==='gauge'?' <span style="font-size:8px;color:#16a34a">●</span>':''}</div>
+      <div style="font-size:10px;color:#dc2626;margin-top:1px">${tmax != null ? Math.round(tmax)+'°' : '—'}</div>
+      <div style="font-size:10px;color:#3b82f6">${tmin != null ? Math.round(tmin)+'°' : '—'}</div>
+    </div>`;
 
   panel.innerHTML = `
-    <div class="card" style="padding:12px 14px;margin-bottom:8px">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px">
-        <span style="font-size:11px;color:var(--hint);text-transform:uppercase;letter-spacing:.06em">Rainfall YTD</span>
-        ${ltaToDate ? `<span style="font-size:10px;color:var(--hint)">LTA to date: ${Math.round(ltaToDate)}mm</span>` : ''}
-      </div>
-      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
-        <span style="font-size:22px;font-weight:700;color:var(--ink)">${Math.round(totalRain)}mm</span>
-        ${rainVar != null ? `<span style="font-size:12px;font-weight:600;color:${rainVarColor}">${rainVar >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(rainVar))}mm vs avg</span>` : ''}
-      </div>
-      ${hasAnyData ? `
-      <div style="display:flex;align-items:flex-end;gap:2px;height:${barH}px;margin-bottom:2px;position:relative">
-        ${months.map((m, i) => {
-          const rainH = Math.max(m.rain > 0 ? 2 : 0, Math.round((m.rain / barMax) * barH));
-          const ltaH  = m.ltaRain ? Math.max(1, Math.round((m.ltaRain / barMax) * barH)) : 0;
-          const ltaPct = m.ltaRain ? Math.round((m.ltaRain / barMax) * 100) : 0;
-          return `<div style="flex:1;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-end;position:relative;height:100%" title="${m.label}: ${m.rain}mm${m.ltaRain ? ' · avg '+Math.round(m.ltaRain)+'mm' : ''}${m.rainSource==='gauge' ? ' (gauge)' : ''}">
-            <div style="height:${rainH}px;background:${m.rainSource==='gauge'?'#16a34a':'#2a78d6'};border-radius:2px 2px 0 0;position:relative">
-              ${ltaH ? `<div style="position:absolute;bottom:${ltaH - rainH}px;left:0;right:0;height:2px;background:#b4b2a9;border-radius:1px"></div>` : ''}
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-      <div style="display:flex;gap:2px;margin-bottom:6px">
-        ${months.map(m => `<div style="flex:1;text-align:center;font-size:8px;color:var(--hint)">${m.label}</div>`).join('')}
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between">
-        <div style="display:flex;gap:10px;font-size:10px;color:var(--hint)">
-          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#2a78d6;margin-right:3px;vertical-align:middle"></span>BOM</span>
-          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#16a34a;margin-right:3px;vertical-align:middle"></span>Gauge</span>
-          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#d3d1c7;margin-right:3px;vertical-align:middle"></span>30yr avg</span>
+    <div style="background:var(--page-bg);border-radius:8px;padding:8px 12px;margin-bottom:8px;border:0.5px solid var(--border)">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:8px">Weather snapshot</div>
+      <div style="display:flex;align-items:stretch">
+        ${snap('Today',
+          todayObs ? parseFloat(todayObs.rainfall_mm) : null,
+          todayObs ? parseFloat(todayObs.temp_max) : null,
+          todayObs ? parseFloat(todayObs.temp_min) : null,
+          'BOM'
+        )}
+        ${snap(curLabel, curMonthRain, curMaxTemp, curMinTemp, curOverride ? 'gauge' : 'BOM')}
+        <div style="text-align:center;padding:0 8px">
+          <div style="font-size:10px;color:var(--hint);margin-bottom:4px;font-weight:600">${prevLabel}</div>
+          <div style="font-size:13px;font-weight:700;color:#2a78d6">${prevMonthRain != null ? Math.round(prevMonthRain*10)/10+'mm' : '—'}${prevOverride?' <span style="font-size:8px;color:#16a34a">●</span>':''}</div>
+          <div style="font-size:10px;color:#dc2626;margin-top:1px">${prevMaxTemp != null ? Math.round(prevMaxTemp)+'°' : '—'}</div>
+          <div style="font-size:10px;color:#3b82f6">${prevMinTemp != null ? Math.round(prevMinTemp)+'°' : '—'}</div>
         </div>
-        ${canWrite() ? `<button class="btn btn-secondary" id="wx-override-btn" style="font-size:10px;padding:3px 8px">✎ Override</button>` : ''}
-      </div>` : `<div style="font-size:11px;color:var(--hint)">No data yet — function runs nightly</div>`}
+      </div>
+      <div style="display:flex;gap:10px;margin-top:6px;font-size:9px;color:var(--hint)">
+        <span><span style="color:#2a78d6">■</span> Rain</span>
+        <span><span style="color:#dc2626">■</span> Max °C</span>
+        <span><span style="color:#3b82f6">■</span> Min °C</span>
+        <span><span style="color:#16a34a">●</span> Gauge reading</span>
+      </div>
     </div>
 
     <div class="card" style="padding:12px 14px;margin-bottom:8px">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px">
-        <span style="font-size:11px;color:var(--hint);text-transform:uppercase;letter-spacing:.06em">Heat units (GDD)</span>
-        <span style="font-size:10px;color:var(--hint)">Base ${gddBase}°C</span>
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span style="font-size:20px;font-weight:700;color:var(--ink)">${Math.round(totalRain)}mm</span>
+          ${rainVar != null ? `<span style="font-size:11px;font-weight:600;color:${rainVarColor}">${rainVar >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(rainVar))}mm vs avg</span>` : ''}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="display:flex;gap:8px;font-size:10px;color:var(--hint)">
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:1px;background:#2a78d6;margin-right:3px;vertical-align:middle"></span>BOM</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:1px;background:#16a34a;margin-right:3px;vertical-align:middle"></span>Gauge</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:1px;background:#d3d1c7;margin-right:3px;vertical-align:middle"></span>30yr avg</span>
+            <span style="display:flex;align-items:center;gap:3px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#2a78d6" stroke-width="1.5"/></svg>Cum.</span>
+            <span style="display:flex;align-items:center;gap:3px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#b4b2a9" stroke-width="1" stroke-dasharray="3,2"/></svg>LTA cum.</span>
+          </div>
+          ${canWrite() ? `<button class="btn btn-secondary" id="wx-override-btn" style="font-size:10px;padding:3px 8px">✎ Override</button>` : ''}
+        </div>
       </div>
-      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
-        <span style="font-size:22px;font-weight:700;color:var(--ink)">${totalGDD.toLocaleString()}</span>
-        <span style="font-size:11px;color:var(--hint)">GDD accumulated</span>
+
+      ${hasData ? `<svg viewBox="0 0 ${W} ${H_RAIN}" style="width:100%;height:${H_RAIN}px;overflow:visible">
+        <!-- Left axis (monthly mm) -->
+        ${rainAxisVals.map(v => {
+          const y = PAD.top + cRainH - toBarH(v);
+          return `<text x="${PAD.left - 4}" y="${y + 3}" font-size="8" text-anchor="end" fill="#888781">${v}</text>
+            <line x1="${PAD.left}" y1="${y}" x2="${PAD.left + cW}" y2="${y}" stroke="#e1e0d9" stroke-width="0.5"/>`;
+        }).join('')}
+        <text x="10" y="${PAD.top + cRainH/2}" font-size="8" text-anchor="middle" fill="#888781" transform="rotate(-90,10,${PAD.top + cRainH/2})">mm/month</text>
+
+        <!-- Right axis (cumulative mm) -->
+        ${cumAxisVals.map(v => {
+          const y = toCumY(v);
+          return `<text x="${PAD.left + cW + 4}" y="${y + 3}" font-size="8" text-anchor="start" fill="#2a78d6">${v}</text>`;
+        }).join('')}
+        <text x="${W - 8}" y="${PAD.top + cRainH/2}" font-size="8" text-anchor="middle" fill="#2a78d6" transform="rotate(90,${W-8},${PAD.top + cRainH/2})">cum. mm</text>
+
+        <!-- Bars: actual rainfall -->
+        ${allMonths.map((m, i) => {
+          if (m.isFuture || m.rain === null) return '';
+          const x = toBarX(i);
+          const h = Math.max(m.rain > 0 ? 2 : 0, toBarH(m.rain));
+          const col = m.rainSource === 'gauge' ? '#16a34a' : '#2a78d6';
+          return `<rect x="${x}" y="${PAD.top + cRainH - h}" width="${barW}" height="${h}" fill="${col}" rx="1"/>`;
+        }).join('')}
+
+        <!-- Bars: LTA rainfall (grey, slightly narrower, behind actual) -->
+        ${allMonths.map((m, i) => {
+          if (!m.ltaRain) return '';
+          const x = toBarX(i);
+          const h = Math.max(1, toBarH(m.ltaRain));
+          return `<rect x="${x + barW - Math.ceil(barW*0.4)}" y="${PAD.top + cRainH - h}" width="${Math.ceil(barW*0.4)}" height="${h}" fill="#d3d1c7" rx="1" opacity="0.9"/>`;
+        }).join('')}
+
+        <!-- Month labels -->
+        ${allMonths.map((m, i) => {
+          const x = toBarX(i) + barW/2;
+          return `<text x="${x}" y="${PAD.top + cRainH + 14}" font-size="8" text-anchor="middle" fill="${m.isFuture ? '#c8c6be' : '#888781'}">${m.label}</text>`;
+        }).join('')}
+
+        <!-- Cumulative actual line -->
+        <polyline points="${cumActual.map((v, i) => v !== null ? `${toBarX(i) + barW/2},${toCumY(v)}` : '').filter(Boolean).join(' ')}"
+          fill="none" stroke="#2a78d6" stroke-width="1.5" stroke-linejoin="round"/>
+
+        <!-- Cumulative LTA line (dashed) -->
+        <polyline points="${cumAvg.map((v, i) => `${toBarX(i) + barW/2},${toCumY(v)}`).join(' ')}"
+          fill="none" stroke="#b4b2a9" stroke-width="1" stroke-dasharray="3,2" stroke-linejoin="round"/>
+
+        <!-- Baseline -->
+        <line x1="${PAD.left}" y1="${PAD.top + cRainH}" x2="${PAD.left + cW}" y2="${PAD.top + cRainH}" stroke="#c3c2b7" stroke-width="0.5"/>
+        <line x1="${PAD.left}" y1="${PAD.top}" x2="${PAD.left}" y2="${PAD.top + cRainH}" stroke="#c3c2b7" stroke-width="0.5"/>
+        <line x1="${PAD.left + cW}" y1="${PAD.top}" x2="${PAD.left + cW}" y2="${PAD.top + cRainH}" stroke="#c3c2b7" stroke-width="0.5"/>
+      </svg>` : `<div style="font-size:11px;color:var(--hint);padding:12px 0">No data yet — function runs nightly</div>`}
+    </div>
+
+    <div class="card" style="padding:12px 14px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span style="font-size:20px;font-weight:700;color:var(--ink)">${totalGDD.toLocaleString()}</span>
+          <span style="font-size:11px;color:var(--hint)">GDD · base ${gddBase}°C</span>
+          ${gddCumLTA[pastMonths.length - 1] ? `<span style="font-size:11px;font-weight:600;color:${totalGDD >= gddCumLTA[pastMonths.length-1] ? '#16a34a' : '#d97706'}">${totalGDD >= gddCumLTA[pastMonths.length-1] ? '▲' : '▼'} ${Math.abs(totalGDD - gddCumLTA[pastMonths.length-1])} vs avg</span>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;font-size:10px;color:var(--hint)">
+          <span style="display:flex;align-items:center;gap:3px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#eb6834" stroke-width="1.5"/></svg>${seasonYear}</span>
+          ${gddCumLTA.some(v => v > 0) ? `<span style="display:flex;align-items:center;gap:3px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#b4b2a9" stroke-width="1" stroke-dasharray="3,2"/></svg>30yr avg</span>` : ''}
+        </div>
       </div>
-      ${hasAnyData ? (() => {
-        // Cumulative GDD line
-        let cum = 0;
-        const cumPoints = months.map(m => { cum += m.gdd; return cum; });
-        const maxGDD = Math.max(...cumPoints, 1);
-        const pts = cumPoints.map((v, i) => `${Math.round((i / (cumPoints.length - 1 || 1)) * 100)},${Math.round((1 - v / maxGDD) * 40)}`).join(' ');
-        return `<svg viewBox="0 0 100 44" style="width:100%;height:44px;overflow:visible">
-          <polyline points="${pts}" fill="none" stroke="#eb6834" stroke-width="1.5" stroke-linejoin="round"/>
-          ${cumPoints.map((v, i) => {
-            const x = Math.round((i / (cumPoints.length - 1 || 1)) * 100);
-            const y = Math.round((1 - v / maxGDD) * 40);
-            return `<circle cx="${x}" cy="${y}" r="2" fill="#eb6834"/>
-              <text x="${x}" y="44" font-size="6" text-anchor="middle" fill="#888781">${months[i].label}</text>`;
-          }).join('')}
-        </svg>`;
-      })() : `<div style="font-size:11px;color:var(--hint)">No temperature data yet</div>`}
+      ${hasData ? `<svg viewBox="0 0 ${W} ${H_GDD}" style="width:100%;height:${H_GDD}px;overflow:visible">
+        <!-- Gridlines and left axis -->
+        ${[0, 0.25, 0.5, 0.75, 1].map(frac => {
+          const v = Math.round(maxGDD * frac);
+          const y = toGddY(v, maxGDD);
+          return `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + cW}" y2="${y}" stroke="#e1e0d9" stroke-width="0.5"/>
+            <text x="${PAD.left - 4}" y="${y + 3}" font-size="8" text-anchor="end" fill="#888781">${v}</text>`;
+        }).join('')}
+
+        <!-- Month labels -->
+        ${allMonths.map((m, i) => {
+          const x = toGddX(i);
+          return `<text x="${x}" y="${PAD.top + cGddH + 14}" font-size="8" text-anchor="middle" fill="${m.isFuture ? '#c8c6be' : '#888781'}">${m.label}</text>`;
+        }).join('')}
+
+        <!-- LTA GDD line (dashed grey) -->
+        ${gddCumLTA.some(v => v > 0) ? `<polyline points="${gddCumLTA.map((v, i) => `${toGddX(i)},${toGddY(v, maxGDD)}`).join(' ')}"
+          fill="none" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="4,3" stroke-linejoin="round"/>` : ''}
+
+        <!-- Actual GDD line -->
+        <polyline points="${gddCumActual.map((v, i) => v !== null ? `${toGddX(i)},${toGddY(v, maxGDD)}` : '').filter(Boolean).join(' ')}"
+          fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round"/>
+
+        <!-- Dot at current position -->
+        ${(() => {
+          const lastIdx = gddCumActual.map((v, i) => v !== null ? i : -1).filter(i => i >= 0).pop();
+          if (lastIdx == null) return '';
+          const x = toGddX(lastIdx), y = toGddY(gddCumActual[lastIdx], maxGDD);
+          return `<circle cx="${x}" cy="${y}" r="3" fill="#eb6834"/>`;
+        })()}
+
+        <!-- Axes -->
+        <line x1="${PAD.left}" y1="${PAD.top}" x2="${PAD.left}" y2="${PAD.top + cGddH}" stroke="#c3c2b7" stroke-width="0.5"/>
+        <line x1="${PAD.left}" y1="${PAD.top + cGddH}" x2="${PAD.left + cW}" y2="${PAD.top + cGddH}" stroke="#c3c2b7" stroke-width="0.5"/>
+      </svg>` : `<div style="font-size:11px;color:var(--hint)">No temperature data yet</div>`}
     </div>`;
 
-  // Wire override button
   document.getElementById('wx-override-btn')?.addEventListener('click', () => {
-    _openWeatherOverrideModal(farm, months, overrideRows, () => _loadWeatherPanel(farm, season));
+    _openWeatherOverrideModal(farm, allMonths.filter(m => !m.isFuture), overrideRows, () => _loadWeatherPanel(farm, season));
   });
 }
 
-// ── Weather override modal ────────────────────────────────────
-function _openWeatherOverrideModal(farm, months, existingOverrides, onSave) {
-  const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
-  modal.innerHTML = `
-    <div style="background:#fff;border-radius:10px;width:100%;max-width:480px;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-        <div>
-          <div style="font-size:15px;font-weight:700;color:var(--ink)">Monthly rainfall overrides</div>
-          <div style="font-size:11px;color:var(--hint);margin-top:2px">Enter farm gauge readings to replace BOM data for a month</div>
-        </div>
-        <button id="wx-modal-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--hint)">✕</button>
-      </div>
-      <div style="padding:16px 18px">
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead>
-            <tr style="border-bottom:1px solid var(--border)">
-              <th style="text-align:left;padding:6px 8px;color:var(--hint);font-weight:500">Month</th>
-              <th style="text-align:right;padding:6px 8px;color:var(--hint);font-weight:500">BOM</th>
-              <th style="text-align:right;padding:6px 8px;color:var(--hint);font-weight:500">Override (mm)</th>
-              <th style="padding:6px 8px"></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${months.map(m => {
-              const ov = existingOverrides.find(r => r.year === m.year && r.month === m.month);
-              return `<tr style="border-bottom:0.5px solid var(--border-light)">
-                <td style="padding:6px 8px;font-weight:500;color:var(--ink)">${m.label} ${m.year}</td>
-                <td style="padding:6px 8px;text-align:right;color:var(--hint)">${m.rain}mm</td>
-                <td style="padding:6px 8px;text-align:right">
-                  <input type="number" step="0.1" min="0" class="wx-override-input form-input"
-                    data-month="${m.month}" data-year="${m.year}" data-override-id="${ov?.id||''}"
-                    value="${ov ? ov.rainfall_mm : ''}" placeholder="—"
-                    style="width:80px;font-size:12px;padding:4px 6px;text-align:right">
-                </td>
-                <td style="padding:6px 8px">
-                  ${ov ? `<button class="wx-clear-btn" data-id="${ov.id}" style="background:none;border:none;color:var(--hint);cursor:pointer;font-size:11px">✕</button>` : ''}
-                </td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-        <div id="wx-override-feedback" style="margin-top:10px;font-size:11px;color:var(--hint)"></div>
-        <div style="display:flex;gap:10px;margin-top:14px">
-          <button class="btn btn-primary" id="wx-save-overrides">Save overrides</button>
-          <button class="btn btn-secondary" id="wx-modal-cancel">Cancel</button>
-        </div>
-      </div>
-    </div>`;
-
-  document.body.appendChild(modal);
-  modal.querySelector('#wx-modal-close').onclick = () => modal.remove();
-  modal.querySelector('#wx-modal-cancel').onclick = () => modal.remove();
-  modal.onclick = e => { if (e.target === modal) modal.remove(); };
-
-  // Clear override
-  modal.querySelectorAll('.wx-clear-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const { id } = btn.dataset;
-      btn.textContent = '…';
-      await dbDelete('weather_monthly_overrides', id);
-      modal.remove();
-      await onSave();
-    });
-  });
-
-  // Save
-  modal.querySelector('#wx-save-overrides').addEventListener('click', async () => {
-    const btn = modal.querySelector('#wx-save-overrides');
-    const fb = modal.querySelector('#wx-override-feedback');
-    btn.disabled = true; btn.textContent = 'Saving…';
-    try {
-      const inputs = modal.querySelectorAll('.wx-override-input');
-      const saves = [];
-      inputs.forEach(inp => {
-        const val = inp.value.trim();
-        if (!val) return;
-        const month = parseInt(inp.dataset.month);
-        const year  = parseInt(inp.dataset.year);
-        const ovId  = inp.dataset.overrideId;
-        saves.push({ id: ovId||undefined, farm_id: farm.id, year, month, rainfall_mm: parseFloat(val) });
-      });
-      if (saves.length) {
-        await dbInsert('weather_monthly_overrides', saves.length === 1 ? saves[0] : saves);
-      }
-      fb.textContent = `${saves.length} override(s) saved`;
-      fb.style.color = '#16a34a';
-      setTimeout(() => { modal.remove(); onSave(); }, 800);
-    } catch(e) {
-      fb.textContent = 'Save failed: ' + e.message;
-      fb.style.color = '#dc2626';
-      btn.disabled = false; btn.textContent = 'Save overrides';
-    }
-  });
 }
