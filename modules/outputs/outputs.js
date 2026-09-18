@@ -1935,11 +1935,14 @@ async function _loadWeatherPanel(farm, season) {
           <span style="font-size:18px;font-weight:700;color:var(--ink)">${Math.round(totalRain)}mm</span>
           ${rainVar != null ? `<span style="font-size:11px;font-weight:600;color:${rainVarColor}">${rainVar >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(rainVar))}mm vs 30yr avg (${Math.round(ltaToDate)}mm)</span>` : ''}
         </div>
-        ${canWrite() ? `<button class="btn btn-secondary" id="wx-override-btn" style="font-size:10px;padding:3px 8px">✎ Override</button>` : ''}
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary" id="wx-expand-rain" style="font-size:10px;padding:3px 8px" title="Expand chart">⤢</button>
+          ${canWrite() ? `<button class="btn btn-secondary" id="wx-override-btn" style="font-size:10px;padding:3px 8px">✎ Override</button>` : ''}
+        </div>
       </div>
       <div style="display:flex;gap:10px;font-size:10px;color:var(--hint);margin-bottom:6px;flex-wrap:wrap">
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2a78d6;vertical-align:middle;margin-right:3px"></span>BOM actual</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#16a34a;vertical-align:middle;margin-right:3px"></span>Gauge</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2a78d6;vertical-align:middle;margin-right:3px"></span>Actual (Open-Meteo)</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#16a34a;vertical-align:middle;margin-right:3px"></span>Gauge override</span>
         <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#d3d1c7;vertical-align:middle;margin-right:3px"></span>30yr avg</span>
         <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3" style="display:block"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#2a78d6" stroke-width="1.5"/></svg>Cumulative</span>
         <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3" style="display:block"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="3,2"/></svg>LTA cumulative</span>
@@ -2025,9 +2028,12 @@ async function _loadWeatherPanel(farm, season) {
             return `<span style="font-size:11px;font-weight:600;color:${col}">${diff>=0?'▲':'▼'} ${Math.abs(diff)} vs 30yr avg (${ltaAtNow})</span>`;
           })()}
         </div>
-        <div style="display:flex;gap:10px;font-size:10px;color:var(--hint)">
-          <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3" style="display:block"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#eb6834" stroke-width="2"/></svg>${seasonYear} actual</span>
-          ${gddCumLTA.some(v=>v>0) ? `<span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3" style="display:block"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="3,2"/></svg>30yr avg</span>` : ''}
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="display:flex;gap:10px;font-size:10px;color:var(--hint)">
+            <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3" style="display:block"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#eb6834" stroke-width="2"/></svg>${seasonYear} actual</span>
+            \${gddCumLTA.some(v=>v>0) ? '<span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3" style="display:block"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="3,2"/></svg>30yr avg</span>' : ''}
+          </div>
+          <button class="btn btn-secondary" id="wx-expand-gdd" style="font-size:10px;padding:3px 8px" title="Expand chart">⤢</button>
         </div>
       </div>
       <div style="font-size:10px;color:var(--hint);margin-bottom:6px">Base ${gddBase}°C · cumulative from ${new Date(seasonYear, yearStart-1, 1).toLocaleDateString('en-AU',{month:'short',year:'numeric'})}</div>
@@ -2075,4 +2081,137 @@ async function _loadWeatherPanel(farm, season) {
   document.getElementById('wx-override-btn')?.addEventListener('click', () => {
     _openWeatherOverrideModal(farm, allMonths.filter(m => !m.isFuture), overrideRows, () => _loadWeatherPanel(farm, season));
   });
+
+  document.getElementById('wx-expand-rain')?.addEventListener('click', () => {
+    _openWeatherExpandModal('rainfall', farm, allMonths, cumActual, cumAvg, totalRain, ltaToDate, rainVar, rainVarColor, seasonYear, n);
+  });
+
+  document.getElementById('wx-expand-gdd')?.addEventListener('click', () => {
+    _openWeatherExpandModal('gdd', farm, allMonths, gddCumActual, gddCumLTA, totalGDD, gddCumLTA[pastMonths.length-1], null, null, seasonYear, n);
+  });
+}
+// ── Weather chart expand modal ────────────────────────────────
+function _openWeatherExpandModal(type, farm, allMonths, actualData, ltaData, total, ltaTotal, varVal, varColor, seasonYear, n) {
+  const isRain = type === 'rainfall';
+  const title = isRain ? 'Rainfall — season to date' : 'Heat units (GDD) — cumulative';
+  const wx = farm.settings?.weather || {};
+  const subtitle = `${wx.locationLabel || farm.name} · ${seasonYear} vs 30-year average`;
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+
+  const VW = 800, VH = isRain ? 320 : 280;
+  const P = { top: 16, right: isRain ? 60 : 20, bottom: 28, left: 50 };
+  const CW = VW - P.left - P.right;
+  const CH = VH - P.top - P.bottom;
+  const barGap = 2;
+
+  let chartSvg = '';
+
+  if (isRain) {
+    const pastMonths = allMonths.filter(m => !m.isFuture);
+    const maxM = Math.max(...allMonths.map(m => Math.max(m.rain||0, m.ltaRain||0)), 20);
+    const maxC = Math.max(...(ltaData||[]), ...(actualData||[]).filter(v=>v!==null), 10);
+    const BW = Math.floor(CW / n) - barGap;
+    const bx = i => P.left + Math.round((i/n)*CW) + 1;
+    const by = v => Math.round((v/maxM)*CH);
+    const cy = v => P.top + CH - Math.round((v/maxC)*CH);
+    const lx = i => bx(i) + BW/2;
+    const leftTicks = [0, Math.round(maxM*0.5), Math.round(maxM)];
+    const rightTicks = [0, Math.round(maxC*0.5), Math.round(maxC)];
+
+    chartSvg = `<svg viewBox="0 0 ${VW} ${VH}" style="width:100%;height:${VH}px">
+      ${leftTicks.map(v => {
+        const y = P.top + CH - by(v);
+        return `<line x1="${P.left}" y1="${y}" x2="${P.left+CW}" y2="${y}" stroke="#e8e7e0" stroke-width="0.5"/>
+          <text x="${P.left-4}" y="${y+3}" font-size="9" text-anchor="end" fill="#888781">${v}mm</text>`;
+      }).join('')}
+      ${rightTicks.map(v => {
+        const y = cy(v);
+        return `<text x="${P.left+CW+4}" y="${y+3}" font-size="9" text-anchor="start" fill="#2a78d6">${v}mm</text>`;
+      }).join('')}
+      ${allMonths.map((m,i) => {
+        const ltaH = m.ltaRain ? Math.max(1,by(m.ltaRain)) : 0;
+        const rainH = m.isFuture||m.rain===null ? 0 : Math.max(m.rain>0?2:0,by(m.rain));
+        const col = m.rainSource==='gauge' ? '#16a34a' : '#2a78d6';
+        const x = bx(i);
+        return `${ltaH ? `<rect x="${x+Math.ceil(BW/2)}" y="${P.top+CH-ltaH}" width="${Math.ceil(BW/2)}" height="${ltaH}" fill="#d3d1c7" rx="1"/>` : ''}
+          ${rainH ? `<rect x="${x}" y="${P.top+CH-rainH}" width="${Math.ceil(BW/2)}" height="${rainH}" fill="${col}" rx="1"/>` : ''}
+          <text x="${lx(i)}" y="${P.top+CH+16}" font-size="9" text-anchor="middle" fill="${m.isFuture?'#c8c6be':'#888781'}">${m.label}</text>`;
+      }).join('')}
+      <polyline points="${(ltaData||[]).map((v,i)=>`${lx(i)},${cy(v)}`).join(' ')}"
+        fill="none" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="5,3" stroke-linejoin="round"/>
+      <polyline points="${(actualData||[]).map((v,i)=>v!==null?`${lx(i)},${cy(v)}`:null).filter(Boolean).join(' ')}"
+        fill="none" stroke="#2a78d6" stroke-width="2.5" stroke-linejoin="round"/>
+      <line x1="${P.left}" y1="${P.top}" x2="${P.left}" y2="${P.top+CH}" stroke="#c3c2b7" stroke-width="0.5"/>
+      <line x1="${P.left}" y1="${P.top+CH}" x2="${P.left+CW}" y2="${P.top+CH}" stroke="#c3c2b7" stroke-width="0.5"/>
+      <line x1="${P.left+CW}" y1="${P.top}" x2="${P.left+CW}" y2="${P.top+CH}" stroke="#c3c2b7" stroke-width="0.5"/>
+    </svg>`;
+  } else {
+    const maxG = Math.max(...(actualData||[]).filter(v=>v!==null), ...(ltaData||[]), 1);
+    const gx = i => P.left + Math.round((i/(n-1))*CW);
+    const gy = v => P.top + CH - Math.round((v/maxG)*CH);
+    const ticks = [0,0.25,0.5,0.75,1].map(f => Math.round(maxG*f));
+
+    chartSvg = `<svg viewBox="0 0 ${VW} ${VH}" style="width:100%;height:${VH}px">
+      ${ticks.map(v => {
+        const y = gy(v);
+        return `<line x1="${P.left}" y1="${y}" x2="${P.left+CW}" y2="${y}" stroke="#e8e7e0" stroke-width="0.5"/>
+          <text x="${P.left-4}" y="${y+3}" font-size="9" text-anchor="end" fill="#888781">${v}</text>`;
+      }).join('')}
+      ${allMonths.map((m,i) => `<text x="${gx(i)}" y="${P.top+CH+16}" font-size="9" text-anchor="middle" fill="${m.isFuture?'#c8c6be':'#888781'}">${m.label}</text>`).join('')}
+      ${(ltaData||[]).some(v=>v>0) ? `<polyline points="${(ltaData||[]).map((v,i)=>`${gx(i)},${gy(v)}`).join(' ')}"
+        fill="none" stroke="#b4b2a9" stroke-width="2" stroke-dasharray="5,3" stroke-linejoin="round"/>` : ''}
+      <polyline points="${(actualData||[]).map((v,i)=>v!==null?`${gx(i)},${gy(v)}`:null).filter(Boolean).join(' ')}"
+        fill="none" stroke="#eb6834" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+      ${(() => {
+        const idx = (actualData||[]).map((v,i)=>v!==null?i:-1).filter(i=>i>=0).pop();
+        if (idx==null) return '';
+        return `<circle cx="${gx(idx)}" cy="${gy(actualData[idx])}" r="5" fill="#eb6834"/>
+          <text x="${gx(idx)+8}" y="${gy(actualData[idx])+4}" font-size="10" fill="#eb6834" font-weight="bold">${actualData[idx]}</text>`;
+      })()}
+      <line x1="${P.left}" y1="${P.top}" x2="${P.left}" y2="${P.top+CH}" stroke="#c3c2b7" stroke-width="0.5"/>
+      <line x1="${P.left}" y1="${P.top+CH}" x2="${P.left+CW}" y2="${P.top+CH}" stroke="#c3c2b7" stroke-width="0.5"/>
+    </svg>`;
+  }
+
+  const diff = varVal != null ? (isRain ? Math.abs(Math.round(varVal)) + 'mm' : Math.abs(Math.round(total - ltaTotal))) : null;
+  const diffColor = isRain ? varColor : (total >= ltaTotal ? '#16a34a' : '#d97706');
+  const diffDir = isRain ? (varVal >= 0 ? '▲' : '▼') : (total >= ltaTotal ? '▲' : '▼');
+
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:100%;max-width:860px;max-height:92vh;overflow:auto;box-shadow:0 24px 80px rgba(0,0,0,.35)">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--ink)">${title}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">${subtitle}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px">
+          <div style="text-align:right">
+            <div style="font-size:22px;font-weight:700;color:var(--ink)">${isRain ? Math.round(total)+'mm' : total.toLocaleString()}</div>
+            ${diff ? `<div style="font-size:12px;font-weight:600;color:${diffColor}">${diffDir} ${diff} vs 30yr avg</div>` : ''}
+          </div>
+          <button id="wx-expand-close" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--hint);padding:4px">✕</button>
+        </div>
+      </div>
+      <div style="padding:20px">
+        ${chartSvg}
+        <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--hint);flex-wrap:wrap">
+          ${isRain ? `
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2a78d6;vertical-align:middle;margin-right:3px"></span>Actual (Open-Meteo)</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#16a34a;vertical-align:middle;margin-right:3px"></span>Gauge override</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#d3d1c7;vertical-align:middle;margin-right:3px"></span>30yr avg monthly</span>
+          <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#2a78d6" stroke-width="2"/></svg>Cumulative actual</span>
+          <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="4,2"/></svg>LTA cumulative</span>
+          ` : `
+          <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#eb6834" stroke-width="2.5"/></svg>${seasonYear} actual</span>
+          <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="4,2"/></svg>30yr average</span>
+          `}
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#wx-expand-close').onclick = () => modal.remove();
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
 }

@@ -287,9 +287,9 @@ export async function mountFarmSettings(container, onSave) {
           </div>
 
           <div style="margin-bottom:10px">
-            <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:4px">Location label (for display)</label>
-            <input class="form-input" id="fs-weather-label" type="text" value="${settings.weather?.locationLabel||settings.weather?.bomStationName||''}" placeholder="e.g. Boggabri area">
-            <div style="font-size:10px;color:var(--hint);margin-top:3px">Shown on the weather panel — doesn't affect data</div>
+            <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:4px">Weather panel label <span style="font-weight:400">(your reference only)</span></label>
+            <input class="form-input" id="fs-weather-label" type="text" value="${settings.weather?.locationLabel||settings.weather?.bomStationName||''}" placeholder="e.g. Boggabri area, Home paddock">
+            <div style="font-size:10px;color:var(--hint);margin-top:3px">Shown on the weather panel header — data always comes from Open-Meteo at the coordinates above</div>
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
