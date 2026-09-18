@@ -1323,7 +1323,7 @@ async function _openPriceChart(farm, crop, region, resolvedGrade, commodityId, s
   const modal = document.createElement('div');
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
   modal.innerHTML = `
-    <div style="background:var(--card-bg);border-radius:10px;width:100%;max-width:760px;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="background:#ffffff;border-radius:10px;width:100%;max-width:760px;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
       <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
         <div>
           <div style="font-size:15px;font-weight:700;color:var(--ink)">${crop} · ${resolvedGrade || ''}</div>
