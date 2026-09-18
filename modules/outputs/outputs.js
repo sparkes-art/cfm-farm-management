@@ -587,7 +587,7 @@ async function _mountOverview(container) {
       ].join('');
     }).join('');
     container.innerHTML = [
-      '<div style="display:grid;grid-template-columns:440px 1fr;gap:16px;align-items:start">',
+      '<div style="display:grid;grid-template-columns:440px 440px 1fr;gap:16px;align-items:start">',
 
       // LEFT — Farm gate prices
       '<div>',
@@ -611,8 +611,32 @@ async function _mountOverview(container) {
         : '<div class="card" style="padding:16px;color:var(--hint)">No budgets or contracts for this season.</div>',
       '</div>',
 
+      // WEATHER column
+      '<div>',
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">',
+      '<h2 style="font-size:14px;font-weight:600;color:var(--ink)">Seasonal weather</h2>',
+      '<span style="font-size:10px;color:var(--hint)" id="wx-station-label"></span>',
+      '</div>',
+      farm.settings?.weather?.bomStationName
+        ? '<p style="font-size:10px;color:var(--hint);margin:0 0 10px">Season-to-date vs 30-year average</p>'
+        : '',
+      '<div id="wx-panel">',
+      farm.settings?.weather?.bomStationId
+        ? '<div style="font-size:11px;color:var(--hint);padding:12px 0">Loading weather data…</div>'
+        : '<div class="card" style="padding:16px;color:var(--hint)">No weather station configured. Add one in Farm Settings.</div>',
+      '</div>',
+      '</div>',
+
       '</div>',
     ].join('');
+
+    // Load weather panel if station configured
+    if (farm.settings?.weather?.bomStationId) {
+      _loadWeatherPanel(farm, season).catch(e => {
+        const panel = document.getElementById('wx-panel');
+        if (panel) panel.innerHTML = '<div style="font-size:11px;color:var(--hint)">Weather data unavailable</div>';
+      });
+    }
 
     // Wire expand on commodity position cards
     container.querySelectorAll('[data-pos-commodity]').forEach(card => {
@@ -1748,4 +1772,247 @@ function _openPositionModal(com, season, fN, fC, fM, fPct) {
   document.body.appendChild(modal);
   modal.querySelector('#pos-modal-close').onclick = () => modal.remove();
   modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+}
+// ── Weather panel ─────────────────────────────────────────────
+async function _loadWeatherPanel(farm, season) {
+  const panel = document.getElementById('wx-panel');
+  const stationLabel = document.getElementById('wx-station-label');
+  if (!panel) return;
+
+  const wx = farm.settings.weather;
+  const stationId = wx.bomStationId;
+  const gddBase = wx.gddBase || 10;
+
+  if (stationLabel) stationLabel.textContent = wx.bomStationName + ' · BOM';
+
+  // Determine season start date
+  const yearStart = farm.settings?.yearStartMonth || 1;
+  const now = new Date();
+  const seasonYear = yearStart === 1 ? now.getFullYear()
+    : (now.getMonth() + 1 >= yearStart ? now.getFullYear() : now.getFullYear() - 1);
+  const startDate = `${seasonYear}-${String(yearStart).padStart(2,'0')}-01`;
+
+  // Fetch data in parallel
+  const [obsRows, overrideRows, avgRows] = await Promise.all([
+    dbSelect('weather_observations',
+      `farm_id=eq.${farm.id}&station_id=eq.${stationId}&obs_date=gte.${startDate}&order=obs_date.asc&limit=400`
+    ).catch(() => []),
+    dbSelect('weather_monthly_overrides',
+      `farm_id=eq.${farm.id}&year=gte.${seasonYear}&order=year.asc,month.asc`
+    ).catch(() => []),
+    dbSelect('weather_station_averages',
+      `station_id=eq.${stationId}&order=month.asc`
+    ).catch(() => []),
+  ]);
+
+  // Build monthly summaries
+  const months = [];
+  const today = new Date();
+  let m = yearStart;
+  let y = seasonYear;
+  while (new Date(y, m - 1, 1) <= today) {
+    const monthKey = `${y}-${String(m).padStart(2,'0')}`;
+    const monthObs = obsRows.filter(r => r.obs_date.startsWith(monthKey));
+
+    // Rainfall: check override first, then sum daily
+    const override = overrideRows.find(r => r.year === y && r.month === m);
+    const actualRain = override
+      ? { value: parseFloat(override.rainfall_mm), source: 'gauge' }
+      : { value: monthObs.reduce((s, r) => s + (parseFloat(r.rainfall_mm) || 0), 0), source: 'BOM' };
+
+    // GDD: sum of (max+min)/2 - base, floored at 0
+    const gdd = monthObs.reduce((s, r) => {
+      const avg = ((parseFloat(r.temp_max) || 0) + (parseFloat(r.temp_min) || 0)) / 2;
+      return s + Math.max(0, avg - gddBase);
+    }, 0);
+
+    // LTA
+    const lta = avgRows.find(a => a.month === m);
+
+    months.push({
+      label: new Date(y, m - 1, 1).toLocaleDateString('en-AU', { month: 'short' }),
+      month: m, year: y,
+      rain: Math.round(actualRain.value * 10) / 10,
+      rainSource: actualRain.source,
+      gdd: Math.round(gdd),
+      ltaRain: lta?.avg_rainfall_mm || null,
+      hasData: monthObs.length > 0 || !!override,
+    });
+
+    m++;
+    if (m > 12) { m = 1; y++; }
+    if (months.length > 24) break; // safety
+  }
+
+  // Totals
+  const totalRain = months.reduce((s, m) => s + (m.rain || 0), 0);
+  const totalGDD = months.reduce((s, m) => s + (m.gdd || 0), 0);
+  const ltaToDate = months.reduce((s, m) => s + (m.ltaRain || 0), 0);
+  const rainVar = ltaToDate ? totalRain - ltaToDate : null;
+  const rainVarColor = rainVar == null ? '#64748b' : rainVar >= 0 ? '#16a34a' : '#dc2626';
+
+  const hasAnyData = months.some(m => m.hasData);
+
+  // Build HTML
+  const barMax = Math.max(...months.map(m => Math.max(m.rain || 0, m.ltaRain || 0)), 10);
+  const barH = 48; // px height of bar area
+
+  panel.innerHTML = `
+    <div class="card" style="padding:12px 14px;margin-bottom:8px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px">
+        <span style="font-size:11px;color:var(--hint);text-transform:uppercase;letter-spacing:.06em">Rainfall YTD</span>
+        ${ltaToDate ? `<span style="font-size:10px;color:var(--hint)">LTA to date: ${Math.round(ltaToDate)}mm</span>` : ''}
+      </div>
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+        <span style="font-size:22px;font-weight:700;color:var(--ink)">${Math.round(totalRain)}mm</span>
+        ${rainVar != null ? `<span style="font-size:12px;font-weight:600;color:${rainVarColor}">${rainVar >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(rainVar))}mm vs avg</span>` : ''}
+      </div>
+      ${hasAnyData ? `
+      <div style="display:flex;align-items:flex-end;gap:3px;height:${barH}px;margin-bottom:6px">
+        ${months.map(m => {
+          const rainH = m.ltaRain ? Math.max(2, Math.round((m.rain / barMax) * barH)) : Math.max(2, Math.round((m.rain / barMax) * barH));
+          const ltaH  = m.ltaRain ? Math.max(1, Math.round((m.ltaRain / barMax) * barH)) : 0;
+          return `<div style="flex:1;display:flex;align-items:flex-end;gap:1px;position:relative" title="${m.label}: ${m.rain}mm actual${m.ltaRain ? ', ' + m.ltaRain + 'mm avg' : ''}${m.rainSource==='gauge' ? ' (gauge)' : ''}">
+            <div style="flex:1;height:${rainH}px;background:${m.rainSource==='gauge'?'#16a34a':'#2a78d6'};border-radius:2px 2px 0 0"></div>
+            ${ltaH ? `<div style="flex:1;height:${ltaH}px;background:#d3d1c7;border-radius:2px 2px 0 0"></div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="display:flex;gap:10px;font-size:10px;color:var(--hint)">
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#2a78d6;margin-right:3px;vertical-align:middle"></span>BOM</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#16a34a;margin-right:3px;vertical-align:middle"></span>Gauge</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#d3d1c7;margin-right:3px;vertical-align:middle"></span>30yr avg</span>
+        </div>
+        ${canWrite() ? `<button class="btn btn-secondary" id="wx-override-btn" style="font-size:10px;padding:3px 8px">✎ Override</button>` : ''}
+      </div>` : `<div style="font-size:11px;color:var(--hint)">No data yet — function runs nightly</div>`}
+    </div>
+
+    <div class="card" style="padding:12px 14px;margin-bottom:8px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px">
+        <span style="font-size:11px;color:var(--hint);text-transform:uppercase;letter-spacing:.06em">Heat units (GDD)</span>
+        <span style="font-size:10px;color:var(--hint)">Base ${gddBase}°C</span>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:10px">
+        <span style="font-size:22px;font-weight:700;color:var(--ink)">${totalGDD.toLocaleString()}</span>
+        <span style="font-size:11px;color:var(--hint)">GDD accumulated</span>
+      </div>
+      ${hasAnyData ? (() => {
+        // Cumulative GDD line
+        let cum = 0;
+        const cumPoints = months.map(m => { cum += m.gdd; return cum; });
+        const maxGDD = Math.max(...cumPoints, 1);
+        const pts = cumPoints.map((v, i) => `${Math.round((i / (cumPoints.length - 1 || 1)) * 100)},${Math.round((1 - v / maxGDD) * 40)}`).join(' ');
+        return `<svg viewBox="0 0 100 44" style="width:100%;height:44px;overflow:visible">
+          <polyline points="${pts}" fill="none" stroke="#eb6834" stroke-width="1.5" stroke-linejoin="round"/>
+          ${cumPoints.map((v, i) => {
+            const x = Math.round((i / (cumPoints.length - 1 || 1)) * 100);
+            const y = Math.round((1 - v / maxGDD) * 40);
+            return `<circle cx="${x}" cy="${y}" r="2" fill="#eb6834"/>
+              <text x="${x}" y="44" font-size="6" text-anchor="middle" fill="#888781">${months[i].label}</text>`;
+          }).join('')}
+        </svg>`;
+      })() : `<div style="font-size:11px;color:var(--hint)">No temperature data yet</div>`}
+    </div>`;
+
+  // Wire override button
+  document.getElementById('wx-override-btn')?.addEventListener('click', () => {
+    _openWeatherOverrideModal(farm, months, overrideRows, () => _loadWeatherPanel(farm, season));
+  });
+}
+
+// ── Weather override modal ────────────────────────────────────
+function _openWeatherOverrideModal(farm, months, existingOverrides, onSave) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:10px;width:100%;max-width:480px;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--ink)">Monthly rainfall overrides</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">Enter farm gauge readings to replace BOM data for a month</div>
+        </div>
+        <button id="wx-modal-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--hint)">✕</button>
+      </div>
+      <div style="padding:16px 18px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:6px 8px;color:var(--hint);font-weight:500">Month</th>
+              <th style="text-align:right;padding:6px 8px;color:var(--hint);font-weight:500">BOM</th>
+              <th style="text-align:right;padding:6px 8px;color:var(--hint);font-weight:500">Override (mm)</th>
+              <th style="padding:6px 8px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${months.map(m => {
+              const ov = existingOverrides.find(r => r.year === m.year && r.month === m.month);
+              return `<tr style="border-bottom:0.5px solid var(--border-light)">
+                <td style="padding:6px 8px;font-weight:500;color:var(--ink)">${m.label} ${m.year}</td>
+                <td style="padding:6px 8px;text-align:right;color:var(--hint)">${m.rain}mm</td>
+                <td style="padding:6px 8px;text-align:right">
+                  <input type="number" step="0.1" min="0" class="wx-override-input form-input"
+                    data-month="${m.month}" data-year="${m.year}" data-override-id="${ov?.id||''}"
+                    value="${ov ? ov.rainfall_mm : ''}" placeholder="—"
+                    style="width:80px;font-size:12px;padding:4px 6px;text-align:right">
+                </td>
+                <td style="padding:6px 8px">
+                  ${ov ? `<button class="wx-clear-btn" data-id="${ov.id}" style="background:none;border:none;color:var(--hint);cursor:pointer;font-size:11px">✕</button>` : ''}
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+        <div id="wx-override-feedback" style="margin-top:10px;font-size:11px;color:var(--hint)"></div>
+        <div style="display:flex;gap:10px;margin-top:14px">
+          <button class="btn btn-primary" id="wx-save-overrides">Save overrides</button>
+          <button class="btn btn-secondary" id="wx-modal-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#wx-modal-close').onclick = () => modal.remove();
+  modal.querySelector('#wx-modal-cancel').onclick = () => modal.remove();
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+
+  // Clear override
+  modal.querySelectorAll('.wx-clear-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const { id } = btn.dataset;
+      btn.textContent = '…';
+      await dbDelete('weather_monthly_overrides', id);
+      modal.remove();
+      await onSave();
+    });
+  });
+
+  // Save
+  modal.querySelector('#wx-save-overrides').addEventListener('click', async () => {
+    const btn = modal.querySelector('#wx-save-overrides');
+    const fb = modal.querySelector('#wx-override-feedback');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const inputs = modal.querySelectorAll('.wx-override-input');
+      const saves = [];
+      inputs.forEach(inp => {
+        const val = inp.value.trim();
+        if (!val) return;
+        const month = parseInt(inp.dataset.month);
+        const year  = parseInt(inp.dataset.year);
+        const ovId  = inp.dataset.overrideId;
+        saves.push({ id: ovId||undefined, farm_id: farm.id, year, month, rainfall_mm: parseFloat(val) });
+      });
+      if (saves.length) {
+        await dbInsert('weather_monthly_overrides', saves.length === 1 ? saves[0] : saves);
+      }
+      fb.textContent = `${saves.length} override(s) saved`;
+      fb.style.color = '#16a34a';
+      setTimeout(() => { modal.remove(); onSave(); }, 800);
+    } catch(e) {
+      fb.textContent = 'Save failed: ' + e.message;
+      fb.style.color = '#dc2626';
+      btn.disabled = false; btn.textContent = 'Save overrides';
+    }
+  });
 }

@@ -55,3 +55,6 @@
 
 [functions.push-livestock-prices]
   timeout = 30
+
+  [functions.push-weather-data]
+  timeout = 60

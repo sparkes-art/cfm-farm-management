@@ -272,7 +272,31 @@ export async function mountFarmSettings(container, onSave) {
         <hr class="divider">
 
         <div class="form-group">
-          <label class="form-label">Livestock saleyards</label>
+          <label class="form-label">Weather station</label>
+          <p class="form-helper" style="margin-bottom:12px">Search for a town to find the nearest BOM observation station. Data is fetched daily for rainfall and temperature accumulation. You can manually override monthly totals on the weather panel if you have farm gauge readings.</p>
+
+          ${settings.weather?.bomStationName ? `
+          <div style="padding:8px 12px;background:var(--page-bg);border-radius:6px;margin-bottom:10px;font-size:12px">
+            <span style="color:var(--hint)">Current: </span>
+            <span style="color:var(--ink);font-weight:600">${settings.weather.bomStationName}</span>
+            <span style="color:var(--hint)"> (${settings.weather.bomStationId})</span>
+          </div>` : ''}
+
+          <input class="form-input" id="fs-bom-search" type="text" placeholder="Search town name e.g. Boggabri, Narrabri…" style="margin-bottom:4px">
+          <div id="fs-bom-results" style="border:0.5px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:10px"></div>
+
+          <input type="hidden" id="fs-bom-geohash" value="${settings.weather?.bomGeohash||''}">
+          <input type="hidden" id="fs-bom-station-id" value="${settings.weather?.bomStationId||''}">
+          <input type="hidden" id="fs-bom-station-name" value="${settings.weather?.bomStationName||''}">
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+            <div>
+              <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:4px">GDD base temperature (°C)</label>
+              <input class="form-input" id="fs-gdd-base" type="number" value="${settings.weather?.gddBase||10}" min="0" max="20" step="0.5" style="font-size:12px">
+              <div style="font-size:10px;color:var(--hint);margin-top:3px">Default 10°C — standard for cereals and cotton</div>
+            </div>
+          </div>
+        </div>
           <p class="form-helper" style="margin-bottom:12px">Set up to three saleyards in priority order. When displaying livestock prices, the system uses the primary saleyard first — falling back to secondary, then tertiary, then the national indicator if no sales are recorded at the chosen yards.</p>
           ${['primary', 'secondary', 'tertiary'].map(priority => `
             <div style="display:grid;grid-template-columns:90px 1fr;align-items:center;gap:12px;margin-bottom:10px">
@@ -346,7 +370,17 @@ export async function mountFarmSettings(container, onSave) {
       });
       newSettings.grainWatchlist = Object.keys(grainWatchlist).length ? grainWatchlist : null;
 
-      // Save livestock saleyards
+      // Save weather station
+      const bomGeohash = qs('#fs-bom-geohash', container)?.value;
+      const bomStationId = qs('#fs-bom-station-id', container)?.value;
+      const bomStationName = qs('#fs-bom-station-name', container)?.value;
+      const gddBase = parseFloat(qs('#fs-gdd-base', container)?.value) || 10;
+      if (bomGeohash && bomStationId) {
+        newSettings.weather = { bomGeohash, bomStationId, bomStationName, gddBase };
+      } else if (settings.weather) {
+        // Keep existing weather settings, just update gddBase
+        newSettings.weather = { ...settings.weather, gddBase };
+      }
       const livestockSaleyards = {};
       container.querySelectorAll('.ls-saleyard-select').forEach(sel => {
         if (sel.value) livestockSaleyards[sel.dataset.priority] = sel.value;
@@ -396,6 +430,56 @@ export async function mountFarmSettings(container, onSave) {
   });
 
   qs('#fs-save-bottom', container)?.addEventListener('click', () => qs('#fs-save', container)?.click());
+
+  // BOM station search
+  const stationSearchEl = qs('#fs-bom-search', container);
+  const stationResultsEl = qs('#fs-bom-results', container);
+  if (stationSearchEl) {
+    let searchTimer;
+    stationSearchEl.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const q = stationSearchEl.value.trim();
+      if (q.length < 2) { stationResultsEl.innerHTML = ''; return; }
+      searchTimer = setTimeout(async () => {
+        try {
+          const res = await fetch(`https://api.weather.bom.gov.au/v1/locations?search=${encodeURIComponent(q)}`, {
+            headers: { Accept: 'application/json' }
+          });
+          const data = await res.json();
+          const locations = (data.data || []).slice(0, 5);
+          if (!locations.length) { stationResultsEl.innerHTML = '<div style="font-size:11px;color:var(--hint);padding:6px">No locations found</div>'; return; }
+
+          // For each location fetch nearest station
+          const stationDetails = await Promise.all(locations.map(async loc => {
+            const r = await fetch(`https://api.weather.bom.gov.au/v1/locations/${loc.geohash.slice(0,6)}/observations`, {
+              headers: { Accept: 'application/json' }
+            });
+            const d = await r.json();
+            return { loc, station: d.data?.station };
+          }));
+
+          stationResultsEl.innerHTML = stationDetails.map(({ loc, station }) => `
+            <div class="bom-station-option" data-geohash="${loc.geohash}" data-station-id="${station?.bom_id||''}" data-station-name="${station?.name||loc.name}" data-loc-name="${loc.name}"
+              style="padding:8px 10px;cursor:pointer;border-bottom:0.5px solid var(--border-light);font-size:12px">
+              <div style="font-weight:600;color:var(--ink)">${loc.name}, ${loc.state}</div>
+              <div style="color:var(--hint);font-size:11px">${station ? `BOM station: ${station.name} (${station.bom_id}) · ${Math.round(station.distance/1000)}km away` : 'No nearby station'}</div>
+            </div>`).join('');
+
+          stationResultsEl.querySelectorAll('.bom-station-option').forEach(el => {
+            el.addEventListener('mouseenter', () => el.style.background = 'var(--page-bg)');
+            el.addEventListener('mouseleave', () => el.style.background = '');
+            el.addEventListener('click', () => {
+              qs('#fs-bom-geohash', container).value = el.dataset.geohash;
+              qs('#fs-bom-station-id', container).value = el.dataset.stationId;
+              qs('#fs-bom-station-name', container).value = el.dataset.stationName;
+              stationSearchEl.value = el.dataset.locName + ' → ' + el.dataset.stationName;
+              stationResultsEl.innerHTML = '';
+            });
+          });
+        } catch(e) { stationResultsEl.innerHTML = `<div style="font-size:11px;color:var(--hint);padding:6px">Search failed: ${e.message}</div>`; }
+      }, 400);
+    });
+  }
 
   // Xero connection section
   const xeroSection = document.createElement('div');
