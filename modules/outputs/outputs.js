@@ -380,9 +380,10 @@ async function _mountOverview(container) {
 
     // ── Commodity position ────────────────────────────────────
     const season = getActiveSeason() || currentSeason();
-    const [contracts, invoices, budgets, harvests] = await Promise.all([
+    const [contracts, invoices, lsInvoices, budgets, harvests] = await Promise.all([
       dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=neq.head&select=id,gross_amount,total_quality_adj,total_qty,forward_contract_id,batches,status'),
+      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&master_unit=eq.head&select=id,gross_amount,total_quality_adj,total_qty,status'),
       dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
       dbSelect('harvest_entries', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     ]);
@@ -391,85 +392,158 @@ async function _mountOverview(container) {
     const commodityList2 = getCommodities();
     const idToName = {}; commodityList2.forEach(c => { idToName[c.id] = c.name; });
 
-    // Group budgets by commodity
+    // Build commodity map from budgets
     const comMap = {};
     budgets.forEach(b => {
       const name = idToName[b.commodity_id] || b.commodity || 'Other';
-      if (!comMap[name]) comMap[name] = { name, commodity_id: b.commodity_id, budArea:0, budProd:0, budPrice:0, unit: b.unit||'t', contracts:[], invoicedQty:0, invoicedRev:0, harvestedProd:0 };
-      comMap[name].budArea += parseFloat(b.area_ha)||0;
+      if (!comMap[name]) comMap[name] = {
+        name, commodity_id: b.commodity_id,
+        budProd: 0, budPrice: 0, unit: b.unit||'t',
+        contracts: [], invoicedQty: 0, invoicedRev: 0, invoicedQA: 0,
+        harvestedProd: 0, isLivestock: false,
+      };
       comMap[name].budProd += parseFloat(b.budgeted_production)||((parseFloat(b.area_ha)||0)*(parseFloat(b.budgeted_yield_per_ha||b.yield_per_ha)||0));
       comMap[name].budPrice = parseFloat(b.price)||comMap[name].budPrice;
     });
 
-    // Add contracts
+    // Contracts
     contracts.forEach(c => {
       const name = idToName[c.commodity_id] || c.commodity || 'Other';
       if (comMap[name]) comMap[name].contracts.push(c);
     });
 
-    // Add harvest actuals
+    // Harvest actuals
     harvests.forEach(h => {
       const name = idToName[h.commodity_id] || h.commodity || 'Other';
       if (comMap[name]) comMap[name].harvestedProd += parseFloat(h.actual_production)||0;
     });
 
-    // Add invoiced revenue
+    // Crop invoices
     invoices.forEach(inv => {
       const c = contracts.find(c => c.id === inv.forward_contract_id);
       if (!c) return;
       const name = idToName[c.commodity_id] || c.commodity || 'Other';
       if (!comMap[name]) return;
-      let qty = 0, rev = 0;
+      let qty = 0, rev = 0, qa = 0;
       if (inv.batches) {
         const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches;
-        b.forEach(bt => { const sl=(bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa'); if(sl.length){qty+=parseFloat(bt.qty)||0;rev+=sl.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);}});
-      } else { qty+=parseFloat(inv.total_qty)||0; rev+=(parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0); }
+        b.forEach(bt => {
+          const sl = (bt.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa');
+          const ql = (bt.lines||[]).filter(l=>l.line_type==='qa');
+          if (sl.length) { qty+=parseFloat(bt.qty)||0; rev+=sl.reduce((s,l)=>s+(parseFloat(l.amount)||0),0); }
+          qa += ql.reduce((s,l)=>s+(parseFloat(l.amount)||0),0);
+        });
+      } else {
+        qty = parseFloat(inv.total_qty)||0;
+        rev = parseFloat(inv.gross_amount)||0;
+        qa  = parseFloat(inv.total_quality_adj)||0;
+      }
       comMap[name].invoicedQty += qty;
       comMap[name].invoicedRev += rev;
+      comMap[name].invoicedQA  += qa;
     });
+
+    // Livestock invoices — add as a pseudo-commodity if any exist
+    if (lsInvoices.length) {
+      const lsName = 'Livestock';
+      if (!comMap[lsName]) comMap[lsName] = {
+        name: lsName, commodity_id: null,
+        budProd: 0, budPrice: 0, unit: 'head',
+        contracts: [], invoicedQty: 0, invoicedRev: 0, invoicedQA: 0,
+        harvestedProd: 0, isLivestock: true,
+      };
+      lsInvoices.forEach(inv => {
+        comMap[lsName].invoicedQty += parseFloat(inv.total_qty)||0;
+        comMap[lsName].invoicedRev += parseFloat(inv.gross_amount)||0;
+        comMap[lsName].invoicedQA  += parseFloat(inv.total_quality_adj)||0;
+      });
+    }
+
+    // ── Bar helper
+    const bar = (pct, color, bgColor='var(--border-light)') =>
+      '<div style="height:4px;background:'+bgColor+';border-radius:2px;margin-top:4px;overflow:hidden">' +
+      '<div style="height:100%;width:'+Math.min(100,Math.max(0,pct))+'%;background:'+color+';border-radius:2px;transition:width .3s"></div></div>';
 
     const comCards = Object.values(comMap).map(com => {
       const contractedQty = com.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0),0);
       const contractedVal = com.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
       const avgContractPrice = contractedQty ? contractedVal/contractedQty : null;
-      // Production figure — harvested > budget forecast
-      const production = com.harvestedProd || com.budProd;
-      const prodLabel = com.harvestedProd ? 'Harvested' : com.budProd ? 'Budget' : null;
-      const pctContracted = production ? Math.min(100, Math.round(contractedQty/production*100)) : null;
-      const pctInvoiced = contractedQty ? Math.min(100, Math.round(com.invoicedQty/contractedQty*100)) : null;
-      const uncontracted = Math.max(0, production - contractedQty);
+
+      // Stage: Harvest (partial or complete) > Budget
+      const harvestPct  = com.budProd ? Math.min(100, (com.harvestedProd/com.budProd)*100) : 0;
+      // Expected total = budget (best estimate of full crop; harvest fills in progressively)
+      const forecastTotal = com.budProd || com.harvestedProd;
+      const stage = com.harvestedProd > 0 && harvestPct >= 99 ? 'Harvest' :
+                    com.harvestedProd > 0 ? 'In harvest' : 'Budget';
+
+      // Sold % against forecast total
+      const soldPct = forecastTotal ? Math.min(150, (contractedQty/forecastTotal)*100) : null;
+
+      // Colour: if harvest nearly done and under 80% sold → amber/red
+      const soldColor = soldPct == null ? '#3b82f6'
+        : soldPct >= 100 ? '#16a34a'
+        : (harvestPct > 80 && soldPct < 60) ? '#dc2626'
+        : (harvestPct > 50 && soldPct < 40) ? '#d97706'
+        : '#3b82f6';
+
+      // Price to budget variance
+      const priceVar = avgContractPrice && com.budPrice ? avgContractPrice - com.budPrice : null;
+      const priceVarPct = priceVar && com.budPrice ? (priceVar/com.budPrice)*100 : null;
+      const priceVarColor = priceVar == null ? 'var(--hint)' : priceVar >= 0 ? '#16a34a' : '#dc2626';
+
+      // QA per unit
+      const qaPerUnit = com.invoicedQty ? com.invoicedQA/com.invoicedQty : null;
+      const invoicedAvgPrice = com.invoicedQty ? (com.invoicedRev/com.invoicedQty) : null;
 
       return [
-        '<div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">',
-        // Header
-        '<div style="padding:8px 14px;background:#1a2535;display:flex;align-items:center;justify-content:space-between">',
-        '<span style="font-size:12px;font-weight:600;color:white">' + com.name + '</span>',
-        prodLabel ? '<span style="font-size:10px;color:rgba(255,255,255,.5)">' + prodLabel + ' ' + fN(production) + ' ' + com.unit + '</span>' : '',
+        '<div class="card" style="padding:12px 14px;margin-bottom:8px">',
+
+        // Header row — name + stage badge + production figure
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">',
+        '<div style="display:flex;align-items:center;gap:8px">',
+        '<span style="font-size:12px;font-weight:700;color:var(--ink)">' + com.name + '</span>',
+        '<span style="font-size:9px;font-weight:600;padding:2px 6px;border-radius:10px;background:var(--page-bg);color:var(--hint)">' + stage + '</span>',
         '</div>',
-        // Stats row
-        '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:0.5px solid var(--border-light)">',
-        // Contracted
-        '<div style="padding:10px 12px;border-right:0.5px solid var(--border-light)">',
-        '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:3px">Contracted</div>',
-        '<div style="font-size:16px;font-weight:700;color:var(--ink)">' + fN(contractedQty) + ' ' + com.unit + '</div>',
-        '<div style="font-size:10px;color:var(--hint);margin-top:1px">' + fC(avgContractPrice) + '/' + com.unit + ' avg</div>',
-        pctContracted != null ? '<div style="height:3px;background:var(--border-light);border-radius:2px;margin-top:5px;overflow:hidden"><div style="height:100%;width:'+pctContracted+'%;background:#3b82f6;border-radius:2px"></div></div>' : '',
-        pctContracted != null ? '<div style="font-size:9px;color:var(--hint);margin-top:2px">'+pctContracted+'% of '+prodLabel+'</div>' : '',
+        forecastTotal ? '<span style="font-size:10px;color:var(--hint)">' + fN(forecastTotal) + ' ' + com.unit + (com.harvestedProd > 0 && com.budProd > 0 ? ' · ' + Math.round(harvestPct) + '% harvested' : '') + '</span>' : '',
         '</div>',
-        // Total contracted value
-        '<div style="padding:10px 12px;border-right:0.5px solid var(--border-light)">',
-        '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:3px">Contract value</div>',
-        '<div style="font-size:16px;font-weight:700;color:var(--ink)">' + fM(contractedVal) + '</div>',
-        uncontracted > 0 ? '<div style="font-size:10px;color:#d97706;margin-top:1px">'+fN(uncontracted)+' '+com.unit+' open</div>' : '<div style="font-size:10px;color:#16a34a;margin-top:1px">Fully contracted ✓</div>',
-        '</div>',
-        // Invoiced / paid
-        '<div style="padding:10px 12px">',
-        '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:3px">Invoiced</div>',
-        '<div style="font-size:16px;font-weight:700;color:' + (com.invoicedRev > 0 ? '#16a34a' : 'var(--ink)') + '">' + fM(com.invoicedRev) + '</div>',
-        '<div style="font-size:10px;color:var(--hint);margin-top:1px">' + fN(com.invoicedQty) + ' ' + com.unit + (pctInvoiced != null ? ' · ' + pctInvoiced + '%' : '') + '</div>',
-        pctInvoiced != null ? '<div style="height:3px;background:var(--border-light);border-radius:2px;margin-top:5px;overflow:hidden"><div style="height:100%;width:'+pctInvoiced+'%;background:#16a34a;border-radius:2px"></div></div>' : '',
-        '</div>',
-        '</div>',
+
+        // Harvest progress bar (only if in-season and partial harvest)
+        com.harvestedProd > 0 && harvestPct < 99 ? [
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1px">',
+          '<span style="font-size:10px;color:var(--hint)">Harvest progress</span>',
+          '<span style="font-size:10px;font-weight:600;color:var(--ink)">' + Math.round(harvestPct) + '% · ' + fN(com.harvestedProd) + ' ' + com.unit + '</span>',
+          '</div>',
+          bar(harvestPct, '#94a3b8'),
+        ].join('') : '',
+
+        // Fwd sold row (grain/cotton only)
+        !com.isLivestock ? [
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;margin-bottom:1px">',
+          '<span style="font-size:10px;color:var(--hint)">Fwd. sold</span>',
+          '<div style="display:flex;align-items:center;gap:8px">',
+          soldPct != null ? '<span style="font-size:10px;font-weight:600;color:'+soldColor+'">' + Math.round(soldPct) + '%</span>' : '',
+          avgContractPrice ? '<span style="font-size:10px;color:var(--ink)">' + fC(avgContractPrice) + ' avg</span>' : '',
+          priceVar != null ? '<span style="font-size:10px;font-weight:600;color:'+priceVarColor+'">' + (priceVar>=0?'▲':'▼') + ' ' + fC(Math.abs(priceVar)) + ' vs budget (' + (priceVarPct>=0?'+':'') + priceVarPct.toFixed(1) + '%)</span>' : '',
+          '</div></div>',
+          soldPct != null ? bar(soldPct, soldColor) : '',
+        ].join('') : '',
+
+        // Invoiced / paid row
+        com.invoicedRev > 0 ? [
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;margin-bottom:1px">',
+          '<span style="font-size:10px;color:var(--hint)">Invoiced / paid</span>',
+          '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">',
+          '<span style="font-size:10px;font-weight:600;color:#16a34a">' + fM(com.invoicedRev + com.invoicedQA) + '</span>',
+          com.invoicedQty ? '<span style="font-size:10px;color:var(--hint)">' + fN(com.invoicedQty) + ' ' + com.unit + '</span>' : '',
+          invoicedAvgPrice ? '<span style="font-size:10px;color:var(--ink)">' + fC(invoicedAvgPrice) + '/' + com.unit + '</span>' : '',
+          qaPerUnit != null && qaPerUnit !== 0 ? '<span style="font-size:10px;color:' + (qaPerUnit>=0?'#16a34a':'#dc2626') + '">QA ' + (qaPerUnit>=0?'+':'') + fC(qaPerUnit) + '/' + com.unit + '</span>' : '',
+          '</div></div>',
+          contractedQty ? bar(com.invoicedQty/contractedQty*100, '#16a34a') : '',
+        ].join('') : '',
+
+        // No activity yet
+        !com.isLivestock && !contractedQty && !com.invoicedRev ? '<div style="font-size:10px;color:var(--hint);margin-top:4px">No contracts or invoices yet</div>' : '',
+
         '</div>',
       ].join('');
     }).join('');
