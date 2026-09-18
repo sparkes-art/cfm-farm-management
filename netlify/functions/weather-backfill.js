@@ -15,15 +15,15 @@ export default async function handler(req) {
   const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   // Get farm coordinates and station
-  const farmRes = await fetch(`${SUPABASE_URL}/rest/v1/farms?id=eq.${farmId}&select=id,name,settings,latitude,longitude`, {
+  const farmRes = await fetch(`${SUPABASE_URL}/rest/v1/farms?id=eq.${farmId}&select=id,name,settings`, {
     headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
   });
   const farms = await farmRes.json();
   const farm = farms?.[0];
   if (!farm) return new Response('Farm not found', { status: 404 });
 
-  const lat = farm.latitude || farm.settings?.latitude;
-  const lon = farm.longitude || farm.settings?.longitude;
+  const lat = farm.settings?.latitude;
+  const lon = farm.settings?.longitude;
   const stationId = farm.settings?.weather?.bomStationId;
 
   if (!lat || !lon) return new Response('Farm has no coordinates — add latitude/longitude to farm record', { status: 400 });
