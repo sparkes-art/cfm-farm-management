@@ -617,13 +617,13 @@ async function _mountOverview(container) {
       '<h2 style="font-size:14px;font-weight:600;color:var(--ink)">Seasonal weather</h2>',
       '<span style="font-size:10px;color:var(--hint)" id="wx-station-label"></span>',
       '</div>',
-      farm.settings?.weather?.bomStationName
+      farm.settings?.latitude
         ? '<p style="font-size:10px;color:var(--hint);margin:0 0 10px">Season-to-date vs 30-year average</p>'
         : '',
       '<div id="wx-panel">',
-      farm.settings?.weather?.bomStationId
+      farm.settings?.latitude
         ? '<div style="font-size:11px;color:var(--hint);padding:12px 0">Loading weather data…</div>'
-        : '<div class="card" style="padding:16px;color:var(--hint)">No weather station configured. Add one in Farm Settings.</div>',
+        : '<div class="card" style="padding:16px;color:var(--hint)">No farm coordinates configured. Add them in Farm Settings.</div>',
       '</div>',
       '</div>',
 
@@ -631,7 +631,7 @@ async function _mountOverview(container) {
     ].join('');
 
     // Load weather panel if station configured
-    if (farm.settings?.weather?.bomStationId) {
+    if (farm.settings?.latitude && farm.settings?.longitude) {
       _loadWeatherPanel(farm, season).catch(e => {
         console.error('[weather panel error]', e.message, e.stack);
         const panel = document.getElementById('wx-panel');
@@ -1781,9 +1781,9 @@ async function _loadWeatherPanel(farm, season) {
   if (!panel) return;
 
   const wx = farm.settings.weather;
-  const stationId = wx.bomStationId;
+  const stationId = wx.bomStationId || farm.id;
   const gddBase = wx.gddBase || 10;
-  if (stationLabel) stationLabel.textContent = wx.bomStationName + ' · BOM';
+  if (stationLabel) stationLabel.textContent = (wx.locationLabel || farm.name) + ' · Open-Meteo';
 
   // Season year — derive from the active season string (e.g. "2026-27" or "2026")
   const yearStart = farm.settings?.yearStartMonth || 1;

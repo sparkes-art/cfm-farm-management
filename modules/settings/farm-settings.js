@@ -272,30 +272,44 @@ export async function mountFarmSettings(container, onSave) {
         <hr class="divider">
 
         <div class="form-group">
-          <label class="form-label">Weather station</label>
-          <p class="form-helper" style="margin-bottom:12px">Search for a town to find the nearest BOM observation station. Data is fetched daily for rainfall and temperature accumulation. You can manually override monthly totals on the weather panel if you have farm gauge readings.</p>
+          <label class="form-label">Farm location &amp; weather</label>
+          <p class="form-helper" style="margin-bottom:12px">Set the farm's coordinates for accurate weather data. Daily rainfall and temperature are fetched from Open-Meteo using these coordinates. The location label is used for display only.</p>
 
-          ${settings.weather?.bomStationName ? `
-          <div style="padding:8px 12px;background:var(--page-bg);border-radius:6px;margin-bottom:10px;font-size:12px">
-            <span style="color:var(--hint)">Current: </span>
-            <span style="color:var(--ink);font-weight:600">${settings.weather.bomStationName}</span>
-            <span style="color:var(--hint)"> (${settings.weather.bomStationId})</span>
-          </div>` : ''}
-
-          <input class="form-input" id="fs-bom-search" type="text" placeholder="Search town name e.g. Boggabri, Narrabri…" style="margin-bottom:4px">
-          <div id="fs-bom-results" style="border:0.5px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:10px"></div>
-
-          <input type="hidden" id="fs-bom-geohash" value="${settings.weather?.bomGeohash||''}">
-          <input type="hidden" id="fs-bom-station-id" value="${settings.weather?.bomStationId||''}">
-          <input type="hidden" id="fs-bom-station-name" value="${settings.weather?.bomStationName||''}">
-
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
             <div>
-              <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:4px">GDD base temperature (°C)</label>
-              <input class="form-input" id="fs-gdd-base" type="number" value="${settings.weather?.gddBase||10}" min="0" max="20" step="0.5" style="font-size:12px">
-              <div style="font-size:10px;color:var(--hint);margin-top:3px">Default 10°C — standard for cereals and cotton</div>
+              <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:4px">Latitude</label>
+              <input class="form-input" id="fs-latitude" type="number" step="0.0001" value="${settings.latitude||''}" placeholder="-30.3900">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:4px">Longitude</label>
+              <input class="form-input" id="fs-longitude" type="number" step="0.0001" value="${settings.longitude||''}" placeholder="149.7200">
             </div>
           </div>
+
+          <div style="margin-bottom:10px">
+            <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:4px">Location label (for display)</label>
+            <input class="form-input" id="fs-weather-label" type="text" value="${settings.weather?.locationLabel||settings.weather?.bomStationName||''}" placeholder="e.g. Boggabri area">
+            <div style="font-size:10px;color:var(--hint);margin-top:3px">Shown on the weather panel — doesn't affect data</div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:4px">GDD base temperature (°C)</label>
+              <input class="form-input" id="fs-gdd-base" type="number" value="${settings.weather?.gddBase||10}" min="0" max="20" step="0.5">
+              <div style="font-size:10px;color:var(--hint);margin-top:3px">Default 10°C — standard for cereals and cotton</div>
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:4px">Data source</label>
+              <div style="font-size:12px;color:var(--ink);padding:8px 0">Open-Meteo</div>
+              <div style="font-size:10px;color:var(--hint)">Free, no API key, server-accessible</div>
+            </div>
+          </div>
+
+          ${settings.latitude && settings.longitude ? `
+          <div style="margin-top:10px;padding:8px 12px;background:var(--page-bg);border-radius:6px;font-size:11px;color:var(--hint)">
+            <span style="color:var(--ink);font-weight:600">Current:</span> ${settings.latitude}, ${settings.longitude}
+            ${settings.weather?.locationLabel ? `· ${settings.weather.locationLabel}` : ''}
+          </div>` : ''}
         </div>
           <p class="form-helper" style="margin-bottom:12px">Set up to three saleyards in priority order. When displaying livestock prices, the system uses the primary saleyard first — falling back to secondary, then tertiary, then the national indicator if no sales are recorded at the chosen yards.</p>
           ${['primary', 'secondary', 'tertiary'].map(priority => `
@@ -370,17 +384,21 @@ export async function mountFarmSettings(container, onSave) {
       });
       newSettings.grainWatchlist = Object.keys(grainWatchlist).length ? grainWatchlist : null;
 
-      // Save weather station
-      const bomGeohash = qs('#fs-bom-geohash', container)?.value;
-      const bomStationId = qs('#fs-bom-station-id', container)?.value;
-      const bomStationName = qs('#fs-bom-station-name', container)?.value;
+      // Save farm location and weather settings
+      const latitude  = parseFloat(qs('#fs-latitude', container)?.value) || null;
+      const longitude = parseFloat(qs('#fs-longitude', container)?.value) || null;
+      const locationLabel = qs('#fs-weather-label', container)?.value?.trim() || null;
       const gddBase = parseFloat(qs('#fs-gdd-base', container)?.value) || 10;
-      if (bomGeohash && bomStationId) {
-        newSettings.weather = { bomGeohash, bomStationId, bomStationName, gddBase };
-      } else if (settings.weather) {
-        // Keep existing weather settings, just update gddBase
-        newSettings.weather = { ...settings.weather, gddBase };
-      }
+      if (latitude) newSettings.latitude = latitude;
+      if (longitude) newSettings.longitude = longitude;
+      newSettings.weather = {
+        ...(settings.weather || {}),
+        gddBase,
+        locationLabel: locationLabel || settings.weather?.locationLabel || null,
+        // Keep existing BOM station ID for display/reference but data comes from Open-Meteo
+        bomStationId: settings.weather?.bomStationId || null,
+        bomStationName: settings.weather?.bomStationName || null,
+      };
       const livestockSaleyards = {};
       container.querySelectorAll('.ls-saleyard-select').forEach(sel => {
         if (sel.value) livestockSaleyards[sel.dataset.priority] = sel.value;
@@ -431,55 +449,6 @@ export async function mountFarmSettings(container, onSave) {
 
   qs('#fs-save-bottom', container)?.addEventListener('click', () => qs('#fs-save', container)?.click());
 
-  // BOM station search
-  const stationSearchEl = qs('#fs-bom-search', container);
-  const stationResultsEl = qs('#fs-bom-results', container);
-  if (stationSearchEl) {
-    let searchTimer;
-    stationSearchEl.addEventListener('input', () => {
-      clearTimeout(searchTimer);
-      const q = stationSearchEl.value.trim();
-      if (q.length < 2) { stationResultsEl.innerHTML = ''; return; }
-      searchTimer = setTimeout(async () => {
-        try {
-          const res = await fetch(`https://api.weather.bom.gov.au/v1/locations?search=${encodeURIComponent(q)}`, {
-            headers: { Accept: 'application/json' }
-          });
-          const data = await res.json();
-          const locations = (data.data || []).slice(0, 5);
-          if (!locations.length) { stationResultsEl.innerHTML = '<div style="font-size:11px;color:var(--hint);padding:6px">No locations found</div>'; return; }
-
-          // For each location fetch nearest station
-          const stationDetails = await Promise.all(locations.map(async loc => {
-            const r = await fetch(`https://api.weather.bom.gov.au/v1/locations/${loc.geohash.slice(0,6)}/observations`, {
-              headers: { Accept: 'application/json' }
-            });
-            const d = await r.json();
-            return { loc, station: d.data?.station };
-          }));
-
-          stationResultsEl.innerHTML = stationDetails.map(({ loc, station }) => `
-            <div class="bom-station-option" data-geohash="${loc.geohash}" data-station-id="${station?.bom_id||''}" data-station-name="${station?.name||loc.name}" data-loc-name="${loc.name}"
-              style="padding:8px 10px;cursor:pointer;border-bottom:0.5px solid var(--border-light);font-size:12px">
-              <div style="font-weight:600;color:var(--ink)">${loc.name}, ${loc.state}</div>
-              <div style="color:var(--hint);font-size:11px">${station ? `BOM station: ${station.name} (${station.bom_id}) · ${Math.round(station.distance/1000)}km away` : 'No nearby station'}</div>
-            </div>`).join('');
-
-          stationResultsEl.querySelectorAll('.bom-station-option').forEach(el => {
-            el.addEventListener('mouseenter', () => el.style.background = 'var(--page-bg)');
-            el.addEventListener('mouseleave', () => el.style.background = '');
-            el.addEventListener('click', () => {
-              qs('#fs-bom-geohash', container).value = el.dataset.geohash;
-              qs('#fs-bom-station-id', container).value = el.dataset.stationId;
-              qs('#fs-bom-station-name', container).value = el.dataset.stationName;
-              stationSearchEl.value = el.dataset.locName + ' → ' + el.dataset.stationName;
-              stationResultsEl.innerHTML = '';
-            });
-          });
-        } catch(e) { stationResultsEl.innerHTML = `<div style="font-size:11px;color:var(--hint);padding:6px">Search failed: ${e.message}</div>`; }
-      }, 400);
-    });
-  }
 
   // Xero connection section
   const xeroSection = document.createElement('div');
