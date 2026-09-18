@@ -249,7 +249,7 @@ async function _mountOverview(container) {
         ' data-expand-crop="' + name + '"',
         ' data-expand-region="' + name + '"',
         ' data-expand-grade=""',
-        ' data-expand-comid="' + (allPrices.find(p => p.region === name)?.commodity_id || '') + '"',
+        ' data-expand-comid="' + (cattleComId || sheepComId || '') + '"',
         ' data-expand-livestock="1">',
         '<div style="display:flex;align-items:center;justify-content:space-between">',
         '<div>',
