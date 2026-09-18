@@ -1926,154 +1926,179 @@ async function _loadWeatherPanel(farm, season) {
       <div style="font-size:10px;color:#3b82f6">${tmin != null ? Math.round(tmin)+'°' : '—'}</div>
     </div>`;
 
+  // ── Render ──
+  const barGap = 2;
+  const n = allMonths.length; // always 12
+
   panel.innerHTML = `
+    <!-- Snapshot strip -->
     <div style="background:var(--page-bg);border-radius:8px;padding:8px 12px;margin-bottom:8px;border:0.5px solid var(--border)">
-      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:8px">Weather snapshot</div>
-      <div style="display:flex;align-items:stretch">
-        ${snap('Today',
-          todayObs ? parseFloat(todayObs.rainfall_mm) : null,
-          todayObs ? parseFloat(todayObs.temp_max) : null,
-          todayObs ? parseFloat(todayObs.temp_min) : null,
-          'BOM'
-        )}
-        ${snap(curLabel, curMonthRain, curMaxTemp, curMinTemp, curOverride ? 'gauge' : 'BOM')}
-        <div style="text-align:center;padding:0 8px">
-          <div style="font-size:10px;color:var(--hint);margin-bottom:4px;font-weight:600">${prevLabel}</div>
-          <div style="font-size:13px;font-weight:700;color:#2a78d6">${prevMonthRain != null ? Math.round(prevMonthRain*10)/10+'mm' : '—'}${prevOverride?' <span style="font-size:8px;color:#16a34a">●</span>':''}</div>
-          <div style="font-size:10px;color:#dc2626;margin-top:1px">${prevMaxTemp != null ? Math.round(prevMaxTemp)+'°' : '—'}</div>
-          <div style="font-size:10px;color:#3b82f6">${prevMinTemp != null ? Math.round(prevMinTemp)+'°' : '—'}</div>
-        </div>
-      </div>
-      <div style="display:flex;gap:10px;margin-top:6px;font-size:9px;color:var(--hint)">
-        <span><span style="color:#2a78d6">■</span> Rain</span>
-        <span><span style="color:#dc2626">■</span> Max °C</span>
-        <span><span style="color:#3b82f6">■</span> Min °C</span>
-        <span><span style="color:#16a34a">●</span> Gauge reading</span>
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:6px">Weather snapshot</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">
+        ${[
+          { label:'Today', rain: todayObs ? parseFloat(todayObs.rainfall_mm) : null, tmax: todayObs ? parseFloat(todayObs.temp_max) : null, tmin: todayObs ? parseFloat(todayObs.temp_min) : null, gauge: false },
+          { label: curLabel + ' total', rain: curMonthRain, tmax: curMaxTemp, tmin: curMinTemp, gauge: !!curOverride },
+          { label: prevLabel + ' total', rain: prevMonthRain, tmax: prevMaxTemp, tmin: prevMinTemp, gauge: !!prevOverride },
+        ].map(s => `
+          <div style="padding:6px 8px;background:var(--surface-2);border-radius:6px;border:0.5px solid var(--border)">
+            <div style="font-size:9px;font-weight:600;color:var(--hint);margin-bottom:4px">${s.label}${s.gauge ? ' <span style="color:#16a34a">●</span>' : ''}</div>
+            <div style="font-size:13px;font-weight:700;color:var(--ink)">${s.rain != null ? Math.round(s.rain*10)/10 + 'mm' : '—'}</div>
+            <div style="display:flex;gap:8px;margin-top:2px">
+              <span style="font-size:11px;color:#dc2626">${s.tmax != null ? Math.round(s.tmax)+'° max' : '—'}</span>
+              <span style="font-size:11px;color:#3b82f6">${s.tmin != null ? Math.round(s.tmin)+'° min' : '—'}</span>
+            </div>
+          </div>`).join('')}
       </div>
     </div>
 
+    <!-- Rainfall card -->
     <div class="card" style="padding:12px 14px;margin-bottom:8px">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px">
         <div style="display:flex;align-items:baseline;gap:8px">
-          <span style="font-size:20px;font-weight:700;color:var(--ink)">${Math.round(totalRain)}mm</span>
-          ${rainVar != null ? `<span style="font-size:11px;font-weight:600;color:${rainVarColor}">${rainVar >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(rainVar))}mm vs avg</span>` : ''}
+          <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Rainfall YTD</span>
+          <span style="font-size:18px;font-weight:700;color:var(--ink)">${Math.round(totalRain)}mm</span>
+          ${rainVar != null ? `<span style="font-size:11px;font-weight:600;color:${rainVarColor}">${rainVar >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(rainVar))}mm vs 30yr avg (${Math.round(ltaToDate)}mm)</span>` : ''}
         </div>
-        <div style="display:flex;align-items:center;gap:10px">
-          <div style="display:flex;gap:8px;font-size:10px;color:var(--hint)">
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:1px;background:#2a78d6;margin-right:3px;vertical-align:middle"></span>BOM</span>
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:1px;background:#16a34a;margin-right:3px;vertical-align:middle"></span>Gauge</span>
-            <span><span style="display:inline-block;width:8px;height:8px;border-radius:1px;background:#d3d1c7;margin-right:3px;vertical-align:middle"></span>30yr avg</span>
-            <span style="display:flex;align-items:center;gap:3px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#2a78d6" stroke-width="1.5"/></svg>Cum.</span>
-            <span style="display:flex;align-items:center;gap:3px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#b4b2a9" stroke-width="1" stroke-dasharray="3,2"/></svg>LTA cum.</span>
-          </div>
-          ${canWrite() ? `<button class="btn btn-secondary" id="wx-override-btn" style="font-size:10px;padding:3px 8px">✎ Override</button>` : ''}
-        </div>
+        ${canWrite() ? `<button class="btn btn-secondary" id="wx-override-btn" style="font-size:10px;padding:3px 8px">✎ Override</button>` : ''}
+      </div>
+      <div style="display:flex;gap:10px;font-size:10px;color:var(--hint);margin-bottom:6px;flex-wrap:wrap">
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2a78d6;vertical-align:middle;margin-right:3px"></span>BOM actual</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#16a34a;vertical-align:middle;margin-right:3px"></span>Gauge</span>
+        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#d3d1c7;vertical-align:middle;margin-right:3px"></span>30yr avg</span>
+        <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3" style="display:block"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#2a78d6" stroke-width="1.5"/></svg>Cumulative</span>
+        <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3" style="display:block"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="3,2"/></svg>LTA cumulative</span>
       </div>
 
-      ${hasData ? `<svg viewBox="0 0 ${W} ${H_RAIN}" style="width:100%;height:${H_RAIN}px;overflow:visible">
-        <!-- Left axis (monthly mm) -->
-        ${rainAxisVals.map(v => {
-          const y = PAD.top + cRainH - toBarH(v);
-          return `<text x="${PAD.left - 4}" y="${y + 3}" font-size="8" text-anchor="end" fill="#888781">${v}</text>
-            <line x1="${PAD.left}" y1="${y}" x2="${PAD.left + cW}" y2="${y}" stroke="#e1e0d9" stroke-width="0.5"/>`;
-        }).join('')}
-        <text x="10" y="${PAD.top + cRainH/2}" font-size="8" text-anchor="middle" fill="#888781" transform="rotate(-90,10,${PAD.top + cRainH/2})">mm/month</text>
+      ${hasData ? (() => {
+        // Dimensions — use viewBox so SVG scales with container
+        const VW = 400, VH = 160;
+        const P = { top: 10, right: 48, bottom: 20, left: 38 };
+        const CW = VW - P.left - P.right;
+        const CH = VH - P.top - P.bottom;
+        const BW = Math.floor(CW / n) - barGap;
+        const maxM = Math.max(...allMonths.map(m => Math.max(m.rain||0, m.ltaRain||0)), 20);
+        const maxC = Math.max(...cumAvg, ...cumActual.filter(v=>v!==null), 10);
+        const bx = i => P.left + Math.round((i/n)*CW) + 1;
+        const by = v => Math.round((v/maxM)*CH);
+        const cy = v => P.top + CH - Math.round((v/maxC)*CH);
+        const lx = i => bx(i) + BW/2;
 
-        <!-- Right axis (cumulative mm) -->
-        ${cumAxisVals.map(v => {
-          const y = toCumY(v);
-          return `<text x="${PAD.left + cW + 4}" y="${y + 3}" font-size="8" text-anchor="start" fill="#2a78d6">${v}</text>`;
-        }).join('')}
-        <text x="${W - 8}" y="${PAD.top + cRainH/2}" font-size="8" text-anchor="middle" fill="#2a78d6" transform="rotate(90,${W-8},${PAD.top + cRainH/2})">cum. mm</text>
+        const leftTicks = [0, Math.round(maxM*0.5), Math.round(maxM)];
+        const rightTicks = [0, Math.round(maxC*0.5), Math.round(maxC)];
 
-        <!-- Bars: actual rainfall -->
-        ${allMonths.map((m, i) => {
-          if (m.isFuture || m.rain === null) return '';
-          const x = toBarX(i);
-          const h = Math.max(m.rain > 0 ? 2 : 0, toBarH(m.rain));
-          const col = m.rainSource === 'gauge' ? '#16a34a' : '#2a78d6';
-          return `<rect x="${x}" y="${PAD.top + cRainH - h}" width="${barW}" height="${h}" fill="${col}" rx="1"/>`;
-        }).join('')}
+        return `<svg viewBox="0 0 ${VW} ${VH}" style="width:100%;height:${VH}px">
+          <!-- gridlines -->
+          ${leftTicks.map(v => {
+            const y = P.top + CH - by(v);
+            return `<line x1="${P.left}" y1="${y}" x2="${P.left+CW}" y2="${y}" stroke="#e8e7e0" stroke-width="0.5"/>
+              <text x="${P.left-3}" y="${y+3}" font-size="8" text-anchor="end" fill="#888781">${v}</text>`;
+          }).join('')}
+          ${rightTicks.map(v => {
+            const y = cy(v);
+            return `<text x="${P.left+CW+3}" y="${y+3}" font-size="8" text-anchor="start" fill="#2a78d6">${v}</text>`;
+          }).join('')}
+          <text x="${P.left-26}" y="${P.top+CH/2}" font-size="8" text-anchor="middle" fill="#888781" transform="rotate(-90,${P.left-26},${P.top+CH/2})">mm/mo</text>
+          <text x="${P.left+CW+38}" y="${P.top+CH/2}" font-size="8" text-anchor="middle" fill="#2a78d6" transform="rotate(90,${P.left+CW+38},${P.top+CH/2})">cum mm</text>
 
-        <!-- Bars: LTA rainfall (grey, slightly narrower, behind actual) -->
-        ${allMonths.map((m, i) => {
-          if (!m.ltaRain) return '';
-          const x = toBarX(i);
-          const h = Math.max(1, toBarH(m.ltaRain));
-          return `<rect x="${x + barW - Math.ceil(barW*0.4)}" y="${PAD.top + cRainH - h}" width="${Math.ceil(barW*0.4)}" height="${h}" fill="#d3d1c7" rx="1" opacity="0.9"/>`;
-        }).join('')}
+          <!-- LTA bars (grey) drawn first so actuals overlay -->
+          ${allMonths.map((m,i) => {
+            if (!m.ltaRain) return '';
+            const x = bx(i); const h = Math.max(1,by(m.ltaRain));
+            const barHalf = Math.ceil(BW/2);
+            return `<rect x="${x+BW-barHalf}" y="${P.top+CH-h}" width="${barHalf}" height="${h}" fill="#d3d1c7" rx="1"/>`;
+          }).join('')}
 
-        <!-- Month labels -->
-        ${allMonths.map((m, i) => {
-          const x = toBarX(i) + barW/2;
-          return `<text x="${x}" y="${PAD.top + cRainH + 14}" font-size="8" text-anchor="middle" fill="${m.isFuture ? '#c8c6be' : '#888781'}">${m.label}</text>`;
-        }).join('')}
+          <!-- Actual bars -->
+          ${allMonths.map((m,i) => {
+            if (m.isFuture || m.rain===null) return '';
+            const x = bx(i); const h = Math.max(m.rain>0?2:0, by(m.rain));
+            const col = m.rainSource==='gauge' ? '#16a34a' : '#2a78d6';
+            return `<rect x="${x}" y="${P.top+CH-h}" width="${Math.ceil(BW/2)}" height="${h}" fill="${col}" rx="1"/>`;
+          }).join('')}
 
-        <!-- Cumulative actual line -->
-        <polyline points="${cumActual.map((v, i) => v !== null ? `${toBarX(i) + barW/2},${toCumY(v)}` : '').filter(Boolean).join(' ')}"
-          fill="none" stroke="#2a78d6" stroke-width="1.5" stroke-linejoin="round"/>
+          <!-- Month labels -->
+          ${allMonths.map((m,i) => `<text x="${lx(i)}" y="${P.top+CH+13}" font-size="8" text-anchor="middle" fill="${m.isFuture?'#c8c6be':'#888781'}">${m.label}</text>`).join('')}
 
-        <!-- Cumulative LTA line (dashed) -->
-        <polyline points="${cumAvg.map((v, i) => `${toBarX(i) + barW/2},${toCumY(v)}`).join(' ')}"
-          fill="none" stroke="#b4b2a9" stroke-width="1" stroke-dasharray="3,2" stroke-linejoin="round"/>
+          <!-- Cumulative LTA line -->
+          <polyline points="${cumAvg.map((v,i)=>`${lx(i)},${cy(v)}`).join(' ')}"
+            fill="none" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="4,3" stroke-linejoin="round"/>
 
-        <!-- Baseline -->
-        <line x1="${PAD.left}" y1="${PAD.top + cRainH}" x2="${PAD.left + cW}" y2="${PAD.top + cRainH}" stroke="#c3c2b7" stroke-width="0.5"/>
-        <line x1="${PAD.left}" y1="${PAD.top}" x2="${PAD.left}" y2="${PAD.top + cRainH}" stroke="#c3c2b7" stroke-width="0.5"/>
-        <line x1="${PAD.left + cW}" y1="${PAD.top}" x2="${PAD.left + cW}" y2="${PAD.top + cRainH}" stroke="#c3c2b7" stroke-width="0.5"/>
-      </svg>` : `<div style="font-size:11px;color:var(--hint);padding:12px 0">No data yet — function runs nightly</div>`}
+          <!-- Cumulative actual line -->
+          <polyline points="${cumActual.map((v,i)=>v!==null?`${lx(i)},${cy(v)}`:null).filter(Boolean).join(' ')}"
+            fill="none" stroke="#2a78d6" stroke-width="2" stroke-linejoin="round"/>
+
+          <!-- Axes -->
+          <line x1="${P.left}" y1="${P.top}" x2="${P.left}" y2="${P.top+CH}" stroke="#c3c2b7" stroke-width="0.5"/>
+          <line x1="${P.left}" y1="${P.top+CH}" x2="${P.left+CW}" y2="${P.top+CH}" stroke="#c3c2b7" stroke-width="0.5"/>
+          <line x1="${P.left+CW}" y1="${P.top}" x2="${P.left+CW}" y2="${P.top+CH}" stroke="#c3c2b7" stroke-width="0.5"/>
+        </svg>`;
+      })() : '<div style="font-size:11px;color:var(--hint);padding:12px 0">No data yet</div>'}
     </div>
 
+    <!-- GDD card -->
     <div class="card" style="padding:12px 14px">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:2px">
         <div style="display:flex;align-items:baseline;gap:8px">
-          <span style="font-size:20px;font-weight:700;color:var(--ink)">${totalGDD.toLocaleString()}</span>
-          <span style="font-size:11px;color:var(--hint)">GDD · base ${gddBase}°C</span>
-          ${gddCumLTA[pastMonths.length - 1] ? `<span style="font-size:11px;font-weight:600;color:${totalGDD >= gddCumLTA[pastMonths.length-1] ? '#16a34a' : '#d97706'}">${totalGDD >= gddCumLTA[pastMonths.length-1] ? '▲' : '▼'} ${Math.abs(totalGDD - gddCumLTA[pastMonths.length-1])} vs avg</span>` : ''}
+          <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Heat units (GDD)</span>
+          <span style="font-size:18px;font-weight:700;color:var(--ink)">${totalGDD.toLocaleString()}</span>
+          ${(() => {
+            const ltaAtNow = gddCumLTA[pastMonths.length - 1];
+            if (!ltaAtNow) return '';
+            const diff = totalGDD - ltaAtNow;
+            const col = diff >= 0 ? '#16a34a' : '#d97706';
+            return `<span style="font-size:11px;font-weight:600;color:${col}">${diff>=0?'▲':'▼'} ${Math.abs(diff)} vs 30yr avg (${ltaAtNow})</span>`;
+          })()}
         </div>
-        <div style="display:flex;gap:8px;font-size:10px;color:var(--hint)">
-          <span style="display:flex;align-items:center;gap:3px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#eb6834" stroke-width="1.5"/></svg>${seasonYear}</span>
-          ${gddCumLTA.some(v => v > 0) ? `<span style="display:flex;align-items:center;gap:3px"><svg width="16" height="4"><line x1="0" y1="2" x2="16" y2="2" stroke="#b4b2a9" stroke-width="1" stroke-dasharray="3,2"/></svg>30yr avg</span>` : ''}
+        <div style="display:flex;gap:10px;font-size:10px;color:var(--hint)">
+          <span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3" style="display:block"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#eb6834" stroke-width="2"/></svg>${seasonYear} actual</span>
+          ${gddCumLTA.some(v=>v>0) ? `<span style="display:inline-flex;align-items:center;gap:3px"><svg width="16" height="3" style="display:block"><line x1="0" y1="1.5" x2="16" y2="1.5" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="3,2"/></svg>30yr avg</span>` : ''}
         </div>
       </div>
-      ${hasData ? `<svg viewBox="0 0 ${W} ${H_GDD}" style="width:100%;height:${H_GDD}px;overflow:visible">
-        <!-- Gridlines and left axis -->
-        ${[0, 0.25, 0.5, 0.75, 1].map(frac => {
-          const v = Math.round(maxGDD * frac);
-          const y = toGddY(v, maxGDD);
-          return `<line x1="${PAD.left}" y1="${y}" x2="${PAD.left + cW}" y2="${y}" stroke="#e1e0d9" stroke-width="0.5"/>
-            <text x="${PAD.left - 4}" y="${y + 3}" font-size="8" text-anchor="end" fill="#888781">${v}</text>`;
-        }).join('')}
+      <div style="font-size:10px;color:var(--hint);margin-bottom:6px">Base ${gddBase}°C · cumulative from ${new Date(seasonYear, yearStart-1, 1).toLocaleDateString('en-AU',{month:'short',year:'numeric'})}</div>
 
-        <!-- Month labels -->
-        ${allMonths.map((m, i) => {
-          const x = toGddX(i);
-          return `<text x="${x}" y="${PAD.top + cGddH + 14}" font-size="8" text-anchor="middle" fill="${m.isFuture ? '#c8c6be' : '#888781'}">${m.label}</text>`;
-        }).join('')}
+      ${hasData ? (() => {
+        const VW = 400, VH = 160;
+        const P = { top: 10, right: 16, bottom: 20, left: 42 };
+        const CW = VW - P.left - P.right;
+        const CH = VH - P.top - P.bottom;
+        const maxG = Math.max(...gddCumActual.filter(v=>v!==null), ...gddCumLTA, 1);
+        const gx = i => P.left + Math.round((i/(n-1))*CW);
+        const gy = v => P.top + CH - Math.round((v/maxG)*CH);
+        const ticks = [0, Math.round(maxG*0.25), Math.round(maxG*0.5), Math.round(maxG*0.75), Math.round(maxG)];
 
-        <!-- LTA GDD line (dashed grey) -->
-        ${gddCumLTA.some(v => v > 0) ? `<polyline points="${gddCumLTA.map((v, i) => `${toGddX(i)},${toGddY(v, maxGDD)}`).join(' ')}"
-          fill="none" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="4,3" stroke-linejoin="round"/>` : ''}
+        return `<svg viewBox="0 0 ${VW} ${VH}" style="width:100%;height:${VH}px">
+          ${ticks.map(v => {
+            const y = gy(v);
+            return `<line x1="${P.left}" y1="${y}" x2="${P.left+CW}" y2="${y}" stroke="#e8e7e0" stroke-width="0.5"/>
+              <text x="${P.left-4}" y="${y+3}" font-size="8" text-anchor="end" fill="#888781">${v}</text>`;
+          }).join('')}
 
-        <!-- Actual GDD line -->
-        <polyline points="${gddCumActual.map((v, i) => v !== null ? `${toGddX(i)},${toGddY(v, maxGDD)}` : '').filter(Boolean).join(' ')}"
-          fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round"/>
+          ${allMonths.map((m,i) => `<text x="${gx(i)}" y="${P.top+CH+13}" font-size="8" text-anchor="middle" fill="${m.isFuture?'#c8c6be':'#888781'}">${m.label}</text>`).join('')}
 
-        <!-- Dot at current position -->
-        ${(() => {
-          const lastIdx = gddCumActual.map((v, i) => v !== null ? i : -1).filter(i => i >= 0).pop();
-          if (lastIdx == null) return '';
-          const x = toGddX(lastIdx), y = toGddY(gddCumActual[lastIdx], maxGDD);
-          return `<circle cx="${x}" cy="${y}" r="3" fill="#eb6834"/>`;
-        })()}
+          <!-- LTA GDD dashed line -->
+          ${gddCumLTA.some(v=>v>0) ? `<polyline points="${gddCumLTA.map((v,i)=>`${gx(i)},${gy(v)}`).join(' ')}"
+            fill="none" stroke="#b4b2a9" stroke-width="1.5" stroke-dasharray="4,3" stroke-linejoin="round"/>` : ''}
 
-        <!-- Axes -->
-        <line x1="${PAD.left}" y1="${PAD.top}" x2="${PAD.left}" y2="${PAD.top + cGddH}" stroke="#c3c2b7" stroke-width="0.5"/>
-        <line x1="${PAD.left}" y1="${PAD.top + cGddH}" x2="${PAD.left + cW}" y2="${PAD.top + cGddH}" stroke="#c3c2b7" stroke-width="0.5"/>
-      </svg>` : `<div style="font-size:11px;color:var(--hint)">No temperature data yet</div>`}
+          <!-- Actual GDD line -->
+          <polyline points="${gddCumActual.map((v,i)=>v!==null?`${gx(i)},${gy(v)}`:null).filter(Boolean).join(' ')}"
+            fill="none" stroke="#eb6834" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+
+          <!-- End dot -->
+          ${(() => {
+            const idx = gddCumActual.map((v,i)=>v!==null?i:-1).filter(i=>i>=0).pop();
+            if (idx==null) return '';
+            return `<circle cx="${gx(idx)}" cy="${gy(gddCumActual[idx])}" r="3.5" fill="#eb6834"/>`;
+          })()}
+
+          <line x1="${P.left}" y1="${P.top}" x2="${P.left}" y2="${P.top+CH}" stroke="#c3c2b7" stroke-width="0.5"/>
+          <line x1="${P.left}" y1="${P.top+CH}" x2="${P.left+CW}" y2="${P.top+CH}" stroke="#c3c2b7" stroke-width="0.5"/>
+        </svg>`;
+      })() : '<div style="font-size:11px;color:var(--hint)">No temperature data yet — re-seed averages to show LTA comparison</div>'}
     </div>`;
 
   document.getElementById('wx-override-btn')?.addEventListener('click', () => {
     _openWeatherOverrideModal(farm, allMonths.filter(m => !m.isFuture), overrideRows, () => _loadWeatherPanel(farm, season));
   });
+}
+
 }
