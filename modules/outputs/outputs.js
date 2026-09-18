@@ -519,13 +519,13 @@ async function _mountOverview(container) {
         // Row 1: name + key metrics + expand
         '<div style="display:flex;align-items:center;justify-content:space-between">',
 
-        // Left: name + stage
-        '<div style="min-width:130px">',
-        '<div style="display:flex;align-items:center;gap:6px">',
+        // Left: name + stage + production (big)
+        '<div style="min-width:140px">',
+        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">',
         '<span style="font-size:12px;font-weight:700;color:var(--ink)">' + com.name + '</span>',
         '<span style="font-size:9px;color:' + stageColor + ';font-weight:600">' + stage + '</span>',
         '</div>',
-        forecastTotal ? '<div style="font-size:10px;color:var(--hint);margin-top:1px">' + fN(forecastTotal) + ' ' + com.unit + '</div>' : '',
+        forecastTotal ? '<div style="font-size:20px;font-weight:700;color:var(--ink);line-height:1">' + fN(forecastTotal) + ' <span style="font-size:11px;font-weight:400;color:var(--hint)">' + com.unit + '</span></div>' : '',
         '</div>',
 
         // Middle: key metrics
@@ -556,6 +556,14 @@ async function _mountOverview(container) {
           '<div style="text-align:center">',
           '<div style="font-size:16px;font-weight:700;color:#16a34a">' + fM(invoicedTotal) + '</div>',
           '<div style="font-size:9px;color:var(--hint)">invoiced</div>',
+          '</div>',
+        ].join('') : '',
+
+        // Unsold — key figure for managers
+        !com.isLivestock && forecastTotal ? [
+          '<div style="text-align:center">',
+          '<div style="font-size:16px;font-weight:700;color:' + (forecastTotal - contractedQty > 0 ? '#d97706' : '#16a34a') + '">' + fN(Math.max(0, forecastTotal - contractedQty)) + ' ' + com.unit + '</div>',
+          '<div style="font-size:9px;color:var(--hint)">unsold</div>',
           '</div>',
         ].join('') : '',
 
