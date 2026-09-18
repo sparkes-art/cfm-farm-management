@@ -1856,42 +1856,6 @@ async function _loadWeatherPanel(farm, season) {
     return Math.round(cumLTA);
   });
 
-  // Chart dimensions
-  const W = 340, H_RAIN = 140, H_GDD = 120;
-  const PAD = { top: 8, right: 52, bottom: 22, left: 36 };
-  const cW = W - PAD.left - PAD.right;
-  const cRainH = H_RAIN - PAD.top - PAD.bottom;
-  const cGddH  = H_GDD  - PAD.top - PAD.bottom;
-  const n = allMonths.length;
-  const barW = Math.floor(cW / n) - 2;
-
-  // Rainfall scales
-  const maxMonthly = Math.max(...allMonths.map(m => Math.max(m.rain || 0, m.ltaRain || 0)), 20);
-  const maxCum = Math.max(...cumAvg, ...cumActual.filter(v => v !== null), 10);
-
-  const toBarX = i => PAD.left + Math.round((i / n) * cW) + 1;
-  const toBarH = v => Math.round((v / maxMonthly) * cRainH);
-  const toCumY = v => PAD.top + cRainH - Math.round((v / maxCum) * cRainH);
-  const toGddX = i => PAD.left + Math.round((i / (n - 1)) * cW);
-  const toGddY = (v, max) => PAD.top + cGddH - Math.round((v / max) * cGddH);
-
-  // GDD cumulative
-  let gcum = 0, gltacum = 0;
-  const gddCumActual = allMonths.map(m => { if (!m.isFuture && m.gdd !== null) gcum += m.gdd; return m.isFuture ? null : gcum; });
-  // LTA GDD from avg temps
-  const gddCumLTA = allMonths.map(m => {
-    if (m.ltaTempMax !== null && m.ltaTempMin !== null) {
-      const days = new Date(m.year, m.month, 0).getDate();
-      gltacum += Math.max(0, ((m.ltaTempMax + m.ltaTempMin) / 2 - gddBase) * days);
-    }
-    return Math.round(gltacum);
-  });
-  const maxGDD = Math.max(...gddCumActual.filter(v => v !== null), ...gddCumLTA, 1);
-
-  // Axis label helpers
-  const rainAxisVals = [0, Math.round(maxMonthly/2), Math.round(maxMonthly)];
-  const cumAxisVals  = [0, Math.round(maxCum/2), Math.round(maxCum)];
-
   // ── Snapshot calculations ──
   const todayStr = now.toISOString().split('T')[0];
   const todayObs = obsRows.find(r => r.obs_date === todayStr);
@@ -1918,17 +1882,9 @@ async function _loadWeatherPanel(farm, season) {
   const curLabel  = now.toLocaleDateString('en-AU', { month: 'short' });
   const prevLabel = prevDate.toLocaleDateString('en-AU', { month: 'short' });
 
-  const snap = (label, rain, tmax, tmin, rainSource) => `
-    <div style="text-align:center;padding:0 8px;border-right:0.5px solid var(--border-light)">
-      <div style="font-size:10px;color:var(--hint);margin-bottom:4px;font-weight:600">${label}</div>
-      <div style="font-size:13px;font-weight:700;color:#2a78d6">${rain != null ? Math.round(rain*10)/10+'mm' : '—'}${rainSource==='gauge'?' <span style="font-size:8px;color:#16a34a">●</span>':''}</div>
-      <div style="font-size:10px;color:#dc2626;margin-top:1px">${tmax != null ? Math.round(tmax)+'°' : '—'}</div>
-      <div style="font-size:10px;color:#3b82f6">${tmin != null ? Math.round(tmin)+'°' : '—'}</div>
-    </div>`;
-
   // ── Render ──
+  const n = allMonths.length;
   const barGap = 2;
-  const n = allMonths.length; // always 12
 
   panel.innerHTML = `
     <!-- Snapshot strip -->
@@ -2099,6 +2055,4 @@ async function _loadWeatherPanel(farm, season) {
   document.getElementById('wx-override-btn')?.addEventListener('click', () => {
     _openWeatherOverrideModal(farm, allMonths.filter(m => !m.isFuture), overrideRows, () => _loadWeatherPanel(farm, season));
   });
-}
-
 }
