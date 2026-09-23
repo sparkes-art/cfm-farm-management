@@ -1867,7 +1867,9 @@ async function _loadWeatherPanel(farm, season) {
 
   // ── Snapshot calculations ──
   const todayStr = now.toISOString().split('T')[0];
-  const todayObs = obsRows.find(r => r.obs_date === todayStr);
+  const yesterdayStr = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  // Daily function stores yesterday's confirmed data (archive, not forecast)
+  const todayObs = obsRows.find(r => r.obs_date === yesterdayStr) || obsRows.find(r => r.obs_date === todayStr);
 
   const curMonthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   const curMonthObs = obsRows.filter(r => r.obs_date.startsWith(curMonthKey));
@@ -1915,7 +1917,7 @@ async function _loadWeatherPanel(farm, season) {
       <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:6px">Weather snapshot</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">
         ${[
-          { label:'Today', rain: todayObs ? parseFloat(todayObs.rainfall_mm) : null, tmax: todayObs ? parseFloat(todayObs.temp_max) : null, tmin: todayObs ? parseFloat(todayObs.temp_min) : null, gauge: false },
+          { label:'Yesterday', rain: todayObs ? parseFloat(todayObs.rainfall_mm) : null, tmax: todayObs ? parseFloat(todayObs.temp_max) : null, tmin: todayObs ? parseFloat(todayObs.temp_min) : null, gauge: false },
           { label: curLabel + ' total', rain: curMonthRain, tmax: curMaxTemp, tmin: curMinTemp, gauge: !!curOverride },
           { label: prevLabel + ' total', rain: prevMonthRain, tmax: prevMaxTemp, tmin: prevMinTemp, gauge: !!prevOverride },
         ].map(s => `

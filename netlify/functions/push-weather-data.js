@@ -42,11 +42,13 @@ async function getFarms() {
   }));
 }
 
-// Fetch today's weather from Open-Meteo forecast API
+// Fetch yesterday's confirmed data from Open-Meteo archive (not forecast)
+// Archive data is finalised — no forecast uncertainty
 async function fetchToday(lat, lon) {
-  const url = `${OM_API}?latitude=${lat}&longitude=${lon}&daily=precipitation_sum,temperature_2m_max,temperature_2m_min&timezone=Australia%2FSydney&forecast_days=1`;
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  const url = `${OM_ARCHIVE}?latitude=${lat}&longitude=${lon}&start_date=${yesterday}&end_date=${yesterday}&daily=precipitation_sum,temperature_2m_max,temperature_2m_min&timezone=Australia%2FSydney`;
   const res = await fetch(url, { headers: { 'User-Agent': 'CFM-FarmManagement/1.0' } });
-  if (!res.ok) throw new Error(`Open-Meteo forecast error: ${res.status}`);
+  if (!res.ok) throw new Error(`Open-Meteo archive error: ${res.status}`);
   const data = await res.json();
   return {
     date: data.daily.time[0],
