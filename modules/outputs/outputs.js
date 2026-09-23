@@ -244,10 +244,13 @@ async function _mountOverview(container) {
           vals.map(v=>'<div style="flex:1;height:'+Math.max(2,Math.round(((v-min)/range)*24))+'px;background:'+(v>=latest?'#16a34a':'#94a3b8')+';border-radius:1px;align-self:flex-end"></div>').join('') + '</div>';
       })() : '';
 
+      // Track which region was actually used for the data
+      const resolvedLsRegion = history.length && history[0].region ? history[0].region : name;
+
       return [
         '<div class="card" style="padding:12px 14px;margin-bottom:8px;cursor:pointer"',
         ' data-expand-crop="' + name + '"',
-        ' data-expand-region="' + name + '"',
+        ' data-expand-region="' + resolvedLsRegion + '"',
         ' data-expand-grade=""',
         ' data-expand-comid="' + (cattleComId || sheepComId || '') + '"',
         ' data-expand-livestock="1">',
