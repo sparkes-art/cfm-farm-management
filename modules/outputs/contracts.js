@@ -19,7 +19,10 @@ export async function mountContracts(container) {
         <h1>Forward Contracts</h1>
         <p class="page-subtitle">Sales contracts by crop year and commodity</p>
       </div>
-      ${canWrite() ? '<button class="btn btn-primary" id="btn-new-contract">＋ New contract</button>' : ''}
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-secondary" id="btn-export-contracts">↓ Export CSV</button>
+        ${canWrite() ? '<button class="btn btn-primary" id="btn-new-contract">＋ New contract</button>' : ''}
+      </div>
     </div>
 
     <!-- Filter panel — Excel slicer style -->
@@ -77,6 +80,7 @@ export async function mountContracts(container) {
   if (canWrite()) {
     qs('#btn-new-contract', container)?.addEventListener('click', () => openContractModal());
   }
+  qs('#btn-export-contracts', container)?.addEventListener('click', _exportCSV);
 }
 
 export function unmountContracts() {
@@ -1064,3 +1068,82 @@ function _confirmDelete(contract) {
 }
 
 function _cap(str) { return str.charAt(0).toUpperCase() + str.slice(1); }
+
+// ── CSV Export ────────────────────────────────────────────────
+function _exportCSV() {
+  const rows = _filtered();
+  if (!rows.length) { toast('No contracts to export', 'info'); return; }
+
+  const esc = v => {
+    if (v == null || v === '') return '';
+    const s = String(v);
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const headers = [
+    'Contract #', 'Commodity', 'Buyer', 'Sale Date',
+    'Quantity', 'Unit', 'Price / Unit', 'Total Value',
+    'Invoiced Qty', 'Qty To Go', 'Invoiced Value',
+    'Delivery Start', 'Delivery End', 'Season', 'Status', 'Notes',
+  ];
+
+  const csvRows = rows.map(c => {
+    const value = (parseFloat(c.quantity) || 0) * (parseFloat(c.price_per_unit) || 0);
+    const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id);
+    const invoicedQty = contractInvoices.reduce((s, i) => {
+      if (i.batches && i.batches.length) {
+        const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
+        return s + b.filter(batch => (batch.lines||[]).some(l => l.type==='income' && l.line_type!=='qa'))
+                    .reduce((ss, batch) => ss + (parseFloat(batch.qty)||0), 0);
+      }
+      const lines = (i.line_items || []).filter(l => l.type !== 'expense' && l.line_type !== 'qa');
+      const seen = new Set();
+      return s + lines.reduce((ss, l) => {
+        const key = l.docket || l.commodity || JSON.stringify(l);
+        if (seen.has(key)) return ss;
+        seen.add(key);
+        return ss + (parseFloat(l.qty)||0);
+      }, 0);
+    }, 0);
+    const invoicedValue = contractInvoices.reduce((s, i) => {
+      const lines = i.line_items || [];
+      if (lines.length) return s + lines.reduce((ss, l) => ss + (parseFloat(l.total)||0), 0);
+      return s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
+    }, 0);
+    const toGo = Math.max(0, (parseFloat(c.quantity)||0) - invoicedQty);
+    const status = c.is_complete ? 'Complete' : invoicedQty > 0 ? 'Filling' : 'Not started';
+
+    return [
+      esc(c.contract_number),
+      esc(c.commodity),
+      esc(c.counterparty),
+      esc(c.sale_date),
+      esc(c.quantity),
+      esc(c.unit),
+      esc(c.price_per_unit),
+      esc(value || ''),
+      esc(invoicedQty || ''),
+      esc(toGo),
+      esc(invoicedValue || ''),
+      esc(c.delivery_start),
+      esc(c.delivery_end),
+      esc(c.season || c.crop_year),
+      esc(status),
+      esc(c.notes),
+    ].join(',');
+  });
+
+  const csv = [headers.map(esc).join(','), ...csvRows].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const farm = getActiveFarm();
+  const date = new Date().toISOString().slice(0, 10);
+  a.download = `contracts_${farm?.id || 'export'}_${date}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast(`Exported ${rows.length} contract${rows.length !== 1 ? 's' : ''}`, 'success');
+}

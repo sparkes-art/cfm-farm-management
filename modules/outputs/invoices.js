@@ -30,7 +30,10 @@ export async function mountInvoices(container) {
           <option value="">All contracts</option>
         </select>
       </div>
-      ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New invoice</button>' : ''}
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-secondary" id="btn-export-invoices">↓ Export CSV</button>
+        ${canWrite() ? '<button class="btn btn-primary" id="btn-new-invoice">＋ New invoice</button>' : ''}
+      </div>
     </div>
 
     <div class="card" id="inv-table-wrap">
@@ -71,6 +74,7 @@ export async function mountInvoices(container) {
     qs(sel, container)?.addEventListener('change', () => _renderTable(container));
   });
   document.addEventListener('cfm:seasonchange', () => _renderTable(container));
+  qs('#btn-export-invoices', container)?.addEventListener('click', () => _exportCSV(container));
 }
 
 export function unmountInvoices() {
@@ -1753,4 +1757,82 @@ async function _callExtractLivestockAPI(file, farm) {
   const json = await res.json();
   if (!res.ok || json.error) throw new Error(json.error || 'Extraction failed');
   return json;
+}
+// ── CSV Export ────────────────────────────────────────────────
+function _exportCSV(container) {
+  const rows = _filtered().sort((a,b) => {
+    if (a.status === 'pending' && b.status !== 'pending') return -1;
+    if (a.status !== 'pending' && b.status === 'pending') return 1;
+    return 0;
+  });
+  if (!rows.length) { toast('No invoices to export', 'info'); return; }
+
+  const esc = v => {
+    if (v == null || v === '') return '';
+    const s = String(v);
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+
+  const headers = [
+    'Date', 'Invoice #', 'Sale Type', 'Buyer',
+    'Commodity', 'Season', 'Qty', 'Unit',
+    'Gross ($)', 'Quality Adj ($)', 'Total Income ($)',
+    'Xero Ref', 'Status',
+  ];
+
+  const csvRows = rows.map(inv => {
+    const lines = inv.line_items || [];
+    const contractCommodity = _contracts.find(c => c.id === inv.forward_contract_id)?.commodity;
+    const commodities = contractCommodity ||
+      [...new Set(lines.map(l => l.commodity).filter(Boolean))].join('; ') ||
+      (() => {
+        if (!inv.batches) return null;
+        const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+        const descs = [...new Set(b.flatMap(batch => (batch.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa').map(l=>l.description).filter(Boolean)))];
+        return descs.join('; ');
+      })() || inv.commodity_type || '';
+
+    let qty = '';
+    if (inv.batches && inv.batches.length) {
+      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+      qty = b.filter(x => (x.lines||[]).some(l => l.type==='income')).reduce((s,x) => s+(parseFloat(x.qty)||0), 0);
+    } else {
+      qty = inv.total_qty || '';
+    }
+
+    const gross = parseFloat(inv.gross_amount) || 0;
+    const qa = parseFloat(inv.total_quality_adj) || 0;
+    const totalIncome = gross + qa;
+    const saleType = inv.sale_type === 'against_contract' ? 'Contract' : 'Cash';
+
+    return [
+      esc(inv.invoice_date),
+      esc(inv.invoice_number),
+      esc(saleType),
+      esc(inv.buyer),
+      esc(commodities),
+      esc(inv.season),
+      esc(qty),
+      esc(inv.master_unit),
+      esc(gross || ''),
+      esc(qa || ''),
+      esc(totalIncome || ''),
+      esc(inv.xero_invoice_id),
+      esc(inv.status),
+    ].join(',');
+  });
+
+  const csv = [headers.map(esc).join(','), ...csvRows].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const farm = getActiveFarm();
+  const date = new Date().toISOString().slice(0, 10);
+  a.download = `invoices_${farm?.id || 'export'}_${date}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast(`Exported ${rows.length} invoice${rows.length !== 1 ? 's' : ''}`, 'success');
 }
