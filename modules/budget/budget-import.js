@@ -368,7 +368,10 @@ function _identifySheets(sheetNames) {
 
   for (const name of sheetNames) {
     const n = name.toLowerCase();
-    if (n.includes('master cashflow')) {
+    // TODO: generalise multi-entity merging. For now only use the OT cashflow
+    // sheet — the PT sheet only carries interest/lease income which was
+    // incorrectly appearing as cropping revenue when both sheets were merged.
+    if (n.includes('master cashflow') && n.startsWith('ot')) {
       cashflowSheets.push(name);
     } else if (SKIP.has(n) || n.includes('capex') || n.includes('pricing') || n.includes('calendar')) {
       skipped.push(name);
