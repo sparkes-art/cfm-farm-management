@@ -85,12 +85,14 @@ export async function dbSelect(table, params = '') {
 }
 
 export async function dbInsert(table, row) {
+  const bulk = Array.isArray(row) && row.length > 1;
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
     method: 'POST',
-    headers: _headers(),
+    headers: _headers(bulk ? { 'Prefer': 'return=minimal' } : {}),
     body: JSON.stringify(row),
   });
   if (!res.ok) throw new Error(`INSERT ${table} failed: ${await res.text()}`);
+  if (bulk) return;
   const rows = await res.json();
   return Array.isArray(rows) ? rows[0] : rows;
 }
@@ -141,6 +143,15 @@ export async function uploadFile(bucket, path, file) {
 
 export async function dbDelete(table, id) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`, {
+    method: 'DELETE',
+    headers: _headers({ 'Prefer': 'return=minimal' }),
+  });
+  if (!res.ok) throw new Error(`DELETE ${table} failed: ${await res.text()}`);
+}
+
+// Delete rows matching a PostgREST filter string, e.g. 'farm_id=eq.farm_blackbull&season=eq.2026-27'
+export async function dbDeleteWhere(table, params) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${params}`, {
     method: 'DELETE',
     headers: _headers({ 'Prefer': 'return=minimal' }),
   });

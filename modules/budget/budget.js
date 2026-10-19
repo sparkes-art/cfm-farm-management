@@ -6,6 +6,7 @@ import { getActiveFarm, getSession, canWrite, getFarms, getActiveSeason } from '
 import { loadCommodities, getCommodities, getCropTypes, commoditySelectHTML, initCommoditySelect, cropTypeSelectHTML, initCropTypeSelect, refreshCropTypeSelect } from '../../js/commodities.js';
 import { toast, openModal, formatNumber, formatCurrency, qs, currentSeason } from '../../js/ui.js';
 import { parseHarvestExcel, resolveCropTypes, diffHarvestImport, commitHarvestImport } from './harvest-import.js';
+import { parseBudgetExcel, showBudgetImportPreview } from './budget-import.js';
 
 let _budgets = [];
 let _forecasts = [];
@@ -36,6 +37,7 @@ export async function mountBudget(container) {
     <div class="tab-strip" style="margin-bottom:16px">
       <button class="tab-btn ${_activeTab === 'budget' ? 'active' : ''}" data-tab="budget">Budget & Forecast</button>
       <button class="tab-btn ${_activeTab === 'harvest' ? 'active' : ''}" data-tab="harvest">Harvest Records</button>
+      ${canWrite() ? `<button class="tab-btn ${_activeTab === 'upload' ? 'active' : ''}" data-tab="upload">📤 Upload Budget</button>` : ''}
     </div>
 
     <div id="bud-tab-content"></div>
@@ -80,7 +82,7 @@ function _renderTabContent(container) {
     `;
     if (canWrite()) qs('#btn-add-row', content)?.addEventListener('click', () => _addRowModal(container));
     _renderTable(container);
-  } else {
+  } else if (_activeTab === 'harvest') {
     content.innerHTML = `
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
         ${canWrite() ? `
@@ -115,7 +117,68 @@ function _renderTabContent(container) {
       });
     }
     _renderHarvest(container);
+  } else if (_activeTab === 'upload') {
+    _renderUploadTab(container);
   }
+}
+
+// ── Budget upload tab ──────────────────────────────────────────
+function _renderUploadTab(container) {
+  const content = qs('#bud-tab-content', container);
+  if (!content) return;
+
+  content.innerHTML = `
+    <div style="max-width:680px;margin:40px auto;text-align:center">
+      <div style="font-size:48px;margin-bottom:16px">📊</div>
+      <h2 style="font-size:18px;font-weight:700;margin:0 0 8px">Upload annual budget</h2>
+      <p style="font-size:13px;color:var(--hint);margin-bottom:24px;max-width:480px;margin-left:auto;margin-right:auto">
+        Select your CFM budget Excel file to import revenue forecasts and fixed cost budgets.
+        The import will preview everything before writing — you can review and cancel if needed.
+      </p>
+      <div style="border:2px dashed var(--border);border-radius:12px;padding:40px 20px;margin-bottom:20px;cursor:pointer;transition:background .15s" id="bud-drop-zone">
+        <div style="font-size:14px;color:var(--hint);margin-bottom:12px">Drop your budget .xlsx here or</div>
+        <label class="btn btn-primary" style="cursor:pointer">
+          Choose file
+          <input type="file" id="bud-upload-input" accept=".xlsx,.xls" style="display:none">
+        </label>
+      </div>
+      <p style="font-size:11px;color:var(--hint)">
+        Accepted: Excel workbooks (.xlsx, .xls) · The existing budget for the same year will be replaced
+      </p>
+    </div>
+  `;
+
+  const input = qs('#bud-upload-input', content);
+  const dropZone = qs('#bud-drop-zone', content);
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    try {
+      toast('Reading file…', 'info');
+      const parsed = await parseBudgetExcel(file);
+      // Show preview in full container, not just the tab content
+      showBudgetImportPreview(container, parsed);
+    } catch (err) {
+      toast('Could not read file: ' + err.message, 'error');
+    }
+  };
+
+  input?.addEventListener('change', e => { handleFile(e.target.files[0]); e.target.value = ''; });
+
+  dropZone?.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.background = 'var(--page-bg)'; });
+  dropZone?.addEventListener('dragleave', () => { dropZone.style.background = ''; });
+  dropZone?.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.style.background = '';
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+
+  // Listen for cancel event from preview (go back to upload tab)
+  container.addEventListener('budget-import-cancel', () => {
+    _activeTab = 'upload';
+    _renderTabContent(container);
+  }, { once: true });
 }
 
 // ── Harvest import: crop-type resolution ────────────────────────
