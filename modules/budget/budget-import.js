@@ -4,7 +4,19 @@
 //
 // Writes to two tables:
 //   budgets        — revenue by enterprise/commodity (existing table)
-//   budget_costs   — fixed cost lines by category (new table)
+//   budget_costs   — all cost lines: variable (per enterprise) + fixed (overheads)
+//
+// budget_costs schema:
+//   farm_id, financial_year, category, subcategory, enterprise,
+//   budget_code, description, cost_per_ha, area_ha, budget_amount, notes
+//
+//   category values:
+//     'variable'   — crop/livestock cost from GM sheets (enterprise is set)
+//     'overhead'   — OT/PT overheads
+//     'rm'         — OT/PT repairs & maintenance
+//     'labour'     — farm management / staffing
+//     'fund_mgmt'  — fund management overheads
+//     'finance'    — finance costs
 //
 // The import is fully previewed before anything is written.  Running it
 // again for the same farm + financial_year is safe — it clears existing
@@ -38,13 +50,22 @@
 // ── Gross Margin sheets ──────────────────────────────────────────────────
 //
 // Individual enterprise sheets (e.g. "CAVALCADE HAY", "COTTON DL") hold
-// the per-ha detail.  The parser reads these to supplement area/yield/price
-// for revenue rows where the cashflow only has totals.
+// the per-ha detail.  The parser reads these for:
+//   1. Revenue summary metrics (area, price, yield, income/ha)
+//   2. Variable cost detail — every budget code line, including $0 rows
 //
-//   Row 4 (0-indexed: 3) col H (7) — area in ha
-//   Row 6 (5)  col B/C/D — income/ha, cost/ha, return/ha
-//   Row 12 (11) col C (2) — budgeted price; col E (4) — total tonnes
-//   Row 13 (12) col C (2) — total yield (tonnes, bales, etc.)
+// Cost rows (0-indexed cols):
+//   Col A (0) — budget code (e.g. "CHEMICALS HERBICIDES", "FUEL CROPPING")
+//               Section header rows have no code and are used as subcategory labels
+//   Col B (1) — operation / product description
+//   Col H (7) — cost per ha (may be 0 — include these, manager may incur costs)
+//
+// A row is a cost line when:
+//   - col A is ALL CAPS text (the budget code)
+//   - col H is a number (including 0)
+//
+// Section grouping rows (e.g. "Field Preparations", "Harvest") appear in col G
+// as "Subtotal:" markers — we capture the section name from col A on those rows.
 //
 // ── Financial year ────────────────────────────────────────────────────────
 //
@@ -285,7 +306,46 @@ function _parseGmSheet(rows, sheetName) {
 
     const totalRevenue = (area_ha && incomePerHa) ? area_ha * incomePerHa : null;
 
-    return { name, area_ha, price, yieldPerHa, totalTonnes, totalRevenue, unit };
+    // ── Variable cost lines ──
+    // Walk all rows from row 16 (0-indexed) onward.
+    // Section header rows: col G (6) = 'Subtotal:' → col A = section name
+    // Cost rows:           col A = ALL CAPS budget code, col H (7) = cost/ha (number, may be 0)
+    const costLines = [];
+    let currentSection = null;
+    const BUDGET_CODE_RE = /^[A-Z][A-Z\s&,\/\-]+$/;  // all-caps with spaces/symbols
+
+    for (let ri = 15; ri < rows.length; ri++) {
+      const row = rows[ri] || [];
+      const colA = str(row[0]);
+      const colG = str(row[6]);
+      const colH = row[7];
+
+      // Section header — "Subtotal:" in col G
+      if (colG === 'Subtotal:') {
+        // Section name is in col A if it looks like a label (Title Case or mixed)
+        // e.g. "Field Preparations", "Harvest", "Fertiliser"
+        if (colA && !BUDGET_CODE_RE.test(colA)) {
+          currentSection = colA.trim();
+        }
+        continue;
+      }
+
+      // Cost row — col A is a budget code (ALL CAPS), col H is a number
+      if (colA && BUDGET_CODE_RE.test(colA) && colH !== null && colH !== undefined) {
+        const costPerHa = num(colH);
+        if (costPerHa === null) continue;  // non-numeric, skip
+        const desc = str(row[1]);          // col B = operation/product description
+        costLines.push({
+          budget_code:  colA.trim(),
+          description:  desc || colA.trim(),
+          subcategory:  currentSection,
+          cost_per_ha:  costPerHa,
+          // total budget cost = cost_per_ha × area_ha (calculated at consolidation time)
+        });
+      }
+    }
+
+    return { name, area_ha, price, yieldPerHa, totalTonnes, totalRevenue, unit, costLines };
   } catch {
     return null;
   }
@@ -381,7 +441,68 @@ function _consolidateRevenue(items, financialYear, farmId, gmData) {
   return rows;
 }
 
-// ── Cost consolidation ─────────────────────────────────────────────────────
+// ── Variable cost consolidation (from GM sheets) ───────────────────────────
+//
+// For each GM sheet that has costLines, emit one budget_costs row per
+// unique (enterprise, budget_code, description, subcategory) combination.
+// Rows with cost_per_ha = 0 are included — they may incur actual costs
+// during the year and are important for reconciliation.
+//
+// budget_amount = cost_per_ha × area_ha  (null when area_ha is unknown)
+//
+function _consolidateVariableCosts(gmData, financialYear, farmId) {
+  const rows = [];
+
+  for (const [, gm] of gmData) {
+    // Skip cattle and any GM without cost lines or area
+    if (!gm.costLines || !gm.costLines.length) continue;
+
+    const enterprise = gm.name;
+    const area_ha    = gm.area_ha;
+
+    // Deduplicate within the enterprise: same code + description can appear
+    // multiple times in different application passes — sum the cost/ha
+    const byKey = new Map();
+    for (const line of gm.costLines) {
+      const key = `${line.budget_code}||${line.description}||${line.subcategory || ''}`;
+      if (byKey.has(key)) {
+        byKey.get(key).cost_per_ha += (line.cost_per_ha || 0);
+      } else {
+        byKey.set(key, { ...line });
+      }
+    }
+
+    for (const line of byKey.values()) {
+      const budget_amount = (area_ha != null) ? line.cost_per_ha * area_ha : null;
+      rows.push({
+        farm_id:        farmId,
+        financial_year: financialYear,
+        category:       'variable',
+        subcategory:    line.subcategory || null,
+        enterprise:     enterprise,
+        budget_code:    line.budget_code,
+        description:    line.description,
+        cost_per_ha:    line.cost_per_ha,
+        area_ha:        area_ha,
+        budget_amount:  budget_amount,
+        notes:          null,
+      });
+    }
+  }
+
+  // Sort: by enterprise name, then subcategory, then budget_code
+  rows.sort((a, b) => {
+    const ea = a.enterprise || '', eb = b.enterprise || '';
+    if (ea !== eb) return ea.localeCompare(eb);
+    const sa = a.subcategory || '', sb = b.subcategory || '';
+    if (sa !== sb) return sa.localeCompare(sb);
+    return (a.budget_code || '').localeCompare(b.budget_code || '');
+  });
+
+  return rows;
+}
+
+// ── Fixed cost consolidation ───────────────────────────────────────────────
 function _consolidateCosts(items, financialYear, farmId) {
   // Deduplicate: sum same description+category across OT and PT entities
   const byKey = new Map();
@@ -399,7 +520,11 @@ function _consolidateCosts(items, financialYear, farmId) {
     financial_year: financialYear,
     category:       item.category,
     subcategory:    null,
+    enterprise:     null,
+    budget_code:    null,
     description:    item.description,
+    cost_per_ha:    null,
+    area_ha:        null,
     budget_amount:  item.budget_amount,
     notes:          null,
   }));
@@ -462,11 +587,24 @@ export async function parseBudgetExcel(file) {
   }
 
   // ── Consolidate (merge OT+PT, dedup) ──
-  const revenueRows = _consolidateRevenue(allRevenueItems, financialYear || 'UNKNOWN', farm.id, gmData);
-  const costRows    = _consolidateCosts(allCostItems, financialYear || 'UNKNOWN', farm.id);
+  const revenueRows      = _consolidateRevenue(allRevenueItems, financialYear || 'UNKNOWN', farm.id, gmData);
+  const fixedCostRows    = _consolidateCosts(allCostItems, financialYear || 'UNKNOWN', farm.id);
+  const variableCostRows = _consolidateVariableCosts(gmData, financialYear || 'UNKNOWN', farm.id);
+
+  // Combined cost rows: variable first (enterprise detail), then fixed
+  const costRows = [...variableCostRows, ...fixedCostRows];
 
   if (!revenueRows.length && !costRows.length) {
     allWarnings.push('No data could be extracted — check that the file matches the expected CFM budget format');
+  }
+
+  // Summary counts for preview
+  const enterprisesWithCosts = new Set(variableCostRows.map(r => r.enterprise)).size;
+  if (variableCostRows.length) {
+    allWarnings.push(
+      `ℹ ${variableCostRows.length} variable cost lines extracted across ${enterprisesWithCosts} enterprises ` +
+      `(including $0 budget rows)`
+    );
   }
 
   return {
@@ -474,6 +612,8 @@ export async function parseBudgetExcel(file) {
     financialYear,
     revenueRows,
     costRows,
+    variableCostRows,
+    fixedCostRows,
     warnings: allWarnings,
     fileName: file.name,
     sheetNames,
@@ -485,19 +625,31 @@ const fC = n => n != null ? '$' + Math.round(n).toLocaleString() : '—';
 const fN = (n, dp = 0) => n != null ? parseFloat(n).toFixed(dp) : '—';
 
 export function showBudgetImportPreview(container, parsed) {
-  const { farm, financialYear, revenueRows, costRows, warnings, fileName } = parsed;
+  const { farm, financialYear, revenueRows, costRows, variableCostRows, fixedCostRows, warnings, fileName } = parsed;
 
   const catLabels = {
-    labour:   'Labour & Farm Mgmt',
-    overhead: 'Overheads',
-    rm:       'Repairs & Maintenance',
-    fund_mgmt:'Fund Management',
-    finance:  'Finance Costs',
+    variable:  'Variable (crop/livestock)',
+    labour:    'Labour & Farm Mgmt',
+    overhead:  'Overheads',
+    rm:        'Repairs & Maintenance',
+    fund_mgmt: 'Fund Management',
+    finance:   'Finance Costs',
   };
-  const totalRev  = revenueRows.reduce((s, r) => s + (r.budgeted_gross_revenue || 0), 0);
-  const totalCost = costRows.reduce((s, r) => s + (r.budget_amount || 0), 0);
+  const totalRev       = revenueRows.reduce((s, r) => s + (r.budgeted_gross_revenue || 0), 0);
+  const totalVarCost   = (variableCostRows || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
+  const totalFixedCost = (fixedCostRows   || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
+  const totalCost      = totalVarCost + totalFixedCost;
 
-  const costByCat = costRows.reduce((acc, r) => {
+  // Group variable costs by enterprise for display
+  const varByEnterprise = {};
+  for (const r of (variableCostRows || [])) {
+    const e = r.enterprise || 'Unknown';
+    if (!varByEnterprise[e]) varByEnterprise[e] = { rows: [], total: 0 };
+    varByEnterprise[e].rows.push(r);
+    varByEnterprise[e].total += (r.budget_amount || 0);
+  }
+
+  const fixedByCat = (fixedCostRows || []).reduce((acc, r) => {
     acc[r.category] = (acc[r.category] || 0) + r.budget_amount;
     return acc;
   }, {});
@@ -525,9 +677,11 @@ export function showBudgetImportPreview(container, parsed) {
             : `<span><input id="bud-import-fy" type="text" class="input input-sm" placeholder="e.g. 2026-27" style="width:100px;display:inline-block"> <span style="color:#ef4444;font-size:11px">⚠ enter manually</span></span><span></span>`}
           <span style="color:#64748b">Cashflow sheets parsed</span><span style="color:#1e293b;font-weight:600">${parsed.sheetNames.filter(n => n.toLowerCase().includes('master cashflow')).length}</span><span></span>
           <span style="color:#64748b">Revenue rows</span><span style="color:#1e293b;font-weight:600">${revenueRows.length}</span><span></span>
-          <span style="color:#64748b">Fixed cost rows</span><span style="color:#1e293b;font-weight:600">${costRows.length}</span><span></span>
+          <span style="color:#64748b">Variable cost rows</span><span style="color:#1e293b;font-weight:600">${(variableCostRows||[]).length}</span><span></span>
+          <span style="color:#64748b">Fixed cost rows</span><span style="color:#1e293b;font-weight:600">${(fixedCostRows||[]).length}</span><span></span>
           <span style="color:#64748b">Total budget revenue</span><span style="color:#16a34a;font-weight:700">${fC(totalRev)}</span><span></span>
-          <span style="color:#64748b">Total fixed costs</span><span style="color:#dc2626;font-weight:700">${fC(totalCost)}</span><span></span>
+          <span style="color:#64748b">Total variable costs</span><span style="color:#dc2626;font-weight:700">${fC(totalVarCost)}</span><span></span>
+          <span style="color:#64748b">Total fixed costs</span><span style="color:#dc2626;font-weight:700">${fC(totalFixedCost)}</span><span></span>
         </div>
       </div>
 
@@ -582,10 +736,56 @@ export function showBudgetImportPreview(container, parsed) {
         </div>
       ` : '<div style="color:#6b7280;font-size:12px;margin-bottom:12px">⚠ No revenue rows parsed</div>'}
 
-      ${costRows.length ? `
+      ${(variableCostRows||[]).length ? `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
-          <div style="padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600">
-            Fixed costs — ${costRows.length} line items
+          <div style="padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+            <span>Variable costs by enterprise — ${(variableCostRows||[]).length} cost code lines</span>
+            <span style="color:#dc2626;font-weight:700">${fC(totalVarCost)}</span>
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <thead>
+                <tr>
+                  <th style="${th};text-align:left">Enterprise</th>
+                  <th style="${th};text-align:left">Section</th>
+                  <th style="${th};text-align:left">Budget Code</th>
+                  <th style="${th};text-align:left">Description</th>
+                  <th style="${thR}">Cost/ha</th>
+                  <th style="${thR}">Budget total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${Object.entries(varByEnterprise).map(([enterprise, { rows: erows, total: etotal }]) => `
+                  ${erows.map((r, i) => `
+                    <tr style="${i % 2 === 0 ? '' : 'background:#fafafa'}${r.budget_amount === 0 ? ';opacity:0.6' : ''}">
+                      <td style="${td};font-size:11px;color:#6b7280">${i === 0 ? enterprise : ''}</td>
+                      <td style="${td};font-size:11px;color:#9ca3af;font-style:italic">${r.subcategory || ''}</td>
+                      <td style="${td};font-size:11px;font-family:monospace;color:#374151">${r.budget_code}</td>
+                      <td style="${td};font-size:11px">${r.description}</td>
+                      <td style="${tdR};font-size:11px">${r.cost_per_ha != null ? '$' + fN(r.cost_per_ha, 2) : '—'}</td>
+                      <td style="${tdR};font-size:11px;color:${r.budget_amount ? '#dc2626' : '#9ca3af'}">${r.budget_amount != null ? (r.budget_amount === 0 ? '$0' : '-' + fC(r.budget_amount)) : '—'}</td>
+                    </tr>
+                  `).join('')}
+                  <tr style="background:#fff5f5">
+                    <td style="${td};font-weight:600;font-size:11px" colspan="5">${enterprise} total</td>
+                    <td style="${tdR};font-weight:600;color:#dc2626;font-size:11px">-${fC(etotal)}</td>
+                  </tr>
+                `).join('')}
+                <tr style="background:#fff5f5;border-top:2px solid #e5e7eb">
+                  <td style="${td};font-weight:700" colspan="5">Total variable costs</td>
+                  <td style="${tdR};color:#dc2626;font-weight:700">-${fC(totalVarCost)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : '<div style="color:#6b7280;font-size:12px;margin-bottom:12px">No variable cost rows parsed from GM sheets</div>'}
+
+      ${(fixedCostRows||[]).length ? `
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
+          <div style="padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+            <span>Fixed costs — ${(fixedCostRows||[]).length} line items</span>
+            <span style="color:#dc2626;font-weight:700">${fC(totalFixedCost)}</span>
           </div>
           <div style="overflow-x:auto">
             <table style="width:100%;border-collapse:collapse">
@@ -597,14 +797,14 @@ export function showBudgetImportPreview(container, parsed) {
                 </tr>
               </thead>
               <tbody>
-                ${costRows.map(r => `
+                ${(fixedCostRows||[]).map(r => `
                   <tr>
                     <td style="${td};color:#6b7280;font-size:11px">${catLabels[r.category] || r.category}</td>
                     <td style="${td}">${r.description}</td>
                     <td style="${tdR};color:#dc2626">-${fC(r.budget_amount)}</td>
                   </tr>
                 `).join('')}
-                ${Object.entries(costByCat).map(([cat, tot]) => `
+                ${Object.entries(fixedByCat).map(([cat, tot]) => `
                   <tr style="background:#fafafa">
                     <td style="${td};font-weight:600;color:#374151" colspan="2">${catLabels[cat] || cat} subtotal</td>
                     <td style="${tdR};font-weight:600;color:#dc2626">-${fC(tot)}</td>
@@ -612,7 +812,7 @@ export function showBudgetImportPreview(container, parsed) {
                 `).join('')}
                 <tr style="background:#fff5f5;border-top:2px solid #e5e7eb">
                   <td style="${td};font-weight:700" colspan="2">Total fixed costs</td>
-                  <td style="${tdR};color:#dc2626;font-weight:700">-${fC(totalCost)}</td>
+                  <td style="${tdR};color:#dc2626;font-weight:700">-${fC(totalFixedCost)}</td>
                 </tr>
               </tbody>
             </table>
