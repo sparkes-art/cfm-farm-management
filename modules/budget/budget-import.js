@@ -569,7 +569,18 @@ export async function parseBudgetExcel(file) {
 
   for (const sheetName of cashflowSheets) {
     const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
+    // DEBUG — log first 30 non-empty rows so we can see col layout
+    console.log(`[budget-import DEBUG] Sheet: "${sheetName}", total rows: ${rows.length}`);
+    let shown = 0;
+    for (let di = 0; di < rows.length && shown < 50; di++) {
+      const r = rows[di];
+      if (!r || !r.some(c => c != null)) continue;
+      console.log(`  row ${di}: B=${JSON.stringify(r[1])} C=${JSON.stringify(r[2])} D=${JSON.stringify(r[3])} F=${JSON.stringify(r[5])}`);
+      shown++;
+    }
     const result = _parseCashflowSheet(rows, sheetName);
+    console.log(`[budget-import DEBUG] revenueItems: ${result.revenueItems.length}`, result.revenueItems.slice(0,5));
+    console.log(`[budget-import DEBUG] costItems: ${result.costItems.length}`);
     allRevenueItems.push(...result.revenueItems);
     allCostItems.push(...result.costItems);
     allWarnings.push(...result.warnings);
