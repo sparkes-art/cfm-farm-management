@@ -132,12 +132,13 @@ function _parseCashflowSheet(rows, sheetName) {
 
     const tag  = str(row[1]);      // col B
     const desc = str(row[3]);      // col D
-    const note = str(row[4]);      // col E
     const totalRaw = row[5];       // col F — full-year total
     const total = num(totalRaw);
+    const descL = low(desc);
 
     // ── Detect transition into overhead section ──
-    if (!inOverheads && low(desc).includes(OVERHEAD_SECTION_START)) {
+    // Row 378: col D = 'OVERHEAD EXPENSES', col B = None
+    if (!inOverheads && descL.includes(OVERHEAD_SECTION_START)) {
       inOverheads = true;
       currentSection = null;
       continue;
@@ -145,31 +146,32 @@ function _parseCashflowSheet(rows, sheetName) {
 
     // ── Overhead section ──
     if (inOverheads) {
-      // Stop at CAPITAL EXPENDITURE / EARNINGS SUMMARY / FINANCE COSTS (we may want finance later)
-      if (low(desc).includes('capital expenditure') || low(desc).includes('earnings summary')) {
-        break;
-      }
+      // Stop at CAPITAL EXPENDITURE
+      if (descL.includes('capital expenditure')) break;
 
-      // Detect sub-section headers (rows with no tag and a known section name)
-      if (!tag) {
-        const descL = low(desc);
+      // Detect sub-section headers — they appear as 'E' tagged rows OR untagged rows
+      // e.g. row 379: B='E', D='OVERHEADS'
+      //      row 409: B='None', D='REPAIRS & MAINTENANCE'
+      //      row 410: B='E',    D='R & M'
+      //      row 427: B='None', D='FARM MANAGEMENT'
+      //      row 428: B='E',    D='FARM MANAGEMENT'
+      if (tag === 'E' || !tag) {
         for (const [key, cat] of Object.entries(SECTION_MAP)) {
           if (descL.includes(key)) {
             currentSection = cat;
             break;
           }
         }
-        // Finance costs — only include if you want them
         if (descL.includes('finance costs')) {
-          currentSection = 'fund_mgmt'; // group finance with fund management
+          currentSection = 'finance'; // separate finance costs category
         }
-        continue;
+        if (tag !== 'EXP') continue;
       }
 
-      // Skip subtotals and 'E' / 'H' rows
-      if (tag === 'H' || tag === 'E' || low(desc) === 'subtotal' || low(desc).startsWith('total')) continue;
+      // Skip headings and subtotals
+      if (tag === 'H' || descL === 'subtotal' || descL.startsWith('total')) continue;
 
-      // Cost line
+      // Cost line — must have EXP tag, a section, and a positive value
       if (tag === 'EXP' && currentSection && total && total > 0) {
         costItems.push({ description: desc, budget_amount: total, category: currentSection });
       }
@@ -179,23 +181,22 @@ function _parseCashflowSheet(rows, sheetName) {
 
     // ── Revenue / Income section ──
 
-    // 'E' rows mark enterprise section headers (have area in col F for enterprise E rows)
-    // Format: "COTTON DL 2024 (250.03 HA)" with area in col F when it's an 'E' row
-    if (tag === 'E') {
-      // col F on E rows is area ha (not a dollar total)
-      const area = num(totalRaw);
-      currentEnterpriseArea = (area && area > 0 && area < 100000) ? area : null;
-      continue;
-    }
-
-    // Skip headings and subtotals
+    // Skip headings, subtotals, and section dividers
     if (tag === 'H') continue;
-    if (low(desc) === 'subtotal' || low(desc).startsWith('total')) continue;
+    if (descL === 'subtotal' || descL.startsWith('total') || descL === 'farm income') continue;
 
-    // 'I' rows = income items
-    if (tag === 'I' && desc && total && total > 0) {
-      revenueItems.push({ commodity: desc, area_ha: currentEnterpriseArea, total });
-      currentEnterpriseArea = null; // area belongs to the first income line after an E row
+    // 'E' rows in the income section just mark group headers (no area on these)
+    if (tag === 'E') continue;
+
+    // Income rows: tagged 'I' OR untagged with a non-zero value in col F and a description
+    // (Some rows like RHODES HAY IRR, CORN IRR have no tag but are genuine income lines)
+    const isTaggedIncome   = tag === 'I';
+    const isUntaggedIncome = !tag && desc && total && total > 0 &&
+                             !descL.includes('subtotal') && !descL.includes('income') &&
+                             !descL.includes('expense') && !descL.includes('farming');
+
+    if ((isTaggedIncome || isUntaggedIncome) && desc && total && total > 0) {
+      revenueItems.push({ commodity: desc, area_ha: null, total });
     }
   }
 
@@ -207,37 +208,84 @@ function _parseCashflowSheet(rows, sheetName) {
 
 // ── Gross Margin sheet parser ──────────────────────────────────────────────
 //
-// Reads one enterprise GM sheet to get area, price, total yield.
-// Returns null if the sheet doesn't look like a GM sheet.
+// All cropping GM sheets follow this layout (0-indexed rows):
+//   Row 3  col 7 (H) — area in ha
+//   Row 5  col 1 (B) — income/ha
+//   Row 10 col 0 (A) — product label (e.g. "Lint:", "Grain:", "Lint:" for hay)
+//          col 2 (C) — price ($/tonne or $/unit)
+//   Row 11 col 1 (B) — "Expected Yield"; col 2 (C) — yield per ha
+//   Row 12 col 1 (B) — "Total Tonnes" or "Total Bales"; col 2 (C) — total units
+//          (RHODES HAY IRR has bales on row 12, tonnes on row 13)
+//
+// Cotton is a two-product enterprise:
+//   Row 10 — Lint price; Row 11 — Lint yield/ha
+//   Row 12 — Seed price; Row 13 — Seed yield/ha
+//   We report lint as the primary product (price/yield) since it drives value.
+//
+// Cattle GM is a different layout (no area row) — returns { name, totalRevenue } only.
+//
+// Returns null if the sheet doesn't look like a recognisable GM sheet.
 //
 function _parseGmSheet(rows, sheetName) {
   try {
-    // Row 3 (0-indexed) col 7 = area ha
-    const areaRow  = rows[3] || [];
-    const area_ha  = num(areaRow[7]);
+    // Enterprise name from row 2 (0-indexed) col A
+    const nameRow  = rows[2] || [];
+    const name     = str(nameRow[0]) || sheetName;
+
+    // ── Cattle GM — different layout ──
+    if (low(name).includes('cattle') || low(sheetName).includes('cattle gm')) {
+      // Row 4 (0-indexed) col 2 = total income; row 10 col 7 = total income
+      const totalRevenue = num((rows[4] || [])[2]) || num((rows[10] || [])[7]);
+      return { name: 'CATTLE SALES', area_ha: null, price: null, yieldPerHa: null, totalRevenue, unit: 'head' };
+    }
+
+    // ── Cropping GM ──
+    // Row 3 col 7 = area ha
+    const area_ha = num((rows[3] || [])[7]);
     if (!area_ha || area_ha <= 0) return null;
 
-    // Row 5 (0-indexed) col 1 = income/ha, col 2 = cost/ha
-    const summRow  = rows[5] || [];
-    const incomePerHa = num(summRow[1]);
+    // Row 5 col 1 = income/ha
+    const incomePerHa = num((rows[5] || [])[1]);
 
-    // Row 11 (0-indexed) col 2 = price, col 4 = total tonnes
-    const priceRow = rows[11] || [];
-    const price    = num(priceRow[2]);
-    const totalT   = num(priceRow[4]);
+    // Detect cotton (two products) vs single product
+    // Row 10 col 0: "Lint:", "Grain:", or other label
+    const productLabel = low(str((rows[10] || [])[0]));
+    const isCotton = productLabel.includes('lint') && str((rows[12] || [])[0]).toLowerCase().includes('seed');
 
-    // Row 12 (0-indexed) col 2 = reported yield (tonnes)
-    const yieldRow = rows[12] || [];
-    const totalYield = num(yieldRow[2]);
+    let price, yieldPerHa, totalTonnes, unit;
 
-    const yieldPerHa = (area_ha && totalYield) ? totalYield / area_ha : null;
-    const grossRev   = (area_ha && incomePerHa) ? area_ha * incomePerHa : null;
+    if (isCotton) {
+      // Lint (primary): row 10 col 2 = price, row 11 col 2 = yield/ha
+      // Seed:           row 12 col 2 = price, row 13 col 2 = yield/ha
+      const lintPrice    = num((rows[10] || [])[2]);
+      const lintYield    = num((rows[11] || [])[2]);  // bales/ha
+      const seedPrice    = num((rows[12] || [])[2]);
+      const seedYield    = num((rows[13] || [])[2]);  // bales/ha
 
-    // Enterprise name from row 2 col 0 (sheet name is also fine)
-    const nameCell = str((rows[2] || [])[0]) || sheetName;
-    const name = nameCell.split('(')[0].trim() || sheetName;
+      // Blended income/ha = lint price * lint yield + seed price * seed yield
+      // (use incomePerHa from summary row as the authoritative figure)
+      price      = lintPrice;   // report lint price as primary
+      yieldPerHa = lintYield;
+      totalTonnes = lintYield && area_ha ? lintYield * area_ha : null;
+      unit = 'bales/ha (lint)';
+    } else {
+      // Single product: row 10 col 2 = price, row 11 col 2 = yield/ha
+      price      = num((rows[10] || [])[2]);
+      yieldPerHa = num((rows[11] || [])[2]);
 
-    return { name, area_ha, price, yieldPerHa, grossRev };
+      // Total tonnes — row 12 col 2 for most, search rows 12-14 for first non-null numeric
+      totalTonnes = num((rows[12] || [])[2]);
+      if (!totalTonnes) totalTonnes = num((rows[13] || [])[2]);
+
+      // Determine unit from sheet name
+      unit = sheetName.toLowerCase().includes('hay') ? 't/ha' :
+             sheetName.toLowerCase().includes('corn') ? 't/ha' :
+             sheetName.toLowerCase().includes('sorghum') ? 't/ha' : 't/ha';
+    }
+
+    const totalRevenue = (area_ha && incomePerHa) ? area_ha * incomePerHa : null;
+
+    return { name, area_ha, price, yieldPerHa, totalTonnes, totalRevenue, unit };
   } catch {
     return null;
   }
@@ -265,10 +313,10 @@ function _identifySheets(sheetNames) {
     } else if (SKIP.has(n) || n.includes('capex') || n.includes('pricing') || n.includes('calendar')) {
       skipped.push(name);
     } else if (
-      // Known GM sheet patterns
+      // Known GM sheet patterns — enterprise cropping + livestock
       n.includes('hay') || n.includes('cotton') || n.includes('corn') ||
       n.includes('sorghum') || n.includes('millet') || n.includes('rhodes') ||
-      n.includes('cattle gm') || n.includes('farm mgmt') ||
+      n === 'cattle gm' || n.includes('farm mgmt') ||
       n.includes('oh + rnm') || n.includes('oh+rnm')
     ) {
       gmSheets.push(name);
@@ -282,48 +330,54 @@ function _identifySheets(sheetNames) {
 
 // ── Revenue income consolidation ───────────────────────────────────────────
 //
-// The cashflow has some income items that are carry-over (prior year crop
-// sales) which we group separately from new crop income.  We combine totals
-// across entities (OT + PT) where the same commodity appears.
+// Merges OT+PT cashflow income items and enriches with GM sheet metrics.
+// GM sheet name is matched against cashflow commodity name (case-insensitive).
 //
 function _consolidateRevenue(items, financialYear, farmId, gmData) {
-  // Merge by commodity name (case-insensitive) summing totals
-  const byName = new Map();
+  // Merge by commodity key — sum totals across OT+PT entities
+  const byKey = new Map();
   for (const item of items) {
-    const key = item.commodity.toUpperCase().replace(/\s+/g,' ');
-    if (byName.has(key)) {
-      const existing = byName.get(key);
-      existing.total = (existing.total || 0) + (item.total || 0);
-      if (!existing.area_ha && item.area_ha) existing.area_ha = item.area_ha;
+    const key = item.commodity.toUpperCase().replace(/\s+/g,' ').trim();
+    if (byKey.has(key)) {
+      byKey.get(key).total += (item.total || 0);
     } else {
-      byName.set(key, { ...item });
+      byKey.set(key, { ...item });
     }
   }
 
-  const rows = [];
-  for (const [, item] of byName) {
-    // Skip carry-over items that are essentially prior-year — these are cashflow
-    // items but still budget entries; include them under their commodity name.
-    // The commodity name contains clues: "Cavalcade" (lower case) = carry-over
-    // We'll include all and let the user review in preview.
+  // Build GM lookup: try exact key match, then partial (commodity name contains GM name or vice versa)
+  const gmLookup = (commodityKey) => {
+    if (gmData.has(commodityKey)) return gmData.get(commodityKey);
+    // Partial match — e.g. cashflow has "COTTON DL", GM sheet is "COTTON DL"
+    for (const [gmKey, gm] of gmData) {
+      if (commodityKey.includes(gmKey) || gmKey.includes(commodityKey)) return gm;
+    }
+    return null;
+  };
 
-    // Look up extra detail from GM sheets
-    const gm = gmData.get(item.commodity.toUpperCase().replace(/\s+/g,' '));
+  const rows = [];
+  for (const [key, item] of byKey) {
+    const gm = gmLookup(key);
 
     rows.push({
-      farm_id:              farmId,
-      season:               financialYear,
-      commodity:            item.commodity,
-      area_ha:              item.area_ha || (gm?.area_ha ?? null),
+      farm_id:               farmId,
+      season:                financialYear,
+      commodity:             item.commodity,
+      area_ha:               gm?.area_ha ?? null,
       budgeted_yield_per_ha: gm?.yieldPerHa ?? null,
       budgeted_price:        gm?.price ?? null,
       budgeted_gross_revenue: item.total,
-      notes: null,
+      notes:                 gm?.unit ? `Yield unit: ${gm.unit}` : null,
     });
   }
 
-  // Sort by revenue descending
-  rows.sort((a, b) => (b.budgeted_gross_revenue || 0) - (a.budgeted_gross_revenue || 0));
+  // Sort: new-season income first (all-caps names), then other/carry-over
+  rows.sort((a, b) => {
+    const aIsNew = a.commodity === a.commodity.toUpperCase();
+    const bIsNew = b.commodity === b.commodity.toUpperCase();
+    if (aIsNew !== bIsNew) return aIsNew ? -1 : 1;
+    return (b.budgeted_gross_revenue || 0) - (a.budgeted_gross_revenue || 0);
+  });
   return rows;
 }
 
@@ -394,13 +448,16 @@ export async function parseBudgetExcel(file) {
   }
 
   // ── Parse GM sheets for supplemental detail ──
-  const gmData = new Map(); // commodity key → { area_ha, price, yieldPerHa }
+  // Key by both the parsed name AND the sheet name (uppercased) for maximum matching
+  const gmData = new Map();
   for (const sheetName of gmSheets) {
     const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
     const gm = _parseGmSheet(rows, sheetName);
     if (gm) {
-      const key = gm.name.toUpperCase().replace(/\s+/g,' ');
-      gmData.set(key, gm);
+      const keyBySheet = sheetName.toUpperCase().replace(/\s+/g,' ').trim();
+      const keyByName  = gm.name.toUpperCase().replace(/\s+/g,' ').trim();
+      gmData.set(keyBySheet, gm);
+      if (keyByName !== keyBySheet) gmData.set(keyByName, gm);
     }
   }
 
@@ -435,6 +492,7 @@ export function showBudgetImportPreview(container, parsed) {
     overhead: 'Overheads',
     rm:       'Repairs & Maintenance',
     fund_mgmt:'Fund Management',
+    finance:  'Finance Costs',
   };
   const totalRev  = revenueRows.reduce((s, r) => s + (r.budgeted_gross_revenue || 0), 0);
   const totalCost = costRows.reduce((s, r) => s + (r.budget_amount || 0), 0);
@@ -491,23 +549,31 @@ export function showBudgetImportPreview(container, parsed) {
                 <tr>
                   <th style="${th};text-align:left">Enterprise / Item</th>
                   <th style="${thR}">Area (ha)</th>
+                  <th style="${thR}">Price ($/t)</th>
                   <th style="${thR}">Yield/ha</th>
-                  <th style="${thR}">Price</th>
+                  <th style="${thR}">Total tonnes</th>
+                  <th style="${thR}">Income/ha</th>
                   <th style="${thR}">Budget revenue</th>
                 </tr>
               </thead>
               <tbody>
-                ${revenueRows.map(r => `
-                  <tr>
-                    <td style="${td}">${r.commodity}</td>
+                ${revenueRows.map(r => {
+                  const totalT = (r.area_ha && r.budgeted_yield_per_ha) ? r.area_ha * r.budgeted_yield_per_ha : null;
+                  const incomeHa = (r.area_ha && r.budgeted_gross_revenue) ? r.budgeted_gross_revenue / r.area_ha : null;
+                  const isCarryOver = r.commodity !== r.commodity.toUpperCase();
+                  return `
+                  <tr style="${isCarryOver ? 'background:#fafaf9;' : ''}">
+                    <td style="${td};${isCarryOver ? 'color:#9ca3af;font-style:italic;' : ''}">${r.commodity}${isCarryOver ? ' <span style="font-size:10px">(carry-over)</span>' : ''}</td>
                     <td style="${tdR}">${fN(r.area_ha, 1)}</td>
-                    <td style="${tdR}">${r.budgeted_yield_per_ha ? fN(r.budgeted_yield_per_ha, 2) : '—'}</td>
-                    <td style="${tdR}">${r.budgeted_price ? fC(r.budgeted_price) : '—'}</td>
+                    <td style="${tdR}">${r.budgeted_price ? '$' + fN(r.budgeted_price, 0) : '—'}</td>
+                    <td style="${tdR}">${r.budgeted_yield_per_ha ? fN(r.budgeted_yield_per_ha, 1) : '—'}</td>
+                    <td style="${tdR}">${totalT ? fN(totalT, 0) + 't' : '—'}</td>
+                    <td style="${tdR}">${incomeHa ? '$' + fN(incomeHa, 0) : '—'}</td>
                     <td style="${tdR};color:#16a34a;font-weight:600">${fC(r.budgeted_gross_revenue)}</td>
-                  </tr>
-                `).join('')}
+                  </tr>`;
+                }).join('')}
                 <tr style="background:#f0fdf4;border-top:2px solid #e5e7eb">
-                  <td style="${td};font-weight:700" colspan="4">Total budget revenue</td>
+                  <td style="${td};font-weight:700" colspan="6">Total budget revenue</td>
                   <td style="${tdR};color:#16a34a;font-weight:700">${fC(totalRev)}</td>
                 </tr>
               </tbody>
