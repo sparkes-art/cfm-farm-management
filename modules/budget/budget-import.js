@@ -216,27 +216,27 @@ function _parseCashflowSheet(rows, sheetName) {
     }
 
     if (inPriorYear) {
-      // Skip heading rows
-      if (tag === 'H') continue;
-      if (descL === 'subtotal' || descL.startsWith('total')) continue;
-
-      // Enterprise sub-sections within prior year (e.g. "COTTON DL 2024 (250.03 HA)")
-      // These have B='E' and a value in col F (the area ha)
-      if (tag === 'E' && desc) {
-        pyEnterprise = desc;  // e.g. "COTTON DL 2024 (250.03 HA)"
+      // The prior year section has two layers:
+      //   Layer 1: general EXP rows (rows 45-66) — the total pool, subtotals ~$140k
+      //   Layer 2: per-enterprise breakdown of the same costs (B='E' header e.g. "COTTON DL 2024")
+      // We only capture layer 1 and stop at the first Subtotal row to avoid doubling.
+      if (descL === 'subtotal') {
+        inPriorYear = false;  // stop — layer 2 below is the same costs broken out by crop
         continue;
       }
 
-      // EXP rows = prior-year variable cost lines
-      if (tag === 'EXP' && desc && total != null) {
-        if (total > 0) {  // only capture non-zero rows for prior year
-          priorYearCostItems.push({
-            budget_code:    desc.toUpperCase().trim(),
-            description:    desc,
-            budget_amount:  total,
-            enterprise:     pyEnterprise,
-          });
-        }
+      // Skip heading rows
+      if (tag === 'H') continue;
+      if (descL.startsWith('total')) continue;
+
+      // EXP rows = prior-year variable cost lines (layer 1 only)
+      if (tag === 'EXP' && desc && total != null && total > 0) {
+        priorYearCostItems.push({
+          budget_code:    desc.toUpperCase().trim(),
+          description:    desc,
+          budget_amount:  total,
+          enterprise:     'Prior Year',
+        });
       }
       continue;
     }
