@@ -286,7 +286,7 @@ function _renderTable(container) {
             <tr style="cursor:pointer" data-id="${inv.id}">
               <td class="muted" style="font-size:11px;white-space:nowrap">
                 ${inv.invoice_date ? new Date(inv.invoice_date+'T00:00:00').toLocaleDateString('en-AU',{day:'2-digit',month:'numeric',year:'2-digit'}) : '—'}
-                ${inv.season && inv.season !== (getActiveSeason()||'') ? `<span style="font-size:9px;background:var(--blue-light);color:var(--blue-text);border-radius:3px;padding:1px 4px;margin-left:3px">${inv.season}</span>` : ''}
+                ${inv.prior_year_income ? `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;margin-left:3px;font-weight:600">Prior yr ${inv.season||''}</span>` : inv.season && inv.season !== (getActiveSeason()||'') ? `<span style="font-size:9px;background:var(--blue-light);color:var(--blue-text);border-radius:3px;padding:1px 4px;margin-left:3px">${inv.season}</span>` : ''}
               </td>
               <td><span class="badge ${inv.sale_type === 'against_contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'against_contract' ? 'Contract' : 'Cash'}</span></td>
               <td><strong>${inv.buyer || '—'}</strong></td>
@@ -898,6 +898,44 @@ export function openInvoiceForm(container, existing = null) {
         <input class="form-input" id="f-grade" type="text" value="${existing?.grade||''}" placeholder="e.g. APW1, Malt, Canola SQ">
       </div>
 
+      <!-- Prior year income toggle -->
+      ${(() => {
+        // Detect if existing invoice is already flagged as prior year
+        // (its season differs from activeSeason, or prior_year flag is set)
+        const isPriorYear = existing ? (existing.prior_year_income === true || (existing.season && existing.season !== activeSeason)) : false;
+        // Build a list of plausible prior seasons (up to 3 years back)
+        const [curY] = (activeSeason || '').split('-').map(Number);
+        const priorSeasons = curY
+          ? [1,2,3].map(n => `${curY-n}-${String(curY-n+1).slice(-2)}`)
+          : [];
+        const commodities = getCommodities();
+        return `
+        <div id="f-prior-year-wrap" style="background:#fffbeb;border:1px solid #fcd34d;border-radius:var(--radius-md);padding:12px 14px;margin-bottom:16px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+            <input type="checkbox" id="f-prior-year" style="width:16px;height:16px;cursor:pointer" ${isPriorYear?'checked':''}>
+            <span style="font-size:13px;font-weight:600;color:#92400e">Prior year income</span>
+            <span style="font-size:11px;color:#a16207;font-weight:400">— payment received this season for a prior year's crop</span>
+          </label>
+          <div id="f-prior-year-fields" style="display:${isPriorYear?'grid':'none'};grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+            <div>
+              <label class="form-label" style="font-size:11px">Prior season</label>
+              <select class="form-select" id="f-prior-season" style="font-size:13px">
+                ${priorSeasons.map(s => `<option value="${s}" ${(existing?.season||''===s)||(!existing&&s===priorSeasons[0])?'selected':''}>${s}</option>`).join('')}
+              </select>
+              <div style="font-size:10px;color:var(--hint);margin-top:3px">Which season this income belongs to</div>
+            </div>
+            <div>
+              <label class="form-label" style="font-size:11px">Commodity (prior year)</label>
+              <select class="form-select" id="f-prior-commodity" style="font-size:13px">
+                <option value="">— select commodity —</option>
+                ${commodities.map(c => `<option value="${c.name}" ${existing?.commodity_type===c.name?'selected':''}>${c.name}</option>`).join('')}
+              </select>
+              <div style="font-size:10px;color:var(--hint);margin-top:3px">Links this payment to the prior year's crop stats</div>
+            </div>
+          </div>
+        </div>`;
+      })()}
+
       <!-- Quantities and amounts -->
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
         <div class="form-group" style="margin:0">
@@ -1172,6 +1210,13 @@ export function openInvoiceForm(container, existing = null) {
   modal.querySelector('#f-qa').addEventListener('input', recalcTotals);
   recalcTotals();
 
+  // ── Prior year toggle ────────────────────────────────────────
+  const priorYearCb = modal.querySelector('#f-prior-year');
+  const priorYearFields = modal.querySelector('#f-prior-year-fields');
+  priorYearCb?.addEventListener('change', () => {
+    priorYearFields.style.display = priorYearCb.checked ? 'grid' : 'none';
+  });
+
   // ── Save ─────────────────────────────────────────────────────
   modal.querySelector('#f-save').addEventListener('click', async () => {
     const btn = modal.querySelector('#f-save');
@@ -1188,6 +1233,11 @@ export function openInvoiceForm(container, existing = null) {
       const contractId = contractHidden?.value || null;
       const selectedContract = _contracts.find(c => c.id === contractId);
       const notes = modal.querySelector('#f-notes')?.value?.trim() || '';
+
+      // Prior year handling
+      const isPriorYear = modal.querySelector('#f-prior-year')?.checked || false;
+      const priorSeason = isPriorYear ? (modal.querySelector('#f-prior-season')?.value || '') : '';
+      const priorCommodity = isPriorYear ? (modal.querySelector('#f-prior-commodity')?.value || '') : '';
 
       if (!date) throw new Error('Please enter a date');
       if (!buyer) throw new Error('Please enter a buyer');
@@ -1216,12 +1266,18 @@ export function openInvoiceForm(container, existing = null) {
 
       // Build batch structure
       const lines = [];
-      const commodity = selectedContract?.commodity || 'Sale';
+      // Prior year income: use the prior commodity name (mixed-case = carry-over in management report)
+      // Regular: use the linked contract's commodity
+      const commodity = isPriorYear
+        ? (priorCommodity || selectedContract?.commodity || 'Prior year income')
+        : (selectedContract?.commodity || 'Sale');
+
       if (gross) lines.push({ type:'income', line_type:'sale', description:commodity, amount:gross, eff_per_unit: qty ? Math.round(gross/qty*10000)/10000 : null });
       if (qa) lines.push({ type:'income', line_type:'qa', description:'Quality adjustment', amount:qa, eff_per_unit: qty ? Math.round(qa/qty*10000)/10000 : null });
 
-      const cropYear = selectedContract?.crop_year || activeSeason;
-      const batch = { qty, crop_year:cropYear, income_files:rctiFiles, lines };
+      // Prior year income: season = prior season (e.g. 2024-25); current invoice date stays as-is
+      const cropYear = isPriorYear ? priorSeason : (selectedContract?.crop_year || activeSeason);
+      const batch = { qty, crop_year: cropYear, income_files: rctiFiles, lines };
 
       const row = {
         farm_id: farm.id,
@@ -1232,6 +1288,8 @@ export function openInvoiceForm(container, existing = null) {
         gst_type: 'ex',
         master_unit: masterUnit,
         season: cropYear,
+        commodity_type: isPriorYear ? commodity : (selectedContract?.commodity || null),
+        prior_year_income: isPriorYear || null,
         batches: [batch],
         total_qty: qty,
         gross_amount: gross,
