@@ -84,6 +84,9 @@ async function _render(container) {
   // They show in whatever season report the user is currently viewing — the user
   // explicitly tagged them, so no date filtering needed.
   const priorYearInvoices = allInvoices.filter(isPriorYearInv);
+  console.log('[MgmtReport] allInvoices:', allInvoices.length, 'seasonInvoices:', seasonInvoices.length, 'priorYearInvoices:', priorYearInvoices.length);
+  if (priorYearInvoices.length) console.log('[MgmtReport] priorYearInvoices detail:', priorYearInvoices.map(i=>({ id:i.id?.slice(0,8), season:i.season, date:i.invoice_date, batches: (typeof i.batches==='string'?JSON.parse(i.batches):i.batches||[]).map(b=>({crop_year:b.crop_year,prior_year_income:b.prior_year_income,lines:(b.lines||[]).map(l=>l.description)})) })));
+  else console.log('[MgmtReport] No prior year invoices found — checking all batches:', allInvoices.map(i=>({ id:i.id?.slice(0,8), season:i.season, hasBatches:!!i.batches, batchSample: i.batches?(typeof i.batches==='string'?JSON.parse(i.batches):i.batches).slice(0,1):[] })));
 
   const fC  = n  => n != null ? formatCurrency(n, 0) : '—';
   const fN  = (n, dp=0) => n != null && n !== 0 ? formatNumber(n, dp) : '—';
