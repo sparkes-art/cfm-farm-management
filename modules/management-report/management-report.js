@@ -147,20 +147,26 @@ async function _render(container) {
   });
 
   // ── Budget for a commodity group ───────────────────────────────────────────
+  // Helper: read a budget field that may be stored under two naming conventions.
+  // Budget-module rows use plain names (yield_per_ha, price); imported rows use budgeted_ prefix.
+  const bField = (b, plain, prefixed) => parseFloat(b[prefixed] ?? b[plain]) || 0;
+
   const budgetForGroup = (g, opts = {}) => {
     if (!g.budgets.length) return { bIncome: null, bYTD: null, bArea: null, bYield: null, bPrice: null, bProd: null };
     if (opts.carryOver) {
-      const bIncome = g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_gross_revenue)||0), 0) || null;
+      const bIncome = g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_gross_revenue)||bField(b,'price','budgeted_price') * (parseFloat(b.budgeted_production)||bField(b,'yield_per_ha','budgeted_yield_per_ha') * (parseFloat(b.area_ha)||0))||0), 0) || null;
       const bYTD    = bIncome != null ? bIncome * ytdFraction : null;
       return { bIncome, bYTD, bArea: null, bYield: null, bProd: null, bPrice: null };
     }
     const bArea   = g.budgets.reduce((s, b) => s + (parseFloat(b.area_ha)||0), 0);
     const bYield  = bArea
-      ? g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_yield_per_ha)||0) * (parseFloat(b.area_ha)||0), 0) / bArea
+      ? g.budgets.reduce((s, b) => s + bField(b,'yield_per_ha','budgeted_yield_per_ha') * (parseFloat(b.area_ha)||0), 0) / bArea
       : 0;
-    const bProd   = bArea && bYield ? Math.round(bArea * bYield) : null;
-    const bPrice  = g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_price)||0), 0) / g.budgets.length;
-    const bIncome = bProd && bPrice ? bProd * bPrice : g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_gross_revenue)||0), 0) || null;
+    const bProd   = bArea && bYield ? Math.round(bArea * bYield) : g.budgets.reduce((s,b)=>s+(parseFloat(b.budgeted_production)||0),0)||null;
+    const bPrice  = g.budgets.reduce((s, b) => s + bField(b,'price','budgeted_price'), 0) / g.budgets.length;
+    const bIncome = (bProd && bPrice)
+      ? bProd * bPrice
+      : g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_gross_revenue)||0), 0) || null;
     const bYTD    = bIncome != null ? bIncome * ytdFraction : null;
     return { bIncome, bYTD, bArea, bYield, bProd, bPrice };
   };
