@@ -286,7 +286,7 @@ function _renderTable(container) {
             <tr style="cursor:pointer" data-id="${inv.id}">
               <td class="muted" style="font-size:11px;white-space:nowrap">
                 ${inv.invoice_date ? new Date(inv.invoice_date+'T00:00:00').toLocaleDateString('en-AU',{day:'2-digit',month:'numeric',year:'2-digit'}) : '—'}
-                ${inv.prior_year_income ? `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;margin-left:3px;font-weight:600">Prior yr ${inv.season||''}</span>` : inv.season && inv.season !== (getActiveSeason()||'') ? `<span style="font-size:9px;background:var(--blue-light);color:var(--blue-text);border-radius:3px;padding:1px 4px;margin-left:3px">${inv.season}</span>` : ''}
+                ${(() => { const b = inv.batches ? (typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches) : []; const isPY = b.some(x=>x.prior_year_income); return isPY ? `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;margin-left:3px;font-weight:600">Prior yr ${inv.season||''}</span>` : inv.season && inv.season !== (getActiveSeason()||'') ? `<span style="font-size:9px;background:var(--blue-light);color:var(--blue-text);border-radius:3px;padding:1px 4px;margin-left:3px">${inv.season}</span>` : ''; })()}
               </td>
               <td><span class="badge ${inv.sale_type === 'against_contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'against_contract' ? 'Contract' : 'Cash'}</span></td>
               <td><strong>${inv.buyer || '—'}</strong></td>
@@ -902,7 +902,7 @@ export function openInvoiceForm(container, existing = null) {
       ${(() => {
         // Detect if existing invoice is already flagged as prior year
         // (its season differs from activeSeason, or prior_year flag is set)
-        const isPriorYear = existing ? (existing.prior_year_income === true || (existing.season && existing.season !== activeSeason)) : false;
+        const isPriorYear = existing ? (() => { const b = existing.batches ? (typeof existing.batches==='string'?JSON.parse(existing.batches):existing.batches) : []; return b.some(x=>x.prior_year_income) || (existing.season && existing.season !== activeSeason); })() : false;
         // Build a list of plausible prior seasons (up to 3 years back)
         const [curY] = (activeSeason || '').split('-').map(Number);
         const priorSeasons = curY
@@ -1277,7 +1277,7 @@ export function openInvoiceForm(container, existing = null) {
 
       // Prior year income: season = prior season (e.g. 2024-25); current invoice date stays as-is
       const cropYear = isPriorYear ? priorSeason : (selectedContract?.crop_year || activeSeason);
-      const batch = { qty, crop_year: cropYear, income_files: rctiFiles, lines };
+      const batch = { qty, crop_year: cropYear, income_files: rctiFiles, lines, ...(isPriorYear ? { prior_year_income: true } : {}) };
 
       const row = {
         farm_id: farm.id,
@@ -1288,7 +1288,6 @@ export function openInvoiceForm(container, existing = null) {
         gst_type: 'ex',
         master_unit: masterUnit,
         season: cropYear,
-        prior_year_income: isPriorYear || null,
         batches: [batch],
         total_qty: qty,
         gross_amount: gross,
