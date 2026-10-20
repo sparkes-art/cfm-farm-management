@@ -923,6 +923,8 @@ function _consolidatePriorYearCosts(items, financialYear, farmId) {
     budget_code:    item.budget_code,
     description:    item.description,
     cost_per_ha:    null,    // no ha basis — this is a cashflow total
+    unit_price:     null,
+    unit:           null,
     area_ha:        null,
     budget_amount:  item.budget_amount,
     notes:          'Prior year crop expenses (from OT cashflow)',
@@ -955,6 +957,8 @@ function _consolidateCosts(items, financialYear, farmId) {
     budget_code:    null,
     description:    item.description,
     cost_per_ha:    null,
+    unit_price:     null,
+    unit:           null,
     area_ha:        null,
     budget_amount:  item.budget_amount,
     notes:          null,
