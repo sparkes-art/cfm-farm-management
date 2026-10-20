@@ -38,11 +38,14 @@ async function _render(container) {
   // Season start month from farm settings (1-based); default July for most farms, Oct for Blackbull
   const yearStartMonth      = farm.settings?.yearStartMonth || 7;
   const seasonStartMonthIdx = yearStartMonth - 1; // 0-based for Date comparison
-  // Months elapsed since start of this season
+  // Months elapsed since start of this season — count the current partial month as 1
+  // e.g. for an October-start farm in October: 0 complete months + we're in month 1 → show 1/12
   let monthsElapsed = (now.getFullYear() - seasonYear) * 12 + (now.getMonth() - seasonStartMonthIdx);
   if (monthsElapsed < 0)  monthsElapsed = 0;
   if (monthsElapsed > 12) monthsElapsed = 12;
-  const ytdFraction = monthsElapsed / 12;
+  // Add 1 so the current (partial) month is included in the pro-rata
+  const ytdMonths   = Math.min(monthsElapsed + 1, 12);
+  const ytdFraction = ytdMonths / 12;
 
   qs('#mgmt-title', container).textContent = `${farm.name} — Management Report`;
   qs('#mgmt-sub', container).textContent   =
@@ -152,7 +155,7 @@ async function _render(container) {
     budgeted_yield_per_ha: b.budgeted_yield_per_ha, budgeted_price: b.budgeted_price,
     budgeted_gross_revenue: b.budgeted_gross_revenue, budgeted_production: b.budgeted_production,
   })));
-  console.log('[MgmtReport] ytdFraction:', ytdFraction, 'monthsElapsed:', monthsElapsed);
+  console.log('[MgmtReport] ytdMonths:', ytdMonths, 'ytdFraction:', ytdFraction, 'monthsElapsed:', monthsElapsed);
 
   // ── Budget for a commodity group ───────────────────────────────────────────
   // Helper: read a budget field that may be stored under two naming conventions.
@@ -351,7 +354,7 @@ async function _render(container) {
 
     <!-- Info note -->
     <div style="font-size:11px;color:var(--hint);margin-bottom:12px;font-style:italic">
-      ℹ Budget YTD is pro-rated (${monthsElapsed} of 12 months elapsed from ${new Date(seasonYear, seasonStartMonthIdx).toLocaleString('en-AU',{month:'long'})}).
+      ℹ Budget YTD is pro-rated (${ytdMonths} of 12 months from ${new Date(seasonYear, seasonStartMonthIdx).toLocaleString('en-AU',{month:'long'})}).
       Click any income row ↗ for detail.
     </div>
 
