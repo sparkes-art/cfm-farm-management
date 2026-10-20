@@ -193,14 +193,18 @@ function _parseCashflowSheet(rows, sheetName) {
     }
 
     // ── CAPEX section — tag 'A' rows ──
+    // Negative total = purchase (outflow), Positive total = sale of machinery (inflow offset)
+    // Store as signed: positive = purchase cost, negative = sale proceeds (net offset)
     if (inCapex) {
       if (descL === 'subtotal' || descL.startsWith('total') || descL.startsWith('earnings')) break;
       if (tag === 'H' || tag === 'E') continue;
-      if (tag === 'A' && desc && total != null) {
-        const amt = Math.abs(total);  // CAPEX stored as negative outflow in cashflow
-        if (amt > 0) {
-          capexItems.push({ budget_code: desc.toUpperCase().trim(), description: desc, budget_amount: amt });
-        }
+      if (tag === 'A' && desc && total != null && total !== 0) {
+        capexItems.push({
+          budget_code:   desc.toUpperCase().trim(),
+          description:   desc,
+          budget_amount: -total,  // flip sign: negative cashflow → positive cost; positive cashflow → negative (sale)
+          is_sale:       total > 0,
+        });
       }
       continue;
     }
@@ -870,7 +874,7 @@ function _consolidateCapex(items, financialYear, farmId) {
     farm_id:        farmId,
     financial_year: financialYear,
     category:       'capex',
-    subcategory:    'Capital Expenditure',
+    subcategory:    item.is_sale ? 'Machinery Sale' : 'Capital Expenditure',
     enterprise:     null,
     budget_code:    item.budget_code,
     description:    item.description,
@@ -878,8 +882,9 @@ function _consolidateCapex(items, financialYear, farmId) {
     unit_price:     null,
     unit:           null,
     area_ha:        null,
-    budget_amount:  item.budget_amount,
-    notes:          'Capital expenditure from cashflow',
+    budget_amount:  item.budget_amount,  // positive = purchase cost, negative = sale offset
+    is_sale:        item.is_sale || false,
+    notes:          item.is_sale ? 'Machinery sale proceeds from cashflow' : 'Capital expenditure from cashflow',
   }));
 }
 
@@ -1054,7 +1059,8 @@ export async function parseBudgetExcel(file) {
     allWarnings.push(`ℹ ${fallowCostRows.length} fallow cost lines from cashflow`);
   }
   if (capexRows.length) {
-    allWarnings.push(`ℹ ${capexRows.length} capital expenditure lines`);
+    const capexSales = capexRows.filter(r => r.is_sale).length;
+    allWarnings.push(`ℹ ${capexRows.length} CAPEX lines (${capexSales} machinery sale${capexSales !== 1 ? 's' : ''})`);
   }
 
   return {
@@ -1250,8 +1256,8 @@ export function showBudgetImportPreview(container, parsed) {
                 <span style="font-weight:600">-${fC(totalFixedCost)}</span>
               </div>
               <div style="display:flex;justify-content:space-between">
-                <span style="color:#6b7280">CAPEX</span>
-                <span style="font-weight:600">-${fC(totalCapex)}</span>
+                <span style="color:#6b7280">CAPEX (net)</span>
+                <span style="font-weight:600;color:${totalCapex < 0 ? '#16a34a' : 'inherit'}">${totalCapex < 0 ? '+' : '-'}${fC(Math.abs(totalCapex))}</span>
               </div>
             </div>
           </div>
@@ -1592,15 +1598,18 @@ export function showBudgetImportPreview(container, parsed) {
         </div>
       ` : '<div style="color:#6b7280;font-size:12px;margin-bottom:12px">No fixed cost rows parsed</div>'}
 
-      ${(capexRows||[]).length ? `
+      ${(capexRows||[]).length ? (() => {
+        const netCapex = (capexRows||[]).reduce((s, r) => s + (r.budget_amount || 0), 0);
+        return `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
           <div style="padding:10px 16px;background:#f5f3ff;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
-            <span>Capital expenditure — ${(capexRows||[]).length} items <span style="font-weight:400;color:#6b7280;font-size:11px">(from cashflow)</span></span>
-            <span style="color:#dc2626;font-weight:700">-${fC(totalCapex)}</span>
+            <span>Capital expenditure — ${(capexRows||[]).length} items <span style="font-weight:400;color:#6b7280;font-size:11px">(from cashflow; negative = machinery sale)</span></span>
+            <span style="color:${netCapex >= 0 ? '#dc2626' : '#16a34a'};font-weight:700">${netCapex >= 0 ? '-' : '+'}${fC(Math.abs(netCapex))}</span>
           </div>
           <div style="overflow-x:auto">
             <table style="width:100%;border-collapse:collapse">
               <thead><tr>
+                <th style="${th};text-align:left">Type</th>
                 <th style="${th};text-align:left">Budget Code</th>
                 <th style="${th};text-align:left">Description</th>
                 <th style="${thR}">Amount</th>
@@ -1608,20 +1617,21 @@ export function showBudgetImportPreview(container, parsed) {
               <tbody>
                 ${(capexRows||[]).map((r, i) => `
                   <tr style="${i % 2 === 0 ? '' : 'background:#fafafa'}">
+                    <td style="${td};font-size:11px;color:${r.is_sale ? '#16a34a' : '#6b7280'}">${r.is_sale ? 'Sale' : 'Purchase'}</td>
                     <td style="${td};font-size:11px;font-family:monospace;color:#374151">${r.budget_code}</td>
                     <td style="${td};font-size:11px">${r.description}</td>
-                    <td style="${tdR};font-size:11px;color:#dc2626">-${fC(r.budget_amount)}</td>
+                    <td style="${tdR};font-size:11px;color:${r.budget_amount < 0 ? '#16a34a' : '#dc2626'}">${r.budget_amount < 0 ? '+' : '-'}${fC(Math.abs(r.budget_amount))}</td>
                   </tr>
                 `).join('')}
-                <tr style="background:#fff5f5;border-top:2px solid #e5e7eb">
-                  <td style="${td};font-weight:700" colspan="2">Total capex</td>
-                  <td style="${tdR};color:#dc2626;font-weight:700">-${fC(totalCapex)}</td>
+                <tr style="background:#f5f3ff;border-top:2px solid #e5e7eb">
+                  <td style="${td};font-weight:700" colspan="3">Net CAPEX</td>
+                  <td style="${tdR};font-weight:700;color:${netCapex >= 0 ? '#dc2626' : '#16a34a'}">${netCapex >= 0 ? '-' : '+'}${fC(Math.abs(netCapex))}</td>
                 </tr>
               </tbody>
             </table>
           </div>
-        </div>
-      ` : ''}
+        </div>`;
+      })() : ''}
 
       ${revenueRows.length || costRows.length ? `
         <div style="display:flex;gap:10px;align-items:center;justify-content:flex-end">
