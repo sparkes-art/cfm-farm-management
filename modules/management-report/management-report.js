@@ -1,6 +1,7 @@
 // modules/management-report/management-report.js
 // Management Report — income actuals vs budget, season-scoped
-// Actuals from CFM invoices (synced to Xero); costs section to follow
+// Revenue actuals from CFM invoices; cost actuals pulled from Xero (operational transactions only,
+// manual journals excluded). Xero pull is non-blocking — report renders even if Xero is not connected.
 
 import { dbSelect, dbInsert } from '../../js/supabase-client.js';
 import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js';
@@ -45,18 +46,38 @@ async function _render(container) {
 
   qs('#mgmt-title', container).textContent = `${farm.name} — Management Report`;
   qs('#mgmt-sub', container).textContent   =
-    `Season ${season} · YTD to ${now.toLocaleString('en-AU',{month:'long',year:'numeric'})} · As at ${formatDate(now.toISOString().slice(0,10))}`;
+    `Season ${season} · YTD to ${now.toLocaleString('en-AU',{month:'long',year:'numeric'})} · As at ${formatDate(now.toISOString().slice(0,10))}` +
+    (xeroConnected ? ` · Xero costs: ${seasonFrom} – ${seasonTo}` : ' · Xero not connected');
 
   const body = qs('#mgmt-body', container);
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--hint)">Loading...</div>';
 
-  const [contracts, allInvoices, budgets, budgetCosts, comments] = await Promise.all([
+  // Season date range for Xero pull
+  const seasonFrom = `${seasonYear}-${String(yearStartMonth).padStart(2,'0')}-01`;
+  const seasonEndYear  = yearStartMonth === 1 ? seasonYear : seasonYear + 1;
+  const seasonEndMonth = yearStartMonth === 1 ? 12 : yearStartMonth - 1;
+  const seasonEndDay   = new Date(seasonEndYear, seasonEndMonth, 0).getDate(); // last day of month
+  const seasonTo   = `${seasonEndYear}-${String(seasonEndMonth).padStart(2,'0')}-${seasonEndDay}`;
+
+  // Xero pull is non-blocking — if Xero not connected or fails, report still renders
+  const xeroPromise = fetch(`/api/xero-pull?farm_id=${farm.id}&from=${seasonFrom}&to=${seasonTo}`)
+    .then(r => r.ok ? r.json() : null)
+    .catch(() => null);
+
+  const [contracts, allInvoices, budgets, budgetCosts, comments, xeroData] = await Promise.all([
     dbSelect('forward_contracts', `farm_id=eq.${farm.id}&crop_year=eq.${season}&select=*`),
     dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`),
     dbSelect('budgets', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`),
     dbSelect('budget_costs', `farm_id=eq.${farm.id}&financial_year=eq.${season}&select=*`).catch(()=>[]),
     dbSelect('management_comments', `farm_id=eq.${farm.id}&season=eq.${season}&select=*,user_profiles(full_name)&order=created_at.desc`).catch(()=>[]),
+    xeroPromise,
   ]);
+
+  // Xero actuals (null if not connected or error)
+  const xeroCosts   = xeroData?.costs   || null;  // { "Fertiliser": 40026, "Chemicals Herbicides": 4420, ... }
+  const xeroRevenue = xeroData?.revenue || null;  // { "Cavalcade Hay": 78900, ... }
+  const xeroMeta    = xeroData?.meta    || null;
+  const xeroConnected = xeroData != null;
 
   // ── Season-scoped invoices ──────────────────────────────────────────────────
   // Use invoice.season field (same logic as outputs module) — avoids prior-year bleed
@@ -268,19 +289,63 @@ async function _render(container) {
     buildSection('Carry-over income', carryOverGroups, { hideAreaProd: true, carryOver: true }),
   ].join('');
 
-  // ── Fixed costs from budget_costs ──────────────────────────────────────────
+  // ── Fixed costs from budget_costs + Xero actuals ──────────────────────────
+  // Xero account names are matched to budget cost lines by fuzzy keyword match.
+  // Any Xero account not matched to a budget line is shown as "Unbudgeted" at the end.
+
+  // Helper: sum all Xero accounts whose name contains any keyword (case-insensitive)
+  const xeroSum = (keywords) => {
+    if (!xeroCosts) return null;
+    let total = 0, found = false;
+    for (const [name, amt] of Object.entries(xeroCosts)) {
+      const n = name.toLowerCase();
+      if (keywords.some(kw => n.includes(kw.toLowerCase()))) {
+        total += amt;
+        found = true;
+      }
+    }
+    return found ? total : null;
+  };
+
+  // Track which Xero accounts have been matched so we can show unmatched ones
+  const xeroMatched = new Set();
+  const xeroSumTracked = (keywords) => {
+    if (!xeroCosts) return null;
+    let total = 0, found = false;
+    for (const [name, amt] of Object.entries(xeroCosts)) {
+      const n = name.toLowerCase();
+      if (keywords.some(kw => n.includes(kw.toLowerCase()))) {
+        total += amt;
+        xeroMatched.add(name);
+        found = true;
+      }
+    }
+    return found ? total : null;
+  };
+
   const fixedCats = [
-    { key: 'labour',    label: 'Labour & Farm Management' },
-    { key: 'overhead',  label: 'Overheads' },
-    { key: 'rm',        label: 'Repairs & Maintenance' },
-    { key: 'fund_mgmt', label: 'Fund Management' },
+    { key: 'labour',    label: 'Labour & Farm Management', xeroKeys: ['labour', 'wages', 'salary', 'management fee', 'farm management'] },
+    { key: 'overhead',  label: 'Overheads',               xeroKeys: ['insurance', 'telephone', 'admin', 'accounting', 'legal', 'bank', 'office', 'subscription', 'rates', 'water', 'electricity', 'fuel tax', 'fuel on hand'] },
+    { key: 'rm',        label: 'Repairs & Maintenance',   xeroKeys: ['repairs', 'maintenance', 'r&m', 'buildings', 'fencing', 'plant', 'equipment'] },
+    { key: 'fund_mgmt', label: 'Fund Management',         xeroKeys: ['fund management', 'management fee', 'aagp', 'boutique'] },
   ];
-  let totalFixedBudget = 0;
+
+  let totalFixedBudget = 0, totalFixedActual = 0;
   const fixedRows = fixedCats.map(cat => {
     const lines = budgetCosts.filter(c => c.category === cat.key);
     if (!lines.length) return '';
-    const catTotal = lines.reduce((s, c) => s + (parseFloat(c.budget_amount)||0), 0);
+    const catTotal   = lines.reduce((s, c) => s + (parseFloat(c.budget_amount)||0), 0);
+    const catActual  = xeroSumTracked(cat.xeroKeys);
     totalFixedBudget += catTotal;
+    if (catActual != null) totalFixedActual += catActual;
+
+    const actualCell  = catActual != null
+      ? `<span style="color:var(--red)">-${fC(catActual)}</span>`
+      : `<span style="color:var(--hint)">—</span>`;
+    const varCell = catActual != null
+      ? varAmt(-catActual, -catTotal)  // negate both so "actual < budget" = favourable
+      : '<span style="color:var(--hint)">—</span>';
+
     return `
       ${commRow(cat.label)}
       ${lines.map(c => `
@@ -293,12 +358,45 @@ async function _render(container) {
         </tr>`).join('')}
       <tr style="background:var(--page-bg)">
         <td style="${td};padding-left:20px;font-weight:600;font-size:12px">${cat.label} total</td>
-        <td style="${tdR}"></td>
+        <td style="${tdR};font-weight:600">${actualCell}</td>
         <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal)}</td>
         <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal)}</td>
-        <td style="${tdR}">—</td>
+        <td style="${tdR};font-weight:600">${varCell}</td>
       </tr>`;
   }).join('');
+
+  // ── Xero direct costs (variable costs from Xero not in budget_costs) ────────
+  // These are operational cost accounts (290+) that came through as Xero invoices/payments
+  // Show them in a "Direct costs (Xero)" section so management can see actual variable spend
+  let xeroDirectCostsHtml = '';
+  let totalXeroDirect = 0;
+  if (xeroCosts) {
+    // Accounts not matched to fixed cost categories above
+    const directAccounts = Object.entries(xeroCosts)
+      .filter(([name]) => !xeroMatched.has(name))
+      .sort(([a], [b]) => a.localeCompare(b));
+
+    if (directAccounts.length) {
+      totalXeroDirect = directAccounts.reduce((s, [, v]) => s + v, 0);
+      xeroDirectCostsHtml = `
+        ${secRow('Direct costs (Xero actuals)')}
+        ${directAccounts.map(([name, amt]) => `
+          <tr>
+            <td style="${td};padding-left:20px;font-size:12px">${name}</td>
+            <td style="${tdR};color:var(--red)">-${fC(amt)}</td>
+            <td style="${tdR};color:var(--hint)">—</td>
+            <td style="${tdR};color:var(--hint)">—</td>
+            <td style="${tdR};color:var(--hint)">—</td>
+          </tr>`).join('')}
+        <tr style="background:#fff5f5;border-top:2px solid var(--border)">
+          <td style="${td};font-weight:700">Total direct costs</td>
+          <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalXeroDirect)}</td>
+          <td style="${tdR}"></td>
+          <td style="${tdR}"></td>
+          <td style="${tdR}">—</td>
+        </tr>`;
+    }
+  }
 
   // ── Comments ───────────────────────────────────────────────────────────────
   const commentRows = comments.length
@@ -328,7 +426,11 @@ async function _render(container) {
 
     <!-- Note on budget YTD -->
     <div style="font-size:11px;color:var(--hint);margin-bottom:12px;font-style:italic">
-      ℹ Budget YTD is pro-rated (${monthsElapsed} of 12 months elapsed from ${new Date(seasonYear, seasonStartMonthIdx).toLocaleString('en-AU',{month:'long'})}). Click any income row ↗ for detail.
+      ℹ Budget YTD is pro-rated (${monthsElapsed} of 12 months elapsed from ${new Date(seasonYear, seasonStartMonthIdx).toLocaleString('en-AU',{month:'long'})}).
+      Click any income row ↗ for detail.
+      ${xeroConnected
+        ? `Cost actuals from Xero (${xeroMeta?.journalsIncluded || 0} transactions, ${xeroMeta?.journalsManual || 0} manual journals excluded).`
+        : `Cost actuals unavailable — Xero not connected for this farm.`}
     </div>
 
     <!-- Main table -->
@@ -361,21 +463,28 @@ async function _render(container) {
               ${fixedRows}
               <tr style="background:#fff5f5;border-top:2px solid var(--border)">
                 <td style="${td};font-weight:700">Total fixed costs</td>
-                <td style="${tdR}"></td>
+                <td style="${tdR};color:var(--red);font-weight:700">${totalFixedActual ? '-' + fC(totalFixedActual) : xeroConnected ? '<span style="color:var(--hint)">—</span>' : '<span style="color:var(--hint)">No Xero</span>'}</td>
                 <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
                 <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
-                <td style="${tdR}">—</td>
+                <td style="${tdR}">${totalFixedActual ? varAmt(-totalFixedActual, -totalFixedBudget) : '—'}</td>
               </tr>
             ` : ''}
 
+            ${xeroDirectCostsHtml}
+
             <!-- Net -->
-            <tr style="background:#eff6ff;border-top:2px solid var(--border)">
-              <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">Net income (income only)</td>
-              <td style="${tdR};color:var(--blue);font-weight:700;font-size:13px">${fC(grandActual)}</td>
-              <td style="${tdR}"></td>
-              <td style="${tdR}"></td>
-              <td style="${tdR}">${varAmt(grandActual, grandBudgetYTD)}</td>
-            </tr>
+            ${(() => {
+              const netActual  = grandActual - totalFixedActual - totalXeroDirect;
+              const netBudget  = grandBudgetYTD - totalFixedBudget;
+              const hasCostActuals = totalFixedActual > 0 || totalXeroDirect > 0;
+              return `<tr style="background:#eff6ff;border-top:2px solid var(--border)">
+                <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">Net income${hasCostActuals ? '' : ' (income only)'}</td>
+                <td style="${tdR};color:var(--blue);font-weight:700;font-size:13px">${hasCostActuals ? fC(netActual) : fC(grandActual)}</td>
+                <td style="${tdR};font-weight:700">${fC(netBudget)}</td>
+                <td style="${tdR}"></td>
+                <td style="${tdR}">${hasCostActuals ? varAmt(netActual, netBudget) : varAmt(grandActual, grandBudgetYTD)}</td>
+              </tr>`;
+            })()}
           </tbody>
         </table>
       </div>
