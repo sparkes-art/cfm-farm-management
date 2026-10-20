@@ -84,10 +84,18 @@ async function _render(container) {
     let qty = 0, income = 0, qa = 0, costs = 0;
     const matchedInvs = [];
     const targetKey = commName ? commName.trim().toUpperCase().replace(/\s+/g,' ') : null;
+    const targetIsLivestock = targetKey && /cattle|livestock/i.test(targetKey);
     invList.forEach(inv => {
       const linked = contracts.find(c => c.id === inv.forward_contract_id);
       const iComm  = linked?.commodity || inv.commodity_type || (inv.line_items||[])[0]?.commodity || '';
-      if (targetKey && iComm.trim().toUpperCase().replace(/\s+/g,' ') !== targetKey) return;
+      const iCommKey = iComm.trim().toUpperCase().replace(/\s+/g,' ');
+      // Livestock invoices use commodity_type='livestock' but budget may be stored as 'CATTLE' etc.
+      // Allow any livestock synonym to match any livestock budget group.
+      if (targetKey) {
+        const invoiceIsLivestock = /cattle|livestock/i.test(iComm);
+        if (targetIsLivestock && invoiceIsLivestock) { /* match */ }
+        else if (iCommKey !== targetKey) return;
+      }
       matchedInvs.push(inv);
       if (inv.batches) {
         const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
