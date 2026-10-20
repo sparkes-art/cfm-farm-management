@@ -154,15 +154,12 @@ async function _render(container) {
   let grandBudget = 0, grandBudgetYTD = 0, grandActual = 0;
 
   // ── Single commodity row builder ───────────────────────────────────────────
+  // Returns { html, bIncome, bYTD, actual } so callers can build subtotals
   const buildCommRow = (g, opts = {}) => {
     const { bIncome, bYTD, bArea, bProd } = budgetForGroup(g);
     const inv  = invTotals(seasonInvoices, g.name);
     const unit = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
     const hideAreaProd = opts.hideAreaProd;
-
-    grandBudget    += bIncome      || 0;
-    grandBudgetYTD += bYTD        || 0;
-    grandActual    += inv.totalIncome;
 
     const detailId  = `inv-detail-${g.name.replace(/[^a-z0-9]/gi,'-')}`;
     const detailRows = inv.invoices.length
@@ -188,7 +185,7 @@ async function _render(container) {
         }).join('')
       : `<tr style="background:#fafbff"><td colspan="7" style="${td};padding-left:36px;font-size:11px;color:var(--hint);font-style:italic">No invoices this season</td></tr>`;
 
-    return `
+    const html = `
       ${commRow(g.name)}
       <tr style="cursor:pointer" onclick="
         const el=document.getElementById('${detailId}');
@@ -209,27 +206,59 @@ async function _render(container) {
         ${detailRows}
       </tbody>
     `;
+    return { html, bIncome: bIncome || 0, bYTD: bYTD || 0, actual: inv.totalIncome };
+  };
+
+  // ── Section builder — renders rows + subtotal row, accumulates into grand totals ──
+  const buildSection = (label, gList, opts = {}) => {
+    if (!gList.length) return '';
+    let secBudget = 0, secBudgetYTD = 0, secActual = 0;
+    const rowsHtml = gList.map(g => {
+      const r = buildCommRow(g, opts);
+      secBudget    += r.bIncome;
+      secBudgetYTD += r.bYTD;
+      secActual    += r.actual;
+      return r.html;
+    }).join('');
+    grandBudget    += secBudget;
+    grandBudgetYTD += secBudgetYTD;
+    grandActual    += secActual;
+    const subtotal = `
+      <tr style="background:#f0f4f8">
+        <td style="${td};font-weight:600;font-size:11px;padding-left:16px;color:var(--hint)">${label} total</td>
+        <td colspan="2" style="${tdR}"></td>
+        <td style="${tdR};color:var(--green);font-weight:600">${secActual ? fC(secActual) : '—'}</td>
+        <td style="${tdR};font-weight:600">${secBudgetYTD ? fC(secBudgetYTD) : '—'}</td>
+        <td style="${tdR};font-weight:600">${secBudget ? fC(secBudget) : '—'}</td>
+        <td style="${tdR}">${varAmt(secActual, secBudgetYTD)}</td>
+      </tr>`;
+    return secRow(label) + rowsHtml + subtotal;
   };
 
   // ── Income rows — grouped by section matching budget import ───────────────
-  // section field on budgets rows: 'farming' | 'other' | 'carry_over'
+  // section not persisted to DB — infer from commodity name:
+  //   ALL-CAPS = new season farming crop
+  //   mixed-case = carry-over (prior season crop still being sold)
+  //   cattle keyword = livestock section (own metrics)
+  //   other keywords = other income
+  const isCattle    = (name) => /cattle|livestock/i.test(name);
+  const isOther     = (name) => !isCattle(name) && /agistment|interest received|rent|lease|royalt/i.test(name);
+  const isCarryOver = (name) => !isCattle(name) && !isOther(name) && name !== name.toUpperCase();
+  const isFarming   = (name) => !isCattle(name) && !isOther(name) && !isCarryOver(name);
+
   const sortedGroups = Object.values(groups).sort((a, b) =>
     a.name.toUpperCase().localeCompare(b.name.toUpperCase())
   );
-  // section not persisted to DB — infer from commodity name using same convention as budget import:
-  //   ALL-CAPS name = new season farming income
-  //   mixed-case name = carry-over (prior season crop still being sold)
-  //   cattle/agistment/interest keywords = other income
-  const isOther    = (name) => /cattle|livestock|agistment|interest received|rent|lease|royalt/i.test(name);
-  const isCarryOver = (name) => !isOther(name) && name !== name.toUpperCase();
-  const farmingGroups   = sortedGroups.filter(g => !isOther(g.name) && !isCarryOver(g.name));
-  const otherGroups     = sortedGroups.filter(g =>  isOther(g.name));
-  const carryOverGroups = sortedGroups.filter(g =>  isCarryOver(g.name));
+  const farmingGroups   = sortedGroups.filter(g => isFarming(g.name));
+  const cattleGroups    = sortedGroups.filter(g => isCattle(g.name));
+  const otherGroups     = sortedGroups.filter(g => isOther(g.name));
+  const carryOverGroups = sortedGroups.filter(g => isCarryOver(g.name));
 
   const incomeRows = [
-    farmingGroups.length   ? secRow('Farming income')    + farmingGroups.map(g => buildCommRow(g)).join('')                        : '',
-    otherGroups.length     ? secRow('Other income')      + otherGroups.map(g => buildCommRow(g, { hideAreaProd: true })).join('')   : '',
-    carryOverGroups.length ? secRow('Carry-over income') + carryOverGroups.map(g => buildCommRow(g, { hideAreaProd: true })).join('') : '',
+    buildSection('Farming income',    farmingGroups),
+    buildSection('Livestock income',  cattleGroups,    { hideAreaProd: true }),
+    buildSection('Other income',      otherGroups,     { hideAreaProd: true }),
+    buildSection('Carry-over income', carryOverGroups, { hideAreaProd: true }),
   ].join('');
 
   // ── Fixed costs from budget_costs ──────────────────────────────────────────
