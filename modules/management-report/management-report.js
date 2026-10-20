@@ -213,11 +213,15 @@ async function _render(container) {
   const sortedGroups = Object.values(groups).sort((a, b) =>
     a.name.toUpperCase().localeCompare(b.name.toUpperCase())
   );
-  // section not persisted to DB — infer from commodity name
-  const isOther = (name) => /cattle|livestock|agistment|interest|rent|royalt/i.test(name);
-  const farmingGroups   = sortedGroups.filter(g => !isOther(g.name));
+  // section not persisted to DB — infer from commodity name using same convention as budget import:
+  //   ALL-CAPS name = new season farming income
+  //   mixed-case name = carry-over (prior season crop still being sold)
+  //   cattle/agistment/interest keywords = other income
+  const isOther    = (name) => /cattle|livestock|agistment|interest received|rent|royalt/i.test(name);
+  const isCarryOver = (name) => !isOther(name) && name !== name.toUpperCase();
+  const farmingGroups   = sortedGroups.filter(g => !isOther(g.name) && !isCarryOver(g.name));
   const otherGroups     = sortedGroups.filter(g =>  isOther(g.name));
-  const carryOverGroups = [];
+  const carryOverGroups = sortedGroups.filter(g =>  isCarryOver(g.name));
 
   const incomeRows = [
     farmingGroups.length   ? secRow('Farming income')   + farmingGroups.map(buildCommRow).join('')   : '',
