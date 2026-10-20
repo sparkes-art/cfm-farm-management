@@ -920,17 +920,15 @@ export function openInvoiceForm(container, existing = null) {
             <div>
               <label class="form-label" style="font-size:11px">Prior season</label>
               <select class="form-select" id="f-prior-season" style="font-size:13px">
-                ${priorSeasons.map(s => `<option value="${s}" ${(existing?.season||''===s)||(!existing&&s===priorSeasons[0])?'selected':''}>${s}</option>`).join('')}
+                ${priorSeasons.map((s,i) => `<option value="${s}" ${(existing?.season===s)||(i===0&&!existing)?'selected':''}>${s}</option>`).join('')}
               </select>
               <div style="font-size:10px;color:var(--hint);margin-top:3px">Which season this income belongs to</div>
             </div>
             <div>
-              <label class="form-label" style="font-size:11px">Commodity (prior year)</label>
-              <select class="form-select" id="f-prior-commodity" style="font-size:13px">
-                <option value="">— select commodity —</option>
-                ${commodities.map(c => `<option value="${c.name}" ${existing?.commodity_type===c.name?'selected':''}>${c.name}</option>`).join('')}
-              </select>
-              <div style="font-size:10px;color:var(--hint);margin-top:3px">Links this payment to the prior year's crop stats</div>
+              <label class="form-label" style="font-size:11px">Crop / description (prior year)</label>
+              <input type="text" class="form-input" id="f-prior-commodity" style="font-size:13px" placeholder="e.g. Cavalcade, Cotton 2024-25"
+                value="${(() => { if (!existing) return ''; const b = existing.batches?(typeof existing.batches==='string'?JSON.parse(existing.batches):existing.batches):[]; return b.flatMap(x=>x.lines||[]).find(l=>l.type==='income'&&l.description)?.description || (existing.line_items||[])[0]?.commodity || ''; })()}">
+              <div style="font-size:10px;color:var(--hint);margin-top:3px">Describe the prior year's crop for reporting</div>
             </div>
           </div>
         </div>`;

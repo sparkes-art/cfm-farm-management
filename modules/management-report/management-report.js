@@ -122,16 +122,13 @@ async function _render(container) {
   });
 
   // ── Also add groups from prior-year-flagged invoices with no budget row ────
-  // These invoices have batch.prior_year_income=true; commodity comes from
-  // the batch line description (set at save time as the prior commodity name).
-  allInvoices.forEach(inv => {
+  // Use seasonInvoices (already filtered to this season) so we catch prior-year
+  // invoices regardless of how the season/crop_year fields were stored.
+  seasonInvoices.forEach(inv => {
     if (!inv.batches) return;
     const batches = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
     const isPY = batches.some(b => b.prior_year_income);
     if (!isPY) return;
-    // Only include if this invoice belongs to the current season being viewed
-    const invSeason = inv.season || batches.find(b=>b.crop_year)?.crop_year;
-    if (invSeason !== season) return;
     // Get commodity from batch line description or line_items
     const commName = batches.flatMap(b=>b.lines||[]).find(l=>l.type==='income'&&l.description)?.description
       || (inv.line_items||[])[0]?.commodity
