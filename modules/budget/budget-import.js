@@ -397,8 +397,9 @@ function _parseGmSheet(rows, sheetName) {
           currentSection = colA.trim();
           continue;
         }
-        // Skip rows with no code or no total
+        // Skip rows with no code or no total, and skip any summary/total rows
         if (!colA || col38 == null) continue;
+        if (/total|subtotal/i.test(colA)) continue;
         // Budget code row
         if (BUDGET_CODE_RE_CATTLE.test(colA)) {
           const costTotal = num(col38);
@@ -503,6 +504,9 @@ function _parseGmSheet(rows, sheetName) {
       }
 
       // Cost row — col A is a budget code (ALL CAPS), col H is a number
+      // Skip any summary/total rows that sneak through (e.g. "SPARE TOTAL", "TOTAL VARIABLE COSTS")
+      if (colA && /total|subtotal/i.test(colA)) continue;
+
       if (colA && BUDGET_CODE_RE.test(colA) && colH !== null && colH !== undefined) {
         const costPerHa = num(colH);
         if (costPerHa === null) continue;  // non-numeric, skip
@@ -1113,7 +1117,7 @@ export function showBudgetImportPreview(container, parsed) {
   const totalCattleCost  = (cattleCostRows    || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
   const totalFixedCost   = (fixedCostRows     || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
   const totalCapex       = (capexRows         || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
-  const totalCost        = totalVarCost + totalFallowCostH + totalPYCost + totalCattleCost + totalFixedCost + totalCapex;
+  const totalCost        = totalVarCost + totalFallowCostH + totalPYCost + totalCattleCost + totalFixedCost + Math.abs(totalCapex);
 
   // Group variable costs by enterprise for display
   const varByEnterprise = {};
