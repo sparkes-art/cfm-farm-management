@@ -151,9 +151,15 @@ function _parseCashflowSheet(rows, sheetName) {
     const row  = rows[i];
     if (!row || !row.some(c => c != null)) continue;
 
-    const tag  = str(row[1]);      // col B
-    const desc = str(row[3]);      // col D
-    const totalRaw = row[5];       // col F — full-year total
+    // SheetJS sheet_to_json shifts cols left by 1 vs openpyxl (col A is always
+    // empty in this sheet so SheetJS skips it). Effective mapping:
+    //   idx 0 = col B = tag (I / E / H / EXP)
+    //   idx 2 = col D = description
+    //   idx 4 = col F = current-year budget total
+    //   idx 19 = col U = re-forecast / prior year total
+    const tag  = str(row[0]);      // col B (SheetJS idx 0)
+    const desc = str(row[2]);      // col D (SheetJS idx 2)
+    const totalRaw = row[4];       // col F — current-year budget total (SheetJS idx 4)
     const total = num(totalRaw);
     const descL = low(desc);
 
@@ -217,7 +223,9 @@ function _parseCashflowSheet(rows, sheetName) {
                              !descL.includes('expense') && !descL.includes('farming');
 
     if ((isTaggedIncome || isUntaggedIncome) && desc && total && total > 0) {
-      revenueItems.push({ commodity: desc, area_ha: null, total });
+      // col AE (openpyxl idx 30) = SheetJS idx 29 = Budget Area (ha)
+      const area_ha = num(row[29]) || null;
+      revenueItems.push({ commodity: desc, area_ha, total });
     }
   }
 
@@ -569,18 +577,7 @@ export async function parseBudgetExcel(file) {
 
   for (const sheetName of cashflowSheets) {
     const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
-    // DEBUG — log first 30 non-empty rows so we can see col layout
-    console.log(`[budget-import DEBUG] Sheet: "${sheetName}", total rows: ${rows.length}`);
-    let shown = 0;
-    for (let di = 0; di < rows.length && shown < 50; di++) {
-      const r = rows[di];
-      if (!r || !r.some(c => c != null)) continue;
-      console.log(`  row ${di}: B=${JSON.stringify(r[1])} C=${JSON.stringify(r[2])} D=${JSON.stringify(r[3])} F=${JSON.stringify(r[5])}`);
-      shown++;
-    }
     const result = _parseCashflowSheet(rows, sheetName);
-    console.log(`[budget-import DEBUG] revenueItems: ${result.revenueItems.length}`, result.revenueItems.slice(0,5));
-    console.log(`[budget-import DEBUG] costItems: ${result.costItems.length}`);
     allRevenueItems.push(...result.revenueItems);
     allCostItems.push(...result.costItems);
     allWarnings.push(...result.warnings);
