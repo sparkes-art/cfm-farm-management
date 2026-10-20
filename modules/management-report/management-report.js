@@ -34,9 +34,11 @@ async function _render(container) {
 
   const seasonYear = parseInt(season.split('-')[0]);
   const now        = new Date();
-  // Months elapsed in season (Jul = month 1 of season)
-  const seasonStartMonth = 6; // July = index 6
-  let monthsElapsed = (now.getFullYear() - seasonYear) * 12 + (now.getMonth() - seasonStartMonth);
+  // Season start month from farm settings (1-based); default July for most farms, Oct for Blackbull
+  const yearStartMonth  = farm.settings?.yearStartMonth || 7;  // 1-based (1=Jan, 7=Jul, 10=Oct)
+  const seasonStartMonthIdx = yearStartMonth - 1;              // 0-based for Date comparison
+  // Months elapsed since start of this season
+  let monthsElapsed = (now.getFullYear() - seasonYear) * 12 + (now.getMonth() - seasonStartMonthIdx);
   if (monthsElapsed < 0) monthsElapsed = 0;
   if (monthsElapsed > 12) monthsElapsed = 12;
   const ytdFraction = monthsElapsed / 12;
@@ -152,10 +154,11 @@ async function _render(container) {
   let grandBudget = 0, grandBudgetYTD = 0, grandActual = 0;
 
   // ── Single commodity row builder ───────────────────────────────────────────
-  const buildCommRow = (g) => {
+  const buildCommRow = (g, opts = {}) => {
     const { bIncome, bYTD, bArea, bProd } = budgetForGroup(g);
     const inv  = invTotals(seasonInvoices, g.name);
     const unit = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
+    const hideAreaProd = opts.hideAreaProd;
 
     grandBudget    += bIncome      || 0;
     grandBudgetYTD += bYTD        || 0;
@@ -195,8 +198,8 @@ async function _render(container) {
           Income
           <span style="font-size:10px;color:var(--hint);margin-left:6px">${inv.invoices.length ? `▸ ${inv.invoices.length} invoice${inv.invoices.length!==1?'s':''}` : ''}</span>
         </td>
-        <td style="${tdR}">${bArea ? fN(bArea,1)+' ha' : '—'}</td>
-        <td style="${tdR}">${bProd ? fN(bProd)+' '+unit : '—'}</td>
+        <td style="${tdR}">${!hideAreaProd && bArea ? fN(bArea,1)+' ha' : '—'}</td>
+        <td style="${tdR}">${!hideAreaProd && bProd ? fN(bProd)+' '+unit : '—'}</td>
         <td style="${tdR};color:${inv.totalIncome ? 'var(--green)' : 'var(--hint)'};font-weight:600">${inv.totalIncome ? fC(inv.totalIncome) : '—'}</td>
         <td style="${tdR}">${bYTD != null ? fC(bYTD) : '—'}</td>
         <td style="${tdR}">${bIncome != null ? fC(bIncome) : '—'}</td>
@@ -217,16 +220,16 @@ async function _render(container) {
   //   ALL-CAPS name = new season farming income
   //   mixed-case name = carry-over (prior season crop still being sold)
   //   cattle/agistment/interest keywords = other income
-  const isOther    = (name) => /cattle|livestock|agistment|interest received|rent|royalt/i.test(name);
+  const isOther    = (name) => /cattle|livestock|agistment|interest received|rent|lease|royalt/i.test(name);
   const isCarryOver = (name) => !isOther(name) && name !== name.toUpperCase();
   const farmingGroups   = sortedGroups.filter(g => !isOther(g.name) && !isCarryOver(g.name));
   const otherGroups     = sortedGroups.filter(g =>  isOther(g.name));
   const carryOverGroups = sortedGroups.filter(g =>  isCarryOver(g.name));
 
   const incomeRows = [
-    farmingGroups.length   ? secRow('Farming income')   + farmingGroups.map(buildCommRow).join('')   : '',
-    otherGroups.length     ? secRow('Other income')     + otherGroups.map(buildCommRow).join('')     : '',
-    carryOverGroups.length ? secRow('Carry-over income') + carryOverGroups.map(buildCommRow).join('') : '',
+    farmingGroups.length   ? secRow('Farming income')    + farmingGroups.map(g => buildCommRow(g)).join('')                        : '',
+    otherGroups.length     ? secRow('Other income')      + otherGroups.map(g => buildCommRow(g, { hideAreaProd: true })).join('')   : '',
+    carryOverGroups.length ? secRow('Carry-over income') + carryOverGroups.map(g => buildCommRow(g, { hideAreaProd: true })).join('') : '',
   ].join('');
 
   // ── Fixed costs from budget_costs ──────────────────────────────────────────
@@ -289,7 +292,7 @@ async function _render(container) {
 
     <!-- Note on budget YTD -->
     <div style="font-size:11px;color:var(--hint);margin-bottom:12px;font-style:italic">
-      ℹ Budget YTD is pro-rated (${monthsElapsed} of 12 months elapsed). Click any income row to see invoice detail.
+      ℹ Budget YTD is pro-rated (${monthsElapsed} of 12 months elapsed from ${new Date(seasonYear, seasonStartMonthIdx).toLocaleString('en-AU',{month:'long'})}). Click any income row to see invoice detail.
     </div>
 
     <!-- Main table -->
