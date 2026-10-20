@@ -424,12 +424,18 @@ function _parseGmSheet(rows, sheetName) {
       if (colA && BUDGET_CODE_RE.test(colA) && colH !== null && colH !== undefined) {
         const costPerHa = num(colH);
         if (costPerHa === null) continue;  // non-numeric, skip
-        const desc = str(row[1]);          // col B = operation/product description
+        const desc       = str(row[1]);    // col B = operation/product description
+        const unitPrice  = num(row[5]);    // col F = cost/unit (e.g. $/litre, $/kg)
+        const unitLabel  = str(row[6]);    // col G = unit label (e.g. '/Litre', '/kg', '/Pass')
+        //   col C (row[2]) = applications, col E (row[4]) = rate/ha
+        //   Cost/Ha = Applications × Rate/Ha × Cost/Unit — we store unit price for variance analysis
         costLines.push({
           budget_code:  colA.trim(),
           description:  desc || colA.trim(),
           subcategory:  currentSection,
           cost_per_ha:  costPerHa,
+          unit_price:   unitPrice,    // price per unit (e.g. $1.25/kg for urea)
+          unit:         unitLabel && unitLabel.startsWith('/') ? unitLabel.slice(1) : unitLabel || null,
           // total budget cost = cost_per_ha × area_ha (calculated at consolidation time)
         });
       }
@@ -557,31 +563,20 @@ function _consolidateVariableCosts(gmData, financialYear, farmId) {
     const enterprise = gm.name;
     const area_ha    = gm.area_ha;   // null for cattle
 
-    // Deduplicate within the enterprise: same code + description can appear
-    // multiple times in different application passes — sum the cost/ha (or cost_total for cattle)
-    const byKey = new Map();
+    // Each line is stored individually to preserve unit_price per product/pass.
+    // Same budget_code can appear multiple times (e.g. Diesel across several passes) —
+    // these are kept as separate rows so unit price and usage context are retained.
+    // budget_amount is cost/ha × area_ha for each line (null when area unknown).
     for (const line of gm.costLines) {
-      const key = `${line.budget_code}||${line.description}||${line.subcategory || ''}`;
-      if (byKey.has(key)) {
-        if (gm.isCattle) {
-          byKey.get(key).cost_total += (line.cost_total || 0);
-        } else {
-          byKey.get(key).cost_per_ha += (line.cost_per_ha || 0);
-        }
-      } else {
-        byKey.set(key, { ...line });
-      }
-    }
-
-    for (const line of byKey.values()) {
       let cost_per_ha_val, budget_amount;
       if (gm.isCattle) {
-        // Cattle: costs are total dollars (not per ha)
         cost_per_ha_val = null;
         budget_amount   = line.cost_total;
       } else {
         cost_per_ha_val = line.cost_per_ha;
-        budget_amount   = (area_ha != null) ? line.cost_per_ha * area_ha : null;
+        budget_amount   = (area_ha != null && line.cost_per_ha != null)
+          ? line.cost_per_ha * area_ha
+          : null;
       }
 
       rows.push({
@@ -593,6 +588,8 @@ function _consolidateVariableCosts(gmData, financialYear, farmId) {
         budget_code:    line.budget_code,
         description:    line.description,
         cost_per_ha:    cost_per_ha_val,
+        unit_price:     line.unit_price  ?? null,
+        unit:           line.unit        ?? null,
         area_ha:        area_ha,
         budget_amount:  budget_amount,
         notes:          gm.isCattle ? 'Cattle: total cost (head-based, no $/ha)' : null,
@@ -968,6 +965,8 @@ export function showBudgetImportPreview(container, parsed) {
                   <th style="${th};text-align:left">Section</th>
                   <th style="${th};text-align:left">Budget Code</th>
                   <th style="${th};text-align:left">Description</th>
+                  <th style="${thR}">Unit Price</th>
+                  <th style="${th};text-align:left">Unit</th>
                   <th style="${thR}">Cost/ha</th>
                   <th style="${thR}">Budget total</th>
                 </tr>
@@ -980,6 +979,8 @@ export function showBudgetImportPreview(container, parsed) {
                       <td style="${td};font-size:11px;color:#9ca3af;font-style:italic">${r.subcategory || ''}</td>
                       <td style="${td};font-size:11px;font-family:monospace;color:#374151">${r.budget_code}</td>
                       <td style="${td};font-size:11px">${r.description}</td>
+                      <td style="${tdR};font-size:11px">${r.unit_price != null ? '$' + fN(r.unit_price, 4) : '—'}</td>
+                      <td style="${td};font-size:11px;color:#6b7280">${r.unit || '—'}</td>
                       <td style="${tdR};font-size:11px">${r.cost_per_ha != null ? '$' + fN(r.cost_per_ha, 2) : '—'}</td>
                       <td style="${tdR};font-size:11px;color:${r.budget_amount ? '#dc2626' : '#9ca3af'}">${r.budget_amount != null ? (r.budget_amount === 0 ? '$0' : '-' + fC(r.budget_amount)) : '—'}</td>
                     </tr>
