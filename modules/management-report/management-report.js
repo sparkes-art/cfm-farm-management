@@ -161,19 +161,53 @@ async function _render(container) {
   let grandBudget = 0, grandBudgetYTD = 0, grandActual = 0;
 
   // ── Single commodity row builder ───────────────────────────────────────────
-  // Returns { html, bIncome, bYTD, actual } so callers can build subtotals
+  // One summary row per commodity; expand to see budget metrics + invoice detail
   const buildCommRow = (g, opts = {}) => {
-    const { bIncome, bYTD, bArea, bProd } = budgetForGroup(g, { carryOver: opts.carryOver });
-    const inv  = invTotals(seasonInvoices, g.name);
-    const unit = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
-    const hideAreaProd = opts.hideAreaProd;
+    const { bIncome, bYTD, bArea, bYield, bProd, bPrice } = budgetForGroup(g, { carryOver: opts.carryOver });
+    const inv      = invTotals(seasonInvoices, g.name);
+    const unit     = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
+    const isLs     = opts.livestock;
+    const expandId = `expand-${g.name.replace(/[^a-z0-9]/gi,'-')}`;
 
-    const detailId  = `inv-detail-${g.name.replace(/[^a-z0-9]/gi,'-')}`;
-    const detailRows = inv.invoices.length
+    // ── Livestock invoice metrics ──
+    let lsHead = 0, lsKg = 0, lsIncome = 0;
+    if (isLs) {
+      inv.invoices.forEach(i => {
+        lsHead   += parseFloat(i.total_head)   || 0;
+        lsKg     += parseFloat(i.total_weight) || 0;
+        lsIncome += (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
+      });
+    }
+
+    // ── Expand panel: budget metrics ──
+    const metricRow = (label, val) =>
+      `<tr style="background:#f5f7fa">
+        <td style="${td};padding-left:32px;font-size:11px;color:var(--hint);border-bottom:none">${label}</td>
+        <td colspan="6" style="${tdR};font-size:11px;color:var(--ink);border-bottom:none">${val}</td>
+      </tr>`;
+
+    const budgetMetrics = isLs ? '' : [
+      bArea  != null ? metricRow('Budget area',       fN(bArea,1)+' ha')                        : '',
+      bProd  != null ? metricRow('Budget production', fN(bProd)+' '+unit)                       : '',
+      bYield != null && bYield ? metricRow('Budget yield', fN(bYield,2)+' '+unit+'/ha')         : '',
+      bPrice != null && bPrice ? metricRow('Budget price',  '$'+fN(bPrice,2)+'/'+unit)          : '',
+      bIncome!= null ? metricRow('Full yr budget',    fC(bIncome))                              : '',
+    ].join('');
+
+    const lsMetrics = !isLs ? '' : [
+      lsHead   ? metricRow('Head sold (actual)',    fN(lsHead,0)+' hd')                                      : '',
+      lsKg     ? metricRow('Total weight (actual)', fN(lsKg,0)+' kg')                                        : '',
+      lsKg && lsHead ? metricRow('Avg weight/head', fN(lsKg/lsHead,0)+' kg/hd')                             : '',
+      lsKg && lsIncome ? metricRow('Price/kg (actual)', '$'+fN(lsIncome/lsKg,2)+'/kg')                      : '',
+      bIncome != null ? metricRow('Full yr budget', fC(bIncome))                                             : '',
+    ].join('');
+
+    // ── Invoice detail rows ──
+    const invoiceRows = inv.invoices.length
       ? inv.invoices.map(i => {
-          const invDate  = formatDate(i.invoice_date?.slice(0,10));
-          const invInc   = (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
-          const invQty   = (() => {
+          const invDate = formatDate(i.invoice_date?.slice(0,10));
+          const invInc  = (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
+          const invQty  = (() => {
             if (i.batches) {
               const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
               return b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa'))
@@ -182,35 +216,37 @@ async function _render(container) {
             return parseFloat(i.total_qty)||0;
           })();
           return `<tr style="background:#fafbff">
-            <td style="${td};padding-left:36px;font-size:11px;color:var(--hint)">${invDate}</td>
-            <td style="${td};font-size:11px;color:var(--hint)">${i.buyer || '—'}</td>
-            <td style="${tdR};font-size:11px;color:var(--hint)">${invQty ? fN(invQty,2)+' '+unit : '—'}</td>
+            <td style="${td};padding-left:40px;font-size:11px;color:var(--hint)">${invDate} · ${i.buyer||'—'}</td>
+            <td colspan="2" style="${tdR};font-size:11px;color:var(--hint)">${invQty ? fN(invQty,2)+' '+unit : '—'}</td>
             <td style="${tdR};font-size:11px;color:var(--hint)">${i.xero_invoice_number || i.id?.slice(0,8) || '—'}</td>
-            <td style="${tdR};font-size:11px;color:var(--green)">${fC(invInc)}</td>
+            <td style="${tdR};font-size:11px;color:var(--green);font-weight:600">${fC(invInc)}</td>
             <td colspan="2" style="${tdR}"></td>
           </tr>`;
         }).join('')
-      : `<tr style="background:#fafbff"><td colspan="7" style="${td};padding-left:36px;font-size:11px;color:var(--hint);font-style:italic">No invoices this season</td></tr>`;
+      : `<tr style="background:#fafbff"><td colspan="7" style="${td};padding-left:40px;font-size:11px;color:var(--hint);font-style:italic">No invoices this season</td></tr>`;
+
+    const expandContent = budgetMetrics + lsMetrics + invoiceRows;
 
     const html = `
-      ${commRow(g.name)}
       <tr style="cursor:pointer" onclick="
-        const el=document.getElementById('${detailId}');
-        if(el){el.style.display=el.style.display==='none'?'':'none';}
+        const el=document.getElementById('${expandId}');
+        const ic=document.getElementById('${expandId}-ic');
+        if(el){const open=el.style.display!=='none';el.style.display=open?'none':'';if(ic)ic.textContent=open?'▸':'▾';}
       ">
-        <td style="${td};padding-left:20px;color:var(--hint)">
-          Income
-          <span style="font-size:10px;color:var(--hint);margin-left:6px">${inv.invoices.length ? `▸ ${inv.invoices.length} invoice${inv.invoices.length!==1?'s':''}` : ''}</span>
+        <td style="${td};font-weight:600;padding-left:16px">
+          <span id="${expandId}-ic" style="color:var(--hint);margin-right:6px;font-size:10px">▸</span>${g.name}
+          ${inv.invoices.length ? `<span style="font-size:10px;color:var(--hint);margin-left:6px;font-weight:400">${inv.invoices.length} invoice${inv.invoices.length!==1?'s':''}</span>` : ''}
         </td>
-        <td style="${tdR}">${!hideAreaProd && bArea ? fN(bArea,1)+' ha' : '—'}</td>
-        <td style="${tdR}">${!hideAreaProd && bProd ? fN(bProd)+' '+unit : '—'}</td>
+        <td style="${tdR};color:var(--hint);font-size:11px">${!opts.carryOver && bArea ? fN(bArea,1)+' ha' : '—'}</td>
+        <td style="${tdR};color:var(--hint);font-size:11px">${!opts.carryOver && bProd ? fN(bProd)+' '+unit : '—'}</td>
         <td style="${tdR};color:${inv.totalIncome ? 'var(--green)' : 'var(--hint)'};font-weight:600">${inv.totalIncome ? fC(inv.totalIncome) : '—'}</td>
         <td style="${tdR}">${bYTD != null ? fC(bYTD) : '—'}</td>
         <td style="${tdR}">${bIncome != null ? fC(bIncome) : '—'}</td>
         <td style="${tdR}">${varAmt(inv.totalIncome, bYTD)}</td>
       </tr>
-      <tbody id="${detailId}" style="display:none">
-        ${detailRows}
+      <tbody id="${expandId}" style="display:none">
+        ${expandContent}
+        <tr style="background:#f5f7fa"><td colspan="7" style="padding:4px 16px;border-bottom:1px solid var(--border)"></td></tr>
       </tbody>
     `;
     return { html, bIncome: bIncome || 0, bYTD: bYTD || 0, actual: inv.totalIncome };
@@ -221,7 +257,7 @@ async function _render(container) {
     if (!gList.length) return '';
     let secBudget = 0, secBudgetYTD = 0, secActual = 0;
     const rowsHtml = gList.map(g => {
-      const r = buildCommRow(g, { hideAreaProd: opts.hideAreaProd, carryOver: opts.carryOver });
+      const r = buildCommRow(g, { hideAreaProd: opts.hideAreaProd, carryOver: opts.carryOver, livestock: opts.livestock || isCattle(g.name) });
       secBudget    += r.bIncome;
       secBudgetYTD += r.bYTD;
       secActual    += r.actual;
@@ -256,14 +292,13 @@ async function _render(container) {
   const sortedGroups = Object.values(groups).sort((a, b) =>
     a.name.toUpperCase().localeCompare(b.name.toUpperCase())
   );
-  const farmingGroups   = sortedGroups.filter(g => isFarming(g.name));
-  const cattleGroups    = sortedGroups.filter(g => isCattle(g.name));
+  // Livestock merges back into Farming income — the expand panel handles the different metrics
+  const farmingGroups   = sortedGroups.filter(g => isFarming(g.name) || isCattle(g.name));
   const otherGroups     = sortedGroups.filter(g => isOther(g.name));
   const carryOverGroups = sortedGroups.filter(g => isCarryOver(g.name));
 
   const incomeRows = [
     buildSection('Farming income',    farmingGroups),
-    buildSection('Livestock income',  cattleGroups,    { hideAreaProd: true }),
     buildSection('Other income',      otherGroups,     { hideAreaProd: true }),
     buildSection('Carry-over income', carryOverGroups, { hideAreaProd: true, carryOver: true }),
   ].join('');
