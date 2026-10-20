@@ -80,17 +80,10 @@ async function _render(container) {
     return false;
   });
 
-  // Prior-year receipts: flagged invoices whose invoice_date falls in the current season.
-  // These show in the current season's Carry-over section (cash received this year,
-  // income earned in a prior year).
-  const [seasonStartY] = season.split('-').map(Number);
-  const seasonStartDate = `${seasonStartY}-${String(yearStartMonth).padStart(2,'0')}-01`;
-  const seasonEndDate   = `${seasonStartY + 1}-${String(yearStartMonth).padStart(2,'0')}-01`;
-  const priorYearInvoices = allInvoices.filter(inv => {
-    if (!isPriorYearInv(inv)) return false;
-    const d = inv.invoice_date?.slice(0,10) || '';
-    return d >= seasonStartDate && d < seasonEndDate;
-  });
+  // Prior-year receipts: all invoices flagged with prior_year_income=true for this farm.
+  // They show in whatever season report the user is currently viewing — the user
+  // explicitly tagged them, so no date filtering needed.
+  const priorYearInvoices = allInvoices.filter(isPriorYearInv);
 
   const fC  = n  => n != null ? formatCurrency(n, 0) : '—';
   const fN  = (n, dp=0) => n != null && n !== 0 ? formatNumber(n, dp) : '—';
