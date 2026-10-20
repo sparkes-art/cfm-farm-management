@@ -892,7 +892,6 @@ function _consolidateCapex(items, financialYear, farmId) {
     unit:           null,
     area_ha:        null,
     budget_amount:  item.budget_amount,  // positive = purchase cost, negative = sale offset
-    is_sale:        item.is_sale || false,
     notes:          item.is_sale ? 'Machinery sale proceeds from cashflow' : 'Capital expenditure from cashflow',
   }));
 }
