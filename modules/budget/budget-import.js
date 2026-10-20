@@ -143,12 +143,16 @@ function _parseCashflowSheet(rows, sheetName) {
   const revenueItems        = [];
   const costItems           = [];
   const priorYearCostItems  = [];
+  const capexItems          = [];
+  const cattleCostItems     = [];
   const warnings            = [];
 
   // State machine
   let incomeSection  = 'farming';  // 'farming' | 'other' | 'carry_over'
   let inPriorYear    = false;      // between EXPENSES FROM PRIOR YEAR and OVERHEAD EXPENSES
   let inOverheads    = false;
+  let inCapex        = false;
+  let inCattle       = false;      // inside CATTLE variable cost section
   let currentSection = null;       // overhead sub-section: 'overhead' | 'rm' | 'labour' | 'fund_mgmt'
   let pyEnterprise   = 'Prior Year'; // current enterprise for prior-year EXP rows
 
@@ -178,9 +182,30 @@ function _parseCashflowSheet(rows, sheetName) {
     const total = num(totalRaw);
     const descL = low(desc);
 
+    // ── Detect transition into capex section ──
+    if (inOverheads && !inCapex && descL.includes('capital expenditure')) {
+      inCapex = true;
+      inOverheads = false;
+      continue;
+    }
+
+    // ── CAPEX section — tag 'A' rows ──
+    if (inCapex) {
+      if (descL === 'subtotal' || descL.startsWith('total') || descL.startsWith('earnings')) break;
+      if (tag === 'H' || tag === 'E') continue;
+      if (tag === 'A' && desc && total != null) {
+        const amt = Math.abs(total);  // CAPEX stored as negative outflow in cashflow
+        if (amt > 0) {
+          capexItems.push({ budget_code: desc.toUpperCase().trim(), description: desc, budget_amount: amt });
+        }
+      }
+      continue;
+    }
+
     // ── Detect transition into overhead section ──
     if (!inOverheads && descL.includes(OVERHEAD_SECTION_START)) {
       inPriorYear = false;
+      inCattle    = false;
       inOverheads = true;
       currentSection = null;
       continue;
@@ -188,9 +213,6 @@ function _parseCashflowSheet(rows, sheetName) {
 
     // ── Overhead section ──
     if (inOverheads) {
-      // Stop at CAPITAL EXPENDITURE
-      if (descL.includes('capital expenditure')) break;
-
       if (tag === 'E' || !tag) {
         for (const [key, cat] of Object.entries(SECTION_MAP)) {
           if (descL.includes(key)) { currentSection = cat; break; }
@@ -203,6 +225,26 @@ function _parseCashflowSheet(rows, sheetName) {
 
       if (tag === 'EXP' && currentSection && total && total > 0) {
         costItems.push({ description: desc, budget_amount: total, category: currentSection });
+      }
+      continue;
+    }
+
+    // ── Cattle variable costs section ──
+    // Triggered by E row "CATTLE 2024" (or similar) in the farming expenses area
+    if (!inCattle && tag === 'E' && descL.startsWith('cattle')) {
+      inCattle = true;
+      continue;
+    }
+    if (inCattle) {
+      if (descL === 'subtotal' || descL.startsWith('total')) { inCattle = false; continue; }
+      if (tag === 'H') continue;
+      if (tag === 'EXP' && desc && total != null && total > 0) {
+        cattleCostItems.push({
+          budget_code:   desc.toUpperCase().trim(),
+          description:   desc,
+          budget_amount: total,
+          enterprise:    'CATTLE',
+        });
       }
       continue;
     }
@@ -271,7 +313,7 @@ function _parseCashflowSheet(rows, sheetName) {
   if (!revenueItems.length) warnings.push(`[${sheetName}] No revenue rows found`);
   if (!costItems.length)    warnings.push(`[${sheetName}] No overhead cost rows found`);
 
-  return { revenueItems, costItems, priorYearCostItems, warnings };
+  return { revenueItems, costItems, priorYearCostItems, capexItems, cattleCostItems, warnings };
 }
 
 // ── Gross Margin sheet parser ──────────────────────────────────────────────
@@ -615,6 +657,116 @@ function _consolidateVariableCosts(gmData, financialYear, farmId) {
 // from the prior season (e.g. late ginning, cartage, license fees for
 // cotton harvested in the previous year).
 // They appear in the OT cashflow as EXP rows between:
+// ── Cattle Program sheet parser ────────────────────────────────────────────
+// Extracts livestock metrics: total head, total sales $, total kg, avg $/head, avg kg/head
+// Row indexes (0-based from SheetJS): row 51 = Total Head Sold, row 52 = Total Sales $
+// Per-class rows carry: description, head count, weight/head (kg), $/kg
+function _parseCattleProgram(rows) {
+  const num = v => (v !== null && v !== undefined && !isNaN(Number(v))) ? Number(v) : null;
+  const str = v => (v !== null && v !== undefined) ? String(v).trim() : '';
+
+  let totalHead  = null;
+  let totalSales = null;
+  let totalKg    = 0;
+  let classRows  = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    const desc = str(row[1]).toLowerCase();
+
+    // Row 52 (0-based 51): "Total Head Sold" — value in col 2
+    if (desc.includes('total head sold')) { totalHead  = num(row[2]); continue; }
+    // Row 53 (0-based 52): "Total Sales $"  — value in col 2
+    if (desc.includes('total sales')) {     totalSales = num(row[2]); continue; }
+
+    // Per-class data rows: description, head count (col 2), weight/head (col 3), $/kg (col 4)
+    const head   = num(row[2]);
+    const wtHead = num(row[3]);  // avg kg/head
+    const dolKg  = num(row[4]);  // $/kg
+    if (head !== null && head > 0 && wtHead !== null && dolKg !== null) {
+      const classKg = head * wtHead;
+      totalKg += classKg;
+      classRows.push({ description: str(row[1]), head, wtHead, dolKg, classKg });
+    }
+  }
+
+  if (totalHead === null && !classRows.length) return null;
+
+  // Compute totals from class rows if not captured directly
+  if (totalHead === null) totalHead = classRows.reduce((s, r) => s + r.head, 0);
+  if (!totalKg) totalKg = classRows.reduce((s, r) => s + r.classKg, 0);
+
+  const avgPricePerHead = (totalHead && totalSales) ? totalSales / totalHead : null;
+  const avgKgPerHead    = (totalHead && totalKg)    ? totalKg    / totalHead  : null;
+
+  return { totalHead, totalSales, totalKg, avgPricePerHead, avgKgPerHead, classRows };
+}
+
+// ── Cattle variable costs (from cashflow, not GM) ─────────────────────────
+function _consolidateCattleCosts(items, financialYear, farmId) {
+  if (!items.length) return [];
+
+  // Deduplicate across OT+PT sheets by budget_code
+  const byKey = new Map();
+  for (const item of items) {
+    const key = item.budget_code;
+    if (byKey.has(key)) {
+      byKey.get(key).budget_amount += (item.budget_amount || 0);
+    } else {
+      byKey.set(key, { ...item });
+    }
+  }
+
+  return [...byKey.values()].map(item => ({
+    farm_id:        farmId,
+    financial_year: financialYear,
+    category:       'variable',
+    subcategory:    'Livestock',
+    enterprise:     'CATTLE',
+    budget_code:    item.budget_code,
+    description:    item.description,
+    cost_per_ha:    null,
+    unit_price:     null,
+    unit:           null,
+    area_ha:        null,
+    budget_amount:  item.budget_amount,
+    notes:          'Cattle variable costs from cashflow',
+  }));
+}
+
+// ── CAPEX consolidation ───────────────────────────────────────────────────
+function _consolidateCapex(items, financialYear, farmId) {
+  if (!items.length) return [];
+
+  // Deduplicate by budget_code across OT+PT
+  const byKey = new Map();
+  for (const item of items) {
+    const key = item.budget_code;
+    if (byKey.has(key)) {
+      byKey.get(key).budget_amount += (item.budget_amount || 0);
+    } else {
+      byKey.set(key, { ...item });
+    }
+  }
+
+  return [...byKey.values()].map(item => ({
+    farm_id:        farmId,
+    financial_year: financialYear,
+    category:       'capex',
+    subcategory:    'Capital Expenditure',
+    enterprise:     null,
+    budget_code:    item.budget_code,
+    description:    item.description,
+    cost_per_ha:    null,
+    unit_price:     null,
+    unit:           null,
+    area_ha:        null,
+    budget_amount:  item.budget_amount,
+    notes:          'Capital expenditure from cashflow',
+  }));
+}
+
 //   "EXPENSES FROM PRIOR YEAR" (row ~43) and "OVERHEAD EXPENSES" (row ~378)
 // Enterprise buckets within this section are announced by 'E' rows
 // (e.g. "COTTON DL 2024 (250.03 HA)").
@@ -714,6 +866,8 @@ export async function parseBudgetExcel(file) {
   const allRevenueItems       = [];
   const allCostItems          = [];
   const allPriorYearCostItems = [];
+  const allCapexItems         = [];
+  const allCattleCostItems    = [];
 
   for (const sheetName of cashflowSheets) {
     const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
@@ -721,13 +875,22 @@ export async function parseBudgetExcel(file) {
     allRevenueItems.push(...result.revenueItems);
     allCostItems.push(...result.costItems);
     allPriorYearCostItems.push(...(result.priorYearCostItems || []));
+    allCapexItems.push(...(result.capexItems || []));
+    allCattleCostItems.push(...(result.cattleCostItems || []));
     allWarnings.push(...result.warnings);
   }
 
-  // ── Parse GM sheets for supplemental detail ──
-  // Key by both the parsed name AND the sheet name (uppercased) for maximum matching
+  // ── Parse Cattle Program sheet for livestock metrics ──
+  let cattleMetrics = null;
+  if (wb.Sheets['Cattle Program']) {
+    const cpRows = window.XLSX.utils.sheet_to_json(wb.Sheets['Cattle Program'], { header: 1, raw: true, defval: null });
+    cattleMetrics = _parseCattleProgram(cpRows);
+  }
+
+  // ── Parse GM sheets for cropping enterprise detail (skip Cattle GM — costs come from cashflow) ──
   const gmData = new Map();
   for (const sheetName of gmSheets) {
+    if (low(sheetName).includes('cattle')) continue;  // cattle costs from cashflow, not GM
     const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
     const gm = _parseGmSheet(rows, sheetName);
     if (gm) {
@@ -738,31 +901,36 @@ export async function parseBudgetExcel(file) {
     }
   }
 
-  // ── Consolidate (merge OT+PT, dedup) ──
-  const revenueRows      = _consolidateRevenue(allRevenueItems, financialYear || 'UNKNOWN', farm.id, gmData);
-  const fixedCostRows    = _consolidateCosts(allCostItems, financialYear || 'UNKNOWN', farm.id);
-  const variableCostRows = _consolidateVariableCosts(gmData, financialYear || 'UNKNOWN', farm.id);
-  const priorYearCostRows = _consolidatePriorYearCosts(allPriorYearCostItems, financialYear || 'UNKNOWN', farm.id);
+  const fy = financialYear || 'UNKNOWN';
 
-  // Combined cost rows: variable first (enterprise detail), then prior year, then fixed
-  const costRows = [...variableCostRows, ...priorYearCostRows, ...fixedCostRows];
+  // ── Consolidate ──
+  const revenueRows      = _consolidateRevenue(allRevenueItems, fy, farm.id, gmData);
+  const fixedCostRows    = _consolidateCosts(allCostItems, fy, farm.id);
+  const variableCostRows = _consolidateVariableCosts(gmData, fy, farm.id);
+  const priorYearCostRows = _consolidatePriorYearCosts(allPriorYearCostItems, fy, farm.id);
+
+  // Cattle variable costs from cashflow (deduplicated across OT+PT sheets)
+  const cattleCostRows = _consolidateCattleCosts(allCattleCostItems, fy, farm.id);
+
+  // CAPEX rows (deduplicated by budget_code)
+  const capexRows = _consolidateCapex(allCapexItems, fy, farm.id);
+
+  // Combined cost rows: variable first, then prior year, then cattle, then fixed, then capex
+  const costRows = [...variableCostRows, ...priorYearCostRows, ...cattleCostRows, ...fixedCostRows, ...capexRows];
 
   if (!revenueRows.length && !costRows.length) {
     allWarnings.push('No data could be extracted — check that the file matches the expected CFM budget format');
   }
 
-  // Summary counts for preview
   const enterprisesWithCosts = new Set(variableCostRows.map(r => r.enterprise)).size;
   if (variableCostRows.length) {
-    allWarnings.push(
-      `ℹ ${variableCostRows.length} variable cost lines extracted across ${enterprisesWithCosts} enterprises ` +
-      `(including $0 budget rows)`
-    );
+    allWarnings.push(`ℹ ${variableCostRows.length} variable cost lines across ${enterprisesWithCosts} enterprises`);
   }
   if (priorYearCostRows.length) {
-    allWarnings.push(
-      `ℹ ${priorYearCostRows.length} prior-year expense lines extracted from cashflow`
-    );
+    allWarnings.push(`ℹ ${priorYearCostRows.length} prior-year expense lines from cashflow`);
+  }
+  if (capexRows.length) {
+    allWarnings.push(`ℹ ${capexRows.length} capital expenditure lines`);
   }
 
   return {
@@ -772,7 +940,10 @@ export async function parseBudgetExcel(file) {
     costRows,
     variableCostRows,
     priorYearCostRows,
+    cattleCostRows,
     fixedCostRows,
+    capexRows,
+    cattleMetrics,
     warnings: allWarnings,
     fileName: file.name,
     sheetNames,
@@ -784,7 +955,7 @@ const fC = n => n != null ? '$' + Math.round(n).toLocaleString() : '—';
 const fN = (n, dp = 0) => n != null ? parseFloat(n).toFixed(dp) : '—';
 
 export function showBudgetImportPreview(container, parsed) {
-  const { farm, financialYear, revenueRows, costRows, variableCostRows, priorYearCostRows, fixedCostRows, warnings, fileName } = parsed;
+  const { farm, financialYear, revenueRows, costRows, variableCostRows, priorYearCostRows, cattleCostRows, fixedCostRows, capexRows, cattleMetrics, warnings, fileName } = parsed;
 
   const catLabels = {
     variable:  'Variable (crop/livestock)',
@@ -807,8 +978,10 @@ export function showBudgetImportPreview(container, parsed) {
 
   const totalVarCost     = (variableCostRows  || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
   const totalPYCost      = (priorYearCostRows || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
+  const totalCattleCost  = (cattleCostRows    || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
   const totalFixedCost   = (fixedCostRows     || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
-  const totalCost        = totalVarCost + totalPYCost + totalFixedCost;
+  const totalCapex       = (capexRows         || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
+  const totalCost        = totalVarCost + totalPYCost + totalCattleCost + totalFixedCost + totalCapex;
 
   // Group variable costs by enterprise for display
   const varByEnterprise = {};
@@ -897,11 +1070,15 @@ export function showBudgetImportPreview(container, parsed) {
           <span style="color:#64748b">Revenue rows</span><span style="color:#1e293b;font-weight:600">${revenueRows.length}</span><span></span>
           <span style="color:#64748b">Variable cost rows</span><span style="color:#1e293b;font-weight:600">${(variableCostRows||[]).length}</span><span></span>
           <span style="color:#64748b">Prior year cost rows</span><span style="color:#1e293b;font-weight:600">${(priorYearCostRows||[]).length}</span><span></span>
+          <span style="color:#64748b">Cattle cost rows</span><span style="color:#1e293b;font-weight:600">${(cattleCostRows||[]).length}</span><span></span>
           <span style="color:#64748b">Fixed cost rows</span><span style="color:#1e293b;font-weight:600">${(fixedCostRows||[]).length}</span><span></span>
+          <span style="color:#64748b">CAPEX rows</span><span style="color:#1e293b;font-weight:600">${(capexRows||[]).length}</span><span></span>
           <span style="color:#64748b">Total budget revenue</span><span style="color:#16a34a;font-weight:700">${fC(totalRev)}</span><span></span>
           <span style="color:#64748b">Total variable costs</span><span style="color:#dc2626;font-weight:700">${fC(totalVarCost)}</span><span></span>
           <span style="color:#64748b">Total prior year costs</span><span style="color:#dc2626;font-weight:700">${fC(totalPYCost)}</span><span></span>
+          <span style="color:#64748b">Total cattle costs</span><span style="color:#dc2626;font-weight:700">${fC(totalCattleCost)}</span><span></span>
           <span style="color:#64748b">Total fixed costs</span><span style="color:#dc2626;font-weight:700">${fC(totalFixedCost)}</span><span></span>
+          <span style="color:#64748b">Total CAPEX</span><span style="color:#dc2626;font-weight:700">${fC(totalCapex)}</span><span></span>
         </div>
       </div>
 
@@ -986,12 +1163,12 @@ export function showBudgetImportPreview(container, parsed) {
                     </tr>
                   `).join('')}
                   <tr style="background:#fff5f5">
-                    <td style="${td};font-weight:600;font-size:11px" colspan="5">${enterprise} total</td>
+                    <td style="${td};font-weight:600;font-size:11px" colspan="7">${enterprise} total</td>
                     <td style="${tdR};font-weight:600;color:#dc2626;font-size:11px">-${fC(etotal)}</td>
                   </tr>
                 `).join('')}
                 <tr style="background:#fff5f5;border-top:2px solid #e5e7eb">
-                  <td style="${td};font-weight:700" colspan="5">Total variable costs</td>
+                  <td style="${td};font-weight:700" colspan="7">Total variable costs</td>
                   <td style="${tdR};color:#dc2626;font-weight:700">-${fC(totalVarCost)}</td>
                 </tr>
               </tbody>
@@ -1039,6 +1216,85 @@ export function showBudgetImportPreview(container, parsed) {
         </div>
       ` : ''}
 
+      ${cattleMetrics ? `
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
+          <div style="padding:10px 16px;background:#fef9f0;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+            <span>🐄 Livestock — Cattle Program metrics</span>
+            <span style="color:#16a34a;font-weight:700">${fC(cattleMetrics.totalSales)}</span>
+          </div>
+          <div style="padding:14px 16px">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+              ${[
+                ['Total head sold', cattleMetrics.totalHead != null ? cattleMetrics.totalHead.toLocaleString() + ' hd' : '—'],
+                ['Avg price / head', cattleMetrics.avgPricePerHead != null ? fC(cattleMetrics.avgPricePerHead) : '—'],
+                ['Total kg', cattleMetrics.totalKg ? Math.round(cattleMetrics.totalKg).toLocaleString() + ' kg' : '—'],
+                ['Avg kg / head', cattleMetrics.avgKgPerHead != null ? fN(cattleMetrics.avgKgPerHead, 0) + ' kg' : '—'],
+              ].map(([label, val]) => `
+                <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px;text-align:center">
+                  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${label}</div>
+                  <div style="font-size:15px;font-weight:700;color:#1e293b">${val}</div>
+                </div>
+              `).join('')}
+            </div>
+            ${cattleMetrics.classRows && cattleMetrics.classRows.length ? `
+              <table style="width:100%;border-collapse:collapse;font-size:11px">
+                <thead><tr>
+                  <th style="${th};text-align:left">Class</th>
+                  <th style="${thR}">Head</th>
+                  <th style="${thR}">Avg kg/hd</th>
+                  <th style="${thR}">$/kg</th>
+                  <th style="${thR}">Total kg</th>
+                  <th style="${thR}">Value</th>
+                </tr></thead>
+                <tbody>
+                  ${cattleMetrics.classRows.map((cr, i) => `
+                    <tr style="${i % 2 === 0 ? '' : 'background:#fafafa'}">
+                      <td style="${td}">${cr.description}</td>
+                      <td style="${tdR}">${cr.head.toLocaleString()}</td>
+                      <td style="${tdR}">${fN(cr.wtHead, 0)} kg</td>
+                      <td style="${tdR}">$${fN(cr.dolKg, 2)}</td>
+                      <td style="${tdR}">${Math.round(cr.classKg).toLocaleString()} kg</td>
+                      <td style="${tdR};color:#16a34a;font-weight:600">${fC(cr.head * cr.wtHead * cr.dolKg)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            ` : ''}
+          </div>
+        </div>
+      ` : ''}
+
+      ${(cattleCostRows||[]).length ? `
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
+          <div style="padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+            <span>Cattle variable costs — ${(cattleCostRows||[]).length} lines <span style="font-weight:400;color:#6b7280;font-size:11px">(from cashflow)</span></span>
+            <span style="color:#dc2626;font-weight:700">-${fC(totalCattleCost)}</span>
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <thead><tr>
+                <th style="${th};text-align:left">Budget Code</th>
+                <th style="${th};text-align:left">Description</th>
+                <th style="${thR}">Amount</th>
+              </tr></thead>
+              <tbody>
+                ${(cattleCostRows||[]).map((r, i) => `
+                  <tr style="${i % 2 === 0 ? '' : 'background:#fafafa'}">
+                    <td style="${td};font-size:11px;font-family:monospace;color:#374151">${r.budget_code}</td>
+                    <td style="${td};font-size:11px">${r.description}</td>
+                    <td style="${tdR};font-size:11px;color:#dc2626">-${fC(r.budget_amount)}</td>
+                  </tr>
+                `).join('')}
+                <tr style="background:#fff5f5;border-top:2px solid #e5e7eb">
+                  <td style="${td};font-weight:700" colspan="2">Total cattle variable costs</td>
+                  <td style="${tdR};color:#dc2626;font-weight:700">-${fC(totalCattleCost)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : ''}
+
       ${(fixedCostRows||[]).length ? `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
           <div style="padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
@@ -1077,6 +1333,37 @@ export function showBudgetImportPreview(container, parsed) {
           </div>
         </div>
       ` : '<div style="color:#6b7280;font-size:12px;margin-bottom:12px">No fixed cost rows parsed</div>'}
+
+      ${(capexRows||[]).length ? `
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
+          <div style="padding:10px 16px;background:#f5f3ff;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+            <span>Capital expenditure — ${(capexRows||[]).length} items <span style="font-weight:400;color:#6b7280;font-size:11px">(from cashflow)</span></span>
+            <span style="color:#dc2626;font-weight:700">-${fC(totalCapex)}</span>
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <thead><tr>
+                <th style="${th};text-align:left">Budget Code</th>
+                <th style="${th};text-align:left">Description</th>
+                <th style="${thR}">Amount</th>
+              </tr></thead>
+              <tbody>
+                ${(capexRows||[]).map((r, i) => `
+                  <tr style="${i % 2 === 0 ? '' : 'background:#fafafa'}">
+                    <td style="${td};font-size:11px;font-family:monospace;color:#374151">${r.budget_code}</td>
+                    <td style="${td};font-size:11px">${r.description}</td>
+                    <td style="${tdR};font-size:11px;color:#dc2626">-${fC(r.budget_amount)}</td>
+                  </tr>
+                `).join('')}
+                <tr style="background:#fff5f5;border-top:2px solid #e5e7eb">
+                  <td style="${td};font-weight:700" colspan="2">Total capex</td>
+                  <td style="${tdR};color:#dc2626;font-weight:700">-${fC(totalCapex)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : ''}
 
       ${revenueRows.length || costRows.length ? `
         <div style="display:flex;gap:10px;align-items:center;justify-content:flex-end">
