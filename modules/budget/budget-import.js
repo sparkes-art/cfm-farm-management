@@ -291,23 +291,15 @@ function _parseCashflowSheet(rows, sheetName) {
     }
 
     // ── Next Year Crops variable costs section ──
-    // Triggered by E row containing "next year crops" — pre-paid costs for the following season
+    // These are pre-paid costs for the FOLLOWING season — not current-year expenses.
+    // Skip the entire section so they don't inflate current-year crop cost totals.
     if (!inNyCrops && tag === 'E' && descL.includes('next year crops')) {
       inNyCrops = true;
       continue;
     }
     if (inNyCrops) {
-      if (descL === 'subtotal' || descL.startsWith('total')) { inNyCrops = false; continue; }
-      if (tag === 'H') continue;
-      if (tag === 'EXP' && desc && total != null && total > 0) {
-        fallowCostItems.push({
-          budget_code:   desc.toUpperCase().trim(),
-          description:   desc,
-          budget_amount: total,
-          enterprise:    'NY CROPS',
-        });
-      }
-      continue;
+      if (descL === 'subtotal' || descL.startsWith('total')) { inNyCrops = false; }
+      continue;  // skip all rows in this section
     }
 
     // ── Fallow variable costs section ──
@@ -539,15 +531,53 @@ function _parseGmSheet(rows, sheetName) {
       //   Blackbull format: row 10 col 2 = price, row 11 col 2 = yield
       //   Merrowie format:  row 10 col 0 = "Expected Yield:", col 1 = yield value
       //                     row 11 col 0 = "Expected Price:", col 1 = price value
-      const row10L = low(str((rows[10] || [])[0]));
-      const row11L = low(str((rows[11] || [])[0]));
-      const isMerrowieLayout = row10L.includes('expected yield') || row11L.includes('expected price');
+      // SheetJS rows[] is 0-indexed; openpyxl reports 1-indexed row numbers.
+      // openpyxl row N  →  SheetJS rows[N-1]
+      // Merrowie standard layout (wheat, canola, etc.):
+      //   opx row 11 (rows[10]) col 0 = "Expected Yield:", col 1 = yield value
+      //   opx row 12 (rows[11]) col 0 = "Expected Price:", col 1 = price value
+      // Barley Semi IRR layout:
+      //   opx row 11 (rows[10]) col 0 = "Expected Grain Yield:", col 1 = yield
+      //   opx row 12 (rows[11]) col 0 = "Expected Grain Price:", col 1 = price
+      // Almonds layout (all stages):
+      //   opx row 8  (rows[7])  col 0 = "Metrics"
+      //   opx row 12 (rows[11]) col 0 = "Expected Yield:", col 7 = yield value
+      //   opx row 14 (rows[13]) col 7 = indicative budget price
+      const row8L  = low(str((rows[7]  || [])[0]));  // opx row 8
+      const row10L = low(str((rows[10] || [])[0]));  // opx row 11 (standard yield label row)
+      const row11L = low(str((rows[11] || [])[0]));  // opx row 12 (standard price label row)
 
-      if (isMerrowieLayout) {
-        // Expected Yield: row 10 col 1; Expected Price: row 11 col 1
+      const isMerrowieLayout  = row10L.includes('expected yield') && !row10L.includes('grain');
+      const isBarleyIrrLayout = row10L.includes('expected grain yield') || row11L.includes('expected grain price');
+      // Almonds: row 8 = "Metrics", then scan rows 11-14 for "Expected Yield:" (offset varies by stage)
+      let almondYieldRow = -1;
+      if (row8L.includes('metrics') && !row10L.includes('expected yield') && !row10L.includes('grain')) {
+        for (let ai = 10; ai <= 14; ai++) {
+          if (low(str((rows[ai] || [])[0])).includes('expected yield')) { almondYieldRow = ai; break; }
+        }
+      }
+      const isAlmondLayout    = almondYieldRow >= 0;
+
+      if (isAlmondLayout) {
+        // Almonds: yield at almondYieldRow col 7; price 2 rows later col 7 (indicative) or col 4 (cash)
+        yieldPerHa  = num((rows[almondYieldRow] || [])[7]);
+        const priceRow = almondYieldRow + 2;  // "Contracts to Date:" row with price cols
+        price       = num((rows[priceRow] || [])[7]) || num((rows[priceRow] || [])[4]);
+        // Skip #DIV/0! formula results (returned as string by SheetJS)
+        if (typeof price === 'string') price = null;
+        totalTonnes = yieldPerHa && area_ha ? yieldPerHa * area_ha : null;
+        unit = 't/ha';
+      } else if (isBarleyIrrLayout) {
+        // Barley Semi IRR: grain yield at opx row 11 (rows[10]) col 1, price at opx row 12 (rows[11]) col 1
         yieldPerHa  = num((rows[10] || [])[1]);
         price       = num((rows[11] || [])[1]);
-        // Production total: row 11 col 8 (e.g. 1767.7 tonnes for wheat)
+        totalTonnes = num((rows[10] || [])[8]) || (yieldPerHa && area_ha ? yieldPerHa * area_ha : null);
+        unit = 't/ha';
+      } else if (isMerrowieLayout) {
+        // Standard Merrowie: Expected Yield at opx row 11 (rows[10]) col 1, price at opx row 12 (rows[11]) col 1
+        yieldPerHa  = num((rows[10] || [])[1]);
+        price       = num((rows[11] || [])[1]);
+        // Production total: col 8 of price row or yield row
         totalTonnes = num((rows[11] || [])[8]) || num((rows[10] || [])[8]);
       } else {
         // Standard (Blackbull) layout: row 10 col 2 = price, row 11 col 2 = yield/ha
@@ -687,7 +717,10 @@ function _consolidateRevenue(items, financialYear, farmId, gmData) {
   // Keep section from the first occurrence (OT cashflow is authoritative)
   const byKey = new Map();
   for (const item of items) {
-    const key = item.commodity.toUpperCase().replace(/\s+/g,' ').trim();
+    // Include section in key so carry-over and current-year items with the same
+    // commodity name (e.g. WHEAT DL) are kept separate, not summed together.
+    const section = item.section || 'farming';
+    const key = section + '|' + item.commodity.toUpperCase().replace(/\s+/g,' ').trim();
     if (byKey.has(key)) {
       byKey.get(key).total += (item.total || 0);
     } else {
@@ -897,6 +930,37 @@ function _parseCattleProgram(rows) {
   const avgKgPerHead    = (totalHead && totalKg)    ? totalKg    / totalHead  : null;
 
   return { totalHead, totalSales, totalKg, avgPricePerHead, avgKgPerHead, classRows };
+}
+
+// ── Sheep GM metrics ──────────────────────────────────────────────────────
+// Extracts summary metrics from the Sheep GM sheet (single-entity Merrowie layout).
+// Row 5:  "Total Income"       col 2 = total income
+// Row 6:  "Total Costs"        col 2 = total costs
+// Row 11: "Expected Sales:"    col 7 = sheep sale revenue
+// Row 12: "Wool Sales:"        col 7 = wool sale revenue
+function _parseSheepGm(rows) {
+  if (!rows || rows.length < 13) return null;
+  const num = v => (v !== null && v !== undefined && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+  const str = v => (v !== null && v !== undefined) ? String(v).trim() : '';
+  const low = s => s.toLowerCase();
+
+  let totalIncome    = null;
+  let totalCosts     = null;
+  let sheepSales     = null;
+  let woolSales      = null;
+
+  for (let i = 0; i < Math.min(rows.length, 25); i++) {
+    const row = rows[i] || [];
+    const label = low(str(row[0]));
+    if (label.includes('total income'))    totalIncome = num(row[2]);
+    if (label.includes('total costs'))     totalCosts  = num(row[2]);
+    if (label.includes('expected sales'))  sheepSales  = num(row[7]) ?? num(row[2]);
+    if (label.includes('wool sales'))      woolSales   = num(row[7]) ?? num(row[2]);
+  }
+
+  if (!sheepSales && !woolSales && !totalIncome) return null;
+
+  return { totalIncome, totalCosts, sheepSales, woolSales };
 }
 
 // ── Cattle variable costs (from cashflow, not GM) ─────────────────────────
@@ -1120,7 +1184,15 @@ export async function parseBudgetExcel(file) {
     cattleMetrics = _parseCattleProgram(cpRows);
   }
 
-  // ── Parse GM sheets for cropping enterprise detail (skip Cattle GM — costs come from cashflow) ──
+  // ── Parse Sheep GM sheet for livestock metrics (metrics only — costs come from cashflow) ──
+  let sheepMetrics = null;
+  const sheepGmSheet = Object.keys(wb.Sheets).find(s => low(s) === 'sheep gm' || low(s).includes('sheep gm'));
+  if (sheepGmSheet) {
+    const sgRows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheepGmSheet], { header: 1, raw: true, defval: null });
+    sheepMetrics = _parseSheepGm(sgRows);
+  }
+
+  // ── Parse GM sheets for cropping enterprise detail (skip Cattle GM and Sheep GM — costs come from cashflow) ──
   const gmData = new Map();
   for (const sheetName of gmSheets) {
     if (low(sheetName).includes('cattle')) continue;  // cattle costs from cashflow, not GM
@@ -1186,6 +1258,7 @@ export async function parseBudgetExcel(file) {
     fixedCostRows,
     capexRows,
     cattleMetrics,
+    sheepMetrics,
     warnings: allWarnings,
     fileName: file.name,
     sheetNames,
@@ -1197,7 +1270,7 @@ const fC = n => n != null ? '$' + Math.round(n).toLocaleString() : '—';
 const fN = (n, dp = 0) => n != null ? parseFloat(n).toFixed(dp) : '—';
 
 export function showBudgetImportPreview(container, parsed) {
-  const { farm, financialYear, revenueRows, costRows, variableCostRows, fallowCostRows, priorYearCostRows, cattleCostRows, fixedCostRows, capexRows, cattleMetrics, warnings, fileName } = parsed;
+  const { farm, financialYear, revenueRows, costRows, variableCostRows, fallowCostRows, priorYearCostRows, cattleCostRows, fixedCostRows, capexRows, cattleMetrics, sheepMetrics, warnings, fileName } = parsed;
 
   const catLabels = {
     variable:  'Variable (crop/livestock)',
@@ -1410,10 +1483,15 @@ export function showBudgetImportPreview(container, parsed) {
           </div>
           <div style="padding:12px 16px">
             ${(() => {
-              // Farming Income: cropping rows table + livestock metrics card inline
-              const cropRows = farmingRevRows.filter(r => !r.commodity.toUpperCase().includes('CATTLE'));
-              const cattleRevRow = farmingRevRows.find(r => r.commodity.toUpperCase().includes('CATTLE'));
-              const totalCropRev = cropRows.reduce((s, r) => s + (r.budgeted_gross_revenue || 0), 0);
+              // Farming Income: cropping rows table + livestock metrics cards inline
+              const isCattle = r => r.commodity.toUpperCase().includes('CATTLE');
+              const isSheep  = r => r.commodity.toUpperCase().includes('SHEEP SALES') || r.commodity.toUpperCase().includes('WOOL SALES');
+              const cropRows = farmingRevRows.filter(r => !isCattle(r) && !isSheep(r));
+              const cattleRevRow  = farmingRevRows.find(r => isCattle(r));
+              const sheepSalesRow = farmingRevRows.find(r => r.commodity.toUpperCase().includes('SHEEP SALES'));
+              const woolSalesRow  = farmingRevRows.find(r => r.commodity.toUpperCase().includes('WOOL SALES'));
+              const totalCropRev  = cropRows.reduce((s, r) => s + (r.budgeted_gross_revenue || 0), 0);
+              const totalSheepRev = (sheepSalesRow?.budgeted_gross_revenue || 0) + (woolSalesRow?.budgeted_gross_revenue || 0);
               return `
                 ${renderRevSection('Farming Income — Cropping', cropRows, totalCropRev, true, false)}
                 ${cattleRevRow || cattleMetrics ? `
@@ -1463,6 +1541,29 @@ export function showBudgetImportPreview(container, parsed) {
                         ` : ''}
                       </div>
                     ` : `<div style="padding:10px 16px;font-size:12px;color:#6b7280">Total from cashflow only — upload Cattle Program sheet for detailed metrics</div>`}
+                  </div>
+                ` : ''}
+                ${(sheepSalesRow || woolSalesRow || sheepMetrics) ? `
+                  <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px">
+                    <div style="padding:8px 16px;background:#f0f9f0;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between">
+                      <span>🐑 Livestock — Sheep &amp; Wool</span>
+                      <span style="color:#16a34a">${fC(totalSheepRev || sheepMetrics?.totalIncome)}</span>
+                    </div>
+                    ${sheepMetrics ? `
+                      <div style="padding:12px 16px">
+                        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+                          ${[
+                            ['Sheep sales', fC(sheepSalesRow?.budgeted_gross_revenue ?? sheepMetrics?.sheepSales)],
+                            ['Wool sales',  fC(woolSalesRow?.budgeted_gross_revenue  ?? sheepMetrics?.woolSales)],
+                          ].map(([label, val]) => `
+                            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px;text-align:center">
+                              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${label}</div>
+                              <div style="font-size:15px;font-weight:700;color:#1e293b">${val}</div>
+                            </div>
+                          `).join('')}
+                        </div>
+                      </div>
+                    ` : `<div style="padding:10px 16px;font-size:12px;color:#6b7280">Total from cashflow only</div>`}
                   </div>
                 ` : ''}
                 <div style="display:flex;justify-content:flex-end;font-size:11px;color:#6b7280;margin-bottom:8px">
