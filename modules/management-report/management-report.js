@@ -87,7 +87,8 @@ async function _render(container) {
     const targetIsLivestock = targetKey && /cattle|livestock/i.test(targetKey);
     invList.forEach(inv => {
       const linked = contracts.find(c => c.id === inv.forward_contract_id);
-      const iComm  = linked?.commodity || inv.commodity_type || (inv.line_items||[])[0]?.commodity || '';
+      const batchComm = (() => { if (!inv.batches) return ''; const b = typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches; return b.flatMap(x=>x.lines||[]).find(l=>l.type==='income'&&l.description)?.description||''; })();
+      const iComm  = linked?.commodity || batchComm || (inv.line_items||[])[0]?.commodity || '';
       const iCommKey = iComm.trim().toUpperCase().replace(/\s+/g,' ');
       // Livestock invoices use commodity_type='livestock' but budget may be stored as 'CATTLE' etc.
       // Allow any livestock synonym to match any livestock budget group.
@@ -118,6 +119,26 @@ async function _render(container) {
     const key = b.commodity.trim().toUpperCase().replace(/\s+/g,' ');
     if (!groups[key]) groups[key] = { name: b.commodity.trim(), budgets: [] };
     groups[key].budgets.push(b);
+  });
+
+  // ── Also add groups from prior-year-flagged invoices with no budget row ────
+  // These invoices have batch.prior_year_income=true; commodity comes from
+  // the batch line description (set at save time as the prior commodity name).
+  allInvoices.forEach(inv => {
+    if (!inv.batches) return;
+    const batches = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+    const isPY = batches.some(b => b.prior_year_income);
+    if (!isPY) return;
+    // Only include if this invoice belongs to the current season being viewed
+    const invSeason = inv.season || batches.find(b=>b.crop_year)?.crop_year;
+    if (invSeason !== season) return;
+    // Get commodity from batch line description or line_items
+    const commName = batches.flatMap(b=>b.lines||[]).find(l=>l.type==='income'&&l.description)?.description
+      || (inv.line_items||[])[0]?.commodity
+      || null;
+    if (!commName) return;
+    const key = commName.trim().toUpperCase().replace(/\s+/g,' ');
+    if (!groups[key]) groups[key] = { name: commName.trim(), budgets: [] };
   });
 
   // ── Budget for a commodity group ───────────────────────────────────────────
