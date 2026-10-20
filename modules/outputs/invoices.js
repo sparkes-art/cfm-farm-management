@@ -1288,7 +1288,6 @@ export function openInvoiceForm(container, existing = null) {
         gst_type: 'ex',
         master_unit: masterUnit,
         season: cropYear,
-        commodity_type: isPriorYear ? commodity : (selectedContract?.commodity || null),
         prior_year_income: isPriorYear || null,
         batches: [batch],
         total_qty: qty,
