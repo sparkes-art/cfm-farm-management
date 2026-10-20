@@ -1775,14 +1775,15 @@ function _exportCSV(container) {
 
   const headers = [
     'Date', 'Invoice #', 'Sale Type', 'Buyer',
-    'Commodity', 'Season', 'Qty', 'Unit',
+    'Commodity', 'Contract #', 'Season', 'Qty', 'Unit',
     'Gross ($)', 'Quality Adj ($)', 'Total Income ($)',
     'Xero Ref', 'Status',
   ];
 
   const csvRows = rows.map(inv => {
     const lines = inv.line_items || [];
-    const contractCommodity = _contracts.find(c => c.id === inv.forward_contract_id)?.commodity;
+    const contract = _contracts.find(c => c.id === inv.forward_contract_id);
+    const contractCommodity = contract?.commodity;
     const commodities = contractCommodity ||
       [...new Set(lines.map(l => l.commodity).filter(Boolean))].join('; ') ||
       (() => {
@@ -1811,13 +1812,14 @@ function _exportCSV(container) {
       esc(saleType),
       esc(inv.buyer),
       esc(commodities),
+      esc(contract?.contract_number || ''),
       esc(inv.season),
       esc(qty),
       esc(inv.master_unit),
       esc(gross || ''),
       esc(qa || ''),
       esc(totalIncome || ''),
-      esc(inv.xero_invoice_id),
+      esc(inv.xero_invoice_number),
       esc(inv.status),
     ].join(',');
   });
