@@ -214,12 +214,14 @@ async function _render(container) {
           qty = b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa'))
                  .reduce((s,x)=>s+(parseFloat(x.qty)||0),0);
         } else { qty = parseFloat(i.total_qty)||0; }
+        const inc = (parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0);
         return {
+          id: i.id,
           date: i.invoice_date?.slice(0,10),
           buyer: i.buyer,
-          ref: i.xero_invoice_number || i.id?.slice(0,8),
           qty,
-          inc: (parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0),
+          inc,
+          price: (qty && inc) ? inc / qty : null,
         };
       }),
     };
@@ -431,7 +433,18 @@ window._mgmtOpenModal = function(d) {
 
   const sectionHdr = label => `<div style="padding:8px 18px;background:var(--page-bg);border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">${label}</div>`;
 
-  const budgetSection = d.isLs ? '' : `
+  // For carry-over income: show actual qty sold + avg price (area/yield not relevant)
+  const totalQty   = d.invoices.reduce((s,i) => s + (i.qty||0), 0);
+  const totalInc   = d.invoices.reduce((s,i) => s + (i.inc||0), 0);
+  const avgPrice   = (totalQty && totalInc) ? totalInc / totalQty : null;
+
+  const budgetSection = d.isLs ? '' : d.carryOver ? `
+    ${sectionHdr('Actual')}
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--border)">
+      ${stat('Qty sold',  totalQty  ? fN(totalQty,2)+' '+d.unit : '—')}
+      ${stat('Avg price', avgPrice  ? '$'+fN(avgPrice,2)+'/'+d.unit : '—')}
+      ${stat('Total',     totalInc  ? fC(totalInc) : '—', '', '#16a34a')}
+    </div>` : `
     ${sectionHdr('Budget')}
     <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--border)">
       ${stat('Area',       d.bArea  != null ? fN(d.bArea,1)+' ha'              : '—')}
@@ -456,15 +469,20 @@ window._mgmtOpenModal = function(d) {
         <thead><tr style="border-bottom:1px solid var(--border)">
           <th style="text-align:left;padding:4px 8px;color:var(--hint);font-weight:500">Date · Buyer</th>
           <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Qty</th>
-          <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Ref</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Price</th>
           <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Amount</th>
+          <th style="padding:4px 8px;color:var(--hint);font-weight:500"></th>
         </tr></thead>
         <tbody>
           ${d.invoices.map(i => `<tr style="border-bottom:0.5px solid var(--border-light)">
             <td style="padding:5px 8px;color:var(--ink)">${i.date ? new Date(i.date).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) : '—'}${i.buyer ? ' · '+i.buyer : ''}</td>
             <td style="padding:5px 8px;text-align:right;color:var(--hint)">${i.qty ? fN(i.qty,2)+' '+d.unit : '—'}</td>
-            <td style="padding:5px 8px;text-align:right;color:var(--hint)">${i.ref || '—'}</td>
+            <td style="padding:5px 8px;text-align:right;color:var(--hint)">${i.price ? '$'+fN(i.price,2)+'/'+d.unit : '—'}</td>
             <td style="padding:5px 8px;text-align:right;color:#16a34a;font-weight:600">${fC(i.inc)}</td>
+            <td style="padding:5px 8px;text-align:center">
+              <button onclick="window._mgmtOpenInvoice('${i.id}')" title="Open invoice"
+                style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;color:var(--blue);line-height:1.4">↗</button>
+            </td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -489,6 +507,29 @@ window._mgmtOpenModal = function(d) {
   document.body.appendChild(modal);
   modal.querySelector('#mgmt-modal-close').onclick = () => modal.remove();
   modal.onclick = e => { if (e.target === modal) modal.remove(); };
+};
+
+// Navigate to Outputs and open invoice edit form
+window._mgmtOpenInvoice = async function(invoiceId) {
+  // Close any open modal
+  document.querySelectorAll('[style*="position:fixed"]').forEach(el => {
+    if (el.style.zIndex >= 9999) el.remove();
+  });
+  // Switch to outputs module
+  const { dbSelect } = await import('../../js/supabase-client.js');
+  const { openInvoiceForm } = await import('../outputs/invoices.js');
+  // Navigate to outputs tab
+  document.querySelector('#sidebar a[data-module="outputs"]')?.click();
+  // Wait briefly for module to mount, then open the invoice
+  setTimeout(async () => {
+    try {
+      const rows = await dbSelect('invoices', `id=eq.${invoiceId}&select=*`);
+      const inv = rows?.[0];
+      if (!inv) return;
+      const container = document.getElementById('main');
+      if (container) openInvoiceForm(container, inv);
+    } catch(e) { console.error('Could not open invoice:', e); }
+  }, 600);
 };
 
 async function _addComment(container) {
