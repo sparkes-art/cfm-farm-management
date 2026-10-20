@@ -125,6 +125,19 @@ function _filtered() {
       const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
       return b.some(batch => batch.crop_year === season);
     })();
+    // Prior-year-flagged invoices: show in the season their invoice_date falls in,
+    // not the season field (which holds the prior season they belong to).
+    const isPY = (() => { if (!i.batches) return false; const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches; return b.some(x=>x.prior_year_income); })();
+    if (isPY) {
+      // Find season date range from active contracts or fall back to July start
+      const [sy] = season.split('-').map(Number);
+      const startM = 7; // will refine if needed
+      const startDate = `${sy}-${String(startM).padStart(2,'0')}-01`;
+      const endDate   = `${sy+1}-${String(startM).padStart(2,'0')}-01`;
+      const d = i.invoice_date?.slice(0,10) || '';
+      const dateInSeason = d >= startDate && d < endDate;
+      return dateInSeason && commodityMatch && contractMatch && monthMatch;
+    }
     const seasonMatch = i.season === season
       || batchSeasonMatch
       || (linkedContract && linkedContract.crop_year === season);
@@ -926,7 +939,7 @@ export function openInvoiceForm(container, existing = null) {
             </div>
             <div>
               <label class="form-label" style="font-size:11px">Crop / description (prior year)</label>
-              <input type="text" class="form-input" id="f-prior-commodity" style="font-size:13px" placeholder="e.g. Cavalcade, Cotton 2024-25"
+              <input type="text" class="form-input" id="f-prior-commodity" style="font-size:13px" placeholder="e.g. Cavalcade, Cotton, Wheat"
                 value="${(() => { if (!existing) return ''; const b = existing.batches?(typeof existing.batches==='string'?JSON.parse(existing.batches):existing.batches):[]; return b.flatMap(x=>x.lines||[]).find(l=>l.type==='income'&&l.description)?.description || (existing.line_items||[])[0]?.commodity || ''; })()}">
               <div style="font-size:10px;color:var(--hint);margin-top:3px">Describe the prior year's crop for reporting</div>
             </div>
