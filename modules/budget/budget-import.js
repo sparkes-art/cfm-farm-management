@@ -454,12 +454,28 @@ function _parseGmSheet(rows, sheetName) {
     let price, yieldPerHa, totalTonnes, unit;
 
     if (isCotton) {
-      // Lint (primary): row 10 col 2 = price, row 11 col 2 = yield/ha
-      // Seed:           row 12 col 2 = price, row 13 col 2 = yield/ha
-      const lintPrice    = num((rows[10] || [])[2]);
-      const lintYield    = num((rows[11] || [])[2]);  // bales/ha
-      const seedPrice    = num((rows[12] || [])[2]);
-      const seedYield    = num((rows[13] || [])[2]);  // bales/ha
+      // Two layout variants for cotton:
+      //   Blackbull: row 10 col 2 = lint price, row 11 col 2 = lint yield/ha
+      //              row 12 col 2 = seed price, row 13 col 2 = seed yield
+      //   Merrowie:  row 10 col 0 = "Lint Yield:",  col 1 = lint yield/ha
+      //              row 11 col 0 = "Lint Price:",   col 1 = lint price
+      //              row 12 col 0 = "Seed Yield...", col 1 = seed yield/bale
+      //              row 13 col 0 = "Seed Price:",   col 1 = seed price
+      const row10Label = low(str((rows[10] || [])[0]));
+      const isMerrowieLayout = row10Label.includes('lint yield') || row10Label.includes('lint price');
+
+      let lintPrice, lintYield, seedPrice, seedYield;
+      if (isMerrowieLayout) {
+        lintYield  = num((rows[10] || [])[1]);
+        lintPrice  = num((rows[11] || [])[1]);
+        seedYield  = num((rows[12] || [])[1]);
+        seedPrice  = num((rows[13] || [])[1]);
+      } else {
+        lintPrice  = num((rows[10] || [])[2]);
+        lintYield  = num((rows[11] || [])[2]);
+        seedPrice  = num((rows[12] || [])[2]);
+        seedYield  = num((rows[13] || [])[2]);
+      }
 
       // Blended income/ha = lint price * lint yield + seed price * seed yield
       // (use incomePerHa from summary row as the authoritative figure)
@@ -468,12 +484,28 @@ function _parseGmSheet(rows, sheetName) {
       totalTonnes = lintYield && area_ha ? lintYield * area_ha : null;
       unit = 'bales/ha (lint)';
     } else {
-      // Single product: row 10 col 2 = price, row 11 col 2 = yield/ha
-      price      = num((rows[10] || [])[2]);
-      yieldPerHa = num((rows[11] || [])[2]);
+      // Detect layout variant:
+      //   Blackbull format: row 10 col 2 = price, row 11 col 2 = yield
+      //   Merrowie format:  row 10 col 0 = "Expected Yield:", col 1 = yield value
+      //                     row 11 col 0 = "Expected Price:", col 1 = price value
+      const row10L = low(str((rows[10] || [])[0]));
+      const row11L = low(str((rows[11] || [])[0]));
+      const isMerrowieLayout = row10L.includes('expected yield') || row11L.includes('expected price');
 
-      // Total tonnes — row 12 col 2 for most, search rows 12-14 for first non-null numeric
-      totalTonnes = num((rows[12] || [])[2]);
+      if (isMerrowieLayout) {
+        // Expected Yield: row 10 col 1; Expected Price: row 11 col 1
+        yieldPerHa  = num((rows[10] || [])[1]);
+        price       = num((rows[11] || [])[1]);
+        // Production total: row 11 col 8 (e.g. 1767.7 tonnes for wheat)
+        totalTonnes = num((rows[11] || [])[8]) || num((rows[10] || [])[8]);
+      } else {
+        // Standard (Blackbull) layout: row 10 col 2 = price, row 11 col 2 = yield/ha
+        price      = num((rows[10] || [])[2]);
+        yieldPerHa = num((rows[11] || [])[2]);
+      }
+
+      // Total tonnes fallback — row 12 col 2 for most, search rows 12-14 for first non-null numeric
+      if (!totalTonnes) totalTonnes = num((rows[12] || [])[2]);
       if (!totalTonnes) totalTonnes = num((rows[13] || [])[2]);
 
       // Determine unit from sheet name
@@ -551,25 +583,40 @@ function _identifySheets(sheetNames) {
     'op capex','prop capex','cattle program','ny crops','py crops',
     'pricing - app','pricing - inputs','pricing - livestock','codings',
     'end of sept property','ops summary',
+    // Merrowie-specific non-GM sheets
+    'budget summary','total crop expenses','accounting','yields','fallows',
+    'sheep program','ny crops','gen capex','dev capex','oh + rnm','ops summary',
+    'pistachios new planting',
   ]);
+
+  // Sheets that are definitively GM enterprise sheets regardless of format
+  const GM_PATTERNS = [
+    'hay','cotton','corn','sorghum','millet','rhodes','cattle gm','sheep gm',
+    'farm mgmt','fallow','oh + rnm','oh+rnm',
+    // Grain / oilseed / legume patterns
+    'wheat','barley','canola','chickpea','durum','vetch','oat','maize',
+    'almond','pistachio','almond stage',
+  ];
 
   for (const name of sheetNames) {
     const n = name.toLowerCase();
-    // TODO: generalise multi-entity merging. For now only use the OT cashflow
-    // sheet — the PT sheet only carries interest/lease income which was
-    // incorrectly appearing as cropping revenue when both sheets were merged.
-    if (n.includes('master cashflow') && n.startsWith('ot')) {
-      cashflowSheets.push(name);
-    } else if (SKIP.has(n) || n.includes('capex') || n.includes('pricing') || n.includes('calendar')) {
+
+    // Cashflow sheets:
+    //   Multi-entity workbooks (Blackbull): "OT - Master Cashflow", "PT - Master Cashflow"
+    //   Single-entity workbooks (Merrowie): "Master Cashflow"
+    // For multi-entity we only use OT to avoid double-counting interest/lease.
+    // For single-entity we use the sheet directly.
+    if (n.includes('master cashflow')) {
+      if (n.startsWith('ot') || n === 'master cashflow') {
+        cashflowSheets.push(name);
+      } else {
+        // PT or other entity cashflow — skip to avoid double-counting
+        skipped.push(name);
+      }
+    } else if (SKIP.has(n) || n.includes('capex') || n.includes('pricing') || n.includes('calendar') ||
+               n === 'finance costs' || n === 'farm mgmt') {
       skipped.push(name);
-    } else if (
-      // Known GM sheet patterns — enterprise cropping + livestock + fallows
-      n.includes('hay') || n.includes('cotton') || n.includes('corn') ||
-      n.includes('sorghum') || n.includes('millet') || n.includes('rhodes') ||
-      n === 'cattle gm' || n.includes('farm mgmt') ||
-      n.includes('fallow') ||
-      n.includes('oh + rnm') || n.includes('oh+rnm')
-    ) {
+    } else if (GM_PATTERNS.some(p => n.includes(p))) {
       gmSheets.push(name);
     } else {
       skipped.push(name);
