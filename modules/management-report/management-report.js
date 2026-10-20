@@ -211,11 +211,13 @@ async function _render(container) {
   // ── Income rows — grouped by section matching budget import ───────────────
   // section field on budgets rows: 'farming' | 'other' | 'carry_over'
   const sortedGroups = Object.values(groups).sort((a, b) =>
-    (a.budgets[0]?.budgeted_gross_revenue || 0) > (b.budgets[0]?.budgeted_gross_revenue || 0) ? -1 : 1
+    a.name.toUpperCase().localeCompare(b.name.toUpperCase())
   );
-  const farmingGroups   = sortedGroups.filter(g => !g.budgets.length || g.budgets.every(b => !b.section || b.section === 'farming'));
-  const otherGroups     = sortedGroups.filter(g =>  g.budgets.some(b => b.section === 'other'));
-  const carryOverGroups = sortedGroups.filter(g =>  g.budgets.some(b => b.section === 'carry_over'));
+  // section not persisted to DB — infer from commodity name
+  const isOther = (name) => /cattle|livestock|agistment|interest|rent|royalt/i.test(name);
+  const farmingGroups   = sortedGroups.filter(g => !isOther(g.name));
+  const otherGroups     = sortedGroups.filter(g =>  isOther(g.name));
+  const carryOverGroups = [];
 
   const incomeRows = [
     farmingGroups.length   ? secRow('Farming income')   + farmingGroups.map(buildCommRow).join('')   : '',
