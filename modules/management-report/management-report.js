@@ -60,7 +60,16 @@ async function _render(container) {
   ]);
 
   // ── Season-scoped invoices ──────────────────────────────────────────────────
+  // Prior-year-flagged invoices are handled separately below — exclude them here
+  // so they don't double-count in normal income rows.
+  const isPriorYearInv = inv => {
+    if (!inv.batches) return false;
+    const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+    return b.some(batch => batch.prior_year_income);
+  };
+
   const seasonInvoices = allInvoices.filter(inv => {
+    if (isPriorYearInv(inv)) return false; // handled in carry-over section
     if (inv.season === season) return true;
     if (inv.batches) {
       const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
@@ -69,6 +78,18 @@ async function _render(container) {
     const linked = contracts.find(c => c.id === inv.forward_contract_id);
     if (linked?.crop_year === season) return true;
     return false;
+  });
+
+  // Prior-year receipts: flagged invoices whose invoice_date falls in the current season.
+  // These show in the current season's Carry-over section (cash received this year,
+  // income earned in a prior year).
+  const [seasonStartY] = season.split('-').map(Number);
+  const seasonStartDate = `${seasonStartY}-${String(yearStartMonth).padStart(2,'0')}-01`;
+  const seasonEndDate   = `${seasonStartY + 1}-${String(yearStartMonth).padStart(2,'0')}-01`;
+  const priorYearInvoices = allInvoices.filter(inv => {
+    if (!isPriorYearInv(inv)) return false;
+    const d = inv.invoice_date?.slice(0,10) || '';
+    return d >= seasonStartDate && d < seasonEndDate;
   });
 
   const fC  = n  => n != null ? formatCurrency(n, 0) : '—';
@@ -121,15 +142,9 @@ async function _render(container) {
     groups[key].budgets.push(b);
   });
 
-  // ── Also add groups from prior-year-flagged invoices with no budget row ────
-  // Use seasonInvoices (already filtered to this season) so we catch prior-year
-  // invoices regardless of how the season/crop_year fields were stored.
-  seasonInvoices.forEach(inv => {
-    if (!inv.batches) return;
+  // ── Add groups from prior-year receipts (no budget row needed) ────────────
+  priorYearInvoices.forEach(inv => {
     const batches = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-    const isPY = batches.some(b => b.prior_year_income);
-    if (!isPY) return;
-    // Get commodity from batch line description or line_items
     const commName = batches.flatMap(b=>b.lines||[]).find(l=>l.type==='income'&&l.description)?.description
       || (inv.line_items||[])[0]?.commodity
       || null;
@@ -174,7 +189,9 @@ async function _render(container) {
 
   const buildCommRow = (g, opts = {}) => {
     const { bIncome, bYTD, bArea, bYield, bProd, bPrice } = budgetForGroup(g, { carryOver: opts.carryOver });
-    const inv  = invTotals(seasonInvoices, g.name);
+    // Carry-over rows: use prior-year receipts list (invoice_date this season, prior_year_income flag)
+    const invSource = opts.carryOver ? priorYearInvoices : seasonInvoices;
+    const inv  = invTotals(invSource, g.name);
     const unit = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
     const isLs = isCattle(g.name);
 
