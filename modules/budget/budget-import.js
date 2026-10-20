@@ -154,6 +154,8 @@ function _parseCashflowSheet(rows, sheetName) {
   let inOverheads    = false;
   let inCapex        = false;
   let inCattle       = false;      // inside CATTLE variable cost section
+  let inSheep        = false;      // inside SHEEP variable cost section
+  let inNyCrops      = false;      // inside NEXT YEAR CROPS variable cost section
   let inFallow       = false;      // inside FALLOW variable cost section
   let fallowEnterprise = null;     // current fallow enterprise name
   let currentSection = null;       // overhead sub-section: 'overhead' | 'rm' | 'labour' | 'fund_mgmt'
@@ -198,23 +200,32 @@ function _parseCashflowSheet(rows, sheetName) {
     // Store as signed for budget_costs: positive = purchase cost, negative = sale offset
     // So: Excel negative (sale) → store negative; Excel positive (purchase) → store positive
     if (inCapex) {
-      if (descL === 'subtotal' || descL.startsWith('total') || descL.startsWith('earnings')) break;
-      if (tag === 'H' || tag === 'E') continue;
-      if (tag === 'A' && desc && total != null && total !== 0) {
-        capexItems.push({
-          budget_code:   desc.toUpperCase().trim(),
-          description:   desc,
-          budget_amount: total,   // keep sign: negative = sale offset, positive = purchase cost
-          is_sale:       total < 0,
-        });
+      // Subtotals between CAPEX sub-sections: keep going (don't break the loop)
+      if (descL === 'subtotal' || descL.startsWith('total') || descL.startsWith('earnings')) continue;
+      // Exit CAPEX when we reach the FUNDING section or a non-tag row that looks like a summary
+      if (tag === 'E' && (descL === 'funding' || descL.includes('overhead'))) {
+        inCapex = false;
+        // fall through to the normal section handlers below
+      } else {
+        if (tag === 'H' || tag === 'E') continue;  // CAPEX sub-section headers (incl. "ALMONDS - STAGE N")
+        if (tag === 'A' && desc && total != null && total !== 0) {
+          capexItems.push({
+            budget_code:   desc.toUpperCase().trim(),
+            description:   desc,
+            budget_amount: total,   // keep sign: negative = sale offset, positive = purchase cost
+            is_sale:       total < 0,
+          });
+        }
+        continue;
       }
-      continue;
     }
 
     // ── Detect transition into overhead section ──
     if (!inOverheads && descL.includes(OVERHEAD_SECTION_START)) {
       inPriorYear = false;
       inCattle    = false;
+      inSheep     = false;
+      inNyCrops   = false;
       inFallow    = false;
       inOverheads = true;
       currentSection = null;
@@ -254,6 +265,46 @@ function _parseCashflowSheet(rows, sheetName) {
           description:   desc,
           budget_amount: total,
           enterprise:    'CATTLE',
+        });
+      }
+      continue;
+    }
+
+    // ── Sheep variable costs section ──
+    // Triggered by E row starting with "sheep" in the farming expenses area
+    if (!inSheep && tag === 'E' && descL.startsWith('sheep')) {
+      inSheep = true;
+      continue;
+    }
+    if (inSheep) {
+      if (descL === 'subtotal' || descL.startsWith('total')) { inSheep = false; continue; }
+      if (tag === 'H') continue;
+      if (tag === 'EXP' && desc && total != null && total > 0) {
+        cattleCostItems.push({
+          budget_code:   desc.toUpperCase().trim(),
+          description:   desc,
+          budget_amount: total,
+          enterprise:    'SHEEP',
+        });
+      }
+      continue;
+    }
+
+    // ── Next Year Crops variable costs section ──
+    // Triggered by E row containing "next year crops" — pre-paid costs for the following season
+    if (!inNyCrops && tag === 'E' && descL.includes('next year crops')) {
+      inNyCrops = true;
+      continue;
+    }
+    if (inNyCrops) {
+      if (descL === 'subtotal' || descL.startsWith('total')) { inNyCrops = false; continue; }
+      if (tag === 'H') continue;
+      if (tag === 'EXP' && desc && total != null && total > 0) {
+        fallowCostItems.push({
+          budget_code:   desc.toUpperCase().trim(),
+          description:   desc,
+          budget_amount: total,
+          enterprise:    'NY CROPS',
         });
       }
       continue;
@@ -1073,6 +1124,7 @@ export async function parseBudgetExcel(file) {
   const gmData = new Map();
   for (const sheetName of gmSheets) {
     if (low(sheetName).includes('cattle')) continue;  // cattle costs from cashflow, not GM
+    if (low(sheetName).includes('sheep gm') || low(sheetName) === 'sheep gm') continue;  // sheep costs from cashflow, not GM
     const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
     const gm = _parseGmSheet(rows, sheetName);
     if (gm) {
