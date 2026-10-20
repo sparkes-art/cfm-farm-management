@@ -146,6 +146,14 @@ async function _render(container) {
     if (!groups[key]) groups[key] = { name: commName.trim(), budgets: [] };
   });
 
+  // TEMP DEBUG — remove after confirming field names
+  console.log('[MgmtReport] budget rows sample:', budgets.slice(0,3).map(b => ({
+    commodity: b.commodity, area_ha: b.area_ha, yield_per_ha: b.yield_per_ha, price: b.price,
+    budgeted_yield_per_ha: b.budgeted_yield_per_ha, budgeted_price: b.budgeted_price,
+    budgeted_gross_revenue: b.budgeted_gross_revenue, budgeted_production: b.budgeted_production,
+  })));
+  console.log('[MgmtReport] ytdFraction:', ytdFraction, 'monthsElapsed:', monthsElapsed);
+
   // ── Budget for a commodity group ───────────────────────────────────────────
   // Helper: read a budget field that may be stored under two naming conventions.
   // Budget-module rows use plain names (yield_per_ha, price); imported rows use budgeted_ prefix.
