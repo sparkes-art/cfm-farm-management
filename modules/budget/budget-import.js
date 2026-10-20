@@ -371,6 +371,9 @@ function _parseGmSheet(rows, sheetName) {
     const nameRow  = rows[2] || [];
     const name     = str(nameRow[0]) || sheetName;
 
+    // Skip placeholder / spare sheets — these are formatting placeholders not real enterprises
+    if (/^spare$/i.test(name.trim()) || /^spare$/i.test(sheetName.trim())) return null;
+
     // ── Cattle GM — different layout ──
     // Row 4 col 2 = total income; Row 5 col 2 = total costs (summary)
     // Variable cost rows start at row 14 (0-indexed):
