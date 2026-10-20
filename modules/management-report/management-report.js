@@ -150,26 +150,25 @@ async function _render(container) {
     return { bIncome, bYTD, bArea, bYield, bProd, bPrice };
   };
 
-  // Table styles
+  // Table styles (5 columns: Description | Actual YTD | Budget YTD | Full yr budget | Variance)
   const th  = `padding:7px 10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);border-bottom:2px solid var(--border);white-space:nowrap`;
   const thR = th + ';text-align:right';
   const td  = `padding:6px 10px;font-size:12px;border-bottom:1px solid var(--border-light)`;
   const tdR = td + ';text-align:right;font-variant-numeric:tabular-nums';
-  const secRow  = label => `<tr style="background:#1e3a5f"><td colspan="7" style="padding:7px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:white">${label}</td></tr>`;
-  const commRow = label => `<tr style="background:#e8f0fe"><td colspan="7" style="padding:5px 12px;font-size:11px;font-weight:600;color:#1e3a5f">${label}</td></tr>`;
+  const secRow  = label => `<tr style="background:#1e3a5f"><td colspan="5" style="padding:7px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:white">${label}</td></tr>`;
+  const commRow = label => `<tr style="background:#e8f0fe"><td colspan="5" style="padding:5px 12px;font-size:11px;font-weight:600;color:#1e3a5f">${label}</td></tr>`;
 
   let grandBudget = 0, grandBudgetYTD = 0, grandActual = 0;
 
   // ── Single commodity row builder ───────────────────────────────────────────
-  // One summary row per commodity; expand to see budget metrics + invoice detail
+  // One row per commodity; click opens a modal with budget metrics + invoice detail
   const buildCommRow = (g, opts = {}) => {
     const { bIncome, bYTD, bArea, bYield, bProd, bPrice } = budgetForGroup(g, { carryOver: opts.carryOver });
-    const inv      = invTotals(seasonInvoices, g.name);
-    const unit     = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
-    const isLs     = opts.livestock;
-    const expandId = `expand-${g.name.replace(/[^a-z0-9]/gi,'-')}`;
+    const inv  = invTotals(seasonInvoices, g.name);
+    const unit = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
+    const isLs = isCattle(g.name);
 
-    // ── Livestock invoice metrics ──
+    // Gather livestock actuals
     let lsHead = 0, lsKg = 0, lsIncome = 0;
     if (isLs) {
       inv.invoices.forEach(i => {
@@ -179,75 +178,42 @@ async function _render(container) {
       });
     }
 
-    // ── Expand panel: budget metrics ──
-    const metricRow = (label, val) =>
-      `<tr style="background:#f5f7fa">
-        <td style="${td};padding-left:32px;font-size:11px;color:var(--hint);border-bottom:none">${label}</td>
-        <td colspan="6" style="${tdR};font-size:11px;color:var(--ink);border-bottom:none">${val}</td>
-      </tr>`;
-
-    const budgetMetrics = isLs ? '' : [
-      bArea  != null ? metricRow('Budget area',       fN(bArea,1)+' ha')                        : '',
-      bProd  != null ? metricRow('Budget production', fN(bProd)+' '+unit)                       : '',
-      bYield != null && bYield ? metricRow('Budget yield', fN(bYield,2)+' '+unit+'/ha')         : '',
-      bPrice != null && bPrice ? metricRow('Budget price',  '$'+fN(bPrice,2)+'/'+unit)          : '',
-      bIncome!= null ? metricRow('Full yr budget',    fC(bIncome))                              : '',
-    ].join('');
-
-    const lsMetrics = !isLs ? '' : [
-      lsHead   ? metricRow('Head sold (actual)',    fN(lsHead,0)+' hd')                                      : '',
-      lsKg     ? metricRow('Total weight (actual)', fN(lsKg,0)+' kg')                                        : '',
-      lsKg && lsHead ? metricRow('Avg weight/head', fN(lsKg/lsHead,0)+' kg/hd')                             : '',
-      lsKg && lsIncome ? metricRow('Price/kg (actual)', '$'+fN(lsIncome/lsKg,2)+'/kg')                      : '',
-      bIncome != null ? metricRow('Full yr budget', fC(bIncome))                                             : '',
-    ].join('');
-
-    // ── Invoice detail rows ──
-    const invoiceRows = inv.invoices.length
-      ? inv.invoices.map(i => {
-          const invDate = formatDate(i.invoice_date?.slice(0,10));
-          const invInc  = (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
-          const invQty  = (() => {
-            if (i.batches) {
-              const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
-              return b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa'))
-                      .reduce((s,x)=>s+(parseFloat(x.qty)||0),0);
-            }
-            return parseFloat(i.total_qty)||0;
-          })();
-          return `<tr style="background:#fafbff">
-            <td style="${td};padding-left:40px;font-size:11px;color:var(--hint)">${invDate} · ${i.buyer||'—'}</td>
-            <td colspan="2" style="${tdR};font-size:11px;color:var(--hint)">${invQty ? fN(invQty,2)+' '+unit : '—'}</td>
-            <td style="${tdR};font-size:11px;color:var(--hint)">${i.xero_invoice_number || i.id?.slice(0,8) || '—'}</td>
-            <td style="${tdR};font-size:11px;color:var(--green);font-weight:600">${fC(invInc)}</td>
-            <td colspan="2" style="${tdR}"></td>
-          </tr>`;
-        }).join('')
-      : `<tr style="background:#fafbff"><td colspan="7" style="${td};padding-left:40px;font-size:11px;color:var(--hint);font-style:italic">No invoices this season</td></tr>`;
-
-    const expandContent = budgetMetrics + lsMetrics + invoiceRows;
+    // Bundle data for modal (JSON-safe, passed via data attribute)
+    const modalData = {
+      name: g.name, unit, isLs, carryOver: !!opts.carryOver,
+      bIncome, bYTD, bArea, bYield, bProd, bPrice,
+      lsHead, lsKg, lsIncome,
+      invoices: inv.invoices.map(i => {
+        let qty = 0;
+        if (i.batches) {
+          const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
+          qty = b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa'))
+                 .reduce((s,x)=>s+(parseFloat(x.qty)||0),0);
+        } else { qty = parseFloat(i.total_qty)||0; }
+        return {
+          date: i.invoice_date?.slice(0,10),
+          buyer: i.buyer,
+          ref: i.xero_invoice_number || i.id?.slice(0,8),
+          qty,
+          inc: (parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0),
+        };
+      }),
+    };
+    const dataAttr = JSON.stringify(modalData).replace(/"/g,'&quot;');
 
     const html = `
-      <tr style="cursor:pointer" onclick="
-        const el=document.getElementById('${expandId}');
-        const ic=document.getElementById('${expandId}-ic');
-        if(el){const open=el.style.display!=='none';el.style.display=open?'none':'';if(ic)ic.textContent=open?'▸':'▾';}
-      ">
-        <td style="${td};font-weight:600;padding-left:16px">
-          <span id="${expandId}-ic" style="color:var(--hint);margin-right:6px;font-size:10px">▸</span>${g.name}
-          ${inv.invoices.length ? `<span style="font-size:10px;color:var(--hint);margin-left:6px;font-weight:400">${inv.invoices.length} invoice${inv.invoices.length!==1?'s':''}</span>` : ''}
+      <tr style="cursor:pointer;transition:background .1s" onmouseenter="this.style.background='#f8fafc'" onmouseleave="this.style.background=''"
+          onclick="window._mgmtOpenModal(JSON.parse(this.dataset.modal))" data-modal="${dataAttr}">
+        <td style="${td};font-weight:500;padding-left:16px;color:var(--ink)">
+          ${g.name}
+          ${inv.invoices.length ? `<span style="font-size:10px;color:var(--hint);margin-left:8px;font-weight:400">${inv.invoices.length} invoice${inv.invoices.length!==1?'s':''}</span>` : ''}
+          <span style="font-size:10px;color:var(--hint);margin-left:4px">↗</span>
         </td>
-        <td style="${tdR};color:var(--hint);font-size:11px">${!opts.carryOver && bArea ? fN(bArea,1)+' ha' : '—'}</td>
-        <td style="${tdR};color:var(--hint);font-size:11px">${!opts.carryOver && bProd ? fN(bProd)+' '+unit : '—'}</td>
         <td style="${tdR};color:${inv.totalIncome ? 'var(--green)' : 'var(--hint)'};font-weight:600">${inv.totalIncome ? fC(inv.totalIncome) : '—'}</td>
         <td style="${tdR}">${bYTD != null ? fC(bYTD) : '—'}</td>
         <td style="${tdR}">${bIncome != null ? fC(bIncome) : '—'}</td>
         <td style="${tdR}">${varAmt(inv.totalIncome, bYTD)}</td>
       </tr>
-      <tbody id="${expandId}" style="display:none">
-        ${expandContent}
-        <tr style="background:#f5f7fa"><td colspan="7" style="padding:4px 16px;border-bottom:1px solid var(--border)"></td></tr>
-      </tbody>
     `;
     return { html, bIncome: bIncome || 0, bYTD: bYTD || 0, actual: inv.totalIncome };
   };
@@ -269,7 +235,6 @@ async function _render(container) {
     const subtotal = `
       <tr style="background:#f0f4f8">
         <td style="${td};font-weight:600;font-size:11px;padding-left:16px;color:var(--hint)">${label} total</td>
-        <td colspan="2" style="${tdR}"></td>
         <td style="${tdR};color:var(--green);font-weight:600">${secActual ? fC(secActual) : '—'}</td>
         <td style="${tdR};font-weight:600">${secBudgetYTD ? fC(secBudgetYTD) : '—'}</td>
         <td style="${tdR};font-weight:600">${secBudget ? fC(secBudget) : '—'}</td>
@@ -321,14 +286,14 @@ async function _render(container) {
       ${lines.map(c => `
         <tr>
           <td style="${td};padding-left:28px;font-size:11px;color:var(--hint)">${c.description}</td>
-          <td colspan="3" style="${tdR}"></td>
+          <td style="${tdR}"></td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(parseFloat(c.budget_amount)||0)}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(parseFloat(c.budget_amount)||0)}</td>
           <td style="${tdR}">—</td>
         </tr>`).join('')}
       <tr style="background:var(--page-bg)">
         <td style="${td};padding-left:20px;font-weight:600;font-size:12px">${cat.label} total</td>
-        <td colspan="3" style="${tdR}"></td>
+        <td style="${tdR}"></td>
         <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal)}</td>
         <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal)}</td>
         <td style="${tdR}">—</td>
@@ -363,7 +328,7 @@ async function _render(container) {
 
     <!-- Note on budget YTD -->
     <div style="font-size:11px;color:var(--hint);margin-bottom:12px;font-style:italic">
-      ℹ Budget YTD is pro-rated (${monthsElapsed} of 12 months elapsed from ${new Date(seasonYear, seasonStartMonthIdx).toLocaleString('en-AU',{month:'long'})}). Click any income row to see invoice detail.
+      ℹ Budget YTD is pro-rated (${monthsElapsed} of 12 months elapsed from ${new Date(seasonYear, seasonStartMonthIdx).toLocaleString('en-AU',{month:'long'})}). Click any income row ↗ for detail.
     </div>
 
     <!-- Main table -->
@@ -372,9 +337,7 @@ async function _render(container) {
         <table style="width:100%;border-collapse:collapse;min-width:800px">
           <thead>
             <tr>
-              <th style="${th};text-align:left;min-width:200px"></th>
-              <th style="${thR}">Area</th>
-              <th style="${thR}">Budget prod.</th>
+              <th style="${th};text-align:left;min-width:220px"></th>
               <th style="${thR}">Actual YTD</th>
               <th style="${thR}">Budget YTD</th>
               <th style="${thR}">Full yr budget</th>
@@ -382,12 +345,11 @@ async function _render(container) {
             </tr>
           </thead>
           <tbody>
-            ${incomeRows || `<tr><td colspan="7" style="${td};color:var(--hint);font-style:italic;padding-left:20px">No income budgets or invoices for this season</td></tr>`}
+            ${incomeRows || `<tr><td colspan="5" style="${td};color:var(--hint);font-style:italic;padding-left:20px">No income budgets or invoices for this season</td></tr>`}
 
             <!-- Income total -->
             <tr style="background:#f0fdf4;border-top:2px solid var(--border)">
               <td style="${td};font-weight:700">Total income</td>
-              <td colspan="2" style="${tdR}"></td>
               <td style="${tdR};color:var(--green);font-weight:700;font-size:13px">${fC(grandActual)}</td>
               <td style="${tdR};font-weight:700">${fC(grandBudgetYTD)}</td>
               <td style="${tdR};font-weight:700">${fC(grandBudget)}</td>
@@ -399,7 +361,7 @@ async function _render(container) {
               ${fixedRows}
               <tr style="background:#fff5f5;border-top:2px solid var(--border)">
                 <td style="${td};font-weight:700">Total fixed costs</td>
-                <td colspan="3" style="${tdR}"></td>
+                <td style="${tdR}"></td>
                 <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
                 <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
                 <td style="${tdR}">—</td>
@@ -409,9 +371,9 @@ async function _render(container) {
             <!-- Net -->
             <tr style="background:#eff6ff;border-top:2px solid var(--border)">
               <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">Net income (income only)</td>
-              <td colspan="2" style="${tdR}"></td>
               <td style="${tdR};color:var(--blue);font-weight:700;font-size:13px">${fC(grandActual)}</td>
-              <td colspan="2" style="${tdR}"></td>
+              <td style="${tdR}"></td>
+              <td style="${tdR}"></td>
               <td style="${tdR}">${varAmt(grandActual, grandBudgetYTD)}</td>
             </tr>
           </tbody>
@@ -431,6 +393,83 @@ async function _render(container) {
     </div>
   `;
 }
+
+// ── Commodity detail modal ────────────────────────────────────────────────────
+window._mgmtOpenModal = function(d) {
+  const fC = v => v == null ? '—' : v.toLocaleString('en-AU', { style:'currency', currency:'AUD', minimumFractionDigits:0, maximumFractionDigits:0 });
+  const fN = (v, dp=0) => v == null ? '—' : v.toLocaleString('en-AU', { minimumFractionDigits:dp, maximumFractionDigits:dp });
+
+  const stat = (label, value, sub='', color='var(--ink)') => `
+    <div style="padding:12px 16px;border-right:0.5px solid var(--border-light)">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">${label}</div>
+      <div style="font-size:20px;font-weight:700;color:${color}">${value}</div>
+      ${sub ? `<div style="font-size:10px;color:var(--hint);margin-top:2px">${sub}</div>` : ''}
+    </div>`;
+
+  const sectionHdr = label => `<div style="padding:8px 18px;background:var(--page-bg);border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">${label}</div>`;
+
+  // Budget metrics section
+  const budgetSection = d.isLs ? '' : `
+    ${sectionHdr('Budget')}
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--border)">
+      ${stat('Area',       d.bArea  != null ? fN(d.bArea,1)+' ha'              : '—')}
+      ${stat('Production', d.bProd  != null ? fN(d.bProd)+' '+d.unit           : '—')}
+      ${stat('Yield',      d.bYield != null && d.bYield ? fN(d.bYield,2)+' '+d.unit+'/ha' : '—')}
+      ${stat('Price',      d.bPrice != null && d.bPrice ? '$'+fN(d.bPrice,2)+'/'+d.unit   : '—')}
+    </div>`;
+
+  // Livestock actuals section
+  const lsSection = !d.isLs ? '' : `
+    ${sectionHdr('Livestock actuals')}
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--border)">
+      ${stat('Head sold',      d.lsHead ? fN(d.lsHead,0)+' hd'                                   : '—')}
+      ${stat('Total weight',   d.lsKg   ? fN(d.lsKg,0)+' kg'                                     : '—')}
+      ${stat('Avg weight/hd',  d.lsKg && d.lsHead   ? fN(d.lsKg/d.lsHead,0)+' kg'               : '—')}
+      ${stat('Price/kg',       d.lsKg && d.lsIncome ? '$'+fN(d.lsIncome/d.lsKg,2)+'/kg' : '—', '', '#16a34a')}
+    </div>`;
+
+  // Invoice table
+  const invoiceTable = d.invoices.length ? `
+    ${sectionHdr('Invoices')}
+    <div style="padding:0 18px 12px">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:12px">
+        <thead><tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:4px 8px;color:var(--hint);font-weight:500">Date · Buyer</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Qty</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Ref</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Amount</th>
+        </tr></thead>
+        <tbody>
+          ${d.invoices.map(i => `<tr style="border-bottom:0.5px solid var(--border-light)">
+            <td style="padding:5px 8px;color:var(--ink)">${i.date ? new Date(i.date).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) : '—'}${i.buyer ? ' · '+i.buyer : ''}</td>
+            <td style="padding:5px 8px;text-align:right;color:var(--hint)">${i.qty ? fN(i.qty,2)+' '+d.unit : '—'}</td>
+            <td style="padding:5px 8px;text-align:right;color:var(--hint)">${i.ref || '—'}</td>
+            <td style="padding:5px 8px;text-align:right;color:#16a34a;font-weight:600">${fC(i.inc)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : `${sectionHdr('Invoices')}<div style="padding:12px 18px;font-size:11px;color:var(--hint);font-style:italic">No invoices this season</div>`;
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:10px;width:100%;max-width:680px;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--ink)">${d.name}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">${d.carryOver ? 'Carry-over income' : d.isLs ? 'Livestock' : 'Farming income'} · Full yr budget: ${fC(d.bIncome)}</div>
+        </div>
+        <button id="mgmt-modal-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--hint)">✕</button>
+      </div>
+      ${budgetSection}
+      ${lsSection}
+      ${invoiceTable}
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#mgmt-modal-close').onclick = () => modal.remove();
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+};
 
 async function _addComment(container) {
   const farm    = getActiveFarm();
