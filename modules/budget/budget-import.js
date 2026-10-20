@@ -392,13 +392,24 @@ function _parseGmSheet(rows, sheetName) {
       };
     }
 
-    // ── Cropping GM ──
-    // Row 3 col 7 = area ha
-    const area_ha = num((rows[3] || [])[7]);
+    // ── Cropping / Fallow GM ──
+    const isFallow = low(name).includes('fallow') || low(sheetName).includes('fallow');
+
+    // Row 3 col 7 = area ha (primary); also check col 8 and col 2 as fallbacks
+    let area_ha = num((rows[3] || [])[7]);
+    if (!area_ha || area_ha <= 0) area_ha = num((rows[3] || [])[8]);
+    if (!area_ha || area_ha <= 0) area_ha = num((rows[3] || [])[2]);
+    // For fallows, scan row 3 for any plausible area value (10–50000 ha)
+    if ((!area_ha || area_ha <= 0) && isFallow) {
+      for (let c = 1; c < (rows[3] || []).length; c++) {
+        const v = num((rows[3] || [])[c]);
+        if (v && v >= 1 && v <= 50000) { area_ha = v; break; }
+      }
+    }
     if (!area_ha || area_ha <= 0) return null;
 
-    // Row 5 col 1 = income/ha
-    const incomePerHa = num((rows[5] || [])[1]);
+    // Row 5 col 1 = income/ha (0 or null for fallows — that's fine)
+    const incomePerHa = isFallow ? 0 : num((rows[5] || [])[1]);
 
     // Detect cotton (two products) vs single product
     // Row 10 col 0: "Lint:", "Grain:", or other label
@@ -634,7 +645,8 @@ function _consolidateVariableCosts(gmData, financialYear, farmId) {
         unit:           line.unit        ?? null,
         area_ha:        area_ha,
         budget_amount:  budget_amount,
-        notes:          gm.isCattle ? 'Cattle: total cost (head-based, no $/ha)' : null,
+        notes:          gm.isCattle ? 'Cattle: total cost (head-based, no $/ha)' :
+                        (low(enterprise).includes('fallow') ? 'Fallow: no revenue, costs only' : null),
       });
     }
   }
@@ -659,11 +671,20 @@ function _consolidateVariableCosts(gmData, financialYear, farmId) {
 // They appear in the OT cashflow as EXP rows between:
 // ── Cattle Program sheet parser ────────────────────────────────────────────
 // Extracts livestock metrics: total head, total sales $, total kg, avg $/head, avg kg/head
-// Row indexes (0-based from SheetJS): row 51 = Total Head Sold, row 52 = Total Sales $
-// Per-class rows carry: description, head count, weight/head (kg), $/kg
+// Scans each row for keyword labels; values are the first numeric found after the label cell.
+// Per-class data rows have: description | head count | avg kg/head | $/kg (consecutive numeric cols)
 function _parseCattleProgram(rows) {
-  const num = v => (v !== null && v !== undefined && !isNaN(Number(v))) ? Number(v) : null;
+  const num = v => (v !== null && v !== undefined && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
   const str = v => (v !== null && v !== undefined) ? String(v).trim() : '';
+
+  // Find first numeric value in a row scanning from startCol onward
+  const firstNum = (row, startCol = 0) => {
+    for (let c = startCol; c < row.length; c++) {
+      const n = num(row[c]);
+      if (n !== null) return n;
+    }
+    return null;
+  };
 
   let totalHead  = null;
   let totalSales = null;
@@ -673,29 +694,68 @@ function _parseCattleProgram(rows) {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (!row) continue;
-    const desc = str(row[1]).toLowerCase();
 
-    // Row 52 (0-based 51): "Total Head Sold" — value in col 2
-    if (desc.includes('total head sold')) { totalHead  = num(row[2]); continue; }
-    // Row 53 (0-based 52): "Total Sales $"  — value in col 2
-    if (desc.includes('total sales')) {     totalSales = num(row[2]); continue; }
+    // Search all cols for the label (could be col A, B, etc.)
+    let labelCol = -1;
+    let labelText = '';
+    for (let c = 0; c < Math.min(row.length, 6); c++) {
+      const s = str(row[c]).toLowerCase();
+      if (s) { labelText = s; labelCol = c; break; }
+    }
+    if (labelCol < 0) continue;
 
-    // Per-class data rows: description, head count (col 2), weight/head (col 3), $/kg (col 4)
-    const head   = num(row[2]);
-    const wtHead = num(row[3]);  // avg kg/head
-    const dolKg  = num(row[4]);  // $/kg
-    if (head !== null && head > 0 && wtHead !== null && dolKg !== null) {
-      const classKg = head * wtHead;
-      totalKg += classKg;
-      classRows.push({ description: str(row[1]), head, wtHead, dolKg, classKg });
+    if (labelText.includes('total head sold') || labelText.includes('total head')) {
+      // Value is an integer (head count) — scan from next col
+      for (let c = labelCol + 1; c < row.length; c++) {
+        const n = num(row[c]);
+        if (n !== null && Number.isInteger(n) && n > 0 && n < 100000) {
+          totalHead = n; break;
+        }
+        // Also accept non-integer that looks like a round head count
+        if (n !== null && n > 0 && n < 100000 && n === Math.round(n)) {
+          totalHead = n; break;
+        }
+      }
+      continue;
+    }
+
+    if (labelText.includes('total sales') || (labelText.includes('total') && labelText.includes('sales'))) {
+      // Value is a large dollar amount — scan from next col
+      for (let c = labelCol + 1; c < row.length; c++) {
+        const n = num(row[c]);
+        if (n !== null && n > 10000) { totalSales = n; break; }
+      }
+      continue;
+    }
+
+    // Per-class rows: description (non-empty, not a total/subtotal label),
+    // followed by head count, then avg kg/head, then $/kg
+    // Skip summary/total rows
+    if (labelText.startsWith('total') || labelText.startsWith('subtotal') ||
+        labelText.startsWith('grand') || labelText === '') continue;
+
+    // Collect up to 5 numeric values after the label
+    const nums = [];
+    for (let c = labelCol + 1; c < row.length && nums.length < 5; c++) {
+      const n = num(row[c]);
+      if (n !== null) nums.push(n);
+    }
+    // Need at least head, kg/head, $/kg — all positive, $/kg < 50 (plausible cattle $/kg)
+    if (nums.length >= 3) {
+      const [head, wtHead, dolKg] = nums;
+      if (head > 0 && head < 10000 && wtHead > 50 && wtHead < 2000 && dolKg > 0 && dolKg < 50) {
+        const classKg = head * wtHead;
+        totalKg += classKg;
+        classRows.push({ description: str(row[labelCol]), head, wtHead, dolKg, classKg });
+      }
     }
   }
 
   if (totalHead === null && !classRows.length) return null;
 
-  // Compute totals from class rows if not captured directly
+  // Derive totals from class rows if summary rows weren't found
   if (totalHead === null) totalHead = classRows.reduce((s, r) => s + r.head, 0);
-  if (!totalKg) totalKg = classRows.reduce((s, r) => s + r.classKg, 0);
+  if (!totalKg)           totalKg   = classRows.reduce((s, r) => s + r.classKg, 0);
 
   const avgPricePerHead = (totalHead && totalSales) ? totalSales / totalHead : null;
   const avgKgPerHead    = (totalHead && totalKg)    ? totalKg    / totalHead  : null;
@@ -1096,7 +1156,67 @@ export function showBudgetImportPreview(container, parsed) {
             <span style="color:#16a34a;font-weight:700">${fC(totalRev)}</span>
           </div>
           <div style="padding:12px 16px">
-            ${renderRevSection('Farming Income', farmingRevRows, totalFarmingRev, true, false)}
+            ${(() => {
+              // Farming Income: cropping rows table + livestock metrics card inline
+              const cropRows = farmingRevRows.filter(r => !r.commodity.toUpperCase().includes('CATTLE'));
+              const cattleRevRow = farmingRevRows.find(r => r.commodity.toUpperCase().includes('CATTLE'));
+              const totalCropRev = cropRows.reduce((s, r) => s + (r.budgeted_gross_revenue || 0), 0);
+              return `
+                ${renderRevSection('Farming Income — Cropping', cropRows, totalCropRev, true, false)}
+                ${cattleRevRow || cattleMetrics ? `
+                  <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px">
+                    <div style="padding:8px 16px;background:#fef9f0;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between">
+                      <span>🐄 Livestock — Cattle Sales</span>
+                      <span style="color:#16a34a">${fC((cattleRevRow?.budgeted_gross_revenue) || (cattleMetrics?.totalSales))}</span>
+                    </div>
+                    ${cattleMetrics ? `
+                      <div style="padding:12px 16px">
+                        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:${cattleMetrics.classRows?.length ? '12px' : '0'}">
+                          ${[
+                            ['Total head sold', cattleMetrics.totalHead != null ? cattleMetrics.totalHead.toLocaleString() + ' hd' : '—'],
+                            ['Avg price / head', cattleMetrics.avgPricePerHead != null ? fC(cattleMetrics.avgPricePerHead) : '—'],
+                            ['Total kg', cattleMetrics.totalKg ? Math.round(cattleMetrics.totalKg).toLocaleString() + ' kg' : '—'],
+                            ['Avg kg / head', cattleMetrics.avgKgPerHead != null ? fN(cattleMetrics.avgKgPerHead, 0) + ' kg' : '—'],
+                          ].map(([label, val]) => `
+                            <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px;text-align:center">
+                              <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${label}</div>
+                              <div style="font-size:15px;font-weight:700;color:#1e293b">${val}</div>
+                            </div>
+                          `).join('')}
+                        </div>
+                        ${cattleMetrics.classRows?.length ? `
+                          <table style="width:100%;border-collapse:collapse;font-size:11px">
+                            <thead><tr>
+                              <th style="${th};text-align:left">Class</th>
+                              <th style="${thR}">Head</th>
+                              <th style="${thR}">Avg kg/hd</th>
+                              <th style="${thR}">$/kg</th>
+                              <th style="${thR}">Total kg</th>
+                              <th style="${thR}">Value</th>
+                            </tr></thead>
+                            <tbody>
+                              ${cattleMetrics.classRows.map((cr, i) => `
+                                <tr style="${i % 2 === 0 ? '' : 'background:#fafafa'}">
+                                  <td style="${td}">${cr.description}</td>
+                                  <td style="${tdR}">${cr.head.toLocaleString()}</td>
+                                  <td style="${tdR}">${fN(cr.wtHead, 0)} kg</td>
+                                  <td style="${tdR}">$${fN(cr.dolKg, 2)}</td>
+                                  <td style="${tdR}">${Math.round(cr.classKg).toLocaleString()} kg</td>
+                                  <td style="${tdR};color:#16a34a;font-weight:600">${fC(cr.head * cr.wtHead * cr.dolKg)}</td>
+                                </tr>
+                              `).join('')}
+                            </tbody>
+                          </table>
+                        ` : ''}
+                      </div>
+                    ` : `<div style="padding:10px 16px;font-size:12px;color:#6b7280">Total from cashflow only — upload Cattle Program sheet for detailed metrics</div>`}
+                  </div>
+                ` : ''}
+                <div style="display:flex;justify-content:flex-end;font-size:11px;color:#6b7280;margin-bottom:8px">
+                  Farming Income total: <strong style="color:#16a34a;margin-left:6px">${fC(totalFarmingRev)}</strong>
+                </div>
+              `;
+            })()}
             ${renderRevSection('Other Income', otherRevRows, totalOtherRev, false, false)}
             ${carryOverRevRows.length ? `
               <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px">
@@ -1216,53 +1336,6 @@ export function showBudgetImportPreview(container, parsed) {
         </div>
       ` : ''}
 
-      ${cattleMetrics ? `
-        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
-          <div style="padding:10px 16px;background:#fef9f0;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
-            <span>🐄 Livestock — Cattle Program metrics</span>
-            <span style="color:#16a34a;font-weight:700">${fC(cattleMetrics.totalSales)}</span>
-          </div>
-          <div style="padding:14px 16px">
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
-              ${[
-                ['Total head sold', cattleMetrics.totalHead != null ? cattleMetrics.totalHead.toLocaleString() + ' hd' : '—'],
-                ['Avg price / head', cattleMetrics.avgPricePerHead != null ? fC(cattleMetrics.avgPricePerHead) : '—'],
-                ['Total kg', cattleMetrics.totalKg ? Math.round(cattleMetrics.totalKg).toLocaleString() + ' kg' : '—'],
-                ['Avg kg / head', cattleMetrics.avgKgPerHead != null ? fN(cattleMetrics.avgKgPerHead, 0) + ' kg' : '—'],
-              ].map(([label, val]) => `
-                <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px;text-align:center">
-                  <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">${label}</div>
-                  <div style="font-size:15px;font-weight:700;color:#1e293b">${val}</div>
-                </div>
-              `).join('')}
-            </div>
-            ${cattleMetrics.classRows && cattleMetrics.classRows.length ? `
-              <table style="width:100%;border-collapse:collapse;font-size:11px">
-                <thead><tr>
-                  <th style="${th};text-align:left">Class</th>
-                  <th style="${thR}">Head</th>
-                  <th style="${thR}">Avg kg/hd</th>
-                  <th style="${thR}">$/kg</th>
-                  <th style="${thR}">Total kg</th>
-                  <th style="${thR}">Value</th>
-                </tr></thead>
-                <tbody>
-                  ${cattleMetrics.classRows.map((cr, i) => `
-                    <tr style="${i % 2 === 0 ? '' : 'background:#fafafa'}">
-                      <td style="${td}">${cr.description}</td>
-                      <td style="${tdR}">${cr.head.toLocaleString()}</td>
-                      <td style="${tdR}">${fN(cr.wtHead, 0)} kg</td>
-                      <td style="${tdR}">$${fN(cr.dolKg, 2)}</td>
-                      <td style="${tdR}">${Math.round(cr.classKg).toLocaleString()} kg</td>
-                      <td style="${tdR};color:#16a34a;font-weight:600">${fC(cr.head * cr.wtHead * cr.dolKg)}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            ` : ''}
-          </div>
-        </div>
-      ` : ''}
 
       ${(cattleCostRows||[]).length ? `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
