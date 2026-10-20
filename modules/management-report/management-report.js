@@ -89,10 +89,11 @@ async function _render(container) {
   const invTotals = (invList, commName) => {
     let qty = 0, income = 0, qa = 0, costs = 0;
     const matchedInvs = [];
+    const targetKey = commName ? commName.trim().toUpperCase().replace(/\s+/g,' ') : null;
     invList.forEach(inv => {
       const linked = contracts.find(c => c.id === inv.forward_contract_id);
       const iComm  = linked?.commodity || inv.commodity_type || (inv.line_items||[])[0]?.commodity || '';
-      if (commName && iComm.trim().toUpperCase() !== commName.trim().toUpperCase()) return;
+      if (targetKey && iComm.trim().toUpperCase().replace(/\s+/g,' ') !== targetKey) return;
       matchedInvs.push(inv);
       if (inv.batches) {
         const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
@@ -108,22 +109,23 @@ async function _render(container) {
     return { qty, income, qa, totalIncome: income + qa, costs, avgPrice: qty ? (income+qa)/qty : null, invoices: matchedInvs };
   };
 
-  // ── Build commodity groups ──────────────────────────────────────────────────
+  // ── Build commodity groups from budgets table only ─────────────────────────
+  // budgets table has the authoritative commodity list for the season.
+  // Contracts and invoices are matched to these groups by case-insensitive lookup
+  // rather than being allowed to create new entries (which caused duplicates).
   const groups = {};
-  const upsert = (name) => {
-    if (!name) return null;
-    const key = name.trim().toUpperCase();
-    if (!groups[key]) groups[key] = { name: name.trim(), budgets: [] };
-    return groups[key];
-  };
-  budgets.forEach(b => upsert(b.commodity)?.budgets.push(b));
-  // Ensure contract commodities appear even with no budget
-  contracts.forEach(c => upsert(c.commodity));
-  seasonInvoices.forEach(inv => {
-    const linked = contracts.find(c => c.id === inv.forward_contract_id);
-    const comm   = linked?.commodity || inv.commodity_type || (inv.line_items||[])[0]?.commodity;
-    if (comm) upsert(comm);
+  budgets.forEach(b => {
+    if (!b.commodity) return;
+    const key = b.commodity.trim().toUpperCase().replace(/\s+/g,' ');
+    if (!groups[key]) groups[key] = { name: b.commodity.trim(), budgets: [] };
+    groups[key].budgets.push(b);
   });
+  // Match helper — returns the group key for a commodity name, or null
+  const findGroup = (commName) => {
+    if (!commName) return null;
+    const k = commName.trim().toUpperCase().replace(/\s+/g,' ');
+    return groups[k] ? k : null;
+  };
 
   // ── Budget from budgets table ───────────────────────────────────────────────
   const budgetForGroup = (g) => {
@@ -149,65 +151,77 @@ async function _render(container) {
 
   let grandBudget = 0, grandBudgetYTD = 0, grandActual = 0;
 
-  // ── Income rows ────────────────────────────────────────────────────────────
-  const incomeRows = Object.values(groups)
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map(g => {
-      const { bIncome, bYTD, bArea, bProd, bPrice } = budgetForGroup(g);
-      const inv  = invTotals(seasonInvoices, g.name);
-      const unit = g.budgets[0]?.unit || contracts.find(c=>c.commodity.toUpperCase()===g.name.toUpperCase())?.unit || 'unit';
+  // ── Single commodity row builder ───────────────────────────────────────────
+  const buildCommRow = (g) => {
+    const { bIncome, bYTD, bArea, bProd } = budgetForGroup(g);
+    const inv  = invTotals(seasonInvoices, g.name);
+    const unit = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
 
-      grandBudget    += bIncome  || 0;
-      grandBudgetYTD += bYTD    || 0;
-      grandActual    += inv.totalIncome;
+    grandBudget    += bIncome      || 0;
+    grandBudgetYTD += bYTD        || 0;
+    grandActual    += inv.totalIncome;
 
-      // Invoice detail rows (hidden by default, toggled on click)
-      const detailId  = `inv-detail-${g.name.replace(/\s+/g,'-')}`;
-      const detailRows = inv.invoices.length
-        ? inv.invoices.map(i => {
-            const invDate  = formatDate(i.invoice_date?.slice(0,10));
-            const invInc   = (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
-            const invQty   = (() => {
-              if (i.batches) {
-                const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
-                return b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa'))
-                        .reduce((s,x)=>s+(parseFloat(x.qty)||0),0);
-              }
-              return parseFloat(i.total_qty)||0;
-            })();
-            return `<tr style="background:#fafbff">
-              <td style="${td};padding-left:36px;font-size:11px;color:var(--hint)">${invDate}</td>
-              <td style="${td};font-size:11px;color:var(--hint)">${i.buyer || '—'}</td>
-              <td style="${tdR};font-size:11px;color:var(--hint)">${invQty ? fN(invQty,2)+' '+unit : '—'}</td>
-              <td style="${tdR};font-size:11px;color:var(--hint)">${i.xero_invoice_number || i.id?.slice(0,8) || '—'}</td>
-              <td style="${tdR};font-size:11px;color:var(--green)">${fC(invInc)}</td>
-              <td colspan="2" style="${tdR}"></td>
-            </tr>`;
-          }).join('')
-        : `<tr style="background:#fafbff"><td colspan="7" style="${td};padding-left:36px;font-size:11px;color:var(--hint);font-style:italic">No invoices this season</td></tr>`;
+    const detailId  = `inv-detail-${g.name.replace(/[^a-z0-9]/gi,'-')}`;
+    const detailRows = inv.invoices.length
+      ? inv.invoices.map(i => {
+          const invDate  = formatDate(i.invoice_date?.slice(0,10));
+          const invInc   = (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
+          const invQty   = (() => {
+            if (i.batches) {
+              const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches;
+              return b.filter(x=>(x.lines||[]).some(l=>l.type==='income'&&l.line_type!=='qa'))
+                      .reduce((s,x)=>s+(parseFloat(x.qty)||0),0);
+            }
+            return parseFloat(i.total_qty)||0;
+          })();
+          return `<tr style="background:#fafbff">
+            <td style="${td};padding-left:36px;font-size:11px;color:var(--hint)">${invDate}</td>
+            <td style="${td};font-size:11px;color:var(--hint)">${i.buyer || '—'}</td>
+            <td style="${tdR};font-size:11px;color:var(--hint)">${invQty ? fN(invQty,2)+' '+unit : '—'}</td>
+            <td style="${tdR};font-size:11px;color:var(--hint)">${i.xero_invoice_number || i.id?.slice(0,8) || '—'}</td>
+            <td style="${tdR};font-size:11px;color:var(--green)">${fC(invInc)}</td>
+            <td colspan="2" style="${tdR}"></td>
+          </tr>`;
+        }).join('')
+      : `<tr style="background:#fafbff"><td colspan="7" style="${td};padding-left:36px;font-size:11px;color:var(--hint);font-style:italic">No invoices this season</td></tr>`;
 
-      return `
-        ${commRow(g.name)}
-        <tr style="cursor:pointer" onclick="
-          const el=document.getElementById('${detailId}');
-          if(el){el.style.display=el.style.display==='none'?'':'none';}
-        ">
-          <td style="${td};padding-left:20px;color:var(--hint)">
-            Income
-            <span style="font-size:10px;color:var(--hint);margin-left:6px">${inv.invoices.length ? `▸ ${inv.invoices.length} invoice${inv.invoices.length!==1?'s':''}` : ''}</span>
-          </td>
-          <td style="${tdR}">${bArea ? fN(bArea,1)+' ha' : '—'}</td>
-          <td style="${tdR}">${bProd ? fN(bProd)+' '+unit : '—'}</td>
-          <td style="${tdR};color:${inv.totalIncome ? 'var(--green)' : 'var(--hint)'};font-weight:600">${fC(inv.totalIncome) || '—'}</td>
-          <td style="${tdR}">${bYTD != null ? fC(bYTD) : '—'}</td>
-          <td style="${tdR}">${bIncome != null ? fC(bIncome) : '—'}</td>
-          <td style="${tdR}">${varAmt(inv.totalIncome, bYTD)}</td>
-        </tr>
-        <tbody id="${detailId}" style="display:none">
-          ${detailRows}
-        </tbody>
-      `;
-    }).join('');
+    return `
+      ${commRow(g.name)}
+      <tr style="cursor:pointer" onclick="
+        const el=document.getElementById('${detailId}');
+        if(el){el.style.display=el.style.display==='none'?'':'none';}
+      ">
+        <td style="${td};padding-left:20px;color:var(--hint)">
+          Income
+          <span style="font-size:10px;color:var(--hint);margin-left:6px">${inv.invoices.length ? `▸ ${inv.invoices.length} invoice${inv.invoices.length!==1?'s':''}` : ''}</span>
+        </td>
+        <td style="${tdR}">${bArea ? fN(bArea,1)+' ha' : '—'}</td>
+        <td style="${tdR}">${bProd ? fN(bProd)+' '+unit : '—'}</td>
+        <td style="${tdR};color:${inv.totalIncome ? 'var(--green)' : 'var(--hint)'};font-weight:600">${inv.totalIncome ? fC(inv.totalIncome) : '—'}</td>
+        <td style="${tdR}">${bYTD != null ? fC(bYTD) : '—'}</td>
+        <td style="${tdR}">${bIncome != null ? fC(bIncome) : '—'}</td>
+        <td style="${tdR}">${varAmt(inv.totalIncome, bYTD)}</td>
+      </tr>
+      <tbody id="${detailId}" style="display:none">
+        ${detailRows}
+      </tbody>
+    `;
+  };
+
+  // ── Income rows — grouped by section matching budget import ───────────────
+  // section field on budgets rows: 'farming' | 'other' | 'carry_over'
+  const sortedGroups = Object.values(groups).sort((a, b) =>
+    (a.budgets[0]?.budgeted_gross_revenue || 0) > (b.budgets[0]?.budgeted_gross_revenue || 0) ? -1 : 1
+  );
+  const farmingGroups   = sortedGroups.filter(g => !g.budgets.length || g.budgets.every(b => !b.section || b.section === 'farming'));
+  const otherGroups     = sortedGroups.filter(g =>  g.budgets.some(b => b.section === 'other'));
+  const carryOverGroups = sortedGroups.filter(g =>  g.budgets.some(b => b.section === 'carry_over'));
+
+  const incomeRows = [
+    farmingGroups.length   ? secRow('Farming income')   + farmingGroups.map(buildCommRow).join('')   : '',
+    otherGroups.length     ? secRow('Other income')     + otherGroups.map(buildCommRow).join('')     : '',
+    carryOverGroups.length ? secRow('Carry-over income') + carryOverGroups.map(buildCommRow).join('') : '',
+  ].join('');
 
   // ── Fixed costs from budget_costs ──────────────────────────────────────────
   const fixedCats = [
@@ -288,7 +302,6 @@ async function _render(container) {
             </tr>
           </thead>
           <tbody>
-            ${secRow('Income')}
             ${incomeRows || `<tr><td colspan="7" style="${td};color:var(--hint);font-style:italic;padding-left:20px">No income budgets or invoices for this season</td></tr>`}
 
             <!-- Income total -->
@@ -302,7 +315,7 @@ async function _render(container) {
             </tr>
 
             ${budgetCosts.length ? `
-              ${secRow('Fixed costs (budget only — actuals from Xero coming)')}
+              ${secRow('Fixed costs')}
               ${fixedRows}
               <tr style="background:#fff5f5;border-top:2px solid var(--border)">
                 <td style="${td};font-weight:700">Total fixed costs</td>
