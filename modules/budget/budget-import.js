@@ -193,8 +193,10 @@ function _parseCashflowSheet(rows, sheetName) {
     }
 
     // ── CAPEX section — tag 'A' rows ──
-    // Negative total = purchase (outflow), Positive total = sale of machinery (inflow offset)
-    // Store as signed: positive = purchase cost, negative = sale proceeds (net offset)
+    // In Excel cashflow: negative value = sale of machinery (cash inflow shown as negative cost)
+    //                    positive value = purchase (cash outflow)
+    // Store as signed for budget_costs: positive = purchase cost, negative = sale offset
+    // So: Excel negative (sale) → store negative; Excel positive (purchase) → store positive
     if (inCapex) {
       if (descL === 'subtotal' || descL.startsWith('total') || descL.startsWith('earnings')) break;
       if (tag === 'H' || tag === 'E') continue;
@@ -202,8 +204,8 @@ function _parseCashflowSheet(rows, sheetName) {
         capexItems.push({
           budget_code:   desc.toUpperCase().trim(),
           description:   desc,
-          budget_amount: -total,  // flip sign: negative cashflow → positive cost; positive cashflow → negative (sale)
-          is_sale:       total > 0,
+          budget_amount: total,   // keep sign: negative = sale offset, positive = purchase cost
+          is_sale:       total < 0,
         });
       }
       continue;
@@ -1120,7 +1122,7 @@ export function showBudgetImportPreview(container, parsed) {
   const totalCattleCost  = (cattleCostRows    || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
   const totalFixedCost   = (fixedCostRows     || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
   const totalCapex       = (capexRows         || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
-  const totalCost        = totalVarCost + totalFallowCostH + totalPYCost + totalCattleCost + totalFixedCost + Math.abs(totalCapex);
+  const totalCost        = totalVarCost + totalFallowCostH + totalPYCost + totalCattleCost + totalFixedCost + totalCapex;
 
   // Group variable costs by enterprise for display
   const varByEnterprise = {};
