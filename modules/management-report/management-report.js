@@ -46,8 +46,7 @@ async function _render(container) {
 
   qs('#mgmt-title', container).textContent = `${farm.name} — Management Report`;
   qs('#mgmt-sub', container).textContent   =
-    `Season ${season} · YTD to ${now.toLocaleString('en-AU',{month:'long',year:'numeric'})} · As at ${formatDate(now.toISOString().slice(0,10))}` +
-    (xeroConnected ? ` · Xero costs: ${seasonFrom} – ${seasonTo}` : ' · Xero not connected');
+    `Season ${season} · YTD to ${now.toLocaleString('en-AU',{month:'long',year:'numeric'})} · As at ${formatDate(now.toISOString().slice(0,10))}`;
 
   const body = qs('#mgmt-body', container);
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--hint)">Loading...</div>';
@@ -78,6 +77,10 @@ async function _render(container) {
   const xeroRevenue = xeroData?.revenue || null;  // { "Cavalcade Hay": 78900, ... }
   const xeroMeta    = xeroData?.meta    || null;
   const xeroConnected = xeroData != null;
+
+  // Update subtitle now that we know Xero status
+  qs('#mgmt-sub', container).textContent +=
+    xeroConnected ? ` · Xero costs: ${seasonFrom} – ${seasonTo}` : ' · Xero not connected';
 
   // ── Season-scoped invoices ──────────────────────────────────────────────────
   // Use invoice.season field (same logic as outputs module) — avoids prior-year bleed
