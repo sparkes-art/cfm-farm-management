@@ -119,23 +119,38 @@ function _inferFinancialYear(fileName) {
 // ── CFM Cashflow sheet parser ──────────────────────────────────────────────
 //
 // Scans a "OT/PT - Master Cashflow" sheet row by row.
-// Returns { revenueItems, costItems, warnings }
+// Returns { revenueItems, costItems, priorYearCostItems, warnings }
 //
-// revenueItems: [{ commodity, area_ha, total }]
-// costItems:    [{ description, budget_amount, category }]
+// revenueItems:        [{ commodity, area_ha, total, section }]
+//   section: 'farming' | 'other' | 'carry_over'
+// costItems:           [{ description, budget_amount, category }]  — overhead / fixed
+// priorYearCostItems:  [{ budget_code, description, budget_amount, enterprise }]
+//   — EXP rows from the "EXPENSES FROM PRIOR YEAR" section (rows ~43–375)
+//     These are variable costs for prior-year crops still on hand / in-field.
+//     enterprise is parsed from 'E' rows that have an area value (e.g. "COTTON DL 2024 (250.03 HA)")
+//     or set to 'Prior Year' for the general bucket.
+//
+// Income section structure (OT cashflow):
+//   FARMING INCOME    → rows with CROPPING INCOME / LIVESTOCK INCOME sub-headings
+//   OTHER INCOME      → agistment, interest, closing stock cattle/hay, etc.
+//   CARRY OVER INCOME → prior-season crops on hand: total dollar value only, no area/yield
+//   Row ~41: Farm Income total
+//   Row ~43: EXPENSES FROM PRIOR YEAR (enterprise bucket, B='E')
+//   Row ~44+: EXP rows for prior-year variable costs
+//   ...continues until OVERHEAD EXPENSES
 //
 function _parseCashflowSheet(rows, sheetName) {
-  const revenueItems = [];
-  const costItems    = [];
-  const warnings     = [];
+  const revenueItems        = [];
+  const costItems           = [];
+  const priorYearCostItems  = [];
+  const warnings            = [];
 
   // State machine
-  let inOverheads   = false;
-  let currentSection = null;  // 'overhead' | 'rm' | 'labour' | 'fund_mgmt'
-
-  // Revenue section enterprise tracking
-  // 'E' rows in the INCOME section announce the enterprise with area
-  let currentEnterpriseArea = null;
+  let incomeSection  = 'farming';  // 'farming' | 'other' | 'carry_over'
+  let inPriorYear    = false;      // between EXPENSES FROM PRIOR YEAR and OVERHEAD EXPENSES
+  let inOverheads    = false;
+  let currentSection = null;       // overhead sub-section: 'overhead' | 'rm' | 'labour' | 'fund_mgmt'
+  let pyEnterprise   = 'Prior Year'; // current enterprise for prior-year EXP rows
 
   const OVERHEAD_SECTION_START = 'overhead expenses';
 
@@ -156,7 +171,7 @@ function _parseCashflowSheet(rows, sheetName) {
     //   idx 0 = col B = tag (I / E / H / EXP)
     //   idx 2 = col D = description
     //   idx 4 = col F = current-year budget total
-    //   idx 19 = col U = re-forecast / prior year total
+    //   idx 29 = col AE = budget area (ha)
     const tag  = str(row[0]);      // col B (SheetJS idx 0)
     const desc = str(row[2]);      // col D (SheetJS idx 2)
     const totalRaw = row[4];       // col F — current-year budget total (SheetJS idx 4)
@@ -164,8 +179,8 @@ function _parseCashflowSheet(rows, sheetName) {
     const descL = low(desc);
 
     // ── Detect transition into overhead section ──
-    // Row 378: col D = 'OVERHEAD EXPENSES', col B = None
     if (!inOverheads && descL.includes(OVERHEAD_SECTION_START)) {
+      inPriorYear = false;
       inOverheads = true;
       currentSection = null;
       continue;
@@ -176,44 +191,68 @@ function _parseCashflowSheet(rows, sheetName) {
       // Stop at CAPITAL EXPENDITURE
       if (descL.includes('capital expenditure')) break;
 
-      // Detect sub-section headers — they appear as 'E' tagged rows OR untagged rows
-      // e.g. row 379: B='E', D='OVERHEADS'
-      //      row 409: B='None', D='REPAIRS & MAINTENANCE'
-      //      row 410: B='E',    D='R & M'
-      //      row 427: B='None', D='FARM MANAGEMENT'
-      //      row 428: B='E',    D='FARM MANAGEMENT'
       if (tag === 'E' || !tag) {
         for (const [key, cat] of Object.entries(SECTION_MAP)) {
-          if (descL.includes(key)) {
-            currentSection = cat;
-            break;
-          }
+          if (descL.includes(key)) { currentSection = cat; break; }
         }
-        if (descL.includes('finance costs')) {
-          currentSection = 'finance'; // separate finance costs category
-        }
+        if (descL.includes('finance costs')) currentSection = 'finance';
         if (tag !== 'EXP') continue;
       }
 
-      // Skip headings and subtotals
       if (tag === 'H' || descL === 'subtotal' || descL.startsWith('total')) continue;
 
-      // Cost line — must have EXP tag, a section, and a positive value
       if (tag === 'EXP' && currentSection && total && total > 0) {
         costItems.push({ description: desc, budget_amount: total, category: currentSection });
       }
+      continue;
+    }
 
+    // ── Prior year expenses section ──
+    // Triggered by B='E' and D='EXPENSES FROM PRIOR YEAR'
+    if (!inPriorYear && tag === 'E' && descL.includes('expenses from prior year')) {
+      inPriorYear = true;
+      pyEnterprise = 'Prior Year';
+      continue;
+    }
+
+    if (inPriorYear) {
+      // Skip heading rows
+      if (tag === 'H') continue;
+      if (descL === 'subtotal' || descL.startsWith('total')) continue;
+
+      // Enterprise sub-sections within prior year (e.g. "COTTON DL 2024 (250.03 HA)")
+      // These have B='E' and a value in col F (the area ha)
+      if (tag === 'E' && desc) {
+        pyEnterprise = desc;  // e.g. "COTTON DL 2024 (250.03 HA)"
+        continue;
+      }
+
+      // EXP rows = prior-year variable cost lines
+      if (tag === 'EXP' && desc && total != null) {
+        if (total > 0) {  // only capture non-zero rows for prior year
+          priorYearCostItems.push({
+            budget_code:    desc.toUpperCase().trim(),
+            description:    desc,
+            budget_amount:  total,
+            enterprise:     pyEnterprise,
+          });
+        }
+      }
       continue;
     }
 
     // ── Revenue / Income section ──
 
-    // Skip headings, subtotals, and section dividers
-    if (tag === 'H') continue;
-    if (descL === 'subtotal' || descL.startsWith('total') || descL === 'farm income') continue;
+    // Detect income sub-section transitions from heading rows
+    if (tag === 'H' || tag === 'E') {
+      if (descL.includes('other income'))        incomeSection = 'other';
+      else if (descL.includes('carry over') || descL.includes('prior year crop')) incomeSection = 'carry_over';
+      else if (descL.includes('cropping income') || descL.includes('livestock income') || descL.includes('farming income')) incomeSection = 'farming';
+      continue;
+    }
 
-    // 'E' rows in the income section just mark group headers (no area on these)
-    if (tag === 'E') continue;
+    // Skip subtotals / totals
+    if (descL === 'subtotal' || descL.startsWith('total') || descL === 'farm income') continue;
 
     // Income rows: tagged 'I' OR untagged with a non-zero value in col F and a description
     // (Some rows like RHODES HAY IRR, CORN IRR have no tag but are genuine income lines)
@@ -223,16 +262,16 @@ function _parseCashflowSheet(rows, sheetName) {
                              !descL.includes('expense') && !descL.includes('farming');
 
     if ((isTaggedIncome || isUntaggedIncome) && desc && total && total > 0) {
-      // col AE (openpyxl idx 30) = SheetJS idx 29 = Budget Area (ha)
-      const area_ha = num(row[29]) || null;
-      revenueItems.push({ commodity: desc, area_ha, total });
+      // col AE (SheetJS idx 29) = Budget Area (ha) — not meaningful for carry-over
+      const area_ha = incomeSection === 'carry_over' ? null : (num(row[29]) || null);
+      revenueItems.push({ commodity: desc, area_ha, total, section: incomeSection });
     }
   }
 
   if (!revenueItems.length) warnings.push(`[${sheetName}] No revenue rows found`);
   if (!costItems.length)    warnings.push(`[${sheetName}] No overhead cost rows found`);
 
-  return { revenueItems, costItems, warnings };
+  return { revenueItems, costItems, priorYearCostItems, warnings };
 }
 
 // ── Gross Margin sheet parser ──────────────────────────────────────────────
@@ -262,10 +301,53 @@ function _parseGmSheet(rows, sheetName) {
     const name     = str(nameRow[0]) || sheetName;
 
     // ── Cattle GM — different layout ──
+    // Row 4 col 2 = total income; Row 5 col 2 = total costs (summary)
+    // Variable cost rows start at row 14 (0-indexed):
+    //   col 0 = budget_code (e.g. "LIVESTOCK CARTAGE")
+    //   col 1 = description / operation
+    //   col 7 = total cost ($) — NOT cost/ha (cattle is head-based, no area)
+    //   col 38 = "Totals" column = annual total
+    // Section headers: col 0 = non-all-caps label (e.g. "Animal Health Cows"),
+    //                  col 6 = "Subtotal:"
     if (low(name).includes('cattle') || low(sheetName).includes('cattle gm')) {
-      // Row 4 (0-indexed) col 2 = total income; row 10 col 7 = total income
-      const totalRevenue = num((rows[4] || [])[2]) || num((rows[10] || [])[7]);
-      return { name: 'CATTLE SALES', area_ha: null, price: null, yieldPerHa: null, totalRevenue, unit: 'head' };
+      const totalRevenue = num((rows[4] || [])[2]) || num((rows[10] || [])[38]);
+      const costLines    = [];
+      let currentSection = null;
+      const BUDGET_CODE_RE_CATTLE = /^[A-Z][A-Z\s&,\/\-]+$/;
+
+      for (let ri = 11; ri < rows.length; ri++) {
+        const row  = rows[ri] || [];
+        const colA = str(row[0]);
+        const colF = str(row[6]);
+        const col38 = row[38];  // Totals column
+
+        // Section headers: col G = "Subtotal:" with a non-budget-code in col A
+        if (colF === 'Subtotal:' && colA && !BUDGET_CODE_RE_CATTLE.test(colA)) {
+          currentSection = colA.trim();
+          continue;
+        }
+        // Skip rows with no code or no total
+        if (!colA || col38 == null) continue;
+        // Budget code row
+        if (BUDGET_CODE_RE_CATTLE.test(colA)) {
+          const costTotal = num(col38);
+          if (costTotal === null) continue;
+          const desc = str(row[1]);
+          costLines.push({
+            budget_code:  colA.trim(),
+            description:  desc || colA.trim(),
+            subcategory:  currentSection,
+            cost_per_ha:  null,   // cattle has no area/ha basis
+            cost_total:   costTotal,
+          });
+        }
+      }
+
+      return {
+        name: 'CATTLE SALES', area_ha: null, price: null, yieldPerHa: null,
+        totalRevenue, unit: 'head', costLines,
+        isCattle: true,
+      };
     }
 
     // ── Cropping GM ──
@@ -369,7 +451,7 @@ function _identifySheets(sheetNames) {
   const SKIP = new Set([
     'formatting','narrative on metrics','key metrics','summary','reconciliation',
     'current assets','crop plan','prices','finance costs','amortisation calculator',
-    'op capex','prop capex','cattle program','fallows','ny crops','py crops',
+    'op capex','prop capex','cattle program','ny crops','py crops',
     'pricing - app','pricing - inputs','pricing - livestock','codings',
     'end of sept property','ops summary',
   ]);
@@ -384,10 +466,11 @@ function _identifySheets(sheetNames) {
     } else if (SKIP.has(n) || n.includes('capex') || n.includes('pricing') || n.includes('calendar')) {
       skipped.push(name);
     } else if (
-      // Known GM sheet patterns — enterprise cropping + livestock
+      // Known GM sheet patterns — enterprise cropping + livestock + fallows
       n.includes('hay') || n.includes('cotton') || n.includes('corn') ||
       n.includes('sorghum') || n.includes('millet') || n.includes('rhodes') ||
       n === 'cattle gm' || n.includes('farm mgmt') ||
+      n.includes('fallow') ||
       n.includes('oh + rnm') || n.includes('oh+rnm')
     ) {
       gmSheets.push(name);
@@ -406,6 +489,7 @@ function _identifySheets(sheetNames) {
 //
 function _consolidateRevenue(items, financialYear, farmId, gmData) {
   // Merge by commodity key — sum totals across OT+PT entities
+  // Keep section from the first occurrence (OT cashflow is authoritative)
   const byKey = new Map();
   for (const item of items) {
     const key = item.commodity.toUpperCase().replace(/\s+/g,' ').trim();
@@ -439,6 +523,8 @@ function _consolidateRevenue(items, financialYear, farmId, gmData) {
       budgeted_price:        gm?.price ?? null,
       budgeted_gross_revenue: item.total,
       notes:                 gm?.unit ? `Yield unit: ${gm.unit}` : null,
+      // section is a UI-only field for the preview — not stored in budgets table
+      section:               item.section || 'farming',
     });
   }
 
@@ -465,26 +551,39 @@ function _consolidateVariableCosts(gmData, financialYear, farmId) {
   const rows = [];
 
   for (const [, gm] of gmData) {
-    // Skip cattle and any GM without cost lines or area
+    // Skip any GM without cost lines
     if (!gm.costLines || !gm.costLines.length) continue;
 
     const enterprise = gm.name;
-    const area_ha    = gm.area_ha;
+    const area_ha    = gm.area_ha;   // null for cattle
 
     // Deduplicate within the enterprise: same code + description can appear
-    // multiple times in different application passes — sum the cost/ha
+    // multiple times in different application passes — sum the cost/ha (or cost_total for cattle)
     const byKey = new Map();
     for (const line of gm.costLines) {
       const key = `${line.budget_code}||${line.description}||${line.subcategory || ''}`;
       if (byKey.has(key)) {
-        byKey.get(key).cost_per_ha += (line.cost_per_ha || 0);
+        if (gm.isCattle) {
+          byKey.get(key).cost_total += (line.cost_total || 0);
+        } else {
+          byKey.get(key).cost_per_ha += (line.cost_per_ha || 0);
+        }
       } else {
         byKey.set(key, { ...line });
       }
     }
 
     for (const line of byKey.values()) {
-      const budget_amount = (area_ha != null) ? line.cost_per_ha * area_ha : null;
+      let cost_per_ha_val, budget_amount;
+      if (gm.isCattle) {
+        // Cattle: costs are total dollars (not per ha)
+        cost_per_ha_val = null;
+        budget_amount   = line.cost_total;
+      } else {
+        cost_per_ha_val = line.cost_per_ha;
+        budget_amount   = (area_ha != null) ? line.cost_per_ha * area_ha : null;
+      }
+
       rows.push({
         farm_id:        farmId,
         financial_year: financialYear,
@@ -493,10 +592,10 @@ function _consolidateVariableCosts(gmData, financialYear, farmId) {
         enterprise:     enterprise,
         budget_code:    line.budget_code,
         description:    line.description,
-        cost_per_ha:    line.cost_per_ha,
+        cost_per_ha:    cost_per_ha_val,
         area_ha:        area_ha,
         budget_amount:  budget_amount,
-        notes:          null,
+        notes:          gm.isCattle ? 'Cattle: total cost (head-based, no $/ha)' : null,
       });
     }
   }
@@ -511,6 +610,49 @@ function _consolidateVariableCosts(gmData, financialYear, farmId) {
   });
 
   return rows;
+}
+
+// ── Prior year cost consolidation (from OT cashflow EXP rows ~43-375) ────────
+//
+// These rows represent variable costs for crops still being processed / sold
+// from the prior season (e.g. late ginning, cartage, license fees for
+// cotton harvested in the previous year).
+// They appear in the OT cashflow as EXP rows between:
+//   "EXPENSES FROM PRIOR YEAR" (row ~43) and "OVERHEAD EXPENSES" (row ~378)
+// Enterprise buckets within this section are announced by 'E' rows
+// (e.g. "COTTON DL 2024 (250.03 HA)").
+//
+function _consolidatePriorYearCosts(items, financialYear, farmId) {
+  if (!items.length) return [];
+
+  // Deduplicate: same enterprise + budget_code → sum
+  const byKey = new Map();
+  for (const item of items) {
+    const key = `${item.enterprise}||${item.budget_code}`;
+    if (byKey.has(key)) {
+      byKey.get(key).budget_amount += (item.budget_amount || 0);
+    } else {
+      byKey.set(key, { ...item });
+    }
+  }
+
+  return [...byKey.values()].map(item => ({
+    farm_id:        farmId,
+    financial_year: financialYear,
+    category:       'variable',
+    subcategory:    'Prior Year Expenses',
+    enterprise:     item.enterprise,
+    budget_code:    item.budget_code,
+    description:    item.description,
+    cost_per_ha:    null,    // no ha basis — this is a cashflow total
+    area_ha:        null,
+    budget_amount:  item.budget_amount,
+    notes:          'Prior year crop expenses (from OT cashflow)',
+  })).sort((a, b) => {
+    const ea = a.enterprise || '', eb = b.enterprise || '';
+    if (ea !== eb) return ea.localeCompare(eb);
+    return (a.budget_code || '').localeCompare(b.budget_code || '');
+  });
 }
 
 // ── Fixed cost consolidation ───────────────────────────────────────────────
@@ -572,14 +714,16 @@ export async function parseBudgetExcel(file) {
   }
 
   // ── Parse all cashflow sheets (OT + PT) ──
-  const allRevenueItems = [];
-  const allCostItems    = [];
+  const allRevenueItems       = [];
+  const allCostItems          = [];
+  const allPriorYearCostItems = [];
 
   for (const sheetName of cashflowSheets) {
     const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
     const result = _parseCashflowSheet(rows, sheetName);
     allRevenueItems.push(...result.revenueItems);
     allCostItems.push(...result.costItems);
+    allPriorYearCostItems.push(...(result.priorYearCostItems || []));
     allWarnings.push(...result.warnings);
   }
 
@@ -601,9 +745,10 @@ export async function parseBudgetExcel(file) {
   const revenueRows      = _consolidateRevenue(allRevenueItems, financialYear || 'UNKNOWN', farm.id, gmData);
   const fixedCostRows    = _consolidateCosts(allCostItems, financialYear || 'UNKNOWN', farm.id);
   const variableCostRows = _consolidateVariableCosts(gmData, financialYear || 'UNKNOWN', farm.id);
+  const priorYearCostRows = _consolidatePriorYearCosts(allPriorYearCostItems, financialYear || 'UNKNOWN', farm.id);
 
-  // Combined cost rows: variable first (enterprise detail), then fixed
-  const costRows = [...variableCostRows, ...fixedCostRows];
+  // Combined cost rows: variable first (enterprise detail), then prior year, then fixed
+  const costRows = [...variableCostRows, ...priorYearCostRows, ...fixedCostRows];
 
   if (!revenueRows.length && !costRows.length) {
     allWarnings.push('No data could be extracted — check that the file matches the expected CFM budget format');
@@ -617,6 +762,11 @@ export async function parseBudgetExcel(file) {
       `(including $0 budget rows)`
     );
   }
+  if (priorYearCostRows.length) {
+    allWarnings.push(
+      `ℹ ${priorYearCostRows.length} prior-year expense lines extracted from cashflow`
+    );
+  }
 
   return {
     farm,
@@ -624,6 +774,7 @@ export async function parseBudgetExcel(file) {
     revenueRows,
     costRows,
     variableCostRows,
+    priorYearCostRows,
     fixedCostRows,
     warnings: allWarnings,
     fileName: file.name,
@@ -636,7 +787,7 @@ const fC = n => n != null ? '$' + Math.round(n).toLocaleString() : '—';
 const fN = (n, dp = 0) => n != null ? parseFloat(n).toFixed(dp) : '—';
 
 export function showBudgetImportPreview(container, parsed) {
-  const { farm, financialYear, revenueRows, costRows, variableCostRows, fixedCostRows, warnings, fileName } = parsed;
+  const { farm, financialYear, revenueRows, costRows, variableCostRows, priorYearCostRows, fixedCostRows, warnings, fileName } = parsed;
 
   const catLabels = {
     variable:  'Variable (crop/livestock)',
@@ -646,10 +797,21 @@ export function showBudgetImportPreview(container, parsed) {
     fund_mgmt: 'Fund Management',
     finance:   'Finance Costs',
   };
-  const totalRev       = revenueRows.reduce((s, r) => s + (r.budgeted_gross_revenue || 0), 0);
-  const totalVarCost   = (variableCostRows || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
-  const totalFixedCost = (fixedCostRows   || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
-  const totalCost      = totalVarCost + totalFixedCost;
+
+  // Split revenue into three sections
+  const farmingRevRows   = revenueRows.filter(r => r.section === 'farming');
+  const otherRevRows     = revenueRows.filter(r => r.section === 'other');
+  const carryOverRevRows = revenueRows.filter(r => r.section === 'carry_over');
+
+  const totalFarmingRev  = farmingRevRows.reduce((s, r)   => s + (r.budgeted_gross_revenue || 0), 0);
+  const totalOtherRev    = otherRevRows.reduce((s, r)     => s + (r.budgeted_gross_revenue || 0), 0);
+  const totalCarryRev    = carryOverRevRows.reduce((s, r) => s + (r.budgeted_gross_revenue || 0), 0);
+  const totalRev         = totalFarmingRev + totalOtherRev + totalCarryRev;
+
+  const totalVarCost     = (variableCostRows  || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
+  const totalPYCost      = (priorYearCostRows || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
+  const totalFixedCost   = (fixedCostRows     || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
+  const totalCost        = totalVarCost + totalPYCost + totalFixedCost;
 
   // Group variable costs by enterprise for display
   const varByEnterprise = {};
@@ -658,6 +820,15 @@ export function showBudgetImportPreview(container, parsed) {
     if (!varByEnterprise[e]) varByEnterprise[e] = { rows: [], total: 0 };
     varByEnterprise[e].rows.push(r);
     varByEnterprise[e].total += (r.budget_amount || 0);
+  }
+
+  // Group prior year costs by enterprise
+  const pyByEnterprise = {};
+  for (const r of (priorYearCostRows || [])) {
+    const e = r.enterprise || 'Prior Year';
+    if (!pyByEnterprise[e]) pyByEnterprise[e] = { rows: [], total: 0 };
+    pyByEnterprise[e].rows.push(r);
+    pyByEnterprise[e].total += (r.budget_amount || 0);
   }
 
   const fixedByCat = (fixedCostRows || []).reduce((acc, r) => {
@@ -670,6 +841,45 @@ export function showBudgetImportPreview(container, parsed) {
   const tdR = td + ';text-align:right;font-variant-numeric:tabular-nums';
   const th  = 'padding:6px 10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#6b7280;border-bottom:2px solid #e5e7eb';
   const thR = th + ';text-align:right';
+
+  // Helper to render a revenue section table
+  const renderRevSection = (title, rows, sectionTotal, showYield = true, isCarryOver = false) => {
+    if (!rows.length) return '';
+    return `
+      <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px">
+        <div style="padding:8px 16px;background:#f0fdf4;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between">
+          <span>${title}</span>
+          <span style="color:#16a34a">${fC(sectionTotal)}</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr>
+                <th style="${th};text-align:left">Enterprise / Item</th>
+                ${showYield ? `<th style="${thR}">Area (ha)</th><th style="${thR}">Price</th><th style="${thR}">Yield/ha</th><th style="${thR}">Income/ha</th>` : ''}
+                <th style="${thR}">Budget revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => {
+                const incomeHa = (r.area_ha && r.budgeted_gross_revenue) ? r.budgeted_gross_revenue / r.area_ha : null;
+                return `
+                <tr>
+                  <td style="${td}${isCarryOver ? ';color:#6b7280;font-style:italic' : ''}">${r.commodity}</td>
+                  ${showYield ? `
+                    <td style="${tdR}">${fN(r.area_ha, 1)}</td>
+                    <td style="${tdR}">${r.budgeted_price ? '$' + fN(r.budgeted_price, 0) : '—'}</td>
+                    <td style="${tdR}">${r.budgeted_yield_per_ha ? fN(r.budgeted_yield_per_ha, 1) : '—'}</td>
+                    <td style="${tdR}">${incomeHa ? '$' + fN(incomeHa, 0) : '—'}</td>
+                  ` : ''}
+                  <td style="${tdR};color:#16a34a;font-weight:600">${fC(r.budgeted_gross_revenue)}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  };
 
   container.innerHTML = `
     <div style="max-width:900px;margin:0 auto;padding:20px 24px">
@@ -689,9 +899,11 @@ export function showBudgetImportPreview(container, parsed) {
           <span style="color:#64748b">Cashflow sheets parsed</span><span style="color:#1e293b;font-weight:600">${parsed.sheetNames.filter(n => n.toLowerCase().includes('master cashflow')).length}</span><span></span>
           <span style="color:#64748b">Revenue rows</span><span style="color:#1e293b;font-weight:600">${revenueRows.length}</span><span></span>
           <span style="color:#64748b">Variable cost rows</span><span style="color:#1e293b;font-weight:600">${(variableCostRows||[]).length}</span><span></span>
+          <span style="color:#64748b">Prior year cost rows</span><span style="color:#1e293b;font-weight:600">${(priorYearCostRows||[]).length}</span><span></span>
           <span style="color:#64748b">Fixed cost rows</span><span style="color:#1e293b;font-weight:600">${(fixedCostRows||[]).length}</span><span></span>
           <span style="color:#64748b">Total budget revenue</span><span style="color:#16a34a;font-weight:700">${fC(totalRev)}</span><span></span>
           <span style="color:#64748b">Total variable costs</span><span style="color:#dc2626;font-weight:700">${fC(totalVarCost)}</span><span></span>
+          <span style="color:#64748b">Total prior year costs</span><span style="color:#dc2626;font-weight:700">${fC(totalPYCost)}</span><span></span>
           <span style="color:#64748b">Total fixed costs</span><span style="color:#dc2626;font-weight:700">${fC(totalFixedCost)}</span><span></span>
         </div>
       </div>
@@ -705,44 +917,39 @@ export function showBudgetImportPreview(container, parsed) {
 
       ${revenueRows.length ? `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
-          <div style="padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600">
-            Revenue — ${revenueRows.length} income items
+          <div style="padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between">
+            <span>Revenue — ${revenueRows.length} income items</span>
+            <span style="color:#16a34a;font-weight:700">${fC(totalRev)}</span>
           </div>
-          <div style="overflow-x:auto">
-            <table style="width:100%;border-collapse:collapse">
-              <thead>
-                <tr>
-                  <th style="${th};text-align:left">Enterprise / Item</th>
-                  <th style="${thR}">Area (ha)</th>
-                  <th style="${thR}">Price ($/t)</th>
-                  <th style="${thR}">Yield/ha</th>
-                  <th style="${thR}">Total tonnes</th>
-                  <th style="${thR}">Income/ha</th>
-                  <th style="${thR}">Budget revenue</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${revenueRows.map(r => {
-                  const totalT = (r.area_ha && r.budgeted_yield_per_ha) ? r.area_ha * r.budgeted_yield_per_ha : null;
-                  const incomeHa = (r.area_ha && r.budgeted_gross_revenue) ? r.budgeted_gross_revenue / r.area_ha : null;
-                  const isCarryOver = r.commodity !== r.commodity.toUpperCase();
-                  return `
-                  <tr style="${isCarryOver ? 'background:#fafaf9;' : ''}">
-                    <td style="${td};${isCarryOver ? 'color:#9ca3af;font-style:italic;' : ''}">${r.commodity}${isCarryOver ? ' <span style="font-size:10px">(carry-over)</span>' : ''}</td>
-                    <td style="${tdR}">${fN(r.area_ha, 1)}</td>
-                    <td style="${tdR}">${r.budgeted_price ? '$' + fN(r.budgeted_price, 0) : '—'}</td>
-                    <td style="${tdR}">${r.budgeted_yield_per_ha ? fN(r.budgeted_yield_per_ha, 1) : '—'}</td>
-                    <td style="${tdR}">${totalT ? fN(totalT, 0) + 't' : '—'}</td>
-                    <td style="${tdR}">${incomeHa ? '$' + fN(incomeHa, 0) : '—'}</td>
-                    <td style="${tdR};color:#16a34a;font-weight:600">${fC(r.budgeted_gross_revenue)}</td>
-                  </tr>`;
-                }).join('')}
-                <tr style="background:#f0fdf4;border-top:2px solid #e5e7eb">
-                  <td style="${td};font-weight:700" colspan="6">Total budget revenue</td>
-                  <td style="${tdR};color:#16a34a;font-weight:700">${fC(totalRev)}</td>
-                </tr>
-              </tbody>
-            </table>
+          <div style="padding:12px 16px">
+            ${renderRevSection('Farming Income', farmingRevRows, totalFarmingRev, true, false)}
+            ${renderRevSection('Other Income', otherRevRows, totalOtherRev, false, false)}
+            ${carryOverRevRows.length ? `
+              <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px">
+                <div style="padding:8px 16px;background:#f0fdf4;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between">
+                  <span>Carry-over Income <span style="font-weight:400;color:#6b7280;font-size:11px">(prior season crops on hand — total value only, no area/yield)</span></span>
+                  <span style="color:#16a34a">${fC(totalCarryRev)}</span>
+                </div>
+                <div style="overflow-x:auto">
+                  <table style="width:100%;border-collapse:collapse">
+                    <thead><tr>
+                      <th style="${th};text-align:left">Crop</th>
+                      <th style="${thR}">Total value</th>
+                    </tr></thead>
+                    <tbody>
+                      ${carryOverRevRows.map(r => `
+                        <tr>
+                          <td style="${td};color:#6b7280;font-style:italic">${r.commodity}</td>
+                          <td style="${tdR};color:#16a34a;font-weight:600">${fC(r.budgeted_gross_revenue)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ` : ''}
+            <div style="display:flex;justify-content:flex-end;padding:8px 0 0;border-top:2px solid #e5e7eb;font-size:13px;font-weight:700;color:#16a34a">
+              Total revenue: ${fC(totalRev)}
+            </div>
           </div>
         </div>
       ` : '<div style="color:#6b7280;font-size:12px;margin-bottom:12px">⚠ No revenue rows parsed</div>'}
@@ -791,6 +998,45 @@ export function showBudgetImportPreview(container, parsed) {
           </div>
         </div>
       ` : '<div style="color:#6b7280;font-size:12px;margin-bottom:12px">No variable cost rows parsed from GM sheets</div>'}
+
+      ${(priorYearCostRows||[]).length ? `
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
+          <div style="padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+            <span>Expenses from prior year — ${(priorYearCostRows||[]).length} lines <span style="font-weight:400;color:#6b7280;font-size:11px">(cashflow only, no $/ha)</span></span>
+            <span style="color:#dc2626;font-weight:700">-${fC(totalPYCost)}</span>
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <thead>
+                <tr>
+                  <th style="${th};text-align:left">Enterprise</th>
+                  <th style="${th};text-align:left">Budget Code</th>
+                  <th style="${thR}">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${Object.entries(pyByEnterprise).map(([enterprise, { rows: erows, total: etotal }]) => `
+                  ${erows.map((r, i) => `
+                    <tr style="${i % 2 === 0 ? '' : 'background:#fafafa'}">
+                      <td style="${td};font-size:11px;color:#6b7280">${i === 0 ? enterprise : ''}</td>
+                      <td style="${td};font-size:11px;font-family:monospace;color:#374151">${r.budget_code}</td>
+                      <td style="${tdR};font-size:11px;color:#dc2626">-${fC(r.budget_amount)}</td>
+                    </tr>
+                  `).join('')}
+                  <tr style="background:#fff5f5">
+                    <td style="${td};font-weight:600;font-size:11px" colspan="2">${enterprise} total</td>
+                    <td style="${tdR};font-weight:600;color:#dc2626;font-size:11px">-${fC(etotal)}</td>
+                  </tr>
+                `).join('')}
+                <tr style="background:#fff5f5;border-top:2px solid #e5e7eb">
+                  <td style="${td};font-weight:700" colspan="2">Total prior year expenses</td>
+                  <td style="${tdR};color:#dc2626;font-weight:700">-${fC(totalPYCost)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ` : ''}
 
       ${(fixedCostRows||[]).length ? `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
@@ -864,7 +1110,8 @@ export function showBudgetImportPreview(container, parsed) {
     }
     if (!fy) { toast('Financial year is required', 'error'); return; }
 
-    const revRows = revenueRows.map(r => ({ ...r, season: fy }));
+    // Strip preview-only 'section' field before writing to budgets table
+    const revRows = revenueRows.map(({ section: _s, ...r }) => ({ ...r, season: fy }));
     const cstRows = costRows.map(r => ({ ...r, financial_year: fy }));
     await _commitImport(container, farm, fy, revRows, cstRows, goBack);
   });
