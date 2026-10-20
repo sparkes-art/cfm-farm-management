@@ -145,6 +145,7 @@ function _parseCashflowSheet(rows, sheetName) {
   const priorYearCostItems  = [];
   const capexItems          = [];
   const cattleCostItems     = [];
+  const fallowCostItems     = [];
   const warnings            = [];
 
   // State machine
@@ -153,6 +154,8 @@ function _parseCashflowSheet(rows, sheetName) {
   let inOverheads    = false;
   let inCapex        = false;
   let inCattle       = false;      // inside CATTLE variable cost section
+  let inFallow       = false;      // inside FALLOW variable cost section
+  let fallowEnterprise = null;     // current fallow enterprise name
   let currentSection = null;       // overhead sub-section: 'overhead' | 'rm' | 'labour' | 'fund_mgmt'
   let pyEnterprise   = 'Prior Year'; // current enterprise for prior-year EXP rows
 
@@ -206,6 +209,7 @@ function _parseCashflowSheet(rows, sheetName) {
     if (!inOverheads && descL.includes(OVERHEAD_SECTION_START)) {
       inPriorYear = false;
       inCattle    = false;
+      inFallow    = false;
       inOverheads = true;
       currentSection = null;
       continue;
@@ -244,6 +248,27 @@ function _parseCashflowSheet(rows, sheetName) {
           description:   desc,
           budget_amount: total,
           enterprise:    'CATTLE',
+        });
+      }
+      continue;
+    }
+
+    // ── Fallow variable costs section ──
+    // Triggered by E row containing "fallow" in the farming expenses area
+    if (!inFallow && tag === 'E' && descL.includes('fallow')) {
+      inFallow = true;
+      fallowEnterprise = desc.trim().toUpperCase();
+      continue;
+    }
+    if (inFallow) {
+      if (descL === 'subtotal' || descL.startsWith('total')) { inFallow = false; continue; }
+      if (tag === 'H') continue;
+      if (tag === 'EXP' && desc && total != null && total > 0) {
+        fallowCostItems.push({
+          budget_code:   desc.toUpperCase().trim(),
+          description:   desc,
+          budget_amount: total,
+          enterprise:    fallowEnterprise,
         });
       }
       continue;
@@ -313,7 +338,7 @@ function _parseCashflowSheet(rows, sheetName) {
   if (!revenueItems.length) warnings.push(`[${sheetName}] No revenue rows found`);
   if (!costItems.length)    warnings.push(`[${sheetName}] No overhead cost rows found`);
 
-  return { revenueItems, costItems, priorYearCostItems, capexItems, cattleCostItems, warnings };
+  return { revenueItems, costItems, priorYearCostItems, capexItems, cattleCostItems, fallowCostItems, warnings };
 }
 
 // ── Gross Margin sheet parser ──────────────────────────────────────────────
@@ -795,6 +820,37 @@ function _consolidateCattleCosts(items, financialYear, farmId) {
   }));
 }
 
+function _consolidateFallowCosts(items, financialYear, farmId) {
+  if (!items.length) return [];
+
+  // Deduplicate by enterprise+budget_code
+  const byKey = new Map();
+  for (const item of items) {
+    const key = `${item.enterprise}|${item.budget_code}`;
+    if (byKey.has(key)) {
+      byKey.get(key).budget_amount += (item.budget_amount || 0);
+    } else {
+      byKey.set(key, { ...item });
+    }
+  }
+
+  return [...byKey.values()].map(item => ({
+    farm_id:        farmId,
+    financial_year: financialYear,
+    category:       'variable',
+    subcategory:    'Fallow',
+    enterprise:     item.enterprise || 'FALLOW',
+    budget_code:    item.budget_code,
+    description:    item.description,
+    cost_per_ha:    null,
+    unit_price:     null,
+    unit:           null,
+    area_ha:        null,
+    budget_amount:  item.budget_amount,
+    notes:          'Fallow variable costs from cashflow',
+  }));
+}
+
 // ── CAPEX consolidation ───────────────────────────────────────────────────
 function _consolidateCapex(items, financialYear, farmId) {
   if (!items.length) return [];
@@ -928,6 +984,7 @@ export async function parseBudgetExcel(file) {
   const allPriorYearCostItems = [];
   const allCapexItems         = [];
   const allCattleCostItems    = [];
+  const allFallowCostItems    = [];
 
   for (const sheetName of cashflowSheets) {
     const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
@@ -937,6 +994,7 @@ export async function parseBudgetExcel(file) {
     allPriorYearCostItems.push(...(result.priorYearCostItems || []));
     allCapexItems.push(...(result.capexItems || []));
     allCattleCostItems.push(...(result.cattleCostItems || []));
+    allFallowCostItems.push(...(result.fallowCostItems || []));
     allWarnings.push(...result.warnings);
   }
 
@@ -972,11 +1030,14 @@ export async function parseBudgetExcel(file) {
   // Cattle variable costs from cashflow (deduplicated across OT+PT sheets)
   const cattleCostRows = _consolidateCattleCosts(allCattleCostItems, fy, farm.id);
 
+  // Fallow variable costs from cashflow (deduplicated by enterprise+budget_code)
+  const fallowCostRows = _consolidateFallowCosts(allFallowCostItems, fy, farm.id);
+
   // CAPEX rows (deduplicated by budget_code)
   const capexRows = _consolidateCapex(allCapexItems, fy, farm.id);
 
-  // Combined cost rows: variable first, then prior year, then cattle, then fixed, then capex
-  const costRows = [...variableCostRows, ...priorYearCostRows, ...cattleCostRows, ...fixedCostRows, ...capexRows];
+  // Combined cost rows: variable (GM crops) → fallow → prior year → cattle → fixed → capex
+  const costRows = [...variableCostRows, ...fallowCostRows, ...priorYearCostRows, ...cattleCostRows, ...fixedCostRows, ...capexRows];
 
   if (!revenueRows.length && !costRows.length) {
     allWarnings.push('No data could be extracted — check that the file matches the expected CFM budget format');
@@ -989,6 +1050,9 @@ export async function parseBudgetExcel(file) {
   if (priorYearCostRows.length) {
     allWarnings.push(`ℹ ${priorYearCostRows.length} prior-year expense lines from cashflow`);
   }
+  if (fallowCostRows.length) {
+    allWarnings.push(`ℹ ${fallowCostRows.length} fallow cost lines from cashflow`);
+  }
   if (capexRows.length) {
     allWarnings.push(`ℹ ${capexRows.length} capital expenditure lines`);
   }
@@ -999,6 +1063,7 @@ export async function parseBudgetExcel(file) {
     revenueRows,
     costRows,
     variableCostRows,
+    fallowCostRows,
     priorYearCostRows,
     cattleCostRows,
     fixedCostRows,
@@ -1015,7 +1080,7 @@ const fC = n => n != null ? '$' + Math.round(n).toLocaleString() : '—';
 const fN = (n, dp = 0) => n != null ? parseFloat(n).toFixed(dp) : '—';
 
 export function showBudgetImportPreview(container, parsed) {
-  const { farm, financialYear, revenueRows, costRows, variableCostRows, priorYearCostRows, cattleCostRows, fixedCostRows, capexRows, cattleMetrics, warnings, fileName } = parsed;
+  const { farm, financialYear, revenueRows, costRows, variableCostRows, fallowCostRows, priorYearCostRows, cattleCostRows, fixedCostRows, capexRows, cattleMetrics, warnings, fileName } = parsed;
 
   const catLabels = {
     variable:  'Variable (crop/livestock)',
@@ -1037,11 +1102,12 @@ export function showBudgetImportPreview(container, parsed) {
   const totalRev         = totalFarmingRev + totalOtherRev + totalCarryRev;
 
   const totalVarCost     = (variableCostRows  || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
+  const totalFallowCostH = (fallowCostRows    || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
   const totalPYCost      = (priorYearCostRows || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
   const totalCattleCost  = (cattleCostRows    || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
   const totalFixedCost   = (fixedCostRows     || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
   const totalCapex       = (capexRows         || []).reduce((s, r) => s + (r.budget_amount || 0), 0);
-  const totalCost        = totalVarCost + totalPYCost + totalCattleCost + totalFixedCost + totalCapex;
+  const totalCost        = totalVarCost + totalFallowCostH + totalPYCost + totalCattleCost + totalFixedCost + totalCapex;
 
   // Group variable costs by enterprise for display
   const varByEnterprise = {};
@@ -1119,26 +1185,96 @@ export function showBudgetImportPreview(container, parsed) {
       </div>
 
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px 18px;margin-bottom:16px">
-        <div style="font-size:12px;color:#64748b;margin-bottom:8px">File: <strong>${fileName}</strong></div>
-        <div style="display:grid;grid-template-columns:repeat(3,auto);gap:4px 24px;font-size:12px">
-          <span style="color:#64748b">Farm</span><span style="color:#1e293b;font-weight:600">${farm.name}</span><span></span>
-          <span style="color:#64748b">Financial year</span>
-          ${financialYear
-            ? `<span style="color:#1e293b;font-weight:600">${financialYear}</span><span></span>`
-            : `<span><input id="bud-import-fy" type="text" class="input input-sm" placeholder="e.g. 2026-27" style="width:100px;display:inline-block"> <span style="color:#ef4444;font-size:11px">⚠ enter manually</span></span><span></span>`}
-          <span style="color:#64748b">Cashflow sheets parsed</span><span style="color:#1e293b;font-weight:600">${parsed.sheetNames.filter(n => n.toLowerCase().includes('master cashflow')).length}</span><span></span>
-          <span style="color:#64748b">Revenue rows</span><span style="color:#1e293b;font-weight:600">${revenueRows.length}</span><span></span>
-          <span style="color:#64748b">Variable cost rows</span><span style="color:#1e293b;font-weight:600">${(variableCostRows||[]).length}</span><span></span>
-          <span style="color:#64748b">Prior year cost rows</span><span style="color:#1e293b;font-weight:600">${(priorYearCostRows||[]).length}</span><span></span>
-          <span style="color:#64748b">Cattle cost rows</span><span style="color:#1e293b;font-weight:600">${(cattleCostRows||[]).length}</span><span></span>
-          <span style="color:#64748b">Fixed cost rows</span><span style="color:#1e293b;font-weight:600">${(fixedCostRows||[]).length}</span><span></span>
-          <span style="color:#64748b">CAPEX rows</span><span style="color:#1e293b;font-weight:600">${(capexRows||[]).length}</span><span></span>
-          <span style="color:#64748b">Total budget revenue</span><span style="color:#16a34a;font-weight:700">${fC(totalRev)}</span><span></span>
-          <span style="color:#64748b">Total variable costs</span><span style="color:#dc2626;font-weight:700">${fC(totalVarCost)}</span><span></span>
-          <span style="color:#64748b">Total prior year costs</span><span style="color:#dc2626;font-weight:700">${fC(totalPYCost)}</span><span></span>
-          <span style="color:#64748b">Total cattle costs</span><span style="color:#dc2626;font-weight:700">${fC(totalCattleCost)}</span><span></span>
-          <span style="color:#64748b">Total fixed costs</span><span style="color:#dc2626;font-weight:700">${fC(totalFixedCost)}</span><span></span>
-          <span style="color:#64748b">Total CAPEX</span><span style="color:#dc2626;font-weight:700">${fC(totalCapex)}</span><span></span>
+        <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:10px;flex-wrap:wrap">
+          <div style="font-size:12px;color:#64748b">File: <strong style="color:#1e293b">${fileName}</strong></div>
+          <div style="font-size:12px;color:#64748b">Farm: <strong style="color:#1e293b">${farm.name}</strong></div>
+          <div style="font-size:12px;color:#64748b">Year:
+            ${financialYear
+              ? `<strong style="color:#1e293b">${financialYear}</strong>`
+              : `<input id="bud-import-fy" type="text" class="input input-sm" placeholder="e.g. 2026-27" style="width:100px;display:inline-block;margin-left:4px"> <span style="color:#ef4444;font-size:11px">⚠ enter manually</span>`}
+          </div>
+          <div style="font-size:11px;color:#94a3b8">${parsed.sheetNames.filter(n => n.toLowerCase().includes('master cashflow')).length} cashflow sheet(s) · ${revenueRows.length} revenue rows · ${(variableCostRows||[]).length + (fallowCostRows||[]).length + (priorYearCostRows||[]).length + (cattleCostRows||[]).length} crop/livestock cost rows · ${(fixedCostRows||[]).length} fixed cost rows · ${(capexRows||[]).length} CAPEX rows</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+
+          <!-- Income block -->
+          <div style="background:white;border:1px solid #d1fae5;border-radius:6px;padding:10px 12px">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#16a34a;margin-bottom:6px">Income</div>
+            <div style="font-size:11px;color:#374151;display:flex;flex-direction:column;gap:3px">
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:#6b7280">Cropping / farming incl. livestock</span>
+                <span style="font-weight:600">${fC(totalFarmingRev)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:#6b7280">Other income</span>
+                <span style="font-weight:600">${fC(totalOtherRev)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:#6b7280">Income from prior year</span>
+                <span style="font-weight:600">${fC(totalCarryRev)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;border-top:1px solid #e5e7eb;margin-top:4px;padding-top:4px">
+                <span style="font-weight:700">Total income</span>
+                <span style="font-weight:700;color:#16a34a">${fC(totalRev)}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Expenses block -->
+          <div style="background:white;border:1px solid #fee2e2;border-radius:6px;padding:10px 12px">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#dc2626;margin-bottom:6px">Expenses</div>
+            <div style="font-size:11px;color:#374151;display:flex;flex-direction:column;gap:3px">
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:#6b7280">Crop variable costs</span>
+                <span style="font-weight:600">-${fC(totalVarCost)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:#6b7280">Fallow costs</span>
+                <span style="font-weight:600">-${fC(totalFallowCostH)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:#6b7280">Prior year crop expenses</span>
+                <span style="font-weight:600">-${fC(totalPYCost)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:#6b7280">Livestock costs</span>
+                <span style="font-weight:600">-${fC(totalCattleCost)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;border-top:1px dashed #fecaca;margin-top:2px;padding-top:4px">
+                <span style="font-weight:600;color:#374151">All crop expenses</span>
+                <span style="font-weight:600;color:#dc2626">-${fC(totalVarCost + totalFallowCostH + totalPYCost + totalCattleCost)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;margin-top:2px">
+                <span style="color:#6b7280">Total fixed costs</span>
+                <span style="font-weight:600">-${fC(totalFixedCost)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:#6b7280">CAPEX</span>
+                <span style="font-weight:600">-${fC(totalCapex)}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Summary block -->
+          <div style="background:white;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#475569;margin-bottom:6px">Summary</div>
+            <div style="font-size:11px;color:#374151;display:flex;flex-direction:column;gap:3px">
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:#6b7280">Total income</span>
+                <span style="font-weight:600;color:#16a34a">${fC(totalRev)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span style="color:#6b7280">Expenses (incl. CAPEX)</span>
+                <span style="font-weight:600;color:#dc2626">-${fC(totalCost)}</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;border-top:2px solid #e2e8f0;margin-top:4px;padding-top:4px">
+                <span style="font-weight:700">Surplus / Deficit</span>
+                <span style="font-weight:700;font-size:13px;color:${totalRev - totalCost >= 0 ? '#16a34a' : '#dc2626'}">${totalRev - totalCost >= 0 ? '' : '-'}${fC(Math.abs(totalRev - totalCost))}</span>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
 
@@ -1296,6 +1432,55 @@ export function showBudgetImportPreview(container, parsed) {
           </div>
         </div>
       ` : '<div style="color:#6b7280;font-size:12px;margin-bottom:12px">No variable cost rows parsed from GM sheets</div>'}
+
+      ${(fallowCostRows||[]).length ? (() => {
+        const totalFallowCost = (fallowCostRows||[]).reduce((s, r) => s + (r.budget_amount || 0), 0);
+        const fallowByEnterprise = {};
+        for (const r of (fallowCostRows||[])) {
+          if (!fallowByEnterprise[r.enterprise]) fallowByEnterprise[r.enterprise] = { rows: [], total: 0 };
+          fallowByEnterprise[r.enterprise].rows.push(r);
+          fallowByEnterprise[r.enterprise].total += (r.budget_amount || 0);
+        }
+        return `
+        <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
+          <div style="padding:10px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center">
+            <span>Fallow variable costs — ${(fallowCostRows||[]).length} lines <span style="font-weight:400;color:#6b7280;font-size:11px">(from cashflow)</span></span>
+            <span style="color:#dc2626;font-weight:700">-${fC(totalFallowCost)}</span>
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <thead>
+                <tr>
+                  <th style="${th};text-align:left">Enterprise</th>
+                  <th style="${th};text-align:left">Budget Code</th>
+                  <th style="${th};text-align:left">Description</th>
+                  <th style="${thR}">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${Object.entries(fallowByEnterprise).map(([enterprise, { rows: erows, total: etotal }]) => `
+                  ${erows.map((r, i) => `
+                    <tr style="${i % 2 === 0 ? '' : 'background:#fafafa'}">
+                      <td style="${td};font-size:11px;color:#6b7280">${i === 0 ? enterprise : ''}</td>
+                      <td style="${td};font-size:11px;font-family:monospace;color:#374151">${r.budget_code}</td>
+                      <td style="${td};font-size:11px">${r.description}</td>
+                      <td style="${tdR};font-size:11px;color:#dc2626">-${fC(r.budget_amount)}</td>
+                    </tr>
+                  `).join('')}
+                  <tr style="background:#fff5f5">
+                    <td style="${td};font-weight:600;font-size:11px" colspan="3">${enterprise} total</td>
+                    <td style="${tdR};font-weight:600;color:#dc2626;font-size:11px">-${fC(etotal)}</td>
+                  </tr>
+                `).join('')}
+                <tr style="background:#fff5f5;border-top:2px solid #e5e7eb">
+                  <td style="${td};font-weight:700" colspan="3">Total fallow costs</td>
+                  <td style="${tdR};color:#dc2626;font-weight:700">-${fC(totalFallowCost)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+      })() : ''}
 
       ${(priorYearCostRows||[]).length ? `
         <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:16px">
