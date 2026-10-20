@@ -130,8 +130,15 @@ async function _render(container) {
   };
 
   // ── Budget from budgets table ───────────────────────────────────────────────
-  const budgetForGroup = (g) => {
+  const budgetForGroup = (g, opts = {}) => {
     if (!g.budgets.length) return { bIncome: null, bYTD: null, bArea: null, bYield: null, bPrice: null, bProd: null };
+    // Carry-over: use only the stored gross revenue total — don't use area/yield/price
+    // (GM sheet partial-match can bleed current-season metrics onto prior-year crop rows)
+    if (opts.carryOver) {
+      const bIncome = g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_gross_revenue)||0), 0) || null;
+      const bYTD    = bIncome != null ? bIncome * ytdFraction : null;
+      return { bIncome, bYTD, bArea: null, bYield: null, bProd: null, bPrice: null };
+    }
     const bArea   = g.budgets.reduce((s, b) => s + (parseFloat(b.area_ha)||0), 0);
     const bYield  = bArea
       ? g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_yield_per_ha)||0) * (parseFloat(b.area_ha)||0), 0) / bArea
@@ -156,7 +163,7 @@ async function _render(container) {
   // ── Single commodity row builder ───────────────────────────────────────────
   // Returns { html, bIncome, bYTD, actual } so callers can build subtotals
   const buildCommRow = (g, opts = {}) => {
-    const { bIncome, bYTD, bArea, bProd } = budgetForGroup(g);
+    const { bIncome, bYTD, bArea, bProd } = budgetForGroup(g, { carryOver: opts.carryOver });
     const inv  = invTotals(seasonInvoices, g.name);
     const unit = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
     const hideAreaProd = opts.hideAreaProd;
@@ -214,7 +221,7 @@ async function _render(container) {
     if (!gList.length) return '';
     let secBudget = 0, secBudgetYTD = 0, secActual = 0;
     const rowsHtml = gList.map(g => {
-      const r = buildCommRow(g, opts);
+      const r = buildCommRow(g, { hideAreaProd: opts.hideAreaProd, carryOver: opts.carryOver });
       secBudget    += r.bIncome;
       secBudgetYTD += r.bYTD;
       secActual    += r.actual;
@@ -258,7 +265,7 @@ async function _render(container) {
     buildSection('Farming income',    farmingGroups),
     buildSection('Livestock income',  cattleGroups,    { hideAreaProd: true }),
     buildSection('Other income',      otherGroups,     { hideAreaProd: true }),
-    buildSection('Carry-over income', carryOverGroups, { hideAreaProd: true }),
+    buildSection('Carry-over income', carryOverGroups, { hideAreaProd: true, carryOver: true }),
   ].join('');
 
   // ── Fixed costs from budget_costs ──────────────────────────────────────────
