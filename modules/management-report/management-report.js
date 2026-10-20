@@ -93,7 +93,10 @@ async function _render(container) {
   const varAmt = (actual, budget) => {
     if (budget == null || actual == null) return '<span style="color:var(--hint)">—</span>';
     const v = actual - budget;
-    return `<span style="color:${v >= 0 ? 'var(--green)' : 'var(--red)'};font-weight:600">${v >= 0 ? '+' : ''}${fC(v)}</span>`;
+    const pct = budget !== 0 ? (v / budget * 100) : null;
+    const color = v >= 0 ? 'var(--green)' : 'var(--red)';
+    const pctStr = pct != null ? ` <span style="font-size:10px;opacity:.8">(${pct >= 0 ? '+' : ''}${pct.toFixed(0)}%)</span>` : '';
+    return `<span style="color:${color};font-weight:600">${v >= 0 ? '+' : ''}${fC(v)}${pctStr}</span>`;
   };
 
   // ── Invoice totals for a commodity ─────────────────────────────────────────
@@ -148,14 +151,6 @@ async function _render(container) {
     const key = commName.trim().toUpperCase().replace(/\s+/g,' ');
     if (!groups[key]) groups[key] = { name: commName.trim(), budgets: [] };
   });
-
-  // TEMP DEBUG — remove after confirming field names
-  console.log('[MgmtReport] budget rows sample:', budgets.slice(0,3).map(b => ({
-    commodity: b.commodity, area_ha: b.area_ha, yield_per_ha: b.yield_per_ha, price: b.price,
-    budgeted_yield_per_ha: b.budgeted_yield_per_ha, budgeted_price: b.budgeted_price,
-    budgeted_gross_revenue: b.budgeted_gross_revenue, budgeted_production: b.budgeted_production,
-  })));
-  console.log('[MgmtReport] ytdMonths:', ytdMonths, 'ytdFraction:', ytdFraction, 'monthsElapsed:', monthsElapsed);
 
   // ── Budget for a commodity group ───────────────────────────────────────────
   // Helper: read a budget field that may be stored under two naming conventions.
@@ -343,7 +338,7 @@ async function _render(container) {
         ['Actual YTD income',  fC(grandActual),      'var(--green)'],
         ['Budget YTD income',  fC(grandBudgetYTD),   'var(--ink)'],
         ['Full year budget',   fC(grandBudget),      'var(--blue)'],
-        ['YTD variance',       (grandActual - grandBudgetYTD >= 0 ? '+' : '') + fC(grandActual - grandBudgetYTD),
+        ['YTD variance',       (() => { const v = grandActual - grandBudgetYTD; const pct = grandBudgetYTD ? v/grandBudgetYTD*100 : null; return (v>=0?'+':'')+fC(v)+(pct!=null?` (${pct>=0?'+':''}${pct.toFixed(0)}%)`:''); })(),
                                grandActual - grandBudgetYTD >= 0 ? 'var(--green)' : 'var(--red)'],
       ].map(([l,v,c]) => `
         <div style="background:white;border:1px solid var(--border);border-radius:8px;padding:12px 14px">
