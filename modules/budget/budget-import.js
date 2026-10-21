@@ -1067,13 +1067,63 @@ function _consolidateFallowCosts(items, financialYear, farmId) {
 //       sheet_label   = the sheet name (e.g. "Op Capex") for subcategory grouping
 //
 function _parseCapexSheet(rows, sheetName) {
-  const items    = [];
+  const items = [];
+
+  // Detect layout by scanning the header row:
+  //
+  // Layout A — CFM cashflow-style (tag col0, desc col2, total col4):
+  //   Used by some CAPEX sheets that follow the cashflow row-tagging convention
+  //   Tag values: 'H' (header/code), 'E' (enterprise header), 'A' (line item)
+  //
+  // Layout B — General Farm CAPEX tabular style:
+  //   Col 0 = Item (line item name)
+  //   Col 1 = Comment/Description
+  //   Col 2 = Code (budget_code like 'CAPEX PLANT & EQUIPMENT')
+  //   Col 3 = Total Value (number)
+  //   No row tags — every data row has item + code + value
+  //
+  // Detection: if the header row has 'code' or 'total value' in col 2 or 3 → Layout B
+
+  let layoutB = false;
+  for (const row of rows.slice(0, 6)) {
+    const c2 = row[2] != null ? String(row[2]).toLowerCase().trim() : '';
+    const c3 = row[3] != null ? String(row[3]).toLowerCase().trim() : '';
+    if (c2 === 'code' || c3 === 'total value' || c3 === 'total') {
+      layoutB = true;
+      break;
+    }
+  }
+
+  if (layoutB) {
+    // Layout B: tabular — Item | Comment | Code | Total Value | TYPE OF FINANCE | monthly...
+    for (const row of rows) {
+      const item  = row[0] != null ? String(row[0]).trim() : '';
+      const code  = row[2] != null ? String(row[2]).trim() : '';
+      const total = typeof row[3] === 'number' ? row[3] : null;
+
+      // Skip headers, blanks, and summary rows
+      if (!item || !code || total == null || total === 0) continue;
+      const itemL = item.toLowerCase();
+      const codeL = code.toLowerCase();
+      if (itemL === 'item' || codeL === 'code') continue;
+      if (itemL.startsWith('total') || itemL.startsWith('subtotal')) continue;
+
+      items.push({
+        budget_code:      code.toUpperCase().trim(),
+        description:      code.toUpperCase().trim(),
+        line_description: item,
+        budget_amount:    total,
+        is_sale:          total < 0,
+        sheet_label:      sheetName,
+      });
+    }
+    return items;
+  }
+
+  // Layout A — CFM cashflow tag-based
   let currentCode = null;
 
   for (const row of rows) {
-    // SheetJS header:1 output — col indices start at 0
-    // CFM CAPEX sheets follow cashflow convention: tag@col0, desc@col2, total@col4
-    // But col A is often empty (merged cells / indent), so we check both layouts
     const tag    = (row[0] != null ? String(row[0]).trim() : null) ||
                    (row[1] != null ? String(row[1]).trim() : null);
     const descA  = row[2] != null ? String(row[2]).trim() : null;
@@ -1081,7 +1131,6 @@ function _parseCapexSheet(rows, sheetName) {
     const desc   = descA || descB || '';
     const descL  = desc.toLowerCase();
     const total  = (() => {
-      // Try col 4, then 5, then 3 — CAPEX sheets vary slightly
       const candidates = [row[4], row[5], row[3]];
       for (const v of candidates) {
         if (v != null && typeof v === 'number') return v;
@@ -1105,8 +1154,8 @@ function _parseCapexSheet(rows, sheetName) {
     if ((tag === 'A' || tag == null) && desc && total != null && total !== 0) {
       items.push({
         budget_code:      currentCode || 'UNALLOCATED',
-        description:      currentCode || desc.toUpperCase().trim(),  // code-level description
-        line_description: desc,                                        // individual item
+        description:      currentCode || desc.toUpperCase().trim(),
+        line_description: desc,
         budget_amount:    total,
         is_sale:          total < 0,
         sheet_label:      sheetName,
@@ -1134,9 +1183,14 @@ function _consolidateCapex(items, financialYear, farmId) {
   //   deduplicate by budget_code across OT+PT sheets (sum if same code appears in both)
   // For CAPEX-sheet items (has line_description):
   //   deduplicate by budget_code + line_description (same item on same code in multiple sheets)
+  // Sheet items take full precedence — drop any cashflow lump-sum for the same budget_code
+  const sheetCodes = new Set(items.filter(i => !!i.line_description).map(i => i.budget_code));
+
   const byKey = new Map();
   for (const item of items) {
     const isSheetItem = !!item.line_description;
+    // Skip cashflow item if a dedicated sheet covers this code
+    if (!isSheetItem && sheetCodes.has(item.budget_code)) continue;
     const key = isSheetItem
       ? `sheet|${item.budget_code}|${item.line_description}`
       : `cashflow|${item.budget_code}`;
