@@ -202,7 +202,21 @@ function parseExpenseAccounts(reportData) {
   return accounts;
 }
 
+// ── Month date range helper ───────────────────────────────────────────────────
+// month = 'YYYY-MM', returns { from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' } for that calendar month
+function monthDateRange(month) {
+  const [year, mon] = month.split('-').map(Number);
+  const from = new Date(Date.UTC(year, mon - 1, 1));
+  const to   = new Date(Date.UTC(year, mon, 0));  // last day of month
+  const fmt  = d => d.toISOString().slice(0, 10);
+  return { from: fmt(from), to: fmt(to) };
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
+// GET /api/xero-pull?farm_id=farm_blackbull&season=2026-27
+//   → YTD actuals for the season to today
+// GET /api/xero-pull?farm_id=farm_blackbull&season=2026-27&month=2026-09
+//   → YTD actuals + month actuals for September 2026
 exports.handler = async (event) => {
   const headers = {
     'Content-Type': 'application/json',
@@ -215,9 +229,15 @@ exports.handler = async (event) => {
   const params   = event.queryStringParameters || {};
   const farmId   = params.farm_id;
   const season   = params.season;   // e.g. '2026-27'
+  const month    = params.month;    // optional, e.g. '2026-09' — if provided, also fetches month-specific P&L
 
   if (!farmId || !season) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'farm_id and season are required' }) };
+  }
+
+  // Validate month format if provided
+  if (month && !/^\d{4}-\d{2}$/.test(month)) {
+    return { statusCode: 400, headers, body: JSON.stringify({ error: 'month must be YYYY-MM format' }) };
   }
 
   try {
@@ -229,34 +249,57 @@ exports.handler = async (event) => {
     // Compute YTD date range
     const { from: ytdFrom, to: ytdTo } = seasonDateRange(season, yearStartMonth);
 
-    // Get Xero token
+    // Get Xero token (single token per farm — one Xero org per farm, enforced)
     const { accessToken, tenantId } = await getAccessToken(farmId);
 
-    // Fetch P&L from Xero
-    const reportData = await fetchProfitAndLoss(accessToken, tenantId, ytdFrom, ytdTo);
+    // ── YTD fetch ──────────────────────────────────────────────────────────────
+    const ytdReportData = await fetchProfitAndLoss(accessToken, tenantId, ytdFrom, ytdTo);
+    const ytdAccounts   = parseExpenseAccounts(ytdReportData);
 
-    // Parse out expense accounts
-    const accounts = parseExpenseAccounts(reportData);
-
-    // Aggregate by CFM category
-    const categories = { labour: 0, overhead: 0, rm: 0, fund_mgmt: 0 };
-    for (const acc of accounts) {
-      if (categories.hasOwnProperty(acc.category)) {
-        categories[acc.category] += acc.amount;
+    const ytdCategories = { labour: 0, overhead: 0, rm: 0, fund_mgmt: 0 };
+    for (const acc of ytdAccounts) {
+      if (Object.prototype.hasOwnProperty.call(ytdCategories, acc.category)) {
+        ytdCategories[acc.category] += acc.amount;
       }
     }
 
-    console.log(`[xero-pull] farm=${farmId} season=${season} ytd=${ytdFrom}→${ytdTo} accounts=${accounts.length}`);
+    console.log(`[xero-pull] farm=${farmId} season=${season} ytd=${ytdFrom}→${ytdTo} accounts=${ytdAccounts.length}`);
+
+    // ── Monthly fetch (if requested) ───────────────────────────────────────────
+    let monthResult = null;
+    if (month) {
+      const { from: mFrom, to: mTo } = monthDateRange(month);
+      const mReportData  = await fetchProfitAndLoss(accessToken, tenantId, mFrom, mTo);
+      const mAccounts    = parseExpenseAccounts(mReportData);
+
+      const mCategories = { labour: 0, overhead: 0, rm: 0, fund_mgmt: 0 };
+      for (const acc of mAccounts) {
+        if (Object.prototype.hasOwnProperty.call(mCategories, acc.category)) {
+          mCategories[acc.category] += acc.amount;
+        }
+      }
+
+      console.log(`[xero-pull] farm=${farmId} month=${month} (${mFrom}→${mTo}) accounts=${mAccounts.length}`);
+
+      monthResult = {
+        month,
+        month_from:   mFrom,
+        month_to:     mTo,
+        categories:   mCategories,
+        accounts:     mAccounts,
+      };
+    }
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        ok:         true,
-        ytd_from:   ytdFrom,
-        ytd_to:     ytdTo,
-        categories,
-        accounts,
+        ok:           true,
+        ytd_from:     ytdFrom,
+        ytd_to:       ytdTo,
+        categories:   ytdCategories,   // YTD categories (backward-compatible key name)
+        accounts:     ytdAccounts,     // YTD accounts
+        month_data:   monthResult,     // null if month param not provided
       }),
     };
 
