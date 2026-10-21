@@ -525,12 +525,13 @@ async function _render(container) {
         : '—';
 
       const rowKey        = 'cost:' + cat.key + ':' + c.description;
-      // Build drilldown click attr if we have an accountID from Xero
-      const drillClick    = lineAccountID
+      // Show drilldown whenever we have a Xero actual — use accountID if available, fall back to name-based lookup
+      const canDrill      = lineAct !== null;
+      const drillClick    = canDrill
         ? 'style="cursor:pointer" onclick="window._mgmtXeroTxns(\'' + farm.id + '\',\'' + lineAccountID.replace(/'/g, '') + '\',\'' + lineAcctName.replace(/'/g, '') + '\',\'' + (xeroYtdFrom || '') + '\',\'' + (xeroYtdTo || '') + '\')"'
         : '';
-      const drillTitle    = lineAccountID ? ' title="Click to see Xero transactions"' : '';
-      const drillIcon     = lineAccountID ? ' <span style="font-size:10px;color:var(--blue);opacity:.7">↗</span>' : '';
+      const drillTitle    = canDrill ? ' title="Click to see Xero transactions ↗"' : '';
+      const drillIcon     = canDrill ? ' <span style="font-size:10px;color:var(--blue);opacity:.8">↗</span>' : '';
 
       const monthLineCols  = _selectedMonth ? `
           <td style="${tdR};color:var(--red);font-size:11px">${lineActMonth !== null ? '-' + fC(lineActMonth) : '—'}</td>

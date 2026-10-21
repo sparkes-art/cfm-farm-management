@@ -160,19 +160,19 @@ exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers };
   if (event.httpMethod !== 'GET')     return { statusCode: 405, headers, body: JSON.stringify({ error: 'GET only' }) };
 
-  const params     = event.queryStringParameters || {};
-  const farmId     = params.farm_id;
-  const accountId  = params.account_id;   // Xero UUID
-  const fromDate   = params.from;          // YYYY-MM-DD
-  const toDate     = params.to;            // YYYY-MM-DD
-  const accountName = params.account_name || ''; // for display (passed from client)
+  const params      = event.queryStringParameters || {};
+  const farmId      = params.farm_id;
+  let   accountId   = params.account_id   || ''; // Xero UUID — may be empty, resolved below if so
+  const fromDate    = params.from;                // YYYY-MM-DD
+  const toDate      = params.to;                  // YYYY-MM-DD
+  let   accountName = params.account_name || '';  // Xero account name — used to resolve UUID if needed
   const accountCode = params.account_code || '';
 
-  if (!farmId || !accountId || !fromDate || !toDate) {
+  if (!farmId || !fromDate || !toDate || (!accountId && !accountName)) {
     return {
       statusCode: 400,
       headers,
-      body: JSON.stringify({ error: 'farm_id, account_id, from, and to are required' }),
+      body: JSON.stringify({ error: 'farm_id, from, to, and either account_id or account_name are required' }),
     };
   }
 
@@ -183,6 +183,40 @@ exports.handler = async (event) => {
 
   try {
     const { accessToken, tenantId } = await getAccessToken(farmId);
+
+    // ── Resolve accountID from name if not provided ──────────────────────────
+    // Xero P&L reports don't always include accountID in cell attributes,
+    // so we fall back to looking it up via the Accounts endpoint by name.
+    if (!accountId && accountName) {
+      const acctRes  = await fetch('https://api.xero.com/api.xro/2.0/Accounts', {
+        headers: {
+          'Authorization':  `Bearer ${accessToken}`,
+          'Xero-Tenant-Id': tenantId,
+          'Accept':         'application/json',
+        },
+      });
+      if (acctRes.ok) {
+        const acctData = await acctRes.json();
+        const norm     = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+        const namNorm  = norm(accountName);
+        const match    = (acctData.Accounts || []).find(a => norm(a.Name) === namNorm || norm(a.Name).includes(namNorm) || namNorm.includes(norm(a.Name)));
+        if (match) {
+          accountId   = match.AccountID;
+          accountName = match.Name; // use canonical Xero name
+          console.log(`[xero-account-txns] resolved "${accountName}" → accountID=${accountId}`);
+        } else {
+          console.warn(`[xero-account-txns] could not resolve accountID for name="${accountName}"`);
+        }
+      }
+    }
+
+    if (!accountId) {
+      return {
+        statusCode: 404,
+        headers,
+        body: JSON.stringify({ ok: false, error: `Could not find a Xero account matching "${accountName}". Check your Xero chart of accounts.` }),
+      };
+    }
 
     // Xero AccountTransactions report
     const url = new URL('https://api.xero.com/api.xro/2.0/Reports/AccountTransactions');
