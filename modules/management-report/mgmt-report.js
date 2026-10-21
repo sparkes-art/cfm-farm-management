@@ -221,7 +221,7 @@ async function _render(container) {
     if (!accounts) return () => null;
     const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
     const normAccounts = accounts.map(a => ({ ...a, _norm: norm(a.name) }));
-    const mkResult = a => ({ amount: a.amount, accountID: a.accountID || '', accountName: a.name });
+    const mkResult = a => ({ amount: a.amount, accountID: a.accountID || '', accountName: a.name, accountCode: a.code || '' });
     return (description) => {
       // 1. Check explicit mapping first — use stored Xero account UUID to match
       const mapping = xeroMappingIndex[description];
@@ -555,6 +555,7 @@ async function _render(container) {
       const lineActMonth   = lineActMoMatch?.amount ?? null;
       const lineAccountID  = lineActMatch?.accountID   || lineActMoMatch?.accountID || '';
       const lineAcctName   = lineActMatch?.accountName || c.description;
+      const lineAcctCode   = lineActMatch?.accountCode || lineActMoMatch?.accountCode || '';
       const lineVar      = lineAct !== null ? amtYTD - lineAct : null;
       const lineVarStyle = lineVar !== null ? (lineVar >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
       const lineVarPct   = lineVar !== null && amtYTD ? lineVar / amtYTD * 100 : null;
@@ -569,8 +570,9 @@ async function _render(container) {
       const drillAcctName   = explicitMapping?.xero_account_name || lineAcctName;
       // Show drilldown whenever we have a Xero actual — use accountID if available, fall back to name-based lookup
       const canDrill      = lineAct !== null;
+      const drillAcctCode  = explicitMapping?.xero_account_code || lineAcctCode;
       const drillClick    = canDrill
-        ? 'onclick="window._mgmtXeroTxns(\'' + farm.id + '\',\'' + drillAccountId.replace(/'/g, '') + '\',\'' + drillAcctName.replace(/'/g, '') + '\',\'' + (xeroYtdFrom || '') + '\',\'' + (xeroYtdTo || '') + '\')"'
+        ? 'onclick="window._mgmtXeroTxns(\'' + farm.id + '\',\'' + drillAccountId.replace(/'/g, '') + '\',\'' + drillAcctName.replace(/'/g, '') + '\',\'' + (xeroYtdFrom || '') + '\',\'' + (xeroYtdTo || '') + '\',\'' + drillAcctCode.replace(/'/g, '') + '\')"'
         : '';
       const drillTitle    = canDrill ? ' title="Click to see Xero transactions"' : '';
 
@@ -1158,10 +1160,10 @@ window._mgmtOpenInvoice = async function(invoiceId) {
 };
 
 // ── Xero account transaction drilldown modal ───────────────────────────────────
-window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, toDate) {
-  // accountId may be empty — backend will resolve UUID from accountName via Xero Accounts API
-  if (!fromDate || !toDate || (!accountId && !accountName)) {
-    alert('Transaction data not available — no date range or account name found. Try refreshing the report.');
+window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, toDate, accountCode) {
+  // accountId may be empty — backend can match by accountCode or accountName
+  if (!fromDate || !toDate || (!accountId && !accountName && !accountCode)) {
+    alert('Transaction data not available — no date range or account found. Try refreshing the report.');
     return;
   }
 
@@ -1197,10 +1199,11 @@ window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, 
 
   try {
     const url = '/.netlify/functions/xero-account-txns?farm_id=' + encodeURIComponent(farmId) +
-      '&account_id=' + encodeURIComponent(accountId) +
-      '&from='        + encodeURIComponent(fromDate) +
-      '&to='          + encodeURIComponent(toDate) +
-      '&account_name=' + encodeURIComponent(accountName);
+      '&account_id='   + encodeURIComponent(accountId || '') +
+      '&from='         + encodeURIComponent(fromDate) +
+      '&to='           + encodeURIComponent(toDate) +
+      '&account_name=' + encodeURIComponent(accountName || '') +
+      '&account_code=' + encodeURIComponent(accountCode || '');
 
     const res  = await fetch(url);
     const data = await res.json();

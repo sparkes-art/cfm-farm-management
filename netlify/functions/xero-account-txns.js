@@ -121,11 +121,11 @@ exports.handler = async (event) => {
   let   accountName = params.account_name || '';
   const accountCode = params.account_code || '';
 
-  if (!farmId || !fromDate || !toDate || (!accountId && !accountName)) {
+  if (!farmId || !fromDate || !toDate || (!accountId && !accountName && !accountCode)) {
     return {
       statusCode: 400,
       headers,
-      body: JSON.stringify({ error: 'farm_id, from, to, and either account_id or account_name are required' }),
+      body: JSON.stringify({ error: 'farm_id, from, to, and either account_id, account_code, or account_name are required' }),
     };
   }
 
@@ -137,8 +137,9 @@ exports.handler = async (event) => {
     const { accessToken, tenantId } = await getAccessToken(farmId);
 
     // ── Resolve accountID and code from name if not provided ─────────────────
+    // Skip name resolution if we already have accountId OR accountCode — saves one API roundtrip
     let resolvedCode = accountCode;
-    if (!accountId && accountName) {
+    if (!accountId && !accountCode && accountName) {
       const acctData = await xeroGet('https://api.xero.com/api.xro/2.0/Accounts', accessToken, tenantId);
       const norm     = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
       const namNorm  = norm(accountName);
