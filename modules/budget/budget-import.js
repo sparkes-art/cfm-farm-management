@@ -763,7 +763,9 @@ function _consolidateRevenue(items, financialYear, farmId, gmData) {
 
   const rows = [];
   for (const [key, item] of byKey) {
-    const gm = gmLookup(key);
+    // gmLookup uses commodity name only (not the section|COMMODITY key used for dedup)
+    const commodityOnly = item.commodity.toUpperCase().replace(/\s+/g,' ').trim();
+    const gm = gmLookup(commodityOnly);
 
     rows.push({
       farm_id:               farmId,

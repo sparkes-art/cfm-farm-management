@@ -244,9 +244,9 @@ async function _render(container) {
           <span style="font-size:10px;color:var(--hint);margin-left:4px">↗</span>
         </td>
         <td style="${tdR};color:${inv.totalIncome ? 'var(--green)' : 'var(--hint)'};font-weight:600">${inv.totalIncome ? fC(inv.totalIncome) : '—'}</td>
-        <td style="${tdR}">${bYTD != null ? fC(bYTD) : '—'}</td>
+        <td style="${tdR}">${inv.totalIncome && bYTD != null ? fC(bYTD) : '—'}</td>
         <td style="${tdR}">${bIncome != null ? fC(bIncome) : '—'}</td>
-        <td style="${tdR}">${varAmt(inv.totalIncome, bYTD)}</td>
+        <td style="${tdR}">${inv.totalIncome ? varAmt(inv.totalIncome, bYTD) : '<span style="color:var(--hint)">—</span>'}</td>
       </tr>
     `;
     return { html, bIncome: bIncome || 0, bYTD: bYTD || 0, actual: inv.totalIncome };
@@ -270,9 +270,9 @@ async function _render(container) {
       <tr style="background:#f0f4f8">
         <td style="${td};font-weight:600;font-size:11px;padding-left:16px;color:var(--hint)">${label} total</td>
         <td style="${tdR};color:var(--green);font-weight:600">${secActual ? fC(secActual) : '—'}</td>
-        <td style="${tdR};font-weight:600">${secBudgetYTD ? fC(secBudgetYTD) : '—'}</td>
+        <td style="${tdR};font-weight:600">${secActual && secBudgetYTD ? fC(secBudgetYTD) : '—'}</td>
         <td style="${tdR};font-weight:600">${secBudget ? fC(secBudget) : '—'}</td>
-        <td style="${tdR}">${varAmt(secActual, secBudgetYTD)}</td>
+        <td style="${tdR}">${secActual ? varAmt(secActual, secBudgetYTD) : '<span style="color:var(--hint)">—</span>'}</td>
       </tr>`;
     return secRow(label) + rowsHtml + subtotal;
   };
@@ -344,15 +344,15 @@ async function _render(container) {
     const isSale = entry.total < 0;
     totalCapexBudget += entry.total;
 
-    // Encode line items for the drilldown modal
+    // Encode line items for the drilldown modal — use data attribute to avoid quote-escaping issues
     const modalData = JSON.stringify({
       code: entry.code,
       subcategory: entry.subcategory || 'Capital Expenditure',
       items: entry.items.map(i => ({ desc: i.description, amt: parseFloat(i.budget_amount)||0, notes: i.notes })),
-    }).replace(/'/g, '&#39;');
+    }).replace(/"/g, '&quot;');
 
     return `
-      <tr style="cursor:pointer" onclick="window._mgmtOpenCapexModal('${modalData}')" title="Click to see budget items">
+      <tr style="cursor:pointer" data-capex-modal="${modalData}" title="Click to see budget items">
         <td style="${td};padding-left:28px">
           <span style="font-size:12px;color:var(--ink)">${entry.code}</span>
           <span style="font-size:10px;color:var(--hint);margin-left:6px">${entry.subcategory || ''}</span>
@@ -483,6 +483,12 @@ async function _render(container) {
       </table>
     </div>
   `;
+
+  // Delegated click handler for CAPEX drilldown rows (data-capex-modal attribute)
+  body.addEventListener('click', e => {
+    const row = e.target.closest('[data-capex-modal]');
+    if (row) window._mgmtOpenCapexModal(row.dataset.capexModal);
+  });
 }
 
 // ── Commodity detail modal ────────────────────────────────────────────────────
@@ -580,7 +586,7 @@ window._mgmtOpenCapexModal = function(dataStr) {
   const fC = v => v == null ? '—' : Math.abs(v).toLocaleString('en-AU', { style:'currency', currency:'AUD', minimumFractionDigits:0, maximumFractionDigits:0 });
 
   let d;
-  try { d = JSON.parse(dataStr.replace(/&#39;/g, "'")); } catch(e) { return; }
+  try { d = JSON.parse(dataStr); } catch(e) { console.error('[CAPEX modal] parse error:', e, dataStr); return; }
 
   const totalAmt = d.items.reduce((s, i) => s + (i.amt || 0), 0);
   const isSale   = totalAmt < 0;
