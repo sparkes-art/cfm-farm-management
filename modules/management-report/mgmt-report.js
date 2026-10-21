@@ -158,11 +158,13 @@ async function _render(container) {
   });
 
   // ── Xero actuals ───────────────────────────────────────────────────────────
-  let xeroActuals     = null; // YTD category totals { labour, overhead, rm, fund_mgmt }
-  let xeroAccounts    = null; // YTD raw accounts for line-level matching
-  let xeroYtdLabel    = null;
-  let xeroMonthActuals = null; // Monthly category totals (null if no month selected)
-  let xeroMonthAccounts= null; // Monthly raw accounts
+  let xeroActuals      = null; // YTD category totals { labour, overhead, rm, fund_mgmt }
+  let xeroAccounts     = null; // YTD raw accounts for line-level matching
+  let xeroYtdLabel     = null;
+  let xeroYtdFrom      = null; // ISO date string e.g. '2026-07-01'
+  let xeroYtdTo        = null; // ISO date string e.g. '2026-10-21'
+  let xeroMonthActuals  = null; // Monthly category totals (null if no month selected)
+  let xeroMonthAccounts = null; // Monthly raw accounts
 
   try {
     const xeroUrl = '/.netlify/functions/xero-pull?farm_id=' + farm.id + '&season=' + encodeURIComponent(season) +
@@ -174,6 +176,8 @@ async function _render(container) {
         xeroActuals  = xeroData.categories;
         xeroAccounts = xeroData.accounts || [];
         xeroYtdLabel = xeroData.ytd_to;
+        xeroYtdFrom  = xeroData.ytd_from;
+        xeroYtdTo    = xeroData.ytd_to;
         if (xeroData.month_data) {
           xeroMonthActuals  = xeroData.month_data.categories;
           xeroMonthAccounts = xeroData.month_data.accounts || [];
@@ -185,23 +189,25 @@ async function _render(container) {
   }
 
   // ── Xero line-level matcher factories ──────────────────────────────────────
+  // Returns { amount, accountID, accountName } or null
   const makeLineMatcher = (accounts) => {
     if (!accounts) return () => null;
     const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
     const normAccounts = accounts.map(a => ({ ...a, _norm: norm(a.name) }));
+    const mkResult = a => ({ amount: a.amount, accountID: a.accountID || '', accountName: a.name });
     return (description) => {
       const dNorm = norm(description);
       let hit = normAccounts.find(a => a._norm === dNorm);
-      if (hit) return hit.amount;
+      if (hit) return mkResult(hit);
       hit = normAccounts.find(a => a._norm.includes(dNorm) || dNorm.includes(a._norm));
-      if (hit) return hit.amount;
+      if (hit) return mkResult(hit);
       const dWords = dNorm.split(' ').filter(w => w.length > 2);
       if (dWords.length) {
         hit = normAccounts.find(a => {
           const matches = dWords.filter(w => a._norm.includes(w));
           return matches.length >= Math.ceil(dWords.length / 2);
         });
-        if (hit) return hit.amount;
+        if (hit) return mkResult(hit);
       }
       return null;
     };
@@ -502,11 +508,15 @@ async function _render(container) {
     const varStyle    = catVariance !== null ? (catVariance >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
 
     const lineRowsHtml = lines.map(c => {
-      const amt          = parseFloat(c.budget_amount) || 0;
-      const amtYTD       = amt * ytdFraction;
-      const amtMonth     = amt / 12;
-      const lineAct      = xeroLineActual(c.description);
-      const lineActMonth = xeroMonthLineActual(c.description);
+      const amt            = parseFloat(c.budget_amount) || 0;
+      const amtYTD         = amt * ytdFraction;
+      const amtMonth       = amt / 12;
+      const lineActMatch   = xeroLineActual(c.description);      // { amount, accountID, accountName } | null
+      const lineActMoMatch = xeroMonthLineActual(c.description); // { amount, accountID, accountName } | null
+      const lineAct        = lineActMatch?.amount   ?? null;
+      const lineActMonth   = lineActMoMatch?.amount ?? null;
+      const lineAccountID  = lineActMatch?.accountID   || lineActMoMatch?.accountID || '';
+      const lineAcctName   = lineActMatch?.accountName || c.description;
       const lineVar      = lineAct !== null ? amtYTD - lineAct : null;
       const lineVarStyle = lineVar !== null ? (lineVar >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
       const lineVarPct   = lineVar !== null && amtYTD ? lineVar / amtYTD * 100 : null;
@@ -514,18 +524,25 @@ async function _render(container) {
         ? (lineVar >= 0 ? '+' : '') + fC(lineVar) + (lineVarPct !== null ? ' (' + (lineVarPct >= 0 ? '+' : '') + lineVarPct.toFixed(0) + '%)' : '')
         : '—';
 
-      const rowKey         = 'cost:' + cat.key + ':' + c.description;
+      const rowKey        = 'cost:' + cat.key + ':' + c.description;
+      // Build drilldown click attr if we have an accountID from Xero
+      const drillClick    = lineAccountID
+        ? 'style="cursor:pointer" onclick="window._mgmtXeroTxns(\'' + farm.id + '\',\'' + lineAccountID.replace(/'/g, '') + '\',\'' + lineAcctName.replace(/'/g, '') + '\',\'' + (xeroYtdFrom || '') + '\',\'' + (xeroYtdTo || '') + '\')"'
+        : '';
+      const drillTitle    = lineAccountID ? ' title="Click to see Xero transactions"' : '';
+      const drillIcon     = lineAccountID ? ' <span style="font-size:10px;color:var(--blue);opacity:.7">↗</span>' : '';
+
       const monthLineCols  = _selectedMonth ? `
           <td style="${tdR};color:var(--red);font-size:11px">${lineActMonth !== null ? '-' + fC(lineActMonth) : '—'}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amtMonth)}</td>` : '';
 
       return `
-        <tr>
+        <tr${drillTitle}>
           <td style="${td};padding-left:28px;font-size:11px;color:var(--hint)">
             ${c.description}${commentChip(rowKey)}
           </td>
           ${monthLineCols}
-          <td style="${tdR};color:var(--red);font-size:11px">${lineAct !== null ? '-' + fC(lineAct) : '—'}</td>
+          <td ${drillClick} style="${tdR};color:var(--red);font-size:11px">${lineAct !== null ? '-' + fC(lineAct) + drillIcon : '—'}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amtYTD)}</td>
           <td style="${tdR};font-size:11px">${lineVar !== null ? '<span style="' + lineVarStyle + ';font-weight:600">' + lineVarLabel + '</span>' : '—'}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amt)}</td>
@@ -1068,6 +1085,110 @@ window._mgmtOpenInvoice = async function(invoiceId) {
       if (container) openInvoiceForm(container, inv);
     } catch (e) { console.error('Could not open invoice:', e); }
   }, 600);
+};
+
+// ── Xero account transaction drilldown modal ───────────────────────────────────
+window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, toDate) {
+  if (!accountId || !fromDate || !toDate) {
+    alert('Transaction data not available — Xero accountID missing. Try refreshing the page after Xero re-syncs.');
+    return;
+  }
+
+  const fC = v => v == null ? '—' : Math.abs(v).toLocaleString('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fD = s => {
+    if (!s) return '—';
+    const d = new Date(s);
+    return isNaN(d) ? s : d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  // Build modal with loading state
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:10px;width:100%;max-width:700px;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--ink)">${accountName}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">Xero transactions · ${fD(fromDate)} – ${fD(toDate)}</div>
+        </div>
+        <button id="xtxn-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--hint)">✕</button>
+      </div>
+      <div id="xtxn-body" style="padding:24px;text-align:center;color:var(--hint)">
+        <div style="font-size:13px">Loading transactions from Xero…</div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#xtxn-close').onclick = () => modal.remove();
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+
+  const body = modal.querySelector('#xtxn-body');
+
+  try {
+    const url = '/.netlify/functions/xero-account-txns?farm_id=' + encodeURIComponent(farmId) +
+      '&account_id=' + encodeURIComponent(accountId) +
+      '&from='        + encodeURIComponent(fromDate) +
+      '&to='          + encodeURIComponent(toDate) +
+      '&account_name=' + encodeURIComponent(accountName);
+
+    const res  = await fetch(url);
+    const data = await res.json();
+
+    if (!data.ok) {
+      body.innerHTML = '<div style="color:var(--red);font-size:13px;padding:8px">Could not load transactions: ' + (data.error || 'Unknown error') + '</div>';
+      return;
+    }
+
+    const txns = data.transactions || [];
+
+    if (!txns.length) {
+      body.innerHTML = '<div style="color:var(--hint);font-size:13px;font-style:italic;padding:8px">No transactions found for this account in the selected period.</div>';
+      return;
+    }
+
+    const total = txns.reduce((s, t) => s + (t.amount || 0), 0);
+
+    const typeLabel = t => {
+      const map = { ACCPAY: 'Bill', ACCREC: 'Invoice', SPEND: 'Bank spend', RECEIVE: 'Bank receive', MANJOURNAL: 'Journal', CASHREC: 'Cash receipt', CASHPAID: 'Cash payment' };
+      return map[t] || t || '—';
+    };
+
+    const rows = txns.map(t => {
+      const isCredit = t.amount < 0;
+      return '<tr style="border-bottom:0.5px solid var(--border-light,#eee)">' +
+        '<td style="padding:6px 10px;font-size:11px;color:var(--hint);white-space:nowrap">' + fD(t.date) + '</td>' +
+        '<td style="padding:6px 10px;font-size:11px;color:var(--hint)">' + typeLabel(t.type) + '</td>' +
+        '<td style="padding:6px 10px;font-size:12px;color:var(--ink)">' + (t.contact || '—') + '</td>' +
+        '<td style="padding:6px 10px;font-size:11px;color:var(--hint)">' + (t.reference || '—') + '</td>' +
+        '<td style="padding:6px 10px;text-align:right;font-size:12px;font-weight:600;color:' + (isCredit ? 'var(--green)' : 'var(--red)') + '">' +
+          (isCredit ? '+' : '-') + fC(t.amount) +
+        '</td>' +
+      '</tr>';
+    }).join('');
+
+    body.innerHTML = `
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);background:var(--page-bg,#f8fafc)">
+            <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);white-space:nowrap">Date</th>
+            <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Type</th>
+            <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Contact / Description</th>
+            <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Reference</th>
+            <th style="padding:7px 10px;text-align:right;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Amount</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr style="border-top:2px solid var(--border);background:var(--page-bg,#f8fafc)">
+            <td colspan="4" style="padding:8px 10px;font-weight:700;font-size:12px">Total (${txns.length} transaction${txns.length !== 1 ? 's' : ''})</td>
+            <td style="padding:8px 10px;text-align:right;font-weight:700;font-size:13px;color:var(--red)">-${fC(total)}</td>
+          </tr>
+        </tfoot>
+      </table>`;
+  } catch (e) {
+    body.innerHTML = '<div style="color:var(--red);font-size:13px;padding:8px">Error loading transactions: ' + e.message + '</div>';
+    console.error('[mgmt xero txns]', e);
+  }
 };
 
 // ── Season-level note (no row_key) ─────────────────────────────────────────────

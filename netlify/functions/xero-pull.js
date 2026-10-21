@@ -180,9 +180,11 @@ function parseExpenseAccounts(reportData) {
       const nameCell   = cells[0];
       const amountCell = cells[1]; // first value column = YTD when single period
 
-      const name   = nameCell?.Value || '';
-      const code   = nameCell?.Attributes?.find(a => a.Id === 'account')?.Value || '';
-      const rawAmt = parseFloat(amountCell?.Value?.replace(/,/g, '') || '0');
+      const name      = nameCell?.Value || '';
+      const attrs     = nameCell?.Attributes || [];
+      const code      = attrs.find(a => a.Id === 'account')?.Value   || '';
+      const accountID = attrs.find(a => a.Id === 'accountID')?.Value || ''; // UUID for transaction drilldown
+      const rawAmt    = parseFloat(amountCell?.Value?.replace(/,/g, '') || '0');
 
       // Skip totals, summary rows, and blank rows
       if (!name || name.toLowerCase().includes('total')) continue;
@@ -192,6 +194,7 @@ function parseExpenseAccounts(reportData) {
       // In Xero P&L, expenses are returned as positive numbers (debit balances)
       accounts.push({
         code,
+        accountID,  // Xero UUID — used for account transaction drilldown
         name,
         amount:   rawAmt,   // positive = cost
         category: categoriseAccount(code, name),
