@@ -605,10 +605,10 @@ async function _render(container) {
   const capexCosts = budgetCosts.filter(c => c.category === 'capex');
   const capexByCode = new Map();
   for (const c of capexCosts) {
-    const subcat = (c.subcategory || '').trim();
-    const code   = (c.budget_code  || '').trim();
-    const key    = subcat || code || c.description || 'UNALLOCATED';
-    if (!capexByCode.has(key)) capexByCode.set(key, { code: code || subcat || 'CAPEX', subcategory: subcat, items: [], total: 0 });
+    const code  = (c.budget_code  || c.description || '').trim();
+    const label = (c.description  || c.budget_code || '').trim();
+    const key   = code || 'UNALLOCATED';
+    if (!capexByCode.has(key)) capexByCode.set(key, { code: label || key, items: [], total: 0 });
     const entry = capexByCode.get(key);
     entry.items.push(c);
     entry.total += parseFloat(c.budget_amount) || 0;
@@ -631,7 +631,6 @@ async function _render(container) {
       <tr>
         <td style="${td};padding-left:28px">
           <span style="font-size:12px;color:var(--ink)">${entry.code}</span>
-          ${entry.subcategory && entry.subcategory !== entry.code ? '<span style="font-size:10px;color:var(--hint);margin-left:6px">' + entry.subcategory + '</span>' : ''}
           ${commentChip(rowKey)}
         </td>
         ${monthCapexCols}
