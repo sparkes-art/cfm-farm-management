@@ -668,6 +668,8 @@ function _identifySheets(sheetNames) {
     'budget summary','total crop expenses','accounting','yields','fallows',
     'sheep program','ny crops','gen capex','dev capex','oh + rnm','ops summary',
     'pistachios new planting',
+    // Auski-specific non-GM sheets
+    'on hand','spare irr',
   ]);
 
   // Sheets that are definitively GM enterprise sheets regardless of format
@@ -683,19 +685,21 @@ function _identifySheets(sheetNames) {
     const n = name.toLowerCase();
 
     // Cashflow sheets:
-    //   Multi-entity workbooks (Blackbull): "OT - Master Cashflow", "PT - Master Cashflow"
-    //   Single-entity workbooks (Merrowie): "Master Cashflow"
-    // For multi-entity we only use OT to avoid double-counting interest/lease.
-    // For single-entity we use the sheet directly.
+    //   Blackbull (trust):  "OT - Master Cashflow", "PT - Master Cashflow"
+    //     → OT only (operating trust); PT skipped to avoid double-counting inter-entity items
+    //   Merrowie (single):  "Master Cashflow"
+    //     → single sheet, used directly
+    //   Auski (two entities): "OC - Master Cashflow" (Operating Co), "PC - Master Cashflow" (Property Co)
+    //     → BOTH included: OC has farming/kiwifruit income, PC has lease/property income
     if (n.includes('master cashflow')) {
-      if (n.startsWith('ot') || n === 'master cashflow') {
+      if (n.startsWith('ot') || n === 'master cashflow' || n.startsWith('oc') || n.startsWith('pc')) {
         cashflowSheets.push(name);
       } else {
-        // PT or other entity cashflow — skip to avoid double-counting
+        // PT or unknown entity cashflow — skip to avoid double-counting
         skipped.push(name);
       }
     } else if (SKIP.has(n) || n.includes('capex') || n.includes('pricing') || n.includes('calendar') ||
-               n === 'finance costs' || n === 'farm mgmt') {
+               n === 'finance costs' || n === 'farm mgmt' || n.includes('oh + rnm') || n.includes('oh+rnm')) {
       skipped.push(name);
     } else if (GM_PATTERNS.some(p => n.includes(p))) {
       gmSheets.push(name);
