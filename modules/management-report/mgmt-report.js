@@ -575,7 +575,7 @@ async function _render(container) {
       const drillTitle    = canDrill ? ' title="Click to see Xero transactions"' : '';
 
       const monthLineCols  = _selectedMonth ? `
-          <td style="${tdR};color:var(--red);font-size:11px">${lineActMonth !== null ? '-' + fC(lineActMonth) : '—'}</td>
+          <td style="${tdR};color:var(--red);font-size:11px">${lineActMonth !== null ? '-' + fC(Math.abs(lineActMonth)) : '—'}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amtMonth)}</td>` : '';
 
       return `
@@ -584,7 +584,7 @@ async function _render(container) {
             ${c.description}${commentChip(rowKey)}
           </td>
           ${monthLineCols}
-          <td style="${tdR};color:var(--red);font-size:11px">${canDrill ? '<span ' + drillClick + ' style="cursor:pointer;text-decoration:underline;text-underline-offset:2px">-' + fC(lineAct) + '</span>' : (lineAct !== null ? '-' + fC(lineAct) : '—')}</td>
+          <td style="${tdR};color:var(--red);font-size:11px">${canDrill ? '<span ' + drillClick + ' style="cursor:pointer;text-decoration:underline;text-underline-offset:2px">-' + fC(Math.abs(lineAct)) + '</span>' : (lineAct !== null ? '-' + fC(Math.abs(lineAct)) : '—')}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amtYTD)}</td>
           <td style="${tdR};font-size:11px">${lineVar !== null ? '<span style="' + lineVarStyle + ';font-weight:600">' + lineVarLabel + '</span>' : '—'}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amt)}</td>

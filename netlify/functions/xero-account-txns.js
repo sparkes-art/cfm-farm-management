@@ -157,41 +157,40 @@ exports.handler = async (event) => {
       }
     }
 
-    // ── Fetch bills (ACCPAY) in date range via Invoices API ──────────────────
-    // accounting.invoices.read scope — always available.
-    // We fetch all approved bills in the period and filter line items by account.
-    // Also fetch ACCREC (sales invoices) in case account appears on revenue side.
+    // ── Fetch transactions from multiple Xero sources ────────────────────────
+    // Xero P&L expense figures can come from:
+    //   1. Bills (ACCPAY invoices) — supplier invoices posted to expense accounts
+    //   2. Bank transactions (BankTransactions type=SPEND) — direct spend money entries
+    //   3. Sales invoices (ACCREC) — less common for expenses but possible
+    // We fetch all three and filter line items by account UUID or code.
     const transactions = [];
-    const seenKeys = new Set(); // deduplicate across ACCPAY/ACCREC loops
+    const seenKeys = new Set(); // deduplicate across sources
 
+    // ── Source 1 & 3: Invoices (ACCPAY bills + ACCREC sales) ─────────────────
     for (const type of ['ACCPAY', 'ACCREC']) {
       let page = 1;
       while (true) {
         const url = new URL('https://api.xero.com/api.xro/2.0/Invoices');
-        url.searchParams.set('Type',   type);
+        url.searchParams.set('Type',     type);
         url.searchParams.set('Statuses', 'AUTHORISED,PAID');
         url.searchParams.set('DateFrom', fromDate);
         url.searchParams.set('DateTo',   toDate);
         url.searchParams.set('page',     page);
-        // Include line items
-        url.searchParams.set('unitdp', '4');
+        url.searchParams.set('unitdp',   '4');
 
         const data     = await xeroGet(url.toString(), accessToken, tenantId);
         const invoices = data?.Invoices || [];
 
         for (const inv of invoices) {
-          const invDate    = parseXeroDate(inv.Date);
-
+          const invDate = parseXeroDate(inv.Date);
           // Belt-and-braces date filter — Xero sometimes ignores DateFrom/DateTo
-          // for PAID invoices and returns historical records. Filter here to be safe.
           if (invDate && (invDate < fromDate || invDate > toDate)) continue;
 
-          const contact    = inv.Contact?.Name || '';
-          const ref        = inv.Reference    || inv.InvoiceNumber || '';
-          const invType    = inv.Type;
+          const contact = inv.Contact?.Name || '';
+          const ref     = inv.Reference || inv.InvoiceNumber || '';
+          const invType = inv.Type;
 
           for (const line of (inv.LineItems || [])) {
-            // Match by accountID (preferred) or by account code
             const lineAcctId   = line.AccountID   || '';
             const lineAcctCode = line.AccountCode || '';
 
@@ -202,15 +201,10 @@ exports.handler = async (event) => {
             const lineAmt = parseFloat(line.LineAmount) || 0;
             if (lineAmt === 0) continue;
 
-            // Deduplicate: same invoice + same line item description + same amount
-            // Guards against the same invoice appearing across ACCPAY/ACCREC loops
-            // or being matched by both accountID and accountCode
             const dedupKey = inv.InvoiceID + '|' + (line.LineItemID || line.Description || '') + '|' + lineAmt;
             if (seenKeys.has(dedupKey)) continue;
             seenKeys.add(dedupKey);
 
-            // For bills (ACCPAY): positive line amount = expense
-            // For credit notes / reversals: amount may be negative
             transactions.push({
               date:        invDate,
               type:        invType,
@@ -226,8 +220,72 @@ exports.handler = async (event) => {
 
         if (invoices.length < 100) break;
         page++;
-        if (page > 20) break; // safety cap
+        if (page > 20) break;
       }
+    }
+
+    // ── Source 2: Bank transactions (SPEND / RECEIVE) ─────────────────────────
+    // These are "Spend Money" / "Receive Money" entries in Xero bank accounts.
+    // They often drive P&L expense accounts but are NOT returned by the Invoices API.
+    try {
+      let bankPage = 1;
+      while (true) {
+        const bUrl = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
+        bUrl.searchParams.set('Statuses', 'AUTHORISED');
+        bUrl.searchParams.set('DateFrom', fromDate);
+        bUrl.searchParams.set('DateTo',   toDate);
+        bUrl.searchParams.set('page',     bankPage);
+        bUrl.searchParams.set('unitdp',   '4');
+
+        const bData  = await xeroGet(bUrl.toString(), accessToken, tenantId);
+        const bTxns  = bData?.BankTransactions || [];
+
+        for (const bt of bTxns) {
+          const btDate = parseXeroDate(bt.Date);
+          if (btDate && (btDate < fromDate || btDate > toDate)) continue;
+
+          const contact = bt.Contact?.Name || '';
+          const ref     = bt.Reference || '';
+          const btType  = bt.Type; // SPEND or RECEIVE
+
+          for (const line of (bt.LineItems || [])) {
+            const lineAcctId   = line.AccountID   || '';
+            const lineAcctCode = line.AccountCode || '';
+
+            const matchedById   = accountId    && lineAcctId   === accountId;
+            const matchedByCode = resolvedCode && lineAcctCode === resolvedCode;
+            if (!matchedById && !matchedByCode) continue;
+
+            const lineAmt = parseFloat(line.LineAmount) || 0;
+            if (lineAmt === 0) continue;
+
+            const dedupKey = bt.BankTransactionID + '|' + (line.LineItemID || line.Description || '') + '|' + lineAmt;
+            if (seenKeys.has(dedupKey)) continue;
+            seenKeys.add(dedupKey);
+
+            // SPEND = expense (positive amount), RECEIVE = income (show as negative)
+            const signedAmt = btType === 'RECEIVE' ? -lineAmt : lineAmt;
+
+            transactions.push({
+              date:        btDate,
+              type:        btType,
+              contact,
+              reference:   ref,
+              description: line.Description || '',
+              debit:       signedAmt > 0 ? signedAmt  : 0,
+              credit:      signedAmt < 0 ? -signedAmt : 0,
+              amount:      signedAmt,
+            });
+          }
+        }
+
+        if (bTxns.length < 100) break;
+        bankPage++;
+        if (bankPage > 20) break;
+      }
+    } catch (bankErr) {
+      // BankTransactions may not be in scope — log and continue with invoice results
+      console.warn('[xero-account-txns] BankTransactions fetch failed (may be out of scope):', bankErr.message);
     }
 
     // Sort by date ascending
