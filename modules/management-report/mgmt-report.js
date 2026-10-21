@@ -1156,12 +1156,16 @@ window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, 
 
     const rows = txns.map(t => {
       const isCredit = t.amount < 0;
+      const desc = (t.description || '').trim();
+      const descHtml = desc
+        ? '<div style="font-size:10px;color:var(--hint);margin-top:2px;line-height:1.4">' + desc.replace(/</g, '&lt;') + '</div>'
+        : '';
       return '<tr style="border-bottom:0.5px solid var(--border-light,#eee)">' +
-        '<td style="padding:6px 10px;font-size:11px;color:var(--hint);white-space:nowrap">' + fD(t.date) + '</td>' +
-        '<td style="padding:6px 10px;font-size:11px;color:var(--hint)">' + typeLabel(t.type) + '</td>' +
-        '<td style="padding:6px 10px;font-size:12px;color:var(--ink)">' + (t.contact || '—') + '</td>' +
-        '<td style="padding:6px 10px;font-size:11px;color:var(--hint)">' + (t.reference || '—') + '</td>' +
-        '<td style="padding:6px 10px;text-align:right;font-size:12px;font-weight:600;color:' + (isCredit ? 'var(--green)' : 'var(--red)') + '">' +
+        '<td style="padding:6px 10px;font-size:11px;color:var(--hint);white-space:nowrap;vertical-align:top">' + fD(t.date) + '</td>' +
+        '<td style="padding:6px 10px;font-size:11px;color:var(--hint);white-space:nowrap;vertical-align:top">' + typeLabel(t.type) + '</td>' +
+        '<td style="padding:6px 10px;font-size:12px;color:var(--ink);vertical-align:top">' + (t.contact || '—') + descHtml + '</td>' +
+        '<td style="padding:6px 10px;font-size:11px;color:var(--hint);vertical-align:top">' + (t.reference || '—') + '</td>' +
+        '<td style="padding:6px 10px;text-align:right;font-size:12px;font-weight:600;color:' + (isCredit ? 'var(--green)' : 'var(--red)') + ';vertical-align:top">' +
           (isCredit ? '+' : '-') + fC(t.amount) +
         '</td>' +
       '</tr>';
@@ -1174,7 +1178,7 @@ window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, 
             <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);white-space:nowrap">Date</th>
             <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Type</th>
             <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Contact / Description</th>
-            <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Reference</th>
+            <th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Ref</th>
             <th style="padding:7px 10px;text-align:right;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Amount</th>
           </tr>
         </thead>

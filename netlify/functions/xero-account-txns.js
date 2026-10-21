@@ -173,6 +173,11 @@ exports.handler = async (event) => {
 
         for (const inv of invoices) {
           const invDate    = parseXeroDate(inv.Date);
+
+          // Belt-and-braces date filter — Xero sometimes ignores DateFrom/DateTo
+          // for PAID invoices and returns historical records. Filter here to be safe.
+          if (invDate && (invDate < fromDate || invDate > toDate)) continue;
+
           const contact    = inv.Contact?.Name || '';
           const ref        = inv.Reference    || inv.InvoiceNumber || '';
           const invType    = inv.Type;
