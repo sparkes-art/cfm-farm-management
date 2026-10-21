@@ -306,18 +306,22 @@ async function _render(container) {
 
     return `
       ${commRow(cat.label)}
-      ${lines.map(c => `
+      ${lines.map(c => {
+        const amt    = parseFloat(c.budget_amount) || 0;
+        const amtYTD = amt * ytdFraction;
+        return `
         <tr>
           <td style="${td};padding-left:28px;font-size:11px;color:var(--hint)">${c.description}</td>
           <td style="${tdR};color:var(--hint)">—</td>
-          <td style="${tdR};font-size:11px;color:var(--red)">-${fC(parseFloat(c.budget_amount)||0)}</td>
-          <td style="${tdR};font-size:11px;color:var(--red)">-${fC(parseFloat(c.budget_amount)||0)}</td>
+          <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amtYTD)}</td>
+          <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amt)}</td>
           <td style="${tdR}">—</td>
-        </tr>`).join('')}
+        </tr>`;
+      }).join('')}
       <tr style="background:var(--page-bg)">
         <td style="${td};padding-left:20px;font-weight:600;font-size:12px">${cat.label} total</td>
         <td style="${tdR};color:var(--hint)">—</td>
-        <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal)}</td>
+        <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal * ytdFraction)}</td>
         <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal)}</td>
         <td style="${tdR};color:var(--hint)">—</td>
       </tr>`;
@@ -360,7 +364,7 @@ async function _render(container) {
         </td>
         <td style="${tdR};color:var(--hint)">—</td>
         <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
-          ${isSale ? '+' : '-'}${fC(amt)}
+          ${isSale ? '+' : '-'}${fC(amt * ytdFraction)}
         </td>
         <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
           ${isSale ? '+' : '-'}${fC(amt)}
@@ -433,7 +437,7 @@ async function _render(container) {
                 <tr style="background:#fff5f5;border-top:2px solid var(--border)">
                   <td style="${td};font-weight:700">Total fixed costs</td>
                   <td style="${tdR};color:var(--hint)">—</td>
-                  <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
+                  <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget * ytdFraction)}</td>
                   <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
                   <td style="${tdR};color:var(--hint)">—</td>
                 </tr>` : ''}
@@ -444,7 +448,7 @@ async function _render(container) {
                 <tr style="background:#fff5f5;border-top:2px solid var(--border)">
                   <td style="${td};font-weight:700">Total capex</td>
                   <td style="${tdR};color:var(--hint)">—</td>
-                  <td style="${tdR};color:var(--red);font-weight:700">-${fC(Math.abs(totalCapexBudget))}</td>
+                  <td style="${tdR};color:var(--red);font-weight:700">-${fC(Math.abs(totalCapexBudget) * ytdFraction)}</td>
                   <td style="${tdR};color:var(--red);font-weight:700">-${fC(Math.abs(totalCapexBudget))}</td>
                   <td style="${tdR};color:var(--hint)">—</td>
                 </tr>` : ''}
@@ -453,7 +457,7 @@ async function _render(container) {
               <tr style="background:#eff6ff;border-top:2px solid var(--border)">
                 <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">Net income (budget)</td>
                 <td style="${tdR};color:var(--hint)">—</td>
-                <td style="${tdR};font-weight:700;color:var(--blue)">${fC(grandBudgetYTD - totalFixedBudget - Math.abs(totalCapexBudget))}</td>
+                <td style="${tdR};font-weight:700;color:var(--blue)">${fC(grandBudgetYTD - totalFixedBudget * ytdFraction - Math.abs(totalCapexBudget) * ytdFraction)}</td>
                 <td style="${tdR};font-weight:700;color:var(--blue)">${fC(grandBudget - totalFixedBudget - Math.abs(totalCapexBudget))}</td>
                 <td style="${tdR};color:var(--hint)">—</td>
               </tr>
