@@ -635,8 +635,6 @@ async function _render(container) {
       }));
     }
   }
-  const capexItemDataJson = JSON.stringify(capexItemData).replace(/</g, '\\u003c');
-
   let totalCapexBudget = 0;
   const capexRows = [...capexByCode.entries()].map(([codeKey, entry]) => {
     const amt      = Math.abs(entry.total);
@@ -824,6 +822,9 @@ async function _render(container) {
     : '<tr><td colspan="5" style="' + td + ';color:var(--hint);font-style:italic">No season notes yet</td></tr>';
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  // Expose CAPEX item data for the detail modal BEFORE setting innerHTML
+  window.__cfmCapexItems = capexItemData;
+
   body.innerHTML = `
     <!-- Summary tiles -->
     <div style="display:grid;grid-template-columns:${tileCols};gap:8px;margin-bottom:20px">
@@ -882,8 +883,6 @@ async function _render(container) {
       </table>
     </div>
 
-    <!-- CAPEX line-item data for detail modal -->
-    <script>window.__cfmCapexItems = ${capexItemDataJson};</script>
   `;
 
 }
