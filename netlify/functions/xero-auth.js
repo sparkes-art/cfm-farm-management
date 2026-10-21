@@ -9,7 +9,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BASE_URL = 'https://profound-tiramisu-8b956e.netlify.app';
 const REDIRECT_URI = `${BASE_URL}/xero/callback`;
-const SCOPES = 'openid profile email accounting.invoices accounting.contacts accounting.settings.read offline_access';
+const SCOPES = 'openid profile email accounting.invoices accounting.contacts accounting.settings.read accounting.reports.read offline_access';
 
 const sb = async (method, path, body = null) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {

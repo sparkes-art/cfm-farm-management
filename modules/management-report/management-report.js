@@ -1,7 +1,7 @@
 // modules/management-report/management-report.js
 // Management Report — CFM-native income actuals vs budget, season-scoped
 // Revenue actuals from CFM invoices; cost budgets from budget_costs table.
-// No Xero dependency — all data is CFM-native.
+// Fixed cost actuals pulled from Xero P&L when the farm has a Xero connection.
 
 import { dbSelect, dbInsert } from '../../js/supabase-client.js';
 import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js';
@@ -63,6 +63,24 @@ async function _render(container) {
     dbSelect('management_comments', `farm_id=eq.${farm.id}&season=eq.${season}&select=*,user_profiles(full_name)&order=created_at.desc`).catch(()=>[]),
   ]);
   console.log('[MgmtReport] budgets rows:', budgets.length, '| budgetCosts rows:', budgetCosts.length);
+
+  // ── Xero fixed-cost actuals (non-blocking — shows — if Xero not connected) ─
+  // Pulls YTD expense totals from Xero P&L via /.netlify/functions/xero-pull
+  let xeroActuals = null; // { labour, overhead, rm, fund_mgmt } or null
+  let xeroYtdLabel = null;
+  try {
+    const xeroRes = await fetch(`/.netlify/functions/xero-pull?farm_id=${farm.id}&season=${encodeURIComponent(season)}`);
+    if (xeroRes.ok) {
+      const xeroData = await xeroRes.json();
+      if (xeroData.ok) {
+        xeroActuals  = xeroData.categories;
+        xeroYtdLabel = xeroData.ytd_to; // e.g. '2026-10-21'
+        console.log('[MgmtReport] Xero actuals loaded:', xeroActuals, 'to:', xeroYtdLabel);
+      }
+    }
+  } catch (xeroErr) {
+    console.log('[MgmtReport] Xero not available (farm may not be connected):', xeroErr.message);
+  }
 
   // ── Season-scoped invoices ──────────────────────────────────────────────────
   // Prior-year-flagged invoices are handled separately below — exclude them here
@@ -297,12 +315,23 @@ async function _render(container) {
     { key: 'fund_mgmt', label: 'Fund Management' },
   ];
 
-  let totalFixedBudget = 0;
+  let totalFixedBudget  = 0;
+  let totalFixedActual  = 0;  // sum of Xero actuals across all fixed categories
   const fixedRows = fixedCats.map(cat => {
     const lines = budgetCosts.filter(c => c.category === cat.key);
     if (!lines.length) return '';
     const catTotal = lines.reduce((s, c) => s + (parseFloat(c.budget_amount)||0), 0);
     totalFixedBudget += catTotal;
+
+    // Xero actual for this category (positive = spend, display as cost)
+    const catActual   = xeroActuals ? (xeroActuals[cat.key] || 0) : null;
+    if (catActual !== null) totalFixedActual += catActual;
+
+    // Variance: positive = under budget (good), negative = over budget (bad)
+    const catVariance = (catActual !== null) ? (catTotal * ytdFraction) - catActual : null;
+    const varStyle    = catVariance !== null
+      ? (catVariance >= 0 ? 'color:var(--green)' : 'color:var(--red)')
+      : '';
 
     return `
       ${commRow(cat.label)}
@@ -320,10 +349,10 @@ async function _render(container) {
       }).join('')}
       <tr style="background:var(--page-bg)">
         <td style="${td};padding-left:20px;font-weight:600;font-size:12px">${cat.label} total</td>
-        <td style="${tdR};color:var(--hint)">—</td>
+        <td style="${tdR};color:var(--red);font-weight:600">${catActual !== null ? '-' + fC(catActual) : '—'}</td>
         <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal * ytdFraction)}</td>
         <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal)}</td>
-        <td style="${tdR};color:var(--hint)">—</td>
+        <td style="${tdR};font-weight:600">${catVariance !== null ? `<span style="${varStyle};font-weight:600">${catVariance >= 0 ? '+' : ''}${fC(catVariance)}</span>` : '—'}</td>
       </tr>`;
   }).join('');
 
@@ -403,6 +432,7 @@ async function _render(container) {
     <div style="font-size:11px;color:var(--hint);margin-bottom:12px;font-style:italic">
       ℹ Budget YTD is pro-rated (${ytdMonths} of 12 months from ${new Date(seasonYear, seasonStartMonthIdx).toLocaleString('en-AU',{month:'long'})}).
       Click any income row ↗ for detail.
+      ${xeroActuals ? `· Fixed cost actuals from Xero to ${formatDate(xeroYtdLabel)}.` : '· Fixed cost actuals not yet available (connect Xero in Farm Settings to enable).'}
     </div>
 
     <!-- Main table -->
@@ -435,11 +465,11 @@ async function _render(container) {
                 ${secRow('Fixed costs')}
                 ${fixedRows}
                 <tr style="background:#fff5f5;border-top:2px solid var(--border)">
-                  <td style="${td};font-weight:700">Total fixed costs</td>
-                  <td style="${tdR};color:var(--hint)">—</td>
+                  <td style="${td};font-weight:700">Total fixed costs${xeroActuals ? ` <span style="font-size:10px;font-weight:400;color:var(--hint)">(Xero actuals)</span>` : ''}</td>
+                  <td style="${tdR};color:var(--red);font-weight:700">${xeroActuals ? '-' + fC(totalFixedActual) : '—'}</td>
                   <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget * ytdFraction)}</td>
                   <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
-                  <td style="${tdR};color:var(--hint)">—</td>
+                  <td style="${tdR};font-weight:700">${xeroActuals ? (() => { const v = (totalFixedBudget * ytdFraction) - totalFixedActual; return `<span style="color:${v>=0?'var(--green)':'var(--red)'};font-weight:700">${v>=0?'+':''}${fC(v)}</span>`; })() : '—'}</td>
                 </tr>` : ''}
 
               ${capexRows.trim() ? `
@@ -453,14 +483,22 @@ async function _render(container) {
                   <td style="${tdR};color:var(--hint)">—</td>
                 </tr>` : ''}
 
-              <!-- Net income (budget only until Inputs module provides actuals) -->
-              <tr style="background:#eff6ff;border-top:2px solid var(--border)">
-                <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">Net income (budget)</td>
-                <td style="${tdR};color:var(--hint)">—</td>
-                <td style="${tdR};font-weight:700;color:var(--blue)">${fC(grandBudgetYTD - totalFixedBudget * ytdFraction - Math.abs(totalCapexBudget) * ytdFraction)}</td>
-                <td style="${tdR};font-weight:700;color:var(--blue)">${fC(grandBudget - totalFixedBudget - Math.abs(totalCapexBudget))}</td>
-                <td style="${tdR};color:var(--hint)">—</td>
-              </tr>
+              <!-- Net income -->
+              ${(() => {
+                const budgetNetYTD = grandBudgetYTD - totalFixedBudget * ytdFraction - Math.abs(totalCapexBudget) * ytdFraction;
+                const budgetNetFY  = grandBudget - totalFixedBudget - Math.abs(totalCapexBudget);
+                // If Xero actuals available, compute actual net: income - fixed costs (CAPEX actuals not yet available)
+                const actualNet    = xeroActuals ? grandActual - totalFixedActual : null;
+                const netVariance  = actualNet !== null ? actualNet - budgetNetYTD : null;
+                const netLabel     = xeroActuals ? 'Net income (Xero costs YTD)' : 'Net income (budget)';
+                return `<tr style="background:#eff6ff;border-top:2px solid var(--border)">
+                  <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">${netLabel}</td>
+                  <td style="${tdR};font-weight:700;color:var(--blue)">${actualNet !== null ? fC(actualNet) : '—'}</td>
+                  <td style="${tdR};font-weight:700;color:var(--blue)">${fC(budgetNetYTD)}</td>
+                  <td style="${tdR};font-weight:700;color:var(--blue)">${fC(budgetNetFY)}</td>
+                  <td style="${tdR};font-weight:700">${netVariance !== null ? `<span style="color:${netVariance>=0?'var(--green)':'var(--red)'};font-weight:700">${netVariance>=0?'+':''}${fC(netVariance)}</span>` : '—'}</td>
+                </tr>`;
+              })()}
             ` : `
               <!-- Net income — income only -->
               <tr style="background:#eff6ff;border-top:2px solid var(--border)">
