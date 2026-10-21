@@ -11,6 +11,15 @@ const BASE_URL = 'https://profound-tiramisu-8b956e.netlify.app';
 const REDIRECT_URI = `${BASE_URL}/xero/callback`;
 const SCOPES = 'openid profile email accounting.invoices accounting.contacts accounting.settings.read accounting.reports.profitandloss.read offline_access';
 
+// Maps CFM farm_id → keywords that should appear in the Xero tenant name.
+// Used to auto-select the right org when multiple orgs are returned after auth.
+// Case-insensitive partial match against tenantName.
+const FARM_TENANT_KEYWORDS = {
+  'farm_auski':     ['auski'],
+  'farm_blackbull': ['blackbull'],
+  'farm_merrowie':  ['merrowie'],
+};
+
 const sb = async (method, path, body = null) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     method,
@@ -93,9 +102,17 @@ exports.handler = async (event) => {
       headers: { 'Authorization': `Bearer ${tokens.access_token}` }
     });
     const tenants = await tenantsRes.json();
-    const tenant = tenants[0]; // take first org — user picks later if multiple
 
-    // Store tokens in Supabase
+    // Match the right tenant to this farm using keyword mapping.
+    // If no match found, fall back to the first tenant.
+    const keywords = (FARM_TENANT_KEYWORDS[farmId] || []);
+    let tenant = tenants.find(t =>
+      keywords.some(kw => (t.tenantName || '').toLowerCase().includes(kw.toLowerCase()))
+    ) || tenants[0];
+
+    console.log(`[xero-auth] farm=${farmId} tenants=${tenants.map(t=>t.tenantName).join(', ')} → selected=${tenant?.tenantName}`);
+
+    // Store tokens in Supabase — one row per farm, keyed on farm_id
     await sb('POST', 'xero_tokens?on_conflict=farm_id', {
       farm_id: farmId,
       tenant_id: tenant?.tenantId,
