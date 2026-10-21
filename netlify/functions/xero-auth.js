@@ -134,18 +134,11 @@ exports.handler = async (event) => {
 
     console.log(`[xero-auth] farm=${farmId} tenants=${tenants.map(t=>t.tenantName).join(', ')} → selected=${tenant?.tenantName}`);
 
-    // CRITICAL: Disconnect every other org so this token is scoped to ONLY this farm's org.
-    // This prevents cross-farm data access — users connecting one farm must not get
-    // access to another farm's Xero org through the same token.
-    const othersToRemove = tenants.filter(t => t.id !== tenant.id);
-    for (const other of othersToRemove) {
-      console.log(`[xero-auth] Disconnecting non-farm tenant: ${other.tenantName} (${other.id})`);
-      await fetch(`https://api.xero.com/connections/${other.id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${tokens.access_token}` },
-      });
-    }
-    console.log(`[xero-auth] Token now scoped to ONLY: ${tenant.tenantName}`);
+    // NOTE: We do NOT delete other tenant connections from Xero here.
+    // Each farm stores its own token row in Supabase (keyed on farm_id) with its own
+    // tenant_id. The getAccessToken(farmId) function is the isolation boundary —
+    // it only ever retrieves the token for the requested farm. Deleting other tenants'
+    // Xero connections would revoke those farms' API access, breaking their YTD data.
 
     // Store tokens in Supabase — one row per farm, keyed on farm_id
     await sb('POST', 'xero_tokens?on_conflict=farm_id', {
