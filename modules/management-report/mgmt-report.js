@@ -1090,8 +1090,9 @@ window._mgmtOpenInvoice = async function(invoiceId) {
 
 // ── Xero account transaction drilldown modal ───────────────────────────────────
 window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, toDate) {
-  if (!accountId || !fromDate || !toDate) {
-    alert('Transaction data not available — Xero accountID missing. Try refreshing the page after Xero re-syncs.');
+  // accountId may be empty — backend will resolve UUID from accountName via Xero Accounts API
+  if (!fromDate || !toDate || (!accountId && !accountName)) {
+    alert('Transaction data not available — no date range or account name found. Try refreshing the report.');
     return;
   }
 
