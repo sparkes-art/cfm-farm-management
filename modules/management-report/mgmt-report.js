@@ -642,7 +642,7 @@ async function _render(container) {
     totalCapexBudget += entry.total;
     const rowKey   = 'capex:' + codeKey;
     const colColor = isSale ? 'var(--green)' : 'var(--red)';
-    const hasItems = !!capexItemData[codeKey];
+    const isClickable = !isPcCode(codeKey);
 
     const monthCapexCols = _selectedMonth ? `
         <td style="${tdR};color:var(--hint)">—</td>
@@ -650,7 +650,7 @@ async function _render(container) {
           ${isSale ? '+' : '-'}${fC(amt / 12)}
         </td>` : '';
 
-    const labelHtml = hasItems
+    const labelHtml = isClickable
       ? `<span onclick="window._mgmtCapexDetail(${JSON.stringify(codeKey)})"
              style="font-size:12px;color:var(--ink);font-weight:500;text-decoration:underline;
                     text-underline-offset:2px;cursor:pointer">${codeKey}</span>`
