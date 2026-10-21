@@ -100,18 +100,18 @@ const low  = v => str(v).toLowerCase();
 
 // ── Financial year inference ───────────────────────────────────────────────
 function _inferFinancialYear(fileName) {
-  // "Blackbull_2027_Budget" → 2026-27
-  const fnYear = fileName.match(/\b(20\d{2})\b/);
-  if (fnYear) {
-    const y = parseInt(fnYear[1]);
-    return `${y - 1}-${String(y).slice(-2)}`;
-  }
-  // "2026-27" literal in filename
+  // Prefer explicit range in filename: "2026-27" or "2026_27"
   const range = fileName.match(/(20\d{2})[_\-](20?\d{2}|\d{2})/);
   if (range) {
     const y1 = parseInt(range[1]);
     const y2 = range[2].length === 2 ? y1 + 1 : parseInt(range[2]);
     if (y2 === y1 + 1) return `${y1}-${String(y2).slice(-2)}`;
+  }
+  // Fall back to single year: "Blackbull_2027_Budget" → 2026-27
+  const fnYear = fileName.match(/\b(20\d{2})\b/);
+  if (fnYear) {
+    const y = parseInt(fnYear[1]);
+    return `${y - 1}-${String(y).slice(-2)}`;
   }
   return null;
 }
@@ -2020,6 +2020,9 @@ async function _commitImport(container, farm, financialYear, revenueRows, costRo
   if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
 
   try {
+    console.log('[BudgetImport] Committing import — farm:', farm.id, 'season:', financialYear);
+    console.log('[BudgetImport] Revenue rows:', revenueRows.length, '| Cost rows:', costRows.length);
+    if (revenueRows[0]) console.log('[BudgetImport] First revenue row season:', revenueRows[0].season, 'farm_id:', revenueRows[0].farm_id);
     await dbDeleteWhere('budgets',      `farm_id=eq.${farm.id}&season=eq.${encodeURIComponent(financialYear)}`);
     await dbDeleteWhere('budget_costs', `farm_id=eq.${farm.id}&financial_year=eq.${encodeURIComponent(financialYear)}`);
 

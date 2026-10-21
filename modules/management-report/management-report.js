@@ -54,6 +54,7 @@ async function _render(container) {
   const body = qs('#mgmt-body', container);
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--hint)">Loading...</div>';
 
+  console.log('[MgmtReport] Loading data for farm:', farm.id, 'season:', season);
   const [contracts, allInvoices, budgets, budgetCosts, comments] = await Promise.all([
     dbSelect('forward_contracts', `farm_id=eq.${farm.id}&crop_year=eq.${season}&select=*`),
     dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`),
@@ -61,6 +62,7 @@ async function _render(container) {
     dbSelect('budget_costs', `farm_id=eq.${farm.id}&financial_year=eq.${season}&select=*`).catch(()=>[]),
     dbSelect('management_comments', `farm_id=eq.${farm.id}&season=eq.${season}&select=*,user_profiles(full_name)&order=created_at.desc`).catch(()=>[]),
   ]);
+  console.log('[MgmtReport] budgets rows:', budgets.length, '| budgetCosts rows:', budgetCosts.length);
 
   // ── Season-scoped invoices ──────────────────────────────────────────────────
   // Prior-year-flagged invoices are handled separately below — exclude them here
