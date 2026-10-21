@@ -155,6 +155,7 @@ exports.handler = async (event) => {
     // We fetch all approved bills in the period and filter line items by account.
     // Also fetch ACCREC (sales invoices) in case account appears on revenue side.
     const transactions = [];
+    const seenKeys = new Set(); // deduplicate across ACCPAY/ACCREC loops
 
     for (const type of ['ACCPAY', 'ACCREC']) {
       let page = 1;
@@ -187,12 +188,19 @@ exports.handler = async (event) => {
             const lineAcctId   = line.AccountID   || '';
             const lineAcctCode = line.AccountCode || '';
 
-            const matched = (accountId && lineAcctId === accountId) ||
-                            (resolvedCode && lineAcctCode === resolvedCode);
-            if (!matched) continue;
+            const matchedById   = accountId    && lineAcctId   === accountId;
+            const matchedByCode = resolvedCode && lineAcctCode === resolvedCode;
+            if (!matchedById && !matchedByCode) continue;
 
             const lineAmt = parseFloat(line.LineAmount) || 0;
             if (lineAmt === 0) continue;
+
+            // Deduplicate: same invoice + same line item description + same amount
+            // Guards against the same invoice appearing across ACCPAY/ACCREC loops
+            // or being matched by both accountID and accountCode
+            const dedupKey = inv.InvoiceID + '|' + (line.LineItemID || line.Description || '') + '|' + lineAmt;
+            if (seenKeys.has(dedupKey)) continue;
+            seenKeys.add(dedupKey);
 
             // For bills (ACCPAY): positive line amount = expense
             // For credit notes / reversals: amount may be negative
