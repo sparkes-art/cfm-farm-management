@@ -602,47 +602,95 @@ async function _render(container) {
   }).join('');
 
   // ── CAPEX ──────────────────────────────────────────────────────────────────
+  // Each row in budget_costs for capex has:
+  //   budget_code  = the code header  (e.g. "CAPEX PLANT & EQUIPMENT")
+  //   description  = the line item    (e.g. "Bulk spreader") — or same as budget_code for cashflow rows
+  // Group by budget_code; within each group, if multiple distinct descriptions exist they
+  // are line items from the dedicated CAPEX sheet and should be shown as sub-rows.
+  // PC development codes are excluded from line-item drill-down (show total only).
+  const PC_CODES = new Set(['PC DEVELOPMENT', 'PC development', 'pc development']);
+  const isPcCode = code => PC_CODES.has(code) || /pc\s+dev/i.test(code);
+
   const capexCosts = budgetCosts.filter(c => c.category === 'capex');
   const capexByCode = new Map();
   for (const c of capexCosts) {
-    const code  = (c.budget_code  || c.description || '').trim();
-    const label = (c.description  || c.budget_code || '').trim();
-    const key   = code || 'UNALLOCATED';
-    if (!capexByCode.has(key)) capexByCode.set(key, { code: label || key, items: [], total: 0 });
-    const entry = capexByCode.get(key);
+    const codeKey = (c.budget_code || c.description || '').trim() || 'UNALLOCATED';
+    if (!capexByCode.has(codeKey)) capexByCode.set(codeKey, { codeKey, items: [], total: 0 });
+    const entry = capexByCode.get(codeKey);
     entry.items.push(c);
     entry.total += parseFloat(c.budget_amount) || 0;
   }
 
   let totalCapexBudget = 0;
-  const capexRows = [...capexByCode.values()].map(entry => {
+  const capexRows = [...capexByCode.entries()].map(([codeKey, entry]) => {
     const amt    = Math.abs(entry.total);
     const isSale = entry.total < 0;
     totalCapexBudget += entry.total;
-    const rowKey = 'capex:' + entry.code;
+    const rowKey = 'capex:' + codeKey;
+    const colColor = isSale ? 'var(--green)' : 'var(--red)';
 
     const monthCapexCols = _selectedMonth ? `
         <td style="${tdR};color:var(--hint)">—</td>
-        <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
+        <td style="${tdR};font-size:12px;color:${colColor}">
           ${isSale ? '+' : '-'}${fC(amt / 12)}
         </td>` : '';
 
-    return `
+    const codeRow = `
       <tr>
         <td style="${td};padding-left:28px">
-          <span style="font-size:12px;color:var(--ink)">${entry.code}</span>
+          <span style="font-size:12px;color:var(--ink);font-weight:500">${codeKey}</span>
           ${commentChip(rowKey)}
         </td>
         ${monthCapexCols}
         <td style="${tdR};color:var(--hint)">—</td>
-        <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
+        <td style="${tdR};font-size:12px;color:${colColor}">
           ${isSale ? '+' : '-'}${fC(amt * ytdFraction)}
         </td>
         <td style="${tdR}">—</td>
-        <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
+        <td style="${tdR};font-size:12px;color:${colColor}">
           ${isSale ? '+' : '-'}${fC(amt)}
         </td>
       </tr>`;
+
+    // Show line items as sub-rows for non-PC codes when items have distinct descriptions
+    // (i.e. came from a dedicated CAPEX sheet rather than cashflow lump-sums)
+    let itemRows = '';
+    if (!isPcCode(codeKey)) {
+      // Only show sub-rows when descriptions differ from the code key (real line items)
+      const lineItems = entry.items.filter(i => {
+        const desc = (i.description || '').trim();
+        return desc && desc !== codeKey;
+      });
+      if (lineItems.length > 0) {
+        itemRows = lineItems.map(item => {
+          const itemAmt  = Math.abs(parseFloat(item.budget_amount) || 0);
+          const itemSale = (parseFloat(item.budget_amount) || 0) < 0;
+          const itemColor = itemSale ? 'var(--green)' : 'var(--red)';
+          const monthItemCols = _selectedMonth ? `
+              <td style="${tdR};color:var(--hint)">—</td>
+              <td style="${tdR};font-size:11px;color:${itemColor}">
+                ${itemSale ? '+' : '-'}${fC(itemAmt / 12)}
+              </td>` : '';
+          return `
+            <tr style="background:var(--page-bg)">
+              <td style="${td};padding-left:44px">
+                <span style="font-size:11px;color:var(--hint-dark,var(--ink));opacity:0.8">${item.description || ''}</span>
+              </td>
+              ${monthItemCols}
+              <td style="${tdR};color:var(--hint)">—</td>
+              <td style="${tdR};font-size:11px;color:${itemColor}">
+                ${itemSale ? '+' : '-'}${fC(itemAmt * ytdFraction)}
+              </td>
+              <td style="${tdR}">—</td>
+              <td style="${tdR};font-size:11px;color:${itemColor}">
+                ${itemSale ? '+' : '-'}${fC(itemAmt)}
+              </td>
+            </tr>`;
+        }).join('');
+      }
+    }
+
+    return codeRow + itemRows;
   }).join('');
 
   // ── Pre-compute HTML blocks (avoid ESM nested-template-literal parse issues)
