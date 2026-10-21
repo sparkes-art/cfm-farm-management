@@ -133,6 +133,8 @@ exports.handler = async (event) => {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'from and to must be YYYY-MM-DD' }) };
   }
 
+  console.log(`[xero-account-txns] PARAMS: farm=${farmId} accountId="${accountId}" accountCode="${accountCode}" accountName="${accountName}" from=${fromDate} to=${toDate}`);
+
   try {
     const { accessToken, tenantId } = await getAccessToken(farmId);
 
@@ -208,6 +210,8 @@ exports.handler = async (event) => {
       return results;
     };
 
+    console.log(`[xero-account-txns] resolvedCode="${resolvedCode}" accountId="${accountId}" tenantId="${tenantId}"`);
+
     // Run ACCPAY, ACCREC, and BankTransactions in parallel
     const [accpayInvoices, accrecInvoices, bankTxnsRaw] = await Promise.all([
       fetchInvoicePages('ACCPAY'),
@@ -218,6 +222,18 @@ exports.handler = async (event) => {
         return [];
       }),
     ]);
+
+    console.log(`[xero-account-txns] fetched: ACCPAY=${accpayInvoices.length} ACCREC=${accrecInvoices.length} BankTxns=${bankTxnsRaw.length}`);
+
+    // Log a sample of what account codes/IDs we're seeing in the data
+    const sampleInv = accpayInvoices[0];
+    if (sampleInv) {
+      console.log(`[xero-account-txns] sample ACCPAY invoice line codes: ${(sampleInv.LineItems||[]).map(l => `${l.AccountCode}/${l.AccountID}`).join(', ')}`);
+    }
+    const sampleBt = bankTxnsRaw[0];
+    if (sampleBt) {
+      console.log(`[xero-account-txns] sample BankTxn type=${sampleBt.Type} line codes: ${(sampleBt.LineItems||[]).map(l => `${l.AccountCode}/${l.AccountID}`).join(', ')}`);
+    }
 
     const transactions = [];
     const seenKeys = new Set();
