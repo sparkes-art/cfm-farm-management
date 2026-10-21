@@ -605,10 +605,9 @@ async function _render(container) {
   // Each row in budget_costs for capex has:
   //   budget_code  = the code header  (e.g. "CAPEX PLANT & EQUIPMENT")
   //   description  = the line item    (e.g. "Bulk spreader") — or same as budget_code for cashflow rows
-  // Group by budget_code; within each group, if multiple distinct descriptions exist they
-  // are line items from the dedicated CAPEX sheet and should be shown as sub-rows.
-  // PC development codes are excluded from line-item drill-down (show total only).
-  // Any code starting with "PC " is a PC development line — no sub-item drill-down
+  // Group by budget_code; show code totals as flat rows.
+  // For non-PC codes that have real line items (description ≠ budget_code),
+  // the code label is underlined/clickable and opens a detail modal.
   const isPcCode = code => /^pc\s+/i.test(code.trim());
 
   const capexCosts = budgetCosts.filter(c => c.category === 'capex');
@@ -621,13 +620,31 @@ async function _render(container) {
     entry.total += parseFloat(c.budget_amount) || 0;
   }
 
+  // Build a data payload for the modal (keyed by code, stored in a JS object on the page)
+  const capexItemData = {};
+  for (const [codeKey, entry] of capexByCode.entries()) {
+    if (isPcCode(codeKey)) continue;
+    const lineItems = entry.items.filter(i => {
+      const desc = (i.description || '').trim();
+      return desc && desc !== codeKey;
+    });
+    if (lineItems.length > 0) {
+      capexItemData[codeKey] = lineItems.map(i => ({
+        desc: i.description || '',
+        amt:  parseFloat(i.budget_amount) || 0,
+      }));
+    }
+  }
+  const capexItemDataJson = JSON.stringify(capexItemData).replace(/</g, '\\u003c');
+
   let totalCapexBudget = 0;
   const capexRows = [...capexByCode.entries()].map(([codeKey, entry]) => {
-    const amt    = Math.abs(entry.total);
-    const isSale = entry.total < 0;
+    const amt      = Math.abs(entry.total);
+    const isSale   = entry.total < 0;
     totalCapexBudget += entry.total;
-    const rowKey = 'capex:' + codeKey;
+    const rowKey   = 'capex:' + codeKey;
     const colColor = isSale ? 'var(--green)' : 'var(--red)';
+    const hasItems = !!capexItemData[codeKey];
 
     const monthCapexCols = _selectedMonth ? `
         <td style="${tdR};color:var(--hint)">—</td>
@@ -635,10 +652,16 @@ async function _render(container) {
           ${isSale ? '+' : '-'}${fC(amt / 12)}
         </td>` : '';
 
-    const codeRow = `
+    const labelHtml = hasItems
+      ? `<span onclick="window._mgmtCapexDetail(${JSON.stringify(codeKey)})"
+             style="font-size:12px;color:var(--ink);font-weight:500;text-decoration:underline;
+                    text-underline-offset:2px;cursor:pointer">${codeKey}</span>`
+      : `<span style="font-size:12px;color:var(--ink);font-weight:500">${codeKey}</span>`;
+
+    return `
       <tr>
         <td style="${td};padding-left:28px">
-          <span style="font-size:12px;color:var(--ink);font-weight:500">${codeKey}</span>
+          ${labelHtml}
           ${commentChip(rowKey)}
         </td>
         ${monthCapexCols}
@@ -651,46 +674,6 @@ async function _render(container) {
           ${isSale ? '+' : '-'}${fC(amt)}
         </td>
       </tr>`;
-
-    // Show line items as sub-rows for non-PC codes when items have distinct descriptions
-    // (i.e. came from a dedicated CAPEX sheet rather than cashflow lump-sums)
-    let itemRows = '';
-    if (!isPcCode(codeKey)) {
-      // Only show sub-rows when descriptions differ from the code key (real line items)
-      const lineItems = entry.items.filter(i => {
-        const desc = (i.description || '').trim();
-        return desc && desc !== codeKey;
-      });
-      if (lineItems.length > 0) {
-        itemRows = lineItems.map(item => {
-          const itemAmt  = Math.abs(parseFloat(item.budget_amount) || 0);
-          const itemSale = (parseFloat(item.budget_amount) || 0) < 0;
-          const itemColor = itemSale ? 'var(--green)' : 'var(--red)';
-          const monthItemCols = _selectedMonth ? `
-              <td style="${tdR};color:var(--hint)">—</td>
-              <td style="${tdR};font-size:11px;color:${itemColor}">
-                ${itemSale ? '+' : '-'}${fC(itemAmt / 12)}
-              </td>` : '';
-          return `
-            <tr style="background:var(--page-bg)">
-              <td style="${td};padding-left:44px">
-                <span style="font-size:11px;color:var(--hint-dark,var(--ink));opacity:0.8">${item.description || ''}</span>
-              </td>
-              ${monthItemCols}
-              <td style="${tdR};color:var(--hint)">—</td>
-              <td style="${tdR};font-size:11px;color:${itemColor}">
-                ${itemSale ? '+' : '-'}${fC(itemAmt * ytdFraction)}
-              </td>
-              <td style="${tdR}">—</td>
-              <td style="${tdR};font-size:11px;color:${itemColor}">
-                ${itemSale ? '+' : '-'}${fC(itemAmt)}
-              </td>
-            </tr>`;
-        }).join('');
-      }
-    }
-
-    return codeRow + itemRows;
   }).join('');
 
   // ── Pre-compute HTML blocks (avoid ESM nested-template-literal parse issues)
@@ -898,9 +881,61 @@ async function _render(container) {
         <tbody>${commentRows}</tbody>
       </table>
     </div>
+
+    <!-- CAPEX line-item data for detail modal -->
+    <script>window.__cfmCapexItems = ${capexItemDataJson};</script>
   `;
 
 }
+
+// ── CAPEX line-item detail modal ──────────────────────────────────────────────
+window._mgmtCapexDetail = function(codeKey) {
+  const fC = v => Math.abs(v).toLocaleString('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const items = (window.__cfmCapexItems || {})[codeKey] || [];
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+  const rows = items.length
+    ? items.map(item => {
+        const isSale = item.amt < 0;
+        return `<tr style="border-bottom:0.5px solid #f0f0f0">
+          <td style="padding:9px 16px;font-size:13px;color:#1a1a1a">${item.desc}</td>
+          <td style="padding:9px 16px;text-align:right;font-size:13px;font-weight:600;color:${isSale ? '#16a34a' : '#dc2626'}">${isSale ? '+' : '-'}${fC(item.amt)}</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="2" style="padding:20px 16px;text-align:center;font-size:13px;color:#999;font-style:italic">
+        No line items — re-import the budget to see individual items here.
+      </td></tr>`;
+
+  const total = items.reduce((s, i) => s + i.amt, 0);
+  const totalRow = items.length ? `
+    <tr style="border-top:2px solid #e5e7eb;background:#fafafa">
+      <td style="padding:10px 16px;font-size:13px;font-weight:700;color:#1a1a1a">Total</td>
+      <td style="padding:10px 16px;text-align:right;font-size:13px;font-weight:700;color:${total < 0 ? '#16a34a' : '#dc2626'}">${total < 0 ? '+' : '-'}${fC(total)}</td>
+    </tr>` : '';
+
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:10px;width:100%;max-width:520px;max-height:80vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+      <div style="padding:14px 18px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
+        <div style="font-size:15px;font-weight:700;color:#1a1a1a">${codeKey}</div>
+        <button onclick="this.closest('[style*=fixed]').remove()"
+                style="background:none;border:none;font-size:20px;cursor:pointer;color:#999;line-height:1;padding:0 4px">&times;</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:#fafafa;border-bottom:1px solid #e5e7eb">
+            <th style="padding:8px 16px;text-align:left;font-size:11px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:.06em">Item</th>
+            <th style="padding:8px 16px;text-align:right;font-size:11px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:.06em">Budget</th>
+          </tr>
+        </thead>
+        <tbody>${rows}${totalRow}</tbody>
+      </table>
+    </div>`;
+
+  document.body.appendChild(modal);
+};
 
 // ── Commodity detail modal ─────────────────────────────────────────────────────
 window._mgmtOpenModal = function(d) {
