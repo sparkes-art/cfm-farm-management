@@ -103,14 +103,49 @@ exports.handler = async (event) => {
     });
     const tenants = await tenantsRes.json();
 
+    if (!Array.isArray(tenants) || tenants.length === 0) {
+      return { statusCode: 400, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'No Xero organisations returned. Please ensure you are logged into the correct Xero account.' }) };
+    }
+
     // Match the right tenant to this farm using keyword mapping.
     // If no match found, fall back to the first tenant.
     const keywords = (FARM_TENANT_KEYWORDS[farmId] || []);
     let tenant = tenants.find(t =>
       keywords.some(kw => (t.tenantName || '').toLowerCase().includes(kw.toLowerCase()))
-    ) || tenants[0];
+    );
+
+    // If no keyword match, fall back to first tenant only when no keywords are configured.
+    // If keywords ARE configured but nothing matched, return a clear error — don't silently
+    // pick the wrong org.
+    if (!tenant) {
+      if (keywords.length > 0) {
+        const names = tenants.map(t => t.tenantName).join(', ');
+        console.error(`[xero-auth] No tenant matched keywords [${keywords.join(', ')}] for farm ${farmId}. Available: ${names}`);
+        return {
+          statusCode: 400,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            error: `Could not find the correct Xero organisation for this farm. Available orgs: ${names}. Please contact support.`,
+          }),
+        };
+      }
+      tenant = tenants[0];
+    }
 
     console.log(`[xero-auth] farm=${farmId} tenants=${tenants.map(t=>t.tenantName).join(', ')} → selected=${tenant?.tenantName}`);
+
+    // CRITICAL: Disconnect every other org so this token is scoped to ONLY this farm's org.
+    // This prevents cross-farm data access — users connecting one farm must not get
+    // access to another farm's Xero org through the same token.
+    const othersToRemove = tenants.filter(t => t.id !== tenant.id);
+    for (const other of othersToRemove) {
+      console.log(`[xero-auth] Disconnecting non-farm tenant: ${other.tenantName} (${other.id})`);
+      await fetch(`https://api.xero.com/connections/${other.id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${tokens.access_token}` },
+      });
+    }
+    console.log(`[xero-auth] Token now scoped to ONLY: ${tenant.tenantName}`);
 
     // Store tokens in Supabase — one row per farm, keyed on farm_id
     await sb('POST', 'xero_tokens?on_conflict=farm_id', {
