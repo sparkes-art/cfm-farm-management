@@ -53,6 +53,12 @@
 [functions.import-paddocks]
   timeout = 26
 
+[functions.xero-account-txns]
+  timeout = 26
+
+[functions.xero-pull]
+  timeout = 26
+
 [functions.push-livestock-prices]
   timeout = 30
 
