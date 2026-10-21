@@ -187,82 +187,79 @@ exports.handler = async (event) => {
       }
     }
 
-    // ── Fetch via AccountTransactions report — Xero filters server-side ──────
-    // This is ONE API call returning only transactions for this account.
-    // Much faster than fetching all invoices/bank-txns and filtering client-side.
+    // ── Fetch via Journals endpoint — works with accounting.invoices.read scope ─
+    // Reports/AccountTransactions requires the deprecated accounting.reports.read
+    // scope (removed for apps created after March 2026). Instead we use the Journals
+    // endpoint which returns all journal lines and filter by accountId client-side.
+    // Page size is 100 (Xero default) so we paginate until we have all lines in range.
     const transactions = [];
 
     if (accountId) {
-      const rUrl = new URL('https://api.xero.com/api.xro/2.0/Reports/AccountTransactions');
-      rUrl.searchParams.set('AccountID', accountId);
-      rUrl.searchParams.set('FromDate',  fromDate);
-      rUrl.searchParams.set('ToDate',    toDate);
+      // Journals endpoint: GET /api.xro/2.0/Journals?offset=N
+      // Each journal has a JournalDate and JournalLines[].AccountID
+      // We filter to our date range and accountId, then build transaction rows.
+      // Journals are returned in JournalNumber order; we stop when JournalDate > toDate.
 
-      console.log(`[xero-account-txns] fetching AccountTransactions report for accountId=${accountId}`);
-      const reportData = await xeroGet(rUrl.toString(), accessToken, tenantId, 3, forceRefresh);
-      const report     = reportData?.Reports?.[0];
+      const fromMs = new Date(fromDate).getTime();
+      const toMs   = new Date(toDate).getTime() + 86400000 - 1; // end of toDate
 
-      // Report rows: each row has Cells with transaction details
-      // Typical columns: Date, Source, Description, Reference, Debit, Credit, Balance
-      // (column order varies — find by header)
-      const headerRow = report?.Rows?.find(r => r.RowType === 'Header');
-      const headers   = (headerRow?.Cells || []).map(c => (c.Value || '').toLowerCase());
+      let offset = 0;
+      let done   = false;
+      let pages  = 0;
+      const MAX_PAGES = 50; // safety ceiling (~5000 journals)
 
-      const iDate  = headers.indexOf('date');
-      const iSrc   = headers.findIndex(h => h.includes('source') || h.includes('type'));
-      const iDesc  = headers.findIndex(h => h.includes('description') || h.includes('reference') || h.includes('details'));
-      const iRef   = headers.findIndex(h => h.includes('reference'));
-      const iDebit = headers.findIndex(h => h.includes('debit'));
-      const iCred  = headers.findIndex(h => h.includes('credit'));
+      console.log(`[xero-account-txns] fetching Journals for accountId=${accountId} ${fromDate}→${toDate}`);
 
-      console.log(`[xero-account-txns] report headers: ${JSON.stringify(headers)}`);
+      while (!done && pages < MAX_PAGES) {
+        const jUrl = `https://api.xero.com/api.xro/2.0/Journals?offset=${offset}`;
+        const data  = await xeroGet(jUrl, accessToken, tenantId, 3, forceRefresh);
+        const page  = data?.Journals || [];
+        pages++;
 
-      for (const section of (report?.Rows || [])) {
-        if (section.RowType === 'Header' || section.RowType === 'SummaryRow') continue;
-        const rows = section.RowType === 'Section' ? (section.Rows || []) : [section];
-        for (const row of rows) {
-          if (row.RowType === 'SummaryRow' || row.RowType === 'Header') continue;
-          const cells = row.Cells || [];
-          if (!cells.length) continue;
+        if (page.length === 0) break;
 
-          const val = (i) => (i >= 0 && cells[i] ? (cells[i].Value || '') : '');
-          const dateStr = val(iDate);
-          if (!dateStr || dateStr.toLowerCase() === 'date') continue; // skip header repeats
+        for (const j of page) {
+          // Parse Xero's /Date(ms+tz)/ format
+          const rawDate = j.JournalDate || '';
+          const msMatch = rawDate.match(/\/Date\((\d+)/);
+          const jDateMs = msMatch ? parseInt(msMatch[1]) : new Date(rawDate).getTime();
+          const jDate   = new Date(jDateMs).toISOString().slice(0, 10);
 
-          const parsedDate = (() => {
-            // Xero dates in reports come as "22 Oct 2026" or "2026-10-22"
-            const d = new Date(dateStr);
-            if (!isNaN(d)) return d.toISOString().slice(0, 10);
-            return null;
-          })();
+          // Journals come in ascending JournalNumber order.
+          // Once we're past toDate we can stop paging.
+          if (jDateMs > toMs) { done = true; break; }
+          if (jDateMs < fromMs) continue; // before our window — keep going
 
-          const debitAmt  = parseFloat((val(iDebit) || '0').replace(/,/g, ''))  || 0;
-          const creditAmt = parseFloat((val(iCred)  || '0').replace(/,/g, ''))  || 0;
-          if (debitAmt === 0 && creditAmt === 0) continue;
+          for (const line of (j.JournalLines || [])) {
+            if (line.AccountID !== accountId) continue;
 
-          const amount = debitAmt > 0 ? debitAmt : -creditAmt;
-          const src    = val(iSrc);
-          const desc   = val(iDesc);
-          const ref    = iRef >= 0 && iRef !== iDesc ? val(iRef) : '';
+            const net = parseFloat(line.NetAmount) || 0;
+            if (net === 0) continue;
 
-          // Derive a type label from the source column
-          const typeMap = { 'Bill': 'ACCPAY', 'Invoice': 'ACCREC', 'Spend Money': 'SPEND', 'Receive Money': 'RECEIVE', 'Manual Journal': 'MANUALJOURNAL' };
-          const txnType = typeMap[src] || src || 'TXN';
+            // In Xero journals, positive NetAmount = debit to this account,
+            // negative = credit. We expose both columns for display.
+            const debit  = net > 0 ? net  : 0;
+            const credit = net < 0 ? -net : 0;
 
-          transactions.push({
-            date:        parsedDate,
-            type:        txnType,
-            contact:     '',
-            reference:   ref,
-            description: desc,
-            debit:       debitAmt,
-            credit:      creditAmt,
-            amount,
-          });
+            transactions.push({
+              date:        jDate,
+              type:        j.SourceType || 'TXN',
+              contact:     line.Description || j.Reference || '',
+              reference:   j.Reference || '',
+              description: line.Description || '',
+              debit,
+              credit,
+              amount: net,
+            });
+          }
         }
+
+        // Xero returns exactly 100 journals per page; fewer means last page
+        if (page.length < 100) break;
+        offset += page.length;
       }
 
-      console.log(`[xero-account-txns] AccountTransactions report: ${transactions.length} rows`);
+      console.log(`[xero-account-txns] Journals scan: ${pages} page(s), ${transactions.length} matching lines`);
     } else {
       console.warn(`[xero-account-txns] no accountId resolved — cannot fetch transactions`);
     }
