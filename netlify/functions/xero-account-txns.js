@@ -2,20 +2,13 @@
 // Returns individual transactions for one Xero account within a date range.
 //
 // GET /api/xero-account-txns?farm_id=farm_blackbull&account_id=UUID&from=2026-07-01&to=2026-10-21
+//   OR with name instead of UUID:
+// GET /api/xero-account-txns?farm_id=farm_blackbull&account_name=Hire+of+Plant&from=2026-07-01&to=2026-10-21
 //
-// Returns:
-// {
-//   ok: true,
-//   account_name: 'Hire of Plant',
-//   account_code: '630',
-//   from: '2026-07-01',
-//   to:   '2026-10-21',
-//   transactions: [
-//     { date, contact, description, reference, amount, type }
-//   ]
-// }
+// Strategy: uses accounting.invoices.read (bills = ACCPAY type) which is always in scope.
+// Fetches all approved bills in the date range, then filters line items to those
+// matching the target account by AccountID or account Code.
 //
-// Uses Xero Account Transactions report (accounting.reports.read scope).
 // One Xero org per farm — token keyed to farm_id, no cross-farm access.
 
 const XERO_CLIENT_ID          = process.env.XERO_CLIENT_ID;
@@ -77,52 +70,30 @@ async function getAccessToken(farmId) {
   return { accessToken: token.access_token, tenantId: token.tenant_id };
 }
 
-// ── Parse Xero Journals response ──────────────────────────────────────────────
-// Uses GET /api.xro/2.0/Journals (accounting.manualjournals.read scope).
-// Each journal has JournalLines[] — we filter to lines matching our accountID.
-// Journal types: ACCPAY (bill), ACCREC (invoice), SPEND, RECEIVE, MANJOURNAL, etc.
-function parseJournals(journalsData, accountId) {
-  const txns = [];
-  const journals = journalsData?.Journals || [];
-
-  for (const j of journals) {
-    const dateStr = j.JournalDate || '';
-    const ref     = j.Reference   || '';
-    const type    = j.SourceType  || '';
-
-    for (const line of (j.JournalLines || [])) {
-      if (line.AccountID !== accountId) continue;
-
-      const net = parseFloat(line.NetAmount) || 0;
-      if (net === 0) continue;
-
-      // NetAmount: positive = debit (expense increase), negative = credit (reversal)
-      txns.push({
-        date:      dateStr,
-        type,
-        contact:   j.SourceType === 'ACCPAY' ? (line.Description || '') : (line.Description || ''),
-        reference: ref,
-        debit:     net > 0 ? net  : 0,
-        credit:    net < 0 ? -net : 0,
-        amount:    net,
-        description: line.Description || '',
-      });
-    }
-  }
-
-  return txns;
-}
-
 // ── Format Xero date ─────────────────────────────────────────────────────────
-// Xero returns dates as '/Date(1696118400000+0000)/' or 'DD MMM YYYY'
 function parseXeroDate(val) {
   if (!val) return null;
   const ms = val.match(/\/Date\((\d+)/);
   if (ms) return new Date(parseInt(ms[1])).toISOString().slice(0, 10);
-  // Try to parse 'DD MMM YYYY'
   const d = new Date(val);
   if (!isNaN(d)) return d.toISOString().slice(0, 10);
   return val;
+}
+
+// ── Xero API helper ──────────────────────────────────────────────────────────
+async function xeroGet(url, accessToken, tenantId) {
+  const res = await fetch(url, {
+    headers: {
+      'Authorization':  `Bearer ${accessToken}`,
+      'Xero-Tenant-Id': tenantId,
+      'Accept':         'application/json',
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Xero API error ${res.status}: ${text}`);
+  }
+  return res.json();
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -137,10 +108,10 @@ exports.handler = async (event) => {
 
   const params      = event.queryStringParameters || {};
   const farmId      = params.farm_id;
-  let   accountId   = params.account_id   || ''; // Xero UUID — may be empty, resolved below if so
-  const fromDate    = params.from;                // YYYY-MM-DD
-  const toDate      = params.to;                  // YYYY-MM-DD
-  let   accountName = params.account_name || '';  // Xero account name — used to resolve UUID if needed
+  let   accountId   = params.account_id   || '';
+  const fromDate    = params.from;
+  const toDate      = params.to;
+  let   accountName = params.account_name || '';
   const accountCode = params.account_code || '';
 
   if (!farmId || !fromDate || !toDate || (!accountId && !accountName)) {
@@ -151,7 +122,6 @@ exports.handler = async (event) => {
     };
   }
 
-  // Basic date format check
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate) || !/^\d{4}-\d{2}-\d{2}$/.test(toDate)) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'from and to must be YYYY-MM-DD' }) };
   }
@@ -159,90 +129,91 @@ exports.handler = async (event) => {
   try {
     const { accessToken, tenantId } = await getAccessToken(farmId);
 
-    // ── Resolve accountID from name if not provided ──────────────────────────
-    // Xero P&L reports don't always include accountID in cell attributes,
-    // so we fall back to looking it up via the Accounts endpoint by name.
+    // ── Resolve accountID and code from name if not provided ─────────────────
+    let resolvedCode = accountCode;
     if (!accountId && accountName) {
-      const acctRes  = await fetch('https://api.xero.com/api.xro/2.0/Accounts', {
-        headers: {
-          'Authorization':  `Bearer ${accessToken}`,
-          'Xero-Tenant-Id': tenantId,
-          'Accept':         'application/json',
-        },
-      });
-      if (acctRes.ok) {
-        const acctData = await acctRes.json();
-        const norm     = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
-        const namNorm  = norm(accountName);
-        const match    = (acctData.Accounts || []).find(a => norm(a.Name) === namNorm || norm(a.Name).includes(namNorm) || namNorm.includes(norm(a.Name)));
-        if (match) {
-          accountId   = match.AccountID;
-          accountName = match.Name; // use canonical Xero name
-          console.log(`[xero-account-txns] resolved "${accountName}" → accountID=${accountId}`);
-        } else {
-          console.warn(`[xero-account-txns] could not resolve accountID for name="${accountName}"`);
+      const acctData = await xeroGet('https://api.xero.com/api.xro/2.0/Accounts', accessToken, tenantId);
+      const norm     = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+      const namNorm  = norm(accountName);
+      const match    = (acctData.Accounts || []).find(a =>
+        norm(a.Name) === namNorm ||
+        norm(a.Name).includes(namNorm) ||
+        namNorm.includes(norm(a.Name))
+      );
+      if (match) {
+        accountId    = match.AccountID;
+        accountName  = match.Name;
+        resolvedCode = match.Code || '';
+        console.log(`[xero-account-txns] resolved "${accountName}" → accountID=${accountId} code=${resolvedCode}`);
+      } else {
+        console.warn(`[xero-account-txns] could not resolve accountID for name="${accountName}"`);
+      }
+    }
+
+    // ── Fetch bills (ACCPAY) in date range via Invoices API ──────────────────
+    // accounting.invoices.read scope — always available.
+    // We fetch all approved bills in the period and filter line items by account.
+    // Also fetch ACCREC (sales invoices) in case account appears on revenue side.
+    const transactions = [];
+
+    for (const type of ['ACCPAY', 'ACCREC']) {
+      let page = 1;
+      while (true) {
+        const url = new URL('https://api.xero.com/api.xro/2.0/Invoices');
+        url.searchParams.set('Type',   type);
+        url.searchParams.set('Statuses', 'AUTHORISED,PAID');
+        url.searchParams.set('DateFrom', fromDate);
+        url.searchParams.set('DateTo',   toDate);
+        url.searchParams.set('page',     page);
+        // Include line items
+        url.searchParams.set('unitdp', '4');
+
+        const data     = await xeroGet(url.toString(), accessToken, tenantId);
+        const invoices = data?.Invoices || [];
+
+        for (const inv of invoices) {
+          const invDate    = parseXeroDate(inv.Date);
+          const contact    = inv.Contact?.Name || '';
+          const ref        = inv.Reference    || inv.InvoiceNumber || '';
+          const invType    = inv.Type;
+
+          for (const line of (inv.LineItems || [])) {
+            // Match by accountID (preferred) or by account code
+            const lineAcctId   = line.AccountID   || '';
+            const lineAcctCode = line.AccountCode || '';
+
+            const matched = (accountId && lineAcctId === accountId) ||
+                            (resolvedCode && lineAcctCode === resolvedCode);
+            if (!matched) continue;
+
+            const lineAmt = parseFloat(line.LineAmount) || 0;
+            if (lineAmt === 0) continue;
+
+            // For bills (ACCPAY): positive line amount = expense
+            // For credit notes / reversals: amount may be negative
+            transactions.push({
+              date:        invDate,
+              type:        invType,
+              contact,
+              reference:   ref,
+              description: line.Description || '',
+              debit:       lineAmt > 0 ? lineAmt  : 0,
+              credit:      lineAmt < 0 ? -lineAmt : 0,
+              amount:      lineAmt,
+            });
+          }
         }
+
+        if (invoices.length < 100) break;
+        page++;
+        if (page > 20) break; // safety cap
       }
     }
 
-    if (!accountId) {
-      return {
-        statusCode: 404,
-        headers,
-        body: JSON.stringify({ ok: false, error: `Could not find a Xero account matching "${accountName}". Check your Xero chart of accounts.` }),
-      };
-    }
+    // Sort by date ascending
+    transactions.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
-    // Fetch journals for the date range — accounting.manualjournals.read scope
-    // Journals cover all account movements: bills (ACCPAY), spend money, manual journals, etc.
-    // Xero returns max 100 journals per page; paginate with offset.
-    let allJournals = [];
-    let offset = 0;
-    const pageSize = 100;
-    while (true) {
-      const url = new URL('https://api.xero.com/api.xro/2.0/Journals');
-      url.searchParams.set('offset', offset);
-      // Xero Journals API doesn't support date filtering natively — filter client-side
-      const res = await fetch(url.toString(), {
-        headers: {
-          'Authorization':  `Bearer ${accessToken}`,
-          'Xero-Tenant-Id': tenantId,
-          'Accept':         'application/json',
-          'If-Modified-Since': fromDate, // reduces payload — Xero uses this as a modified-since filter
-        },
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Xero Journals API error ${res.status}: ${errText}`);
-      }
-
-      const data     = await res.json();
-      const page     = data?.Journals || [];
-      allJournals    = allJournals.concat(page);
-      if (page.length < pageSize) break;
-      offset += pageSize;
-      if (offset > 2000) break; // safety cap
-    }
-
-    // Filter journals to the requested date range
-    const from = new Date(fromDate);
-    const to   = new Date(toDate);
-    to.setHours(23, 59, 59, 999);
-
-    const filteredJournals = allJournals.filter(j => {
-      const d = parseXeroDate(j.JournalDate);
-      if (!d) return false;
-      const jd = new Date(d);
-      return jd >= from && jd <= to;
-    });
-
-    const rawTxns = parseJournals({ Journals: filteredJournals }, accountId);
-
-    // Parse dates to ISO format
-    const transactions = rawTxns.map(t => ({ ...t, date: parseXeroDate(t.date) }));
-
-    console.log(`[xero-account-txns] farm=${farmId} account=${accountId} (${accountName}) ${fromDate}→${toDate} journals=${allJournals.length} filtered=${filteredJournals.length} txns=${transactions.length}`);
+    console.log(`[xero-account-txns] farm=${farmId} account=${accountId} (${accountName}) ${fromDate}→${toDate} txns=${transactions.length}`);
 
     return {
       statusCode: 200,
@@ -251,7 +222,7 @@ exports.handler = async (event) => {
         ok:           true,
         account_id:   accountId,
         account_name: accountName,
-        account_code: accountCode,
+        account_code: resolvedCode,
         from:         fromDate,
         to:           toDate,
         transactions,
