@@ -668,18 +668,19 @@ function _parseGmSheet(rows, sheetName) {
 function _identifySheets(sheetNames) {
   const cashflowSheets = [];
   const gmSheets       = [];
+  const capexSheets    = [];
   const skipped        = [];
 
   // Known non-data sheets to skip
   const SKIP = new Set([
     'formatting','narrative on metrics','key metrics','summary','reconciliation',
     'current assets','crop plan','prices','finance costs','amortisation calculator',
-    'op capex','prop capex','cattle program','ny crops','py crops',
+    'cattle program','ny crops','py crops',
     'pricing - app','pricing - inputs','pricing - livestock','codings',
     'end of sept property','ops summary',
     // Merrowie-specific non-GM sheets
     'budget summary','total crop expenses','accounting','yields','fallows',
-    'sheep program','ny crops','gen capex','dev capex','oh + rnm','ops summary',
+    'sheep program','ny crops','oh + rnm','ops summary',
     'pistachios new planting',
     // Auski-specific non-GM sheets
     'on hand','spare irr',
@@ -713,7 +714,10 @@ function _identifySheets(sheetNames) {
         // PT or unknown entity cashflow — skip to avoid double-counting
         skipped.push(name);
       }
-    } else if (SKIP.has(n) || n.includes('capex') || n.includes('pricing') || n.includes('calendar') ||
+    } else if (n.includes('capex')) {
+      // CAPEX sheets: op capex, prop capex, gen capex, dev capex
+      capexSheets.push(name);
+    } else if (SKIP.has(n) || n.includes('pricing') || n.includes('calendar') ||
                n === 'finance costs' || n === 'farm mgmt' || n.includes('oh + rnm') || n.includes('oh+rnm')) {
       skipped.push(name);
     } else if (GM_PATTERNS.some(p => n.includes(p))) {
@@ -723,7 +727,7 @@ function _identifySheets(sheetNames) {
     }
   }
 
-  return { cashflowSheets, gmSheets, skipped };
+  return { cashflowSheets, gmSheets, capexSheets, skipped };
 }
 
 // ── Revenue income consolidation ───────────────────────────────────────────
@@ -1045,14 +1049,95 @@ function _consolidateFallowCosts(items, financialYear, farmId) {
   }));
 }
 
+// ── CAPEX sheet parser ─────────────────────────────────────────────────────
+//
+// Parses dedicated CAPEX sheets (e.g. "OP Capex", "Prop Capex", "Gen Capex", "Dev Capex").
+// These sheets have a similar structure to the CAPEX section within cashflow:
+//   - 'E'/'H' tag rows announce CAPEX codes / section headers
+//   - 'A' tag rows are individual budget line items within that code
+//   - 'subtotal' / 'total' rows are skipped
+//
+// Returns an array of { budget_code, description, line_description, budget_amount, sheet_label }
+// where budget_code  = the CAPEX code heading (e.g. "MACH001")
+//       description  = same as budget_code (for compatibility with cashflow CAPEX rows)
+//       line_description = the individual item under that code
+//       budget_amount = the amount for that line item
+//       sheet_label   = the sheet name (e.g. "Op Capex") for subcategory grouping
+//
+function _parseCapexSheet(rows, sheetName) {
+  const items    = [];
+  let currentCode = null;
+
+  for (const row of rows) {
+    // SheetJS header:1 output — col indices start at 0
+    // CFM CAPEX sheets follow cashflow convention: tag@col0, desc@col2, total@col4
+    // But col A is often empty (merged cells / indent), so we check both layouts
+    const tag    = (row[0] != null ? String(row[0]).trim() : null) ||
+                   (row[1] != null ? String(row[1]).trim() : null);
+    const descA  = row[2] != null ? String(row[2]).trim() : null;
+    const descB  = row[3] != null ? String(row[3]).trim() : null;
+    const desc   = descA || descB || '';
+    const descL  = desc.toLowerCase();
+    const total  = (() => {
+      // Try col 4, then 5, then 3 — CAPEX sheets vary slightly
+      const candidates = [row[4], row[5], row[3]];
+      for (const v of candidates) {
+        if (v != null && typeof v === 'number') return v;
+      }
+      return null;
+    })();
+
+    if (!tag && !desc) continue;
+    if (!desc) continue;
+    if (descL === 'subtotal' || descL.startsWith('total') || descL.startsWith('less')) continue;
+
+    // Section/code header rows — 'E' or 'H' tag
+    if (tag === 'E' || tag === 'H') {
+      if (desc && !descL.startsWith('subtotal') && !descL.startsWith('total')) {
+        currentCode = desc.toUpperCase().trim();
+      }
+      continue;
+    }
+
+    // Line item rows — 'A' tag (or no tag but has a value)
+    if ((tag === 'A' || tag == null) && desc && total != null && total !== 0) {
+      items.push({
+        budget_code:      currentCode || 'UNALLOCATED',
+        description:      currentCode || desc.toUpperCase().trim(),  // code-level description
+        line_description: desc,                                        // individual item
+        budget_amount:    total,
+        is_sale:          total < 0,
+        sheet_label:      sheetName,
+      });
+    }
+  }
+
+  return items;
+}
+
 // ── CAPEX consolidation ───────────────────────────────────────────────────
+//
+// Items come from two sources:
+//   1. Cashflow tag='A' rows within the CAPEX section — no line_description, budget_code is the item
+//   2. Dedicated CAPEX sheet rows — budget_code is the code header, line_description is the item
+//
+// We store one DB row per individual line item so the management report drilldown
+// can show the full list of items under each CAPEX code.
+// The management report groups by budget_code to show code-level totals.
+//
 function _consolidateCapex(items, financialYear, farmId) {
   if (!items.length) return [];
 
-  // Deduplicate by budget_code across OT+PT
+  // For cashflow-sourced items (no line_description):
+  //   deduplicate by budget_code across OT+PT sheets (sum if same code appears in both)
+  // For CAPEX-sheet items (has line_description):
+  //   deduplicate by budget_code + line_description (same item on same code in multiple sheets)
   const byKey = new Map();
   for (const item of items) {
-    const key = item.budget_code;
+    const isSheetItem = !!item.line_description;
+    const key = isSheetItem
+      ? `sheet|${item.budget_code}|${item.line_description}`
+      : `cashflow|${item.budget_code}`;
     if (byKey.has(key)) {
       byKey.get(key).budget_amount += (item.budget_amount || 0);
     } else {
@@ -1064,16 +1149,21 @@ function _consolidateCapex(items, financialYear, farmId) {
     farm_id:        farmId,
     financial_year: financialYear,
     category:       'capex',
-    subcategory:    item.is_sale ? 'Machinery Sale' : 'Capital Expenditure',
+    subcategory:    item.sheet_label || (item.is_sale ? 'Machinery Sale' : 'Capital Expenditure'),
     enterprise:     null,
     budget_code:    item.budget_code,
-    description:    item.description,
+    // description = the individual line item text for drilldown display
+    // For cashflow items: budget_code is both the code and the description
+    // For sheet items: line_description is the individual item under the code
+    description:    item.line_description || item.description,
     cost_per_ha:    null,
     unit_price:     null,
     unit:           null,
     area_ha:        null,
     budget_amount:  item.budget_amount,  // positive = purchase cost, negative = sale offset
-    notes:          item.is_sale ? 'Machinery sale proceeds from cashflow' : 'Capital expenditure from cashflow',
+    notes:          item.sheet_label
+      ? `From ${item.sheet_label} sheet`
+      : (item.is_sale ? 'Machinery sale proceeds from cashflow' : 'Capital expenditure from cashflow'),
   }));
 }
 
@@ -1165,10 +1255,10 @@ export async function parseBudgetExcel(file) {
   }
 
   // Identify sheet roles
-  const { cashflowSheets, gmSheets, skipped } = _identifySheets(sheetNames);
+  const { cashflowSheets, gmSheets, capexSheets, skipped } = _identifySheets(sheetNames);
 
   if (skipped.length) {
-    allWarnings.push(`Skipped ${skipped.length} non-budget sheets (formatting, pricing, CAPEX, etc.)`);
+    allWarnings.push(`Skipped ${skipped.length} non-budget sheets (formatting, pricing, etc.)`);
   }
 
   if (!cashflowSheets.length) {
@@ -1226,6 +1316,17 @@ export async function parseBudgetExcel(file) {
     }
   }
 
+  // ── Parse dedicated CAPEX sheets (op capex, prop capex, gen capex, dev capex) ──
+  const allCapexSheetItems = [];
+  for (const sheetName of capexSheets) {
+    const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
+    const items = _parseCapexSheet(rows, sheetName);
+    allCapexSheetItems.push(...items);
+    if (items.length) {
+      allWarnings.push(`ℹ ${sheetName}: ${items.length} CAPEX line items parsed`);
+    }
+  }
+
   const fy = financialYear || 'UNKNOWN';
 
   // ── Consolidate ──
@@ -1240,8 +1341,10 @@ export async function parseBudgetExcel(file) {
   // Fallow variable costs from cashflow (deduplicated by enterprise+budget_code)
   const fallowCostRows = _consolidateFallowCosts(allFallowCostItems, fy, farm.id);
 
-  // CAPEX rows (deduplicated by budget_code)
-  const capexRows = _consolidateCapex(allCapexItems, fy, farm.id);
+  // CAPEX rows: merge cashflow CAPEX items + dedicated CAPEX sheet items
+  // Sheet items take precedence — they have full line-item detail
+  // Cashflow items supplement with anything not covered by a dedicated sheet
+  const capexRows = _consolidateCapex([...allCapexItems, ...allCapexSheetItems], fy, farm.id);
 
   // Combined cost rows: variable (GM crops) → fallow → prior year → cattle → fixed → capex
   const costRows = [...variableCostRows, ...fallowCostRows, ...priorYearCostRows, ...cattleCostRows, ...fixedCostRows, ...capexRows];
@@ -1261,8 +1364,14 @@ export async function parseBudgetExcel(file) {
     allWarnings.push(`ℹ ${fallowCostRows.length} fallow cost lines from cashflow`);
   }
   if (capexRows.length) {
-    const capexSales = capexRows.filter(r => r.is_sale).length;
-    allWarnings.push(`ℹ ${capexRows.length} CAPEX lines (${capexSales} machinery sale${capexSales !== 1 ? 's' : ''})`);
+    const fromSheets   = allCapexSheetItems.length;
+    const fromCashflow = allCapexItems.length;
+    if (fromSheets) {
+      allWarnings.push(`ℹ ${capexRows.length} CAPEX lines total (${fromSheets} from ${capexSheets.length} CAPEX sheet${capexSheets.length!==1?'s':''}, ${fromCashflow} from cashflow)`);
+    } else {
+      const capexSales = capexRows.filter(r => r.budget_amount < 0).length;
+      allWarnings.push(`ℹ ${capexRows.length} CAPEX lines (${capexSales} machinery sale${capexSales !== 1 ? 's' : ''})`);
+    }
   }
 
   return {
@@ -1281,6 +1390,7 @@ export async function parseBudgetExcel(file) {
     warnings: allWarnings,
     fileName: file.name,
     sheetNames,
+    capexSheets,
   };
 }
 

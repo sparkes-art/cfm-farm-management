@@ -321,6 +321,52 @@ async function _render(container) {
       </tr>`;
   }).join('');
 
+  // ── CAPEX from budget_costs (category='capex') ────────────────────────────
+  const capexCosts = budgetCosts.filter(c => c.category === 'capex');
+
+  // Group by budget_code to show code-level rows (clickable for drilldown)
+  const capexByCode = new Map();
+  for (const c of capexCosts) {
+    const code = c.budget_code || 'UNALLOCATED';
+    if (!capexByCode.has(code)) {
+      capexByCode.set(code, { code, subcategory: c.subcategory, items: [], total: 0 });
+    }
+    const entry = capexByCode.get(code);
+    entry.items.push(c);
+    entry.total += parseFloat(c.budget_amount) || 0;
+  }
+
+  let totalCapexBudget = 0;
+  const capexRows = [...capexByCode.values()].map(entry => {
+    const amt = Math.abs(entry.total);
+    const isSale = entry.total < 0;
+    totalCapexBudget += entry.total;
+
+    // Encode line items for the drilldown modal
+    const modalData = JSON.stringify({
+      code: entry.code,
+      subcategory: entry.subcategory || 'Capital Expenditure',
+      items: entry.items.map(i => ({ desc: i.description, amt: parseFloat(i.budget_amount)||0, notes: i.notes })),
+    }).replace(/'/g, '&#39;');
+
+    return `
+      <tr style="cursor:pointer" onclick="window._mgmtOpenCapexModal('${modalData}')" title="Click to see budget items">
+        <td style="${td};padding-left:28px">
+          <span style="font-size:12px;color:var(--ink)">${entry.code}</span>
+          <span style="font-size:10px;color:var(--hint);margin-left:6px">${entry.subcategory || ''}</span>
+          <span style="font-size:10px;color:var(--blue);margin-left:6px">↗ ${entry.items.length} item${entry.items.length!==1?'s':''}</span>
+        </td>
+        <td style="${tdR};color:var(--hint)">—</td>
+        <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
+          ${isSale ? '+' : '-'}${fC(amt)}
+        </td>
+        <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
+          ${isSale ? '+' : '-'}${fC(amt)}
+        </td>
+        <td style="${tdR}">—</td>
+      </tr>`;
+  }).join('');
+
   // ── Comments ───────────────────────────────────────────────────────────────
   const commentRows = comments.length
     ? comments.map(c => `
@@ -379,22 +425,34 @@ async function _render(container) {
             </tr>
 
             ${budgetCosts.length ? `
-              ${secRow('Fixed costs')}
-              ${fixedRows}
-              <tr style="background:#fff5f5;border-top:2px solid var(--border)">
-                <td style="${td};font-weight:700">Total fixed costs</td>
-                <td style="${tdR};color:var(--hint)">—</td>
-                <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
-                <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
-                <td style="${tdR};color:var(--hint)">—</td>
-              </tr>
+              ${fixedRows.trim() ? `
+                ${secRow('Fixed costs')}
+                ${fixedRows}
+                <tr style="background:#fff5f5;border-top:2px solid var(--border)">
+                  <td style="${td};font-weight:700">Total fixed costs</td>
+                  <td style="${tdR};color:var(--hint)">—</td>
+                  <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
+                  <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
+                  <td style="${tdR};color:var(--hint)">—</td>
+                </tr>` : ''}
+
+              ${capexRows.trim() ? `
+                ${secRow('Capital expenditure')}
+                ${capexRows}
+                <tr style="background:#fff5f5;border-top:2px solid var(--border)">
+                  <td style="${td};font-weight:700">Total capex</td>
+                  <td style="${tdR};color:var(--hint)">—</td>
+                  <td style="${tdR};color:var(--red);font-weight:700">-${fC(Math.abs(totalCapexBudget))}</td>
+                  <td style="${tdR};color:var(--red);font-weight:700">-${fC(Math.abs(totalCapexBudget))}</td>
+                  <td style="${tdR};color:var(--hint)">—</td>
+                </tr>` : ''}
 
               <!-- Net income (budget only until Inputs module provides actuals) -->
               <tr style="background:#eff6ff;border-top:2px solid var(--border)">
                 <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">Net income (budget)</td>
                 <td style="${tdR};color:var(--hint)">—</td>
-                <td style="${tdR};font-weight:700;color:var(--blue)">${fC(grandBudgetYTD - totalFixedBudget)}</td>
-                <td style="${tdR};font-weight:700;color:var(--blue)">${fC(grandBudget - totalFixedBudget)}</td>
+                <td style="${tdR};font-weight:700;color:var(--blue)">${fC(grandBudgetYTD - totalFixedBudget - Math.abs(totalCapexBudget))}</td>
+                <td style="${tdR};font-weight:700;color:var(--blue)">${fC(grandBudget - totalFixedBudget - Math.abs(totalCapexBudget))}</td>
                 <td style="${tdR};color:var(--hint)">—</td>
               </tr>
             ` : `
@@ -512,6 +570,65 @@ window._mgmtOpenModal = function(d) {
 
   document.body.appendChild(modal);
   modal.querySelector('#mgmt-modal-close').onclick = () => modal.remove();
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+};
+
+// ── CAPEX drilldown modal ─────────────────────────────────────────────────────
+window._mgmtOpenCapexModal = function(dataStr) {
+  const fC = v => v == null ? '—' : Math.abs(v).toLocaleString('en-AU', { style:'currency', currency:'AUD', minimumFractionDigits:0, maximumFractionDigits:0 });
+
+  let d;
+  try { d = JSON.parse(dataStr.replace(/&#39;/g, "'")); } catch(e) { return; }
+
+  const totalAmt = d.items.reduce((s, i) => s + (i.amt || 0), 0);
+  const isSale   = totalAmt < 0;
+
+  const rows = d.items.map(item => {
+    const itemIsSale = item.amt < 0;
+    return `
+      <tr style="border-bottom:0.5px solid var(--border-light,#eee)">
+        <td style="padding:8px 18px;font-size:12px;color:var(--ink)">${item.desc}</td>
+        <td style="padding:8px 18px;text-align:right;font-size:12px;font-weight:600;color:${itemIsSale ? '#16a34a' : 'var(--red,#dc2626)'}">
+          ${itemIsSale ? '+' : '-'}${fC(item.amt)}
+        </td>
+        <td style="padding:8px 18px;font-size:11px;color:var(--hint)">${item.notes||''}</td>
+      </tr>`;
+  }).join('');
+
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:10px;width:100%;max-width:600px;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--ink)">${d.code}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">${d.subcategory} · Total: ${isSale ? '+' : '-'}${fC(totalAmt)}</div>
+        </div>
+        <button id="capex-modal-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--hint)">✕</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);background:var(--page-bg,#f8fafc)">
+            <th style="padding:8px 18px;text-align:left;font-size:11px;color:var(--hint);font-weight:500">Item</th>
+            <th style="padding:8px 18px;text-align:right;font-size:11px;color:var(--hint);font-weight:500">Budget</th>
+            <th style="padding:8px 18px;font-size:11px;color:var(--hint);font-weight:500">Source</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr style="border-top:2px solid var(--border);background:var(--page-bg,#f8fafc)">
+            <td style="padding:10px 18px;font-weight:700;font-size:13px">Total</td>
+            <td style="padding:10px 18px;text-align:right;font-weight:700;font-size:13px;color:${isSale ? '#16a34a' : 'var(--red,#dc2626)'}">
+              ${isSale ? '+' : '-'}${fC(totalAmt)}
+            </td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#capex-modal-close').onclick = () => modal.remove();
   modal.onclick = e => { if (e.target === modal) modal.remove(); };
 };
 
