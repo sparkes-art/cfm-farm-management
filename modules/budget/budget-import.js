@@ -549,16 +549,29 @@ function _parseGmSheet(rows, sheetName) {
 
       const isMerrowieLayout  = row10L.includes('expected yield') && !row10L.includes('grain');
       const isBarleyIrrLayout = row10L.includes('expected grain yield') || row11L.includes('expected grain price');
+      // Kiwifruit: row 11 col A = 'Kiwifruit:', col B = 'Price:', col C = price value ($/kg)
+      //            row 12 col B = 'Yield:', col C = yield value (kg/Ha)
+      const isKiwifruitLayout = low(str((rows[10] || [])[0])).includes('kiwifruit');
       // Almonds: row 8 = "Metrics", then scan rows 11-14 for "Expected Yield:" (offset varies by stage)
       let almondYieldRow = -1;
-      if (row8L.includes('metrics') && !row10L.includes('expected yield') && !row10L.includes('grain')) {
+      if (row8L.includes('metrics') && !row10L.includes('expected yield') && !row10L.includes('grain') && !isKiwifruitLayout) {
         for (let ai = 10; ai <= 14; ai++) {
           if (low(str((rows[ai] || [])[0])).includes('expected yield')) { almondYieldRow = ai; break; }
         }
       }
       const isAlmondLayout    = almondYieldRow >= 0;
 
-      if (isAlmondLayout) {
+      if (isKiwifruitLayout) {
+        // Kiwifruit (Red/Green):
+        //   opx row 11 (rows[10]) col A = 'Kiwifruit:', col C (index 2) = price $/kg
+        //   opx row 12 (rows[11]) col B = 'Yield:', col C (index 2) = yield kg/Ha
+        //   incomePerHa already read from opx row 6 (rows[5]) col B — authoritative $/ha figure
+        price      = num((rows[10] || [])[2]);  // $/kg
+        yieldPerHa = num((rows[11] || [])[2]);  // kg/Ha
+        // Total production in kg (not tonnes); store in totalTonnes as kg for kiwifruit
+        totalTonnes = yieldPerHa && area_ha ? yieldPerHa * area_ha : null;
+        unit = 'kg/ha';
+      } else if (isAlmondLayout) {
         // Almonds: yield at almondYieldRow col 7; price 2 rows later col 7 (indicative) or col 4 (cash)
         yieldPerHa  = num((rows[almondYieldRow] || [])[7]);
         const priceRow = almondYieldRow + 2;  // "Contracts to Date:" row with price cols
@@ -589,10 +602,10 @@ function _parseGmSheet(rows, sheetName) {
       if (!totalTonnes) totalTonnes = num((rows[12] || [])[2]);
       if (!totalTonnes) totalTonnes = num((rows[13] || [])[2]);
 
-      // Determine unit from sheet name
-      unit = sheetName.toLowerCase().includes('hay') ? 't/ha' :
-             sheetName.toLowerCase().includes('corn') ? 't/ha' :
-             sheetName.toLowerCase().includes('sorghum') ? 't/ha' : 't/ha';
+      // Determine unit from sheet name (don't overwrite kiwifruit's kg/ha)
+      if (!isKiwifruitLayout) {
+        unit = 't/ha';
+      }
     }
 
     const totalRevenue = (area_ha && incomePerHa) ? area_ha * incomePerHa : null;
@@ -679,6 +692,8 @@ function _identifySheets(sheetNames) {
     // Grain / oilseed / legume patterns
     'wheat','barley','canola','chickpea','durum','vetch','oat','maize',
     'almond','pistachio','almond stage',
+    // Permanent horticultural crops
+    'kiwifruit',
   ];
 
   for (const name of sheetNames) {
