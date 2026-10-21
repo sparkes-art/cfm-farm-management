@@ -615,14 +615,11 @@ async function _render(container) {
   }
 
   let totalCapexBudget = 0;
-  let _capexExpandId = 0;
   const capexRows = [...capexByCode.values()].map(entry => {
     const amt    = Math.abs(entry.total);
     const isSale = entry.total < 0;
     totalCapexBudget += entry.total;
-    const rowKey   = 'capex:' + entry.code;
-    const expandId = 'capex-items-' + (++_capexExpandId);
-    const colCount = _selectedMonth ? 7 : 5;
+    const rowKey = 'capex:' + entry.code;
 
     const monthCapexCols = _selectedMonth ? `
         <td style="${tdR};color:var(--hint)">—</td>
@@ -630,46 +627,11 @@ async function _render(container) {
           ${isSale ? '+' : '-'}${fC(amt / 12)}
         </td>` : '';
 
-    // Sub-rows: one per item inside this CAPEX code — hidden until expanded
-    const itemRowsHtml = entry.items.map(i => {
-      const iAmt   = parseFloat(i.budget_amount) || 0;
-      const iAbs   = Math.abs(iAmt);
-      const iSale  = iAmt < 0;
-      const notes  = (i.notes || '').trim();
-      const monthItemCols = _selectedMonth ? `<td colspan="2" style="${tdR};color:var(--hint)">—</td>` : '';
-      return `
-        <tr class="${expandId}-item" style="display:none;background:#fafbff">
-          <td style="${td};padding-left:52px">
-            <span style="font-size:11px;font-weight:600;color:var(--ink)">${i.description || '—'}</span>
-            ${notes ? '<div style="font-size:10px;color:var(--hint);margin-top:1px;line-height:1.3">' + notes.replace(/</g,'&lt;') + '</div>' : ''}
-          </td>
-          ${monthItemCols}
-          <td style="${tdR};color:var(--hint)">—</td>
-          <td style="${tdR};font-size:11px;color:${iSale ? 'var(--green)' : 'var(--red)'}">
-            ${iSale ? '+' : '-'}${fC(iAbs * ytdFraction)}
-          </td>
-          <td style="${tdR}">—</td>
-          <td style="${tdR};font-size:11px;color:${iSale ? 'var(--green)' : 'var(--red)'}">
-            ${iSale ? '+' : '-'}${fC(iAbs)}
-          </td>
-        </tr>`;
-    }).join('');
-
     return `
-      <tr style="cursor:pointer" title="Click to expand items" onclick="
-        (function(id){
-          var rows = document.querySelectorAll('.' + id + '-item');
-          var arrow = document.getElementById(id + '-arrow');
-          var open = rows.length && rows[0].style.display !== 'none';
-          rows.forEach(function(r){ r.style.display = open ? 'none' : ''; });
-          if(arrow) arrow.textContent = open ? '▶' : '▼';
-        })('${expandId}')
-      ">
+      <tr>
         <td style="${td};padding-left:28px">
-          <span id="${expandId}-arrow" style="font-size:9px;color:var(--hint);margin-right:5px;display:inline-block;transition:transform .15s">▶</span>
           <span style="font-size:12px;color:var(--ink)">${entry.code}</span>
-          ${entry.subcategory ? '<span style="font-size:10px;color:var(--hint);margin-left:6px">' + entry.subcategory + '</span>' : ''}
-          <span style="font-size:10px;color:var(--blue);margin-left:6px">${entry.items.length} item${entry.items.length !== 1 ? 's' : ''}</span>
+          ${entry.subcategory && entry.subcategory !== entry.code ? '<span style="font-size:10px;color:var(--hint);margin-left:6px">' + entry.subcategory + '</span>' : ''}
           ${commentChip(rowKey)}
         </td>
         ${monthCapexCols}
@@ -681,8 +643,7 @@ async function _render(container) {
         <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
           ${isSale ? '+' : '-'}${fC(amt)}
         </td>
-      </tr>
-      ${itemRowsHtml}`
+      </tr>`;
   }).join('');
 
   // ── Pre-compute HTML blocks (avoid ESM nested-template-literal parse issues)
@@ -892,7 +853,6 @@ async function _render(container) {
     </div>
   `;
 
-  // (CAPEX rows use inline onclick expand — no delegated handler needed)
 }
 
 // ── Commodity detail modal ─────────────────────────────────────────────────────
@@ -1272,8 +1232,26 @@ window._mgmtXeroMapping = async function(farmId, season) {
       return;
     }
 
-    // blank option for "no explicit mapping — auto-match by name"
-    const blankOpt = '<option value="">— auto-match by name —</option>';
+    // Fuzzy name matcher — same logic as makeLineMatcher in the report render,
+    // used here to show which Xero account each line auto-resolves to.
+    const normStr = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    const normAccounts = xeroAccounts.map(a => ({ ...a, _norm: normStr(a.Name) }));
+    const fuzzyMatch = (description) => {
+      const dNorm = normStr(description);
+      let hit = normAccounts.find(a => a._norm === dNorm);
+      if (hit) return hit;
+      hit = normAccounts.find(a => a._norm.includes(dNorm) || dNorm.includes(a._norm));
+      if (hit) return hit;
+      const dWords = dNorm.split(' ').filter(w => w.length > 2);
+      if (dWords.length) {
+        hit = normAccounts.find(a => {
+          const matches = dWords.filter(w => a._norm.includes(w));
+          return matches.length >= Math.ceil(dWords.length / 2);
+        });
+        if (hit) return hit;
+      }
+      return null;
+    };
 
     // Group by category for display
     const catLabels = { labour: 'Labour & Farm Management', overhead: 'Overheads', rm: 'Repairs & Maintenance', fund_mgmt: 'Fund Management' };
@@ -1289,12 +1267,18 @@ window._mgmtXeroMapping = async function(farmId, season) {
       const lines = byCategory[catKey] || [];
       if (!lines.length) return '';
       const rowsHtml = lines.map((c, idx) => {
-        const mapping = mappingIndex[c.description];
-        const savedId = mapping?.xero_account_name ? '' : (mapping?.xero_account_id || '');
-        // Find the Xero account matching the current mapping for display
-        const currentAccount = xeroAccounts.find(a => a.AccountID === mapping?.xero_account_id);
-        const currentName    = currentAccount?.Name || mapping?.xero_account_name || '';
-        const selectedId     = mapping?.xero_account_id || '';
+        const mapping    = mappingIndex[c.description];
+        const selectedId = mapping?.xero_account_id || '';
+
+        // Show what the fuzzy matcher would pick when no explicit mapping is saved
+        const autoMatch  = fuzzyMatch(c.description);
+        const blankLabel = autoMatch
+          ? `— ${autoMatch.Name}${autoMatch.Code ? ' (' + autoMatch.Code + ')' : ''} (auto)`
+          : '— no auto-match found —';
+        const blankOpt = `<option value="">${blankLabel}</option>`;
+
+        const statusText  = selectedId ? '✓ Mapped' : (autoMatch ? '~ Auto' : '✗ No match');
+        const statusColor = selectedId ? 'var(--green)' : (autoMatch ? 'var(--hint)' : 'var(--red)');
 
         return `<tr style="border-bottom:1px solid var(--border,#e5e7eb)">
           <td style="padding:8px 12px;font-size:12px;color:var(--ink);min-width:180px;max-width:220px">${c.description}</td>
@@ -1304,8 +1288,8 @@ window._mgmtXeroMapping = async function(farmId, season) {
               ${xeroAccounts.map(a => `<option value="${a.AccountID}" data-name="${(a.Name || '').replace(/"/g, '&quot;')}"${a.AccountID === selectedId ? ' selected' : ''}>${a.Code ? a.Code + ' – ' : ''}${a.Name}</option>`).join('')}
             </select>
           </td>
-          <td style="padding:8px 12px;font-size:11px;color:${selectedId ? 'var(--green)' : 'var(--hint)'};white-space:nowrap" class="xmap-status-${idx}-${catKey}">
-            ${selectedId ? '✓ Mapped' : '— auto'}
+          <td style="padding:8px 12px;font-size:11px;color:${statusColor};white-space:nowrap">
+            ${statusText}
           </td>
         </tr>`;
       }).join('');
