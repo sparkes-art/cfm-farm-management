@@ -54,7 +54,11 @@ export async function mountManagementReport(container) {
     sel.value = _selectedMonth || '';
     sel.addEventListener('change', () => {
       _selectedMonth = sel.value || null;
-      _render(container);
+      _render(container).catch(e => {
+        console.error('[MgmtReport] render error on month change:', e);
+        const body = qs('#mgmt-body', container);
+        if (body) body.innerHTML = `<div style="color:var(--red);font-size:13px;padding:24px">Error loading: ${e.message}</div>`;
+      });
     });
   }
 
@@ -62,7 +66,16 @@ export async function mountManagementReport(container) {
   qs('#mgmt-xero-map-btn', container)?.addEventListener('click', () => {
     if (farm && season) window._mgmtXeroMapping(farm.id, season);
   });
-  await _render(container);
+  try {
+    await _render(container);
+  } catch (e) {
+    console.error('[MgmtReport] render error:', e);
+    const body = qs('#mgmt-body', container);
+    if (body) body.innerHTML = `<div style="color:var(--red);font-size:13px;padding:24px">
+      Error loading management report: ${e.message}<br>
+      <span style="color:var(--hint);font-size:11px">Check browser console for details. Try refreshing the page.</span>
+    </div>`;
+  }
 }
 
 // Build month options: season start to current month (or end of season)
@@ -650,8 +663,10 @@ async function _render(container) {
           ${isSale ? '+' : '-'}${fC(amt / 12)}
         </td>` : '';
 
+    // Use a data attribute to avoid & and quote issues inside an HTML onclick attribute
+    const safeKey   = codeKey.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     const labelHtml = isClickable
-      ? `<span onclick="window._mgmtCapexDetail(${JSON.stringify(codeKey)})"
+      ? `<span data-capex-key="${safeKey}"
              style="font-size:12px;color:var(--ink);font-weight:500;text-decoration:underline;
                     text-underline-offset:2px;cursor:pointer">${codeKey}</span>`
       : `<span style="font-size:12px;color:var(--ink);font-weight:500">${codeKey}</span>`;
@@ -884,6 +899,12 @@ async function _render(container) {
     </div>
 
   `;
+
+  // Wire up CAPEX detail clicks via event delegation (avoids & encoding issues in onclick attributes)
+  body.addEventListener('click', e => {
+    const span = e.target.closest('[data-capex-key]');
+    if (span) window._mgmtCapexDetail(span.dataset.capexKey);
+  });
 
 }
 
