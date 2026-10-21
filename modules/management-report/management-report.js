@@ -524,7 +524,7 @@ async function _render(container) {
                   <td style="${td};font-weight:700">Total fixed costs${xeroActuals ? ` <span style="font-size:10px;font-weight:400;color:var(--hint)">(Xero actuals)</span>` : ''}</td>
                   <td style="${tdR};color:var(--red);font-weight:700">${xeroActuals ? '-' + fC(totalFixedActual) : '—'}</td>
                   <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget * ytdFraction)}</td>
-                  <td style="${tdR};font-weight:700">${xeroActuals ? (() => { const v = (totalFixedBudget * ytdFraction) - totalFixedActual; const pct = totalFixedBudget * ytdFraction ? v / (totalFixedBudget * ytdFraction) * 100 : null; return `<span style="color:${v>=0?'var(--green)':'var(--red)'};font-weight:700">${v>=0?'+':''}${fC(v)}${pct!=null?` (${pct>=0?'+':''}${pct.toFixed(0)}%)`:''}}</span>`; })() : '—'}</td>
+                  <td style="${tdR};font-weight:700">${xeroActuals ? (() => { const v = (totalFixedBudget * ytdFraction) - totalFixedActual; const pct = totalFixedBudget * ytdFraction ? v / (totalFixedBudget * ytdFraction) * 100 : null; return `<span style="color:${v>=0?'var(--green)':'var(--red)'};font-weight:700">${v>=0?'+':''}${fC(v)}${pct!=null?` (${pct>=0?'+':''}${pct.toFixed(0)}%)`:''}</span>`; })() : '—'}</td>
                   <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
                 </tr>` : ''}
 
@@ -551,7 +551,7 @@ async function _render(container) {
                   <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">${netLabel}</td>
                   <td style="${tdR};font-weight:700;color:var(--blue)">${actualNet !== null ? fC(actualNet) : '—'}</td>
                   <td style="${tdR};font-weight:700;color:var(--blue)">${fC(budgetNetYTD)}</td>
-                  <td style="${tdR};font-weight:700">${netVariance !== null ? (() => { const pct = budgetNetYTD ? netVariance/budgetNetYTD*100 : null; return `<span style="color:${netVariance>=0?'var(--green)':'var(--red)'};font-weight:700">${netVariance>=0?'+':''}${fC(netVariance)}${pct!=null?` (${pct>=0?'+':''}${pct.toFixed(0)}%)`:''}}</span>`; })() : '—'}</td>
+                  <td style="${tdR};font-weight:700">${netVariance !== null ? (() => { const pct = budgetNetYTD ? netVariance/budgetNetYTD*100 : null; return `<span style="color:${netVariance>=0?'var(--green)':'var(--red)'};font-weight:700">${netVariance>=0?'+':''}${fC(netVariance)}${pct!=null?` (${pct>=0?'+':''}${pct.toFixed(0)}%)`:''}</span>`; })() : '—'}</td>
                   <td style="${tdR};font-weight:700;color:var(--blue)">${fC(budgetNetFY)}</td>
                 </tr>`;
               })()}
