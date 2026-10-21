@@ -208,7 +208,7 @@ exports.handler = async (event) => {
       let pages  = 0;
       const MAX_PAGES = 50; // safety ceiling (~5000 journals)
 
-      console.log(`[xero-account-txns] fetching Journals for accountId=${accountId} ${fromDate}→${toDate}`);
+      console.log(`[xero-account-txns] fetching Journals for accountId=${accountId} ${fromDate}→${toDate} tenantId=${tenantId} tokenPrefix=${accessToken?.slice(0,12)}`);
 
       while (!done && pages < MAX_PAGES) {
         const jUrl = `https://api.xero.com/api.xro/2.0/Journals?offset=${offset}`;
