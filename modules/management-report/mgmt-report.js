@@ -353,8 +353,16 @@ async function _render(container) {
   const budgetForGroup = (g, opts = {}) => {
     if (!g.budgets.length) return { bIncome: null, bYTD: null, bMonth: null, bArea: null, bYield: null, bProd: null, bPrice: null };
     if (opts.carryOver) {
-      const bIncome = g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_gross_revenue) || bField(b, 'price', 'budgeted_price') * (parseFloat(b.budgeted_production) || bField(b, 'yield_per_ha', 'budgeted_yield_per_ha') * (parseFloat(b.area_ha) || 0)) || 0), 0) || null;
-      return { bIncome, bYTD: bIncome != null ? bIncome * ytdFraction : null, bMonth: bIncome != null ? bIncome / 12 : null, bArea: null, bYield: null, bProd: null, bPrice: null };
+      const bIncome = g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_gross_revenue) || 0), 0) || null;
+      // For carryover rows imported from budget Excel:
+      //   budgeted_yield_per_ha stores the production quantity (units sold),
+      //   budgeted_price stores the implied $/unit price (total ÷ units).
+      // Both are null for old-format rows without a Units column.
+      const bProd  = g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_yield_per_ha) || 0), 0) || null;
+      const bPrice = g.budgets.some(b => parseFloat(b.budgeted_price))
+        ? g.budgets.reduce((s, b) => s + bField(b, 'price', 'budgeted_price'), 0) / g.budgets.filter(b => parseFloat(b.budgeted_price)).length
+        : null;
+      return { bIncome, bYTD: bIncome != null ? bIncome * ytdFraction : null, bMonth: bIncome != null ? bIncome / 12 : null, bArea: null, bYield: null, bProd, bPrice };
     }
     const bArea   = g.budgets.reduce((s, b) => s + (parseFloat(b.area_ha) || 0), 0);
     const bYield  = bArea
@@ -978,6 +986,13 @@ window._mgmtOpenModal = function(d) {
   const avgPrice = (totalQty && totalInc) ? totalInc / totalQty : null;
 
   const budgetSection = d.isLs ? '' : d.carryOver ? `
+    ${(d.bProd != null || d.bPrice != null) ? `
+    ${sectionHdr('Budget')}
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--border)">
+      ${stat('Production', d.bProd  != null ? fN(d.bProd) + ' ' + d.unit                        : '—')}
+      ${stat('Avg price',  d.bPrice != null ? '$' + fN(d.bPrice, 2) + '/' + d.unit              : '—')}
+      ${stat('Budget',     d.bIncome != null ? fC(d.bIncome) : '—')}
+    </div>` : ''}
     ${sectionHdr('Actual')}
     <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--border)">
       ${stat('Qty sold',  totalQty ? fN(totalQty, 2) + ' ' + d.unit : '—')}

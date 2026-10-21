@@ -142,6 +142,100 @@ function _findHeaderRow(rows, signals, maxScan = 15) {
   return best.rowIdx >= 0 ? best : null;
 }
 
+// ── Carryover income section parser ──────────────────────────────────────
+// Scans a sheet (typically a cashflow sheet like "OT - Master Cashflow") for
+// a section headed "INCOME FROM PRIOR YEAR CROPS" (case-insensitive).
+// In that section the "Units" column contains production quantity (e.g. 4658 t),
+// NOT a unit label, so we compute budgeted_price = total / units_qty.
+//
+// Returns an array of budget rows, same shape as _parseRevenueSheet output,
+// with budgeted_production and budgeted_price populated.
+function _parseCarryOverSection(rows, financialYear, farmId) {
+  const SECTION_SIGNAL = /income.*prior.*year|prior.*year.*crop|carryover.*income|carry.?over.*crop/i;
+
+  // Find the row index of the section header
+  let sectionStart = -1;
+  for (let i = 0; i < rows.length; i++) {
+    const rowText = rows[i].map(str).join(' ');
+    if (SECTION_SIGNAL.test(rowText)) {
+      sectionStart = i;
+      break;
+    }
+  }
+  if (sectionStart === -1) return [];
+
+  // Find the header row within the next ~5 rows (contains Units / Total columns)
+  let headerIdx = -1;
+  let headers = [];
+  for (let i = sectionStart; i < Math.min(sectionStart + 6, rows.length); i++) {
+    const row = rows[i].map(str);
+    // Look for a row that has a column labelled 'units' (case-insensitive)
+    if (row.some(c => /^units?$/i.test(c.trim()))) {
+      headerIdx = i;
+      headers = row;
+      break;
+    }
+  }
+
+  // If no explicit header row with 'Units', build one from the section header row itself:
+  // The section header row may already have column labels in later cells
+  if (headerIdx === -1) {
+    const sRow = rows[sectionStart].map(str);
+    if (sRow.some(c => /^units?$/i.test(c.trim()))) {
+      headerIdx = sectionStart;
+      headers = sRow;
+    } else {
+      // Can't parse without knowing which column is Units
+      return [];
+    }
+  }
+
+  const nameCol  = headers.findIndex((h, i) => i === 0 || /^(enterprise|commodity|crop|item|description)$/i.test(h.trim())) ;
+  // Prefer col 0 for name if it's unlabelled (typical cashflow layout)
+  const actualNameCol = nameCol >= 0 ? nameCol : 0;
+
+  const unitsCol = headers.findIndex(h => /^units?$/i.test(h.trim()));
+  const totalCol = _colIndex(headers, 'total', 'revenue', 'budget', 'income', 'gross', '$');
+
+  if (unitsCol === -1 || totalCol === -1) return [];
+
+  const parsed = [];
+
+  // Read data rows until we hit another section header (ALL-CAPS row with no total) or end of sheet
+  for (let i = headerIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.every(c => c == null || str(c) === '')) continue;
+
+    const name = str(row[actualNameCol]);
+    if (!name) continue;
+
+    // Stop at next section header (ALL CAPS, no numeric total)
+    if (name === name.toUpperCase() && name.length > 3 && !str(row[totalCol])) break;
+    if (/^total|^sub.?total|^grand/i.test(name)) continue;
+
+    const total = num(row[totalCol]);
+    if (!total || total <= 0) continue;
+
+    const unitsQty = num(row[unitsCol]);
+    const impliedPrice = (unitsQty && unitsQty > 0) ? total / unitsQty : null;
+
+    parsed.push({
+      farm_id: farmId,
+      season:  financialYear,
+      commodity: name,
+      area_ha: null,
+      // Store production qty in budgeted_yield_per_ha (no yield-per-ha for carryover rows)
+      // so it's available in the management report without a schema change.
+      budgeted_yield_per_ha: unitsQty || null,
+      budgeted_price: impliedPrice,
+      budgeted_gross_revenue: total,
+      notes: 'carryover',
+    });
+  }
+
+  return parsed;
+}
+
 // ── Revenue sheet parser ──────────────────────────────────────────────────
 function _parseRevenueSheet(rows, financialYear, farmId) {
   const hdr = _findHeaderRow(rows, REVENUE_HEADER_SIGNALS);
@@ -360,6 +454,28 @@ export async function parseBudgetExcel(file) {
     revenueRows.push(...revResult.rows);
     costRows.push(...costResult.rows);
     allWarnings.push(...revResult.warnings, ...costResult.warnings);
+  }
+
+  // Scan ALL sheets (including unclassified cashflow sheets) for carryover income sections.
+  // This handles workbooks where prior-year income lives in a master cashflow sheet
+  // that doesn't match any revenue keyword (e.g. "OT - Master Cashflow").
+  // We deduplicate by commodity name so a carryover row doesn't double-count if it
+  // also appeared on a recognised revenue sheet.
+  const existingCarryOverCommodities = new Set(
+    revenueRows.filter(r => r.notes === 'carryover').map(r => (r.commodity || '').toLowerCase())
+  );
+  for (const name of sheetNames) {
+    const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null });
+    const carryRows = _parseCarryOverSection(rows, financialYear || 'UNKNOWN', farm.id);
+    for (const r of carryRows) {
+      if (!existingCarryOverCommodities.has((r.commodity || '').toLowerCase())) {
+        revenueRows.push(r);
+        existingCarryOverCommodities.add((r.commodity || '').toLowerCase());
+      }
+    }
+    if (carryRows.length) {
+      console.log(`[budget-import] ${name}: found ${carryRows.length} carryover income rows`);
+    }
   }
 
   return {
