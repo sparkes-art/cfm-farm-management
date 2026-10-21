@@ -9,7 +9,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BASE_URL = 'https://profound-tiramisu-8b956e.netlify.app';
 const REDIRECT_URI = `${BASE_URL}/xero/callback`;
-const SCOPES = 'openid profile email accounting.invoices accounting.invoices.read accounting.contacts accounting.contacts.read accounting.settings.read accounting.reports.profitandloss.read accounting.banktransactions.read accounting.manualjournals.read accounting.journals.read offline_access';
+const SCOPES = 'openid profile email accounting.transactions accounting.invoices accounting.invoices.read accounting.contacts accounting.contacts.read accounting.settings.read accounting.reports.profitandloss.read accounting.banktransactions.read accounting.manualjournals.read offline_access';
 
 // Maps CFM farm_id → keywords that should appear in the Xero tenant name.
 // Used to auto-select the right org when multiple orgs are returned after auth.
