@@ -1223,7 +1223,7 @@ window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, 
     const total = txns.reduce((s, t) => s + (t.amount || 0), 0);
 
     const typeLabel = t => {
-      const map = { ACCPAY: 'Bill', ACCREC: 'Invoice', SPEND: 'Bank spend', RECEIVE: 'Bank receive', MANJOURNAL: 'Journal', CASHREC: 'Cash receipt', CASHPAID: 'Cash payment' };
+      const map = { ACCPAY: 'Bill', ACCREC: 'Invoice', SPEND: 'Bank spend', RECEIVE: 'Bank receive', MANJOURNAL: 'Journal', MANUALJOURNAL: 'Journal', CASHREC: 'Cash receipt', CASHPAID: 'Cash payment' };
       return map[t] || t || '—';
     };
 

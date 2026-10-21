@@ -212,18 +212,41 @@ exports.handler = async (event) => {
 
     console.log(`[xero-account-txns] resolvedCode="${resolvedCode}" accountId="${accountId}" tenantId="${tenantId}"`);
 
-    // Run ACCPAY, ACCREC, and BankTransactions in parallel
-    const [accpayInvoices, accrecInvoices, bankTxnsRaw] = await Promise.all([
+    // ── Helper: fetch manual journals ────────────────────────────────────────
+    const fetchManualJournals = async () => {
+      const results = [];
+      let page = 1;
+      while (true) {
+        const url = new URL('https://api.xero.com/api.xro/2.0/ManualJournals');
+        url.searchParams.set('Status',   'POSTED');
+        url.searchParams.set('DateFrom', fromDate);
+        url.searchParams.set('DateTo',   toDate);
+        url.searchParams.set('page',     page);
+        const data = await xeroGet(url.toString(), accessToken, tenantId);
+        const journals = data?.ManualJournals || [];
+        results.push(...journals);
+        if (journals.length < 100) break;
+        page++;
+        if (page > 20) break;
+      }
+      return results;
+    };
+
+    // Run ACCPAY, ACCREC, BankTransactions, and ManualJournals in parallel
+    const [accpayInvoices, accrecInvoices, bankTxnsRaw, manualJournalsRaw] = await Promise.all([
       fetchInvoicePages('ACCPAY'),
       fetchInvoicePages('ACCREC'),
       fetchBankTxnPages().catch(err => {
-        // BankTransactions may not be in scope — log and return empty
         console.warn('[xero-account-txns] BankTransactions fetch failed:', err.message);
+        return [];
+      }),
+      fetchManualJournals().catch(err => {
+        console.warn('[xero-account-txns] ManualJournals fetch failed:', err.message);
         return [];
       }),
     ]);
 
-    console.log(`[xero-account-txns] fetched: ACCPAY=${accpayInvoices.length} ACCREC=${accrecInvoices.length} BankTxns=${bankTxnsRaw.length}`);
+    console.log(`[xero-account-txns] fetched: ACCPAY=${accpayInvoices.length} ACCREC=${accrecInvoices.length} BankTxns=${bankTxnsRaw.length} ManualJournals=${manualJournalsRaw.length}`);
 
     // Log a sample of what account codes/IDs we're seeing in the data
     const sampleInv = accpayInvoices[0];
@@ -311,6 +334,41 @@ exports.handler = async (event) => {
           debit:       signedAmt > 0 ? signedAmt  : 0,
           credit:      signedAmt < 0 ? -signedAmt : 0,
           amount:      signedAmt,
+        });
+      }
+    }
+
+    // ── Process manual journals ───────────────────────────────────────────────
+    for (const mj of manualJournalsRaw) {
+      const mjDate = parseXeroDate(mj.Date);
+      if (mjDate && (mjDate < fromDate || mjDate > toDate)) continue;
+
+      const ref = mj.Narration || mj.ManualJournalID || '';
+
+      for (const line of (mj.JournalLines || [])) {
+        const lineAcctId   = line.AccountID   || '';
+        const lineAcctCode = line.AccountCode || '';
+
+        const matchedById   = accountId    && lineAcctId   === accountId;
+        const matchedByCode = resolvedCode && lineAcctCode === resolvedCode;
+        if (!matchedById && !matchedByCode) continue;
+
+        const lineAmt = parseFloat(line.LineAmount) || 0;
+        if (lineAmt === 0) continue;
+
+        const dedupKey = mj.ManualJournalID + '|' + (line.Description || '') + '|' + lineAmt;
+        if (seenKeys.has(dedupKey)) continue;
+        seenKeys.add(dedupKey);
+
+        transactions.push({
+          date:        mjDate,
+          type:        'MANUALJOURNAL',
+          contact:     '',
+          reference:   ref,
+          description: line.Description || '',
+          debit:       lineAmt > 0 ? lineAmt  : 0,
+          credit:      lineAmt < 0 ? -lineAmt : 0,
+          amount:      lineAmt,
         });
       }
     }
