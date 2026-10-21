@@ -1,7 +1,7 @@
 // modules/paddocks/paddocks.js
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
-import { getActiveFarm, canWrite } from '../../js/app-state.js';
-import { toast, openModal, formatNumber, qs } from '../../js/ui.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1792559266387';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792559266387';
+import { toast, openModal, formatNumber, qs } from '../../js/ui.js?v=1792559266387';
 
 const MAPBOX_TOKEN = window.__CFM_MAPBOX_TOKEN || '';
 
@@ -450,7 +450,7 @@ function _importModal(container, farm) {
       if (status) status.textContent = 'Sending ' + parsedPaddocks.length + ' paddocks to server...';
       if (bar) bar.style.width = '30%';
       try {
-        const { getSession } = await import('../../js/supabase-client.js');
+        const { getSession } = await import('../../js/supabase-client.js?v=1792559266387');
         const session = getSession();
         const res = await fetch('/api/import-paddocks', {
           method: 'POST',

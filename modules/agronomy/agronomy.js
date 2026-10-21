@@ -1,10 +1,10 @@
 // modules/agronomy/agronomy.js
 // CFM Agronomy Module — Paddocks, Map, Visits & Recommendations, Spray Records
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
-import { mountAgronomyVisits, unmountAgronomyVisits } from './agronomy-visits.js';
-import { getActiveFarm, getActiveSeason } from '../../js/app-state.js';
-import { toast, openModal, formatDate } from '../../js/ui.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1792559266387';
+import { mountAgronomyVisits, unmountAgronomyVisits } from './agronomy-visits.js?v=1792559266387';
+import { getActiveFarm, getActiveSeason } from '../../js/app-state.js?v=1792559266387';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1792559266387';
 
 // ── Constants ─────────────────────────────────────────────────
 

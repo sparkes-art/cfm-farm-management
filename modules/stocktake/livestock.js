@@ -1,9 +1,9 @@
 // modules/stocktake/livestock.js
 // Livestock stocktake — mob ledger, movement entry, opening balances
 
-import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js';
-import { getActiveFarm, canWrite } from '../../js/app-state.js';
-import { toast, openModal, qs } from '../../js/ui.js';
+import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1792559266387';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792559266387';
+import { toast, openModal, qs } from '../../js/ui.js?v=1792559266387';
 
 export async function mountLivestock(container, initialPeriod) {
   const farm = getActiveFarm();

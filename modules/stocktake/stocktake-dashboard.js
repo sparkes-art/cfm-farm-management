@@ -1,9 +1,9 @@
 // modules/stocktake/stocktake-dashboard.js
 // Period dashboard — the control centre for the monthly stocktake
 
-import { dbSelect, dbInsert, dbUpdate } from '../../js/supabase-client.js';
-import { getActiveFarm, canWrite } from '../../js/app-state.js';
-import { formatDate, qs, toast, openModal } from '../../js/ui.js';
+import { dbSelect, dbInsert, dbUpdate } from '../../js/supabase-client.js?v=1792559266387';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792559266387';
+import { formatDate, qs, toast, openModal } from '../../js/ui.js?v=1792559266387';
 
 export function unmountStocktakeDashboard() {}
 
@@ -336,7 +336,7 @@ async function _navigateTo(section, container) {
     const farm = getActiveFarm();
     const periods = await dbSelect('stock_periods', `farm_id=eq.${farm.id}&status=in.(open,review)&order=period_start.desc&limit=1`);
     const period = periods[0] || null;
-    const { mountLivestock } = await import('./livestock.js');
+    const { mountLivestock } = await import('./livestock.js?v=1792559266387');
 
     // Wrap with back button
     const wrap = qs('#stk-dash', container) || container;

@@ -1,9 +1,9 @@
 // modules/water/water.js
 // Water entitlement and usage management
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js';
-import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, currentSeason } from '../../js/ui.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1792559266387';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1792559266387';
+import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, currentSeason } from '../../js/ui.js?v=1792559266387';
 
 let _activeTab = 'dashboard';
 let _sources = [];

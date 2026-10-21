@@ -1,10 +1,10 @@
 // modules/outputs/invoices.js
 // Full invoice management — contract sales, cash sales, line items, deductions
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1783290066771';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1783290066771';
-import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1783290066771';
-import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1783290066771';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1792559266387';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1792559266387';
+import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1792559266387';
+import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1792559266387';
 
 let _invoices = [];
 let _contracts = [];

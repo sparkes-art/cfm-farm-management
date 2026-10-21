@@ -1,9 +1,9 @@
 // modules/agronomy/agronomy-visits.js
 // Agronomy visit list and editor — replaces the Numbers/iPad template
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js';
-import { toast, openModal, formatDate, qs } from '../../js/ui.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1792559266387';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1792559266387';
+import { toast, openModal, formatDate, qs } from '../../js/ui.js?v=1792559266387';
 
 // ── Crop template definitions ─────────────────────────────────
 // Loaded from DB but cached here for performance
