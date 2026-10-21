@@ -5,7 +5,7 @@
 // Revenue actuals from CFM invoices; cost actuals from Xero P&L.
 // Line-level comments per row + month, tracked by user and timestamp.
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1792559266387';
+import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1792559266387';
 import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1792559266387';
 import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1792559266387';
 
@@ -34,6 +34,7 @@ export async function mountManagementReport(container) {
               <option value="">Full YTD</option>
             </select>
           </div>
+          <button class="btn btn-ghost btn-sm" id="mgmt-xero-map-btn" title="Map budget cost lines to Xero accounts">⚙ Xero mapping</button>
           ${canWrite() ? '<button class="btn btn-ghost btn-sm" id="mgmt-comment-btn">+ Season note</button>' : ''}
         </div>
       </div>
@@ -58,6 +59,9 @@ export async function mountManagementReport(container) {
   }
 
   qs('#mgmt-comment-btn', container)?.addEventListener('click', () => _addSeasonComment(container));
+  qs('#mgmt-xero-map-btn', container)?.addEventListener('click', () => {
+    if (farm && season) window._mgmtXeroMapping(farm.id, season);
+  });
   await _render(container);
 }
 
@@ -135,14 +139,23 @@ async function _render(container) {
 
   // ── Data fetch ─────────────────────────────────────────────────────────────
   const monthFilter = _selectedMonth ? '&month=eq.' + _selectedMonth : '&month=is.null';
-  const [contracts, allInvoices, budgets, budgetCosts, allComments] = await Promise.all([
+  const [contracts, allInvoices, budgets, budgetCosts, allComments, xeroMappings] = await Promise.all([
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
     dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.asc'),
     dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     dbSelect('budget_costs', 'farm_id=eq.' + farm.id + '&financial_year=eq.' + season + '&select=*').catch(() => []),
     // Load ALL comments for this farm+season (both season-level and line-level, all months)
     dbSelect('management_comments', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*,user_profiles(full_name)&order=created_at.desc').catch(() => []),
+    // Xero account mappings for this farm + season (explicit cost-line → Xero account UUID)
+    dbSelect('xero_account_mappings', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*').catch(() => []),
   ]);
+
+  // Index mappings by cfm_description for O(1) lookup
+  // key: description → { xero_account_id, xero_account_name }
+  const xeroMappingIndex = {};
+  (xeroMappings || []).forEach(m => {
+    xeroMappingIndex[m.cfm_description] = { xero_account_id: m.xero_account_id, xero_account_name: m.xero_account_name };
+  });
 
   // Partition comments
   const seasonComments = allComments.filter(c => !c.row_key); // no row_key = season-level note
@@ -190,12 +203,24 @@ async function _render(container) {
 
   // ── Xero line-level matcher factories ──────────────────────────────────────
   // Returns { amount, accountID, accountName } or null
+  // Priority: explicit mapping (xero_account_mappings) → exact name → fuzzy name
   const makeLineMatcher = (accounts) => {
     if (!accounts) return () => null;
     const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
     const normAccounts = accounts.map(a => ({ ...a, _norm: norm(a.name) }));
     const mkResult = a => ({ amount: a.amount, accountID: a.accountID || '', accountName: a.name });
     return (description) => {
+      // 1. Check explicit mapping first — use stored Xero account UUID to match
+      const mapping = xeroMappingIndex[description];
+      if (mapping) {
+        // Find the account in Xero results by UUID
+        const mapped = normAccounts.find(a => a.accountID === mapping.xero_account_id);
+        if (mapped) return mkResult(mapped);
+        // Mapping exists but no matching Xero account in this P&L — accumulate under the stored name
+        // (this can happen if the account had zero spend; return null so it shows — from total only)
+      }
+
+      // 2. Fuzzy name match fallback
       const dNorm = norm(description);
       let hit = normAccounts.find(a => a._norm === dNorm);
       if (hit) return mkResult(hit);
@@ -525,10 +550,14 @@ async function _render(container) {
         : '—';
 
       const rowKey        = 'cost:' + cat.key + ':' + c.description;
+      // Prefer explicit mapping's accountId for drilldown — it's the correct Xero UUID even if fuzzy matched to wrong account
+      const explicitMapping = xeroMappingIndex[c.description];
+      const drillAccountId  = explicitMapping?.xero_account_id || lineAccountID;
+      const drillAcctName   = explicitMapping?.xero_account_name || lineAcctName;
       // Show drilldown whenever we have a Xero actual — use accountID if available, fall back to name-based lookup
       const canDrill      = lineAct !== null;
       const drillClick    = canDrill
-        ? 'onclick="window._mgmtXeroTxns(\'' + farm.id + '\',\'' + lineAccountID.replace(/'/g, '') + '\',\'' + lineAcctName.replace(/'/g, '') + '\',\'' + (xeroYtdFrom || '') + '\',\'' + (xeroYtdTo || '') + '\')"'
+        ? 'onclick="window._mgmtXeroTxns(\'' + farm.id + '\',\'' + drillAccountId.replace(/'/g, '') + '\',\'' + drillAcctName.replace(/'/g, '') + '\',\'' + (xeroYtdFrom || '') + '\',\'' + (xeroYtdTo || '') + '\')"'
         : '';
       const drillTitle    = canDrill ? ' title="Click to see Xero transactions"' : '';
 
@@ -586,12 +615,14 @@ async function _render(container) {
   }
 
   let totalCapexBudget = 0;
+  let _capexExpandId = 0;
   const capexRows = [...capexByCode.values()].map(entry => {
     const amt    = Math.abs(entry.total);
     const isSale = entry.total < 0;
     totalCapexBudget += entry.total;
-    const modalData = JSON.stringify({ code: entry.code, subcategory: entry.subcategory || 'Capital Expenditure', items: entry.items.map(i => ({ desc: i.description, amt: parseFloat(i.budget_amount) || 0, notes: i.notes })) }).replace(/"/g, '&quot;');
-    const rowKey = 'capex:' + entry.code;
+    const rowKey   = 'capex:' + entry.code;
+    const expandId = 'capex-items-' + (++_capexExpandId);
+    const colCount = _selectedMonth ? 7 : 5;
 
     const monthCapexCols = _selectedMonth ? `
         <td style="${tdR};color:var(--hint)">—</td>
@@ -599,12 +630,46 @@ async function _render(container) {
           ${isSale ? '+' : '-'}${fC(amt / 12)}
         </td>` : '';
 
+    // Sub-rows: one per item inside this CAPEX code — hidden until expanded
+    const itemRowsHtml = entry.items.map(i => {
+      const iAmt   = parseFloat(i.budget_amount) || 0;
+      const iAbs   = Math.abs(iAmt);
+      const iSale  = iAmt < 0;
+      const notes  = (i.notes || '').trim();
+      const monthItemCols = _selectedMonth ? `<td colspan="2" style="${tdR};color:var(--hint)">—</td>` : '';
+      return `
+        <tr class="${expandId}-item" style="display:none;background:#fafbff">
+          <td style="${td};padding-left:52px">
+            <span style="font-size:11px;font-weight:600;color:var(--ink)">${i.description || '—'}</span>
+            ${notes ? '<div style="font-size:10px;color:var(--hint);margin-top:1px;line-height:1.3">' + notes.replace(/</g,'&lt;') + '</div>' : ''}
+          </td>
+          ${monthItemCols}
+          <td style="${tdR};color:var(--hint)">—</td>
+          <td style="${tdR};font-size:11px;color:${iSale ? 'var(--green)' : 'var(--red)'}">
+            ${iSale ? '+' : '-'}${fC(iAbs * ytdFraction)}
+          </td>
+          <td style="${tdR}">—</td>
+          <td style="${tdR};font-size:11px;color:${iSale ? 'var(--green)' : 'var(--red)'}">
+            ${iSale ? '+' : '-'}${fC(iAbs)}
+          </td>
+        </tr>`;
+    }).join('');
+
     return `
-      <tr style="cursor:pointer" data-capex-modal="${modalData}" title="Click to see budget items">
+      <tr style="cursor:pointer" title="Click to expand items" onclick="
+        (function(id){
+          var rows = document.querySelectorAll('.' + id + '-item');
+          var arrow = document.getElementById(id + '-arrow');
+          var open = rows.length && rows[0].style.display !== 'none';
+          rows.forEach(function(r){ r.style.display = open ? 'none' : ''; });
+          if(arrow) arrow.textContent = open ? '▶' : '▼';
+        })('${expandId}')
+      ">
         <td style="${td};padding-left:28px">
+          <span id="${expandId}-arrow" style="font-size:9px;color:var(--hint);margin-right:5px;display:inline-block;transition:transform .15s">▶</span>
           <span style="font-size:12px;color:var(--ink)">${entry.code}</span>
-          <span style="font-size:10px;color:var(--hint);margin-left:6px">${entry.subcategory || ''}</span>
-          <span style="font-size:10px;color:var(--blue);margin-left:6px">↗ ${entry.items.length} item${entry.items.length !== 1 ? 's' : ''}</span>
+          ${entry.subcategory ? '<span style="font-size:10px;color:var(--hint);margin-left:6px">' + entry.subcategory + '</span>' : ''}
+          <span style="font-size:10px;color:var(--blue);margin-left:6px">${entry.items.length} item${entry.items.length !== 1 ? 's' : ''}</span>
           ${commentChip(rowKey)}
         </td>
         ${monthCapexCols}
@@ -616,7 +681,8 @@ async function _render(container) {
         <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
           ${isSale ? '+' : '-'}${fC(amt)}
         </td>
-      </tr>`;
+      </tr>
+      ${itemRowsHtml}`
   }).join('');
 
   // ── Pre-compute HTML blocks (avoid ESM nested-template-literal parse issues)
@@ -826,11 +892,7 @@ async function _render(container) {
     </div>
   `;
 
-  // Delegated click handler for CAPEX drilldown rows
-  body.addEventListener('click', e => {
-    const row = e.target.closest('[data-capex-modal]');
-    if (row) window._mgmtOpenCapexModal(row.dataset.capexModal);
-  });
+  // (CAPEX rows use inline onclick expand — no delegated handler needed)
 }
 
 // ── Commodity detail modal ─────────────────────────────────────────────────────
@@ -916,60 +978,6 @@ window._mgmtOpenModal = function(d) {
 
   document.body.appendChild(modal);
   modal.querySelector('#mgmt-modal-close').onclick = () => modal.remove();
-  modal.onclick = e => { if (e.target === modal) modal.remove(); };
-};
-
-// ── CAPEX drilldown modal ──────────────────────────────────────────────────────
-window._mgmtOpenCapexModal = function(dataStr) {
-  const fC = v => v == null ? '—' : Math.abs(v).toLocaleString('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 0, maximumFractionDigits: 0 });
-  let d;
-  try { d = JSON.parse(dataStr); } catch (e) { console.error('[CAPEX modal] parse error:', e, dataStr); return; }
-
-  const totalAmt = d.items.reduce((s, i) => s + (i.amt || 0), 0);
-  const isSale   = totalAmt < 0;
-  const rows = d.items.map(item => {
-    const itemIsSale = item.amt < 0;
-    return '<tr style="border-bottom:0.5px solid var(--border-light,#eee)">' +
-      '<td style="padding:8px 18px;font-size:12px;color:var(--ink)">' + item.desc + '</td>' +
-      '<td style="padding:8px 18px;text-align:right;font-size:12px;font-weight:600;color:' + (itemIsSale ? '#16a34a' : 'var(--red,#dc2626)') + '">' + (itemIsSale ? '+' : '-') + fC(item.amt) + '</td>' +
-      '<td style="padding:8px 18px;font-size:11px;color:var(--hint)">' + (item.notes || '') + '</td>' +
-      '</tr>';
-  }).join('');
-
-  const modal = document.createElement('div');
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
-  modal.innerHTML = `
-    <div style="background:#fff;border-radius:10px;width:100%;max-width:600px;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-      <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
-        <div>
-          <div style="font-size:15px;font-weight:700;color:var(--ink)">${d.code}</div>
-          <div style="font-size:11px;color:var(--hint);margin-top:2px">${d.subcategory} · Total: ${isSale ? '+' : '-'}${fC(totalAmt)}</div>
-        </div>
-        <button id="capex-modal-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--hint)">✕</button>
-      </div>
-      <table style="width:100%;border-collapse:collapse">
-        <thead>
-          <tr style="border-bottom:1px solid var(--border);background:var(--page-bg,#f8fafc)">
-            <th style="padding:8px 18px;text-align:left;font-size:11px;color:var(--hint);font-weight:500">Item</th>
-            <th style="padding:8px 18px;text-align:right;font-size:11px;color:var(--hint);font-weight:500">Budget</th>
-            <th style="padding:8px 18px;font-size:11px;color:var(--hint);font-weight:500">Source</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-        <tfoot>
-          <tr style="border-top:2px solid var(--border);background:var(--page-bg,#f8fafc)">
-            <td style="padding:10px 18px;font-weight:700;font-size:13px">Total</td>
-            <td style="padding:10px 18px;text-align:right;font-weight:700;font-size:13px;color:${isSale ? '#16a34a' : 'var(--red,#dc2626)'}">
-              ${isSale ? '+' : '-'}${fC(totalAmt)}
-            </td>
-            <td></td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>`;
-
-  document.body.appendChild(modal);
-  modal.querySelector('#capex-modal-close').onclick = () => modal.remove();
   modal.onclick = e => { if (e.target === modal) modal.remove(); };
 };
 
@@ -1193,6 +1201,201 @@ window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, 
   } catch (e) {
     body.innerHTML = '<div style="color:var(--red);font-size:13px;padding:8px">Error loading transactions: ' + e.message + '</div>';
     console.error('[mgmt xero txns]', e);
+  }
+};
+
+// ── Xero account mapping modal ─────────────────────────────────────────────────
+// Opens a modal listing all budget cost lines for the farm+season.
+// For each line the user can pick the correct Xero account from a dropdown.
+// Saves to xero_account_mappings table (farm_id + season + cfm_description → Xero UUID).
+// Changes take effect on next report render.
+window._mgmtXeroMapping = async function(farmId, season) {
+  const fmtAccountOption = (a) =>
+    `<option value="${a.AccountID}" data-name="${(a.Name || '').replace(/"/g, '&quot;')}">${a.Code ? a.Code + ' – ' : ''}${a.Name}${a.Class ? ' (' + a.Class + ')' : ''}</option>`;
+
+  // Build modal with loading state
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;width:100%;max-width:780px;max-height:90vh;overflow:auto;box-shadow:0 24px 70px rgba(0,0,0,.35)">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:1">
+        <div>
+          <div style="font-size:15px;font-weight:700;color:var(--ink)">Xero Account Mapping</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:2px">Season ${season} · Map each cost line to the correct Xero account</div>
+        </div>
+        <button id="xmap-close" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--hint);line-height:1">✕</button>
+      </div>
+      <div id="xmap-body" style="padding:24px">
+        <div style="text-align:center;color:var(--hint);font-size:13px;padding:32px 0">Loading Xero accounts and budget lines…</div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(modal);
+  modal.querySelector('#xmap-close').onclick = () => modal.remove();
+  modal.onclick = e => { if (e.target === modal) modal.remove(); };
+
+  const body = modal.querySelector('#xmap-body');
+
+  try {
+    // Fetch Xero chart of accounts + existing mappings + budget cost lines in parallel
+    const [xeroRes, mappingsArr, costsArr] = await Promise.all([
+      fetch('/.netlify/functions/xero-accounts?farm_id=' + encodeURIComponent(farmId)),
+      dbSelect('xero_account_mappings', 'farm_id=eq.' + farmId + '&season=eq.' + encodeURIComponent(season) + '&select=*').catch(() => []),
+      dbSelect('budget_costs', 'farm_id=eq.' + farmId + '&financial_year=eq.' + encodeURIComponent(season) + '&select=*').catch(() => []),
+    ]);
+
+    const xeroData = await xeroRes.json();
+
+    if (!xeroData.ok) {
+      body.innerHTML = `<div style="color:var(--red);font-size:13px;padding:16px">Could not load Xero accounts: ${xeroData.error || 'Unknown error'}<br><br><span style="color:var(--hint)">Ensure Xero is connected for this farm in Farm Settings.</span></div>`;
+      return;
+    }
+
+    const xeroAccounts = xeroData.accounts || [];
+
+    if (!xeroAccounts.length) {
+      body.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:16px;text-align:center">No Xero accounts found for this farm.</div>';
+      return;
+    }
+
+    // Build existing mapping index: description → { xero_account_id, xero_account_name }
+    const mappingIndex = {};
+    (mappingsArr || []).forEach(m => {
+      mappingIndex[m.cfm_description] = { xero_account_id: m.xero_account_id, xero_account_name: m.xero_account_name };
+    });
+
+    // Filter to non-capex cost lines (the ones shown in fixed costs section)
+    const fixedCosts = (costsArr || []).filter(c => c.category !== 'capex');
+
+    if (!fixedCosts.length) {
+      body.innerHTML = '<div style="color:var(--hint);font-size:13px;padding:16px;text-align:center">No budget cost lines found for this farm and season.</div>';
+      return;
+    }
+
+    // blank option for "no explicit mapping — auto-match by name"
+    const blankOpt = '<option value="">— auto-match by name —</option>';
+
+    // Group by category for display
+    const catLabels = { labour: 'Labour & Farm Management', overhead: 'Overheads', rm: 'Repairs & Maintenance', fund_mgmt: 'Fund Management' };
+    const byCategory = {};
+    fixedCosts.forEach(c => {
+      const cat = c.category || 'overhead';
+      if (!byCategory[cat]) byCategory[cat] = [];
+      byCategory[cat].push(c);
+    });
+
+    // Render rows
+    const catHtml = Object.entries(catLabels).map(([catKey, catLabel]) => {
+      const lines = byCategory[catKey] || [];
+      if (!lines.length) return '';
+      const rowsHtml = lines.map((c, idx) => {
+        const mapping = mappingIndex[c.description];
+        const savedId = mapping?.xero_account_name ? '' : (mapping?.xero_account_id || '');
+        // Find the Xero account matching the current mapping for display
+        const currentAccount = xeroAccounts.find(a => a.AccountID === mapping?.xero_account_id);
+        const currentName    = currentAccount?.Name || mapping?.xero_account_name || '';
+        const selectedId     = mapping?.xero_account_id || '';
+
+        return `<tr style="border-bottom:1px solid var(--border,#e5e7eb)">
+          <td style="padding:8px 12px;font-size:12px;color:var(--ink);min-width:180px;max-width:220px">${c.description}</td>
+          <td style="padding:8px 12px">
+            <select data-desc="${c.description.replace(/"/g, '&quot;')}" class="xmap-select form-select" style="width:100%;font-size:11px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:white;max-width:400px">
+              ${blankOpt}
+              ${xeroAccounts.map(a => `<option value="${a.AccountID}" data-name="${(a.Name || '').replace(/"/g, '&quot;')}"${a.AccountID === selectedId ? ' selected' : ''}>${a.Code ? a.Code + ' – ' : ''}${a.Name}</option>`).join('')}
+            </select>
+          </td>
+          <td style="padding:8px 12px;font-size:11px;color:${selectedId ? 'var(--green)' : 'var(--hint)'};white-space:nowrap" class="xmap-status-${idx}-${catKey}">
+            ${selectedId ? '✓ Mapped' : '— auto'}
+          </td>
+        </tr>`;
+      }).join('');
+
+      return `
+        <tr><td colspan="3" style="padding:10px 12px 4px;font-size:11px;font-weight:700;color:var(--hint);text-transform:uppercase;letter-spacing:.05em;background:var(--page-bg,#f8fafc)">${catLabel}</td></tr>
+        ${rowsHtml}`;
+    }).join('');
+
+    body.innerHTML = `
+      <p style="font-size:12px;color:var(--hint);margin:0 0 16px">
+        Select a Xero account for each cost line. When mapped, the drilldown will pull transactions
+        from that exact account rather than using automatic name matching.
+        Changes apply from the next time you load the management report.
+      </p>
+      <table style="width:100%;border-collapse:collapse;border:1px solid var(--border,#e5e7eb);border-radius:8px;overflow:hidden">
+        <thead>
+          <tr style="background:var(--page-bg,#f8fafc);border-bottom:1px solid var(--border)">
+            <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Budget line</th>
+            <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Xero account</th>
+            <th style="padding:8px 12px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint)">Status</th>
+          </tr>
+        </thead>
+        <tbody>${catHtml}</tbody>
+      </table>
+      <div style="margin-top:16px;display:flex;align-items:center;justify-content:flex-end;gap:10px">
+        <button id="xmap-cancel" class="btn btn-ghost btn-sm">Cancel</button>
+        <button id="xmap-save"   class="btn btn-primary btn-sm">Save mappings</button>
+      </div>
+      <div id="xmap-msg" style="margin-top:8px;font-size:12px;text-align:right;min-height:16px"></div>`;
+
+    modal.querySelector('#xmap-cancel').onclick = () => modal.remove();
+
+    modal.querySelector('#xmap-save').onclick = async () => {
+      const saveBtn = modal.querySelector('#xmap-save');
+      const msgEl   = modal.querySelector('#xmap-msg');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      msgEl.style.color = 'var(--hint)';
+      msgEl.textContent = '';
+
+      const selects = modal.querySelectorAll('.xmap-select');
+      const upserts = [];
+
+      selects.forEach(sel => {
+        const desc    = sel.dataset.desc;
+        const acctId  = sel.value;
+        const opt     = sel.options[sel.selectedIndex];
+        const acctName = acctId ? (opt?.dataset?.name || opt?.textContent || '') : '';
+        // Always upsert — even blank (clears the mapping)
+        upserts.push({
+          farm_id:            farmId,
+          season,
+          cfm_description:    desc,
+          xero_account_id:    acctId || null,
+          xero_account_name:  acctName || null,
+          updated_at:         new Date().toISOString(),
+        });
+      });
+
+      // Only save rows that have a selection (skip blanks that were never set)
+      const toSave = upserts.filter(u => u.xero_account_id !== null);
+
+      try {
+        if (toSave.length) {
+          await dbUpsert('xero_account_mappings', toSave, 'farm_id,season,cfm_description');
+        }
+
+        // Delete rows where the user cleared the selection
+        const toClear = upserts.filter(u => u.xero_account_id === null).map(u => u.cfm_description);
+        for (const desc of toClear) {
+          await dbDeleteWhere('xero_account_mappings', 'farm_id=eq.' + farmId + '&season=eq.' + encodeURIComponent(season) + '&cfm_description=eq.' + encodeURIComponent(desc));
+        }
+
+        msgEl.style.color = 'var(--green)';
+        msgEl.textContent = `✓ ${toSave.length} mapping${toSave.length !== 1 ? 's' : ''} saved. Reload the report to apply changes.`;
+        saveBtn.textContent = 'Saved ✓';
+        saveBtn.disabled = false;
+      } catch (e) {
+        msgEl.style.color   = 'var(--red)';
+        msgEl.textContent   = 'Error: ' + e.message;
+        saveBtn.textContent = 'Save mappings';
+        saveBtn.disabled    = false;
+        console.error('[xero-mapping]', e);
+      }
+    };
+
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--red);font-size:13px;padding:16px">Error loading mapping data: ${e.message}</div>`;
+    console.error('[xero-mapping]', e);
   }
 };
 
