@@ -298,8 +298,8 @@ async function _render(container) {
         </td>
         <td style="${tdR};color:${inv.totalIncome ? 'var(--green)' : 'var(--hint)'};font-weight:600">${inv.totalIncome ? fC(inv.totalIncome) : '—'}</td>
         <td style="${tdR}">${inv.totalIncome && bYTD != null ? fC(bYTD) : '—'}</td>
-        <td style="${tdR}">${bIncome != null ? fC(bIncome) : '—'}</td>
         <td style="${tdR}">${inv.totalIncome ? varAmt(inv.totalIncome, bYTD) : '<span style="color:var(--hint)">—</span>'}</td>
+        <td style="${tdR}">${bIncome != null ? fC(bIncome) : '—'}</td>
       </tr>
     `;
     return { html, bIncome: bIncome || 0, bYTD: bYTD || 0, actual: inv.totalIncome };
@@ -324,8 +324,8 @@ async function _render(container) {
         <td style="${td};font-weight:600;font-size:11px;padding-left:16px;color:var(--hint)">${label} total</td>
         <td style="${tdR};color:var(--green);font-weight:600">${secActual ? fC(secActual) : '—'}</td>
         <td style="${tdR};font-weight:600">${secActual && secBudgetYTD ? fC(secBudgetYTD) : '—'}</td>
-        <td style="${tdR};font-weight:600">${secBudget ? fC(secBudget) : '—'}</td>
         <td style="${tdR}">${secActual ? varAmt(secActual, secBudgetYTD) : '<span style="color:var(--hint)">—</span>'}</td>
+        <td style="${tdR};font-weight:600">${secBudget ? fC(secBudget) : '—'}</td>
       </tr>`;
     return secRow(label) + rowsHtml + subtotal;
   };
@@ -378,35 +378,51 @@ async function _render(container) {
         const lineVarStyle = lineVar !== null
           ? (lineVar >= 0 ? 'color:var(--green)' : 'color:var(--red)')
           : '';
+        const lineVarPct = (lineVar !== null && amtYTD) ? (lineVar / amtYTD * 100) : null;
+        const lineVarLabel = lineVar !== null
+          ? `${lineVar >= 0 ? '+' : ''}${fC(lineVar)}${lineVarPct !== null ? ` (${lineVarPct >= 0 ? '+' : ''}${lineVarPct.toFixed(0)}%)` : ''}`
+          : '—';
         return `
         <tr>
           <td style="${td};padding-left:28px;font-size:11px;color:var(--hint)">${c.description}</td>
           <td style="${tdR};color:var(--red);font-size:11px">${lineAct !== null ? '-' + fC(lineAct) : '—'}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amtYTD)}</td>
+          <td style="${tdR};font-size:11px">${lineVar !== null ? `<span style="${lineVarStyle};font-weight:600">${lineVarLabel}</span>` : '—'}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amt)}</td>
-          <td style="${tdR};font-size:11px">${lineVar !== null ? `<span style="${lineVarStyle};font-weight:600">${lineVar >= 0 ? '+' : ''}${fC(lineVar)}</span>` : '—'}</td>
         </tr>`;
       }).join('')}
+      ${(() => {
+        const catYTD = catTotal * ytdFraction;
+        const catVarPct = (catVariance !== null && catYTD) ? (catVariance / catYTD * 100) : null;
+        const catVarLabel = catVariance !== null
+          ? `${catVariance >= 0 ? '+' : ''}${fC(catVariance)}${catVarPct !== null ? ` (${catVarPct >= 0 ? '+' : ''}${catVarPct.toFixed(0)}%)` : ''}`
+          : '—';
+        return `
       <tr style="background:var(--page-bg)">
         <td style="${td};padding-left:20px;font-weight:600;font-size:12px">${cat.label} total</td>
         <td style="${tdR};color:var(--red);font-weight:600">${catActual !== null ? '-' + fC(catActual) : '—'}</td>
-        <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal * ytdFraction)}</td>
+        <td style="${tdR};color:var(--red);font-weight:600">-${fC(catYTD)}</td>
+        <td style="${tdR};font-weight:600">${catVariance !== null ? `<span style="${varStyle};font-weight:600">${catVarLabel}</span>` : '—'}</td>
         <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal)}</td>
-        <td style="${tdR};font-weight:600">${catVariance !== null ? `<span style="${varStyle};font-weight:600">${catVariance >= 0 ? '+' : ''}${fC(catVariance)}</span>` : '—'}</td>
       </tr>`;
+      })()}
   }).join('');
 
   // ── CAPEX from budget_costs (category='capex') ────────────────────────────
   const capexCosts = budgetCosts.filter(c => c.category === 'capex');
 
-  // Group by budget_code to show code-level rows (clickable for drilldown)
+  // Group by subcategory first, then budget_code as fallback
+  // This ensures items with the same code but different subcategories show as separate rows
   const capexByCode = new Map();
   for (const c of capexCosts) {
-    const code = c.budget_code || 'UNALLOCATED';
-    if (!capexByCode.has(code)) {
-      capexByCode.set(code, { code, subcategory: c.subcategory, items: [], total: 0 });
+    const subcat = (c.subcategory || '').trim();
+    const code   = (c.budget_code || '').trim();
+    // Key: prefer subcategory if present, otherwise fall back to code, then description
+    const key = subcat || code || c.description || 'UNALLOCATED';
+    if (!capexByCode.has(key)) {
+      capexByCode.set(key, { code: code || subcat || 'CAPEX', subcategory: subcat, items: [], total: 0 });
     }
-    const entry = capexByCode.get(code);
+    const entry = capexByCode.get(key);
     entry.items.push(c);
     entry.total += parseFloat(c.budget_amount) || 0;
   }
@@ -435,10 +451,10 @@ async function _render(container) {
         <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
           ${isSale ? '+' : '-'}${fC(amt * ytdFraction)}
         </td>
+        <td style="${tdR}">—</td>
         <td style="${tdR};font-size:12px;color:${isSale ? 'var(--green)' : 'var(--red)'}">
           ${isSale ? '+' : '-'}${fC(amt)}
         </td>
-        <td style="${tdR}">—</td>
       </tr>`;
   }).join('');
 
@@ -484,8 +500,8 @@ async function _render(container) {
               <th style="${th};text-align:left;min-width:220px"></th>
               <th style="${thR}">Actual YTD</th>
               <th style="${thR}">Budget YTD</th>
-              <th style="${thR}">Full yr budget</th>
               <th style="${thR}">Variance</th>
+              <th style="${thR}">Full yr budget</th>
             </tr>
           </thead>
           <tbody>
@@ -496,8 +512,8 @@ async function _render(container) {
               <td style="${td};font-weight:700">Total income</td>
               <td style="${tdR};color:var(--green);font-weight:700;font-size:13px">${fC(grandActual)}</td>
               <td style="${tdR};font-weight:700">${fC(grandBudgetYTD)}</td>
-              <td style="${tdR};font-weight:700">${fC(grandBudget)}</td>
               <td style="${tdR}">${varAmt(grandActual, grandBudgetYTD)}</td>
+              <td style="${tdR};font-weight:700">${fC(grandBudget)}</td>
             </tr>
 
             ${budgetCosts.length ? `
@@ -508,8 +524,8 @@ async function _render(container) {
                   <td style="${td};font-weight:700">Total fixed costs${xeroActuals ? ` <span style="font-size:10px;font-weight:400;color:var(--hint)">(Xero actuals)</span>` : ''}</td>
                   <td style="${tdR};color:var(--red);font-weight:700">${xeroActuals ? '-' + fC(totalFixedActual) : '—'}</td>
                   <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget * ytdFraction)}</td>
+                  <td style="${tdR};font-weight:700">${xeroActuals ? (() => { const v = (totalFixedBudget * ytdFraction) - totalFixedActual; const pct = totalFixedBudget * ytdFraction ? v / (totalFixedBudget * ytdFraction) * 100 : null; return `<span style="color:${v>=0?'var(--green)':'var(--red)'};font-weight:700">${v>=0?'+':''}${fC(v)}${pct!=null?` (${pct>=0?'+':''}${pct.toFixed(0)}%)`:''}}</span>`; })() : '—'}</td>
                   <td style="${tdR};color:var(--red);font-weight:700">-${fC(totalFixedBudget)}</td>
-                  <td style="${tdR};font-weight:700">${xeroActuals ? (() => { const v = (totalFixedBudget * ytdFraction) - totalFixedActual; return `<span style="color:${v>=0?'var(--green)':'var(--red)'};font-weight:700">${v>=0?'+':''}${fC(v)}</span>`; })() : '—'}</td>
                 </tr>` : ''}
 
               ${capexRows.trim() ? `
@@ -519,8 +535,8 @@ async function _render(container) {
                   <td style="${td};font-weight:700">Total capex</td>
                   <td style="${tdR};color:var(--hint)">—</td>
                   <td style="${tdR};color:var(--red);font-weight:700">-${fC(Math.abs(totalCapexBudget) * ytdFraction)}</td>
-                  <td style="${tdR};color:var(--red);font-weight:700">-${fC(Math.abs(totalCapexBudget))}</td>
                   <td style="${tdR};color:var(--hint)">—</td>
+                  <td style="${tdR};color:var(--red);font-weight:700">-${fC(Math.abs(totalCapexBudget))}</td>
                 </tr>` : ''}
 
               <!-- Net income -->
@@ -535,8 +551,8 @@ async function _render(container) {
                   <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">${netLabel}</td>
                   <td style="${tdR};font-weight:700;color:var(--blue)">${actualNet !== null ? fC(actualNet) : '—'}</td>
                   <td style="${tdR};font-weight:700;color:var(--blue)">${fC(budgetNetYTD)}</td>
+                  <td style="${tdR};font-weight:700">${netVariance !== null ? (() => { const pct = budgetNetYTD ? netVariance/budgetNetYTD*100 : null; return `<span style="color:${netVariance>=0?'var(--green)':'var(--red)'};font-weight:700">${netVariance>=0?'+':''}${fC(netVariance)}${pct!=null?` (${pct>=0?'+':''}${pct.toFixed(0)}%)`:''}}</span>`; })() : '—'}</td>
                   <td style="${tdR};font-weight:700;color:var(--blue)">${fC(budgetNetFY)}</td>
-                  <td style="${tdR};font-weight:700">${netVariance !== null ? `<span style="color:${netVariance>=0?'var(--green)':'var(--red)'};font-weight:700">${netVariance>=0?'+':''}${fC(netVariance)}</span>` : '—'}</td>
                 </tr>`;
               })()}
             ` : `
@@ -545,8 +561,8 @@ async function _render(container) {
                 <td style="${td};font-weight:700;font-size:13px;color:var(--blue)">Net income (income only)</td>
                 <td style="${tdR};color:var(--blue);font-weight:700;font-size:13px">${fC(grandActual)}</td>
                 <td style="${tdR};font-weight:700">${fC(grandBudgetYTD)}</td>
-                <td style="${tdR};font-weight:700">${fC(grandBudget)}</td>
                 <td style="${tdR}">${varAmt(grandActual, grandBudgetYTD)}</td>
+                <td style="${tdR};font-weight:700">${fC(grandBudget)}</td>
               </tr>
             `}
           </tbody>
