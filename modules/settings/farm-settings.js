@@ -206,6 +206,18 @@ export async function mountFarmSettings(container, onSave) {
         <hr class="divider">
 
         <div class="form-group">
+          <label class="form-label">Financial year start month</label>
+          <select class="form-select" id="fs-year-start-month" style="max-width:200px">
+            ${['January','February','March','April','May','June','July','August','September','October','November','December'].map((m, i) =>
+              `<option value="${i + 1}" ${(settings.yearStartMonth || 7) === i + 1 ? 'selected' : ''}>${m}</option>`
+            ).join('')}
+          </select>
+          <p class="form-helper">The first month of this farm's financial year. Used to calculate season-to-date ranges in the management report and Xero actuals. Most farms: July. Blackbull Station: October.</p>
+        </div>
+
+        <hr class="divider">
+
+        <div class="form-group">
           <label class="form-label">Cotton pricing region</label>
           <select class="form-select" id="fs-cotton-region" style="max-width:280px">
             <option value="">Not a cotton farm</option>
@@ -369,6 +381,11 @@ export async function mountFarmSettings(container, onSave) {
       if (!name) throw new Error('Farm name is required');
 
       const newSettings = { ...settings };
+
+      // Financial year start month
+      const yearStartMonth = parseInt(qs('#fs-year-start-month', container)?.value || '7', 10);
+      newSettings.yearStartMonth = yearStartMonth;
+
       if (cottonRegion) newSettings.cottonRegion = cottonRegion;
       else delete newSettings.cottonRegion;
 
