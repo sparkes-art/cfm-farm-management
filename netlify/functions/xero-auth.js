@@ -15,9 +15,9 @@ const SCOPES = 'openid profile email accounting.invoices accounting.contacts acc
 // Used to auto-select the right org when multiple orgs are returned after auth.
 // Case-insensitive partial match against tenantName.
 const FARM_TENANT_KEYWORDS = {
-  'farm_auski':     ['auski'],
-  'farm_blackbull': ['blackbull'],
-  'farm_merrowie':  ['merrowie'],
+  'farm_marapana_auski': ['auski'],
+  'farm_blackbull':      ['blackbull'],
+  'farm_merrowie':       ['merrowie'],
 };
 
 const sb = async (method, path, body = null) => {
