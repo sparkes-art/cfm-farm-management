@@ -81,7 +81,7 @@ function parseXeroDate(val) {
 }
 
 // ── Xero API helper ──────────────────────────────────────────────────────────
-async function xeroGet(url, accessToken, tenantId) {
+async function xeroGet(url, accessToken, tenantId, retries = 3) {
   const res = await fetch(url, {
     headers: {
       'Authorization':  `Bearer ${accessToken}`,
@@ -89,6 +89,13 @@ async function xeroGet(url, accessToken, tenantId) {
       'Accept':         'application/json',
     },
   });
+  if (res.status === 429 && retries > 0) {
+    // Respect Retry-After header if present, otherwise back off 2s → 4s → 8s
+    const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
+    const delay = retryAfter > 0 ? retryAfter * 1000 : (4 - retries) * 2000;
+    await new Promise(r => setTimeout(r, delay));
+    return xeroGet(url, accessToken, tenantId, retries - 1);
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Xero API error ${res.status}: ${text}`);

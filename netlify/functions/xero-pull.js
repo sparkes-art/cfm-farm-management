@@ -127,6 +127,27 @@ function categoriseAccount(code, name) {
 }
 
 // ── Xero P&L report fetcher ───────────────────────────────────────────────────
+async function xeroFetch(url, accessToken, tenantId, retries = 3) {
+  const res = await fetch(url, {
+    headers: {
+      'Authorization':   `Bearer ${accessToken}`,
+      'Xero-Tenant-Id':  tenantId,
+      'Accept':          'application/json',
+    },
+  });
+  if (res.status === 429 && retries > 0) {
+    const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
+    const delay = retryAfter > 0 ? retryAfter * 1000 : (4 - retries) * 2000;
+    await new Promise(r => setTimeout(r, delay));
+    return xeroFetch(url, accessToken, tenantId, retries - 1);
+  }
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Xero API error ${res.status}: ${errText}`);
+  }
+  return res.json();
+}
+
 async function fetchProfitAndLoss(accessToken, tenantId, fromDate, toDate) {
   const url = new URL('https://api.xero.com/api.xro/2.0/Reports/ProfitAndLoss');
   url.searchParams.set('fromDate', fromDate);
@@ -134,20 +155,7 @@ async function fetchProfitAndLoss(accessToken, tenantId, fromDate, toDate) {
   // Payments basis = cash; Accrual = invoice date basis. Accrual is more typical.
   url.searchParams.set('standardLayout', 'true');
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      'Authorization':   `Bearer ${accessToken}`,
-      'Xero-Tenant-Id':  tenantId,
-      'Accept':          'application/json',
-    },
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Xero P&L API error ${res.status}: ${errText}`);
-  }
-
-  return res.json();
+  return xeroFetch(url.toString(), accessToken, tenantId);
 }
 
 // ── Parse Xero P&L report rows ────────────────────────────────────────────────
