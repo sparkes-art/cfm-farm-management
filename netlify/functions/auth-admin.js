@@ -84,6 +84,30 @@ exports.handler = async (event) => {
     return { statusCode: 200, headers, body: JSON.stringify({ success: true, user_id: userId }) };
   }
 
+  // Update user profile (bypasses RLS — client PATCH is blocked by RLS policies)
+  if (action === 'update_user') {
+    const { user_id: uid, full_name, role, farm_access } = body;
+    if (!uid) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing user_id' }) };
+
+    const patch = {};
+    if (full_name !== undefined) patch.full_name = full_name;
+    if (role      !== undefined) patch.role       = role;
+    if (farm_access !== undefined) patch.farm_access = farm_access;
+
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/user_profiles?id=eq.${uid}`, {
+      method: 'PATCH',
+      headers: { ...serviceHeaders, 'Prefer': 'return=minimal' },
+      body: JSON.stringify(patch),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      return { statusCode: res.status, headers, body: JSON.stringify({ error: err }) };
+    }
+
+    return { statusCode: 200, headers, body: JSON.stringify({ success: true }) };
+  }
+
   if (action === 'reset_password') {
     if (!user_id || !password) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing user_id or password' }) };
 

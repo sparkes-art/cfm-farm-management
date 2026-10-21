@@ -1,7 +1,7 @@
 // modules/settings/users-settings.js
 // User management — list, add, edit, deactivate
 
-import { dbSelect, dbUpdate } from '../../js/supabase-client.js?v=1792559266387';
+import { dbSelect } from '../../js/supabase-client.js?v=1792559266387';
 import { getActiveFarm, getFarms } from '../../js/app-state.js?v=1792559266387';
 import { toast, openModal, qs, formatDate } from '../../js/ui.js?v=1792559266387';
 
@@ -273,11 +273,20 @@ async function _editUserModal(user, container) {
       const role = modal.querySelector('input[name="eu-role"]:checked')?.value;
       const farmAccess = _gatherFarmAccess(modal);
 
-      await dbUpdate('user_profiles', user.id, {
-        full_name: name,
-        role,
-        farm_access: farmAccess,
+      // Route through auth-admin Netlify function — direct PATCH is blocked by RLS
+      const res = await fetch('/api/auth-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_user',
+          user_id: user.id,
+          full_name: name,
+          role,
+          farm_access: farmAccess,
+        }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update user');
 
       toast('User updated', 'success');
       await _renderUsers(container);
