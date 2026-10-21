@@ -2,12 +2,13 @@
 // Returns individual transactions for one Xero account within a date range.
 //
 // GET /api/xero-account-txns?farm_id=farm_blackbull&account_id=UUID&from=2026-07-01&to=2026-10-21
-//   OR with name instead of UUID:
-// GET /api/xero-account-txns?farm_id=farm_blackbull&account_name=Hire+of+Plant&from=2026-07-01&to=2026-10-21
+//   OR with code or name instead of UUID:
+// GET /api/xero-account-txns?farm_id=farm_blackbull&account_code=410&from=2026-07-01&to=2026-10-21
 //
-// Strategy: uses accounting.invoices.read (bills = ACCPAY type) which is always in scope.
-// Fetches all approved bills in the date range, then filters line items to those
-// matching the target account by AccountID or account Code.
+// Strategy: uses Xero's Reports/AccountTransactions endpoint which filters server-side.
+// If accountId (UUID) is not known, resolves it from the Accounts list (one fast call),
+// then calls AccountTransactions with that UUID. Total: 1-2 API calls, not 10+.
+// This avoids the 60-second timeout caused by bulk-fetching all transactions.
 //
 // One Xero org per farm — token keyed to farm_id, no cross-farm access.
 
@@ -138,239 +139,111 @@ exports.handler = async (event) => {
   try {
     const { accessToken, tenantId } = await getAccessToken(farmId);
 
-    // ── Resolve accountID and code from name if not provided ─────────────────
-    // Skip name resolution if we already have accountId OR accountCode — saves one API roundtrip
-    let resolvedCode = accountCode;
-    if (!accountId && !accountCode && accountName) {
+    // ── Resolve accountID from name/code if needed ───────────────────────────
+    // We need accountId (UUID) to use the AccountTransactions report.
+    // If we only have accountCode, look it up from the Accounts list.
+    // This is ONE fast call vs fetching all transactions and filtering client-side.
+    if (!accountId) {
       const acctData = await xeroGet('https://api.xero.com/api.xro/2.0/Accounts', accessToken, tenantId);
       const norm     = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
-      const namNorm  = norm(accountName);
-      const match    = (acctData.Accounts || []).find(a =>
-        norm(a.Name) === namNorm ||
-        norm(a.Name).includes(namNorm) ||
-        namNorm.includes(norm(a.Name))
-      );
+      const accounts = acctData.Accounts || [];
+
+      let match = null;
+      if (accountCode) {
+        match = accounts.find(a => (a.Code || '') === accountCode);
+      }
+      if (!match && accountName) {
+        const namNorm = norm(accountName);
+        match = accounts.find(a => norm(a.Name) === namNorm)
+             || accounts.find(a => norm(a.Name).includes(namNorm) || namNorm.includes(norm(a.Name)));
+      }
       if (match) {
-        accountId    = match.AccountID;
-        accountName  = match.Name;
-        resolvedCode = match.Code || '';
-        console.log(`[xero-account-txns] resolved "${accountName}" → accountID=${accountId} code=${resolvedCode}`);
+        accountId   = match.AccountID;
+        accountName = match.Name;
+        console.log(`[xero-account-txns] resolved → accountID=${accountId} code=${match.Code} name="${match.Name}"`);
       } else {
-        console.warn(`[xero-account-txns] could not resolve accountID for name="${accountName}"`);
+        console.warn(`[xero-account-txns] could not resolve accountID for code="${accountCode}" name="${accountName}"`);
       }
     }
 
-    // ── Fetch transactions from multiple Xero sources in parallel ───────────────
-    // Xero P&L expense figures can come from:
-    //   1. Bills (ACCPAY invoices) — supplier invoices posted to expense accounts
-    //   2. Bank transactions (BankTransactions type=SPEND) — direct spend money entries
-    //   3. Sales invoices (ACCREC) — less common for expenses but possible
-    // Run all three in parallel (Promise.all) to avoid sequential timeouts.
-
-    // ── Helper: fetch all pages of an invoice type ────────────────────────────
-    const fetchInvoicePages = async (type) => {
-      const results = [];
-      let page = 1;
-      while (true) {
-        const url = new URL('https://api.xero.com/api.xro/2.0/Invoices');
-        url.searchParams.set('Type',     type);
-        url.searchParams.set('Statuses', 'AUTHORISED,PAID');
-        url.searchParams.set('DateFrom', fromDate);
-        url.searchParams.set('DateTo',   toDate);
-        url.searchParams.set('page',     page);
-        url.searchParams.set('unitdp',   '4');
-        const data     = await xeroGet(url.toString(), accessToken, tenantId);
-        const invoices = data?.Invoices || [];
-        results.push(...invoices);
-        if (invoices.length < 100) break;
-        page++;
-        if (page > 20) break;
-      }
-      return results;
-    };
-
-    // ── Helper: fetch all pages of bank transactions ──────────────────────────
-    const fetchBankTxnPages = async () => {
-      const results = [];
-      let page = 1;
-      while (true) {
-        const bUrl = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
-        bUrl.searchParams.set('Statuses', 'AUTHORISED');
-        bUrl.searchParams.set('DateFrom', fromDate);
-        bUrl.searchParams.set('DateTo',   toDate);
-        bUrl.searchParams.set('page',     page);
-        bUrl.searchParams.set('unitdp',   '4');
-        const bData = await xeroGet(bUrl.toString(), accessToken, tenantId);
-        const bTxns = bData?.BankTransactions || [];
-        results.push(...bTxns);
-        if (bTxns.length < 100) break;
-        page++;
-        if (page > 20) break;
-      }
-      return results;
-    };
-
-    console.log(`[xero-account-txns] resolvedCode="${resolvedCode}" accountId="${accountId}" tenantId="${tenantId}"`);
-
-    // ── Helper: fetch manual journals ────────────────────────────────────────
-    const fetchManualJournals = async () => {
-      const results = [];
-      let page = 1;
-      while (true) {
-        const url = new URL('https://api.xero.com/api.xro/2.0/ManualJournals');
-        url.searchParams.set('Status',   'POSTED');
-        url.searchParams.set('DateFrom', fromDate);
-        url.searchParams.set('DateTo',   toDate);
-        url.searchParams.set('page',     page);
-        const data = await xeroGet(url.toString(), accessToken, tenantId);
-        const journals = data?.ManualJournals || [];
-        results.push(...journals);
-        if (journals.length < 100) break;
-        page++;
-        if (page > 20) break;
-      }
-      return results;
-    };
-
-    // Run ACCPAY, ACCREC, BankTransactions, and ManualJournals in parallel
-    const [accpayInvoices, accrecInvoices, bankTxnsRaw, manualJournalsRaw] = await Promise.all([
-      fetchInvoicePages('ACCPAY'),
-      fetchInvoicePages('ACCREC'),
-      fetchBankTxnPages().catch(err => {
-        console.warn('[xero-account-txns] BankTransactions fetch failed:', err.message);
-        return [];
-      }),
-      fetchManualJournals().catch(err => {
-        console.warn('[xero-account-txns] ManualJournals fetch failed:', err.message);
-        return [];
-      }),
-    ]);
-
-    console.log(`[xero-account-txns] fetched: ACCPAY=${accpayInvoices.length} ACCREC=${accrecInvoices.length} BankTxns=${bankTxnsRaw.length} ManualJournals=${manualJournalsRaw.length}`);
-
-    // Log a sample of what account codes/IDs we're seeing in the data
-    const sampleInv = accpayInvoices[0];
-    if (sampleInv) {
-      console.log(`[xero-account-txns] sample ACCPAY invoice line codes: ${(sampleInv.LineItems||[]).map(l => `${l.AccountCode}/${l.AccountID}`).join(', ')}`);
-    }
-    const sampleBt = bankTxnsRaw[0];
-    if (sampleBt) {
-      console.log(`[xero-account-txns] sample BankTxn type=${sampleBt.Type} line codes: ${(sampleBt.LineItems||[]).map(l => `${l.AccountCode}/${l.AccountID}`).join(', ')}`);
-    }
-
+    // ── Fetch via AccountTransactions report — Xero filters server-side ──────
+    // This is ONE API call returning only transactions for this account.
+    // Much faster than fetching all invoices/bank-txns and filtering client-side.
     const transactions = [];
-    const seenKeys = new Set();
 
-    // ── Process invoices (ACCPAY + ACCREC) ───────────────────────────────────
-    for (const inv of [...accpayInvoices, ...accrecInvoices]) {
-      const invDate = parseXeroDate(inv.Date);
-      if (invDate && (invDate < fromDate || invDate > toDate)) continue;
+    if (accountId) {
+      const rUrl = new URL('https://api.xero.com/api.xro/2.0/Reports/AccountTransactions');
+      rUrl.searchParams.set('AccountID', accountId);
+      rUrl.searchParams.set('FromDate',  fromDate);
+      rUrl.searchParams.set('ToDate',    toDate);
 
-      const contact = inv.Contact?.Name || '';
-      const ref     = inv.Reference || inv.InvoiceNumber || '';
-      const invType = inv.Type;
+      console.log(`[xero-account-txns] fetching AccountTransactions report for accountId=${accountId}`);
+      const reportData = await xeroGet(rUrl.toString(), accessToken, tenantId);
+      const report     = reportData?.Reports?.[0];
 
-      for (const line of (inv.LineItems || [])) {
-        const lineAcctId   = line.AccountID   || '';
-        const lineAcctCode = line.AccountCode || '';
+      // Report rows: each row has Cells with transaction details
+      // Typical columns: Date, Source, Description, Reference, Debit, Credit, Balance
+      // (column order varies — find by header)
+      const headerRow = report?.Rows?.find(r => r.RowType === 'Header');
+      const headers   = (headerRow?.Cells || []).map(c => (c.Value || '').toLowerCase());
 
-        const matchedById   = accountId    && lineAcctId   === accountId;
-        const matchedByCode = resolvedCode && lineAcctCode === resolvedCode;
-        if (!matchedById && !matchedByCode) continue;
+      const iDate  = headers.indexOf('date');
+      const iSrc   = headers.findIndex(h => h.includes('source') || h.includes('type'));
+      const iDesc  = headers.findIndex(h => h.includes('description') || h.includes('reference') || h.includes('details'));
+      const iRef   = headers.findIndex(h => h.includes('reference'));
+      const iDebit = headers.findIndex(h => h.includes('debit'));
+      const iCred  = headers.findIndex(h => h.includes('credit'));
 
-        const lineAmt = parseFloat(line.LineAmount) || 0;
-        if (lineAmt === 0) continue;
+      console.log(`[xero-account-txns] report headers: ${JSON.stringify(headers)}`);
 
-        const dedupKey = inv.InvoiceID + '|' + (line.LineItemID || line.Description || '') + '|' + lineAmt;
-        if (seenKeys.has(dedupKey)) continue;
-        seenKeys.add(dedupKey);
+      for (const section of (report?.Rows || [])) {
+        if (section.RowType === 'Header' || section.RowType === 'SummaryRow') continue;
+        const rows = section.RowType === 'Section' ? (section.Rows || []) : [section];
+        for (const row of rows) {
+          if (row.RowType === 'SummaryRow' || row.RowType === 'Header') continue;
+          const cells = row.Cells || [];
+          if (!cells.length) continue;
 
-        transactions.push({
-          date:        invDate,
-          type:        invType,
-          contact,
-          reference:   ref,
-          description: line.Description || '',
-          debit:       lineAmt > 0 ? lineAmt  : 0,
-          credit:      lineAmt < 0 ? -lineAmt : 0,
-          amount:      lineAmt,
-        });
+          const val = (i) => (i >= 0 && cells[i] ? (cells[i].Value || '') : '');
+          const dateStr = val(iDate);
+          if (!dateStr || dateStr.toLowerCase() === 'date') continue; // skip header repeats
+
+          const parsedDate = (() => {
+            // Xero dates in reports come as "22 Oct 2026" or "2026-10-22"
+            const d = new Date(dateStr);
+            if (!isNaN(d)) return d.toISOString().slice(0, 10);
+            return null;
+          })();
+
+          const debitAmt  = parseFloat((val(iDebit) || '0').replace(/,/g, ''))  || 0;
+          const creditAmt = parseFloat((val(iCred)  || '0').replace(/,/g, ''))  || 0;
+          if (debitAmt === 0 && creditAmt === 0) continue;
+
+          const amount = debitAmt > 0 ? debitAmt : -creditAmt;
+          const src    = val(iSrc);
+          const desc   = val(iDesc);
+          const ref    = iRef >= 0 && iRef !== iDesc ? val(iRef) : '';
+
+          // Derive a type label from the source column
+          const typeMap = { 'Bill': 'ACCPAY', 'Invoice': 'ACCREC', 'Spend Money': 'SPEND', 'Receive Money': 'RECEIVE', 'Manual Journal': 'MANUALJOURNAL' };
+          const txnType = typeMap[src] || src || 'TXN';
+
+          transactions.push({
+            date:        parsedDate,
+            type:        txnType,
+            contact:     '',
+            reference:   ref,
+            description: desc,
+            debit:       debitAmt,
+            credit:      creditAmt,
+            amount,
+          });
+        }
       }
-    }
 
-    // ── Process bank transactions (SPEND / RECEIVE) ───────────────────────────
-    for (const bt of bankTxnsRaw) {
-      const btDate = parseXeroDate(bt.Date);
-      if (btDate && (btDate < fromDate || btDate > toDate)) continue;
-
-      const contact = bt.Contact?.Name || '';
-      const ref     = bt.Reference || '';
-      const btType  = bt.Type;
-
-      for (const line of (bt.LineItems || [])) {
-        const lineAcctId   = line.AccountID   || '';
-        const lineAcctCode = line.AccountCode || '';
-
-        const matchedById   = accountId    && lineAcctId   === accountId;
-        const matchedByCode = resolvedCode && lineAcctCode === resolvedCode;
-        if (!matchedById && !matchedByCode) continue;
-
-        const lineAmt = parseFloat(line.LineAmount) || 0;
-        if (lineAmt === 0) continue;
-
-        const dedupKey = bt.BankTransactionID + '|' + (line.LineItemID || line.Description || '') + '|' + lineAmt;
-        if (seenKeys.has(dedupKey)) continue;
-        seenKeys.add(dedupKey);
-
-        // SPEND = expense (positive amount), RECEIVE = income (show as negative)
-        const signedAmt = btType === 'RECEIVE' ? -lineAmt : lineAmt;
-
-        transactions.push({
-          date:        btDate,
-          type:        btType,
-          contact,
-          reference:   ref,
-          description: line.Description || '',
-          debit:       signedAmt > 0 ? signedAmt  : 0,
-          credit:      signedAmt < 0 ? -signedAmt : 0,
-          amount:      signedAmt,
-        });
-      }
-    }
-
-    // ── Process manual journals ───────────────────────────────────────────────
-    for (const mj of manualJournalsRaw) {
-      const mjDate = parseXeroDate(mj.Date);
-      if (mjDate && (mjDate < fromDate || mjDate > toDate)) continue;
-
-      const ref = mj.Narration || mj.ManualJournalID || '';
-
-      for (const line of (mj.JournalLines || [])) {
-        const lineAcctId   = line.AccountID   || '';
-        const lineAcctCode = line.AccountCode || '';
-
-        const matchedById   = accountId    && lineAcctId   === accountId;
-        const matchedByCode = resolvedCode && lineAcctCode === resolvedCode;
-        if (!matchedById && !matchedByCode) continue;
-
-        const lineAmt = parseFloat(line.LineAmount) || 0;
-        if (lineAmt === 0) continue;
-
-        const dedupKey = mj.ManualJournalID + '|' + (line.Description || '') + '|' + lineAmt;
-        if (seenKeys.has(dedupKey)) continue;
-        seenKeys.add(dedupKey);
-
-        transactions.push({
-          date:        mjDate,
-          type:        'MANUALJOURNAL',
-          contact:     '',
-          reference:   ref,
-          description: line.Description || '',
-          debit:       lineAmt > 0 ? lineAmt  : 0,
-          credit:      lineAmt < 0 ? -lineAmt : 0,
-          amount:      lineAmt,
-        });
-      }
+      console.log(`[xero-account-txns] AccountTransactions report: ${transactions.length} rows`);
+    } else {
+      console.warn(`[xero-account-txns] no accountId resolved — cannot fetch transactions`);
     }
 
     // Sort by date ascending
@@ -385,7 +258,7 @@ exports.handler = async (event) => {
         ok:           true,
         account_id:   accountId,
         account_name: accountName,
-        account_code: resolvedCode,
+        account_code: accountCode,
         from:         fromDate,
         to:           toDate,
         transactions,
