@@ -42,13 +42,16 @@ const sbPatch = async (path, body) => {
 };
 
 // ── Token management (mirrors xero-pull.js) ─────────────────────────────────
-async function getAccessToken(farmId) {
+async function getAccessToken(farmId, force = false) {
   const rows  = await sbGet(`xero_tokens?farm_id=eq.${farmId}&select=*`);
   const token = rows[0];
   if (!token) throw new Error('Xero not connected for this farm. Please connect in Farm Settings.');
 
   const expiresAt = new Date(token.expires_at);
-  if (expiresAt - Date.now() < 5 * 60 * 1000) {
+  const needsRefresh = force || (expiresAt - Date.now() < 5 * 60 * 1000);
+
+  if (needsRefresh) {
+    console.log(`[xero-account-txns] refreshing token for farm=${farmId} force=${force}`);
     const tokenRes = await fetch('https://identity.xero.com/connect/token', {
       method: 'POST',
       headers: {
@@ -57,7 +60,11 @@ async function getAccessToken(farmId) {
       },
       body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: token.refresh_token }).toString(),
     });
-    if (!tokenRes.ok) throw new Error('Xero token expired. Please reconnect in Farm Settings.');
+    if (!tokenRes.ok) {
+      const errText = await tokenRes.text();
+      console.error(`[xero-account-txns] token refresh failed ${tokenRes.status}: ${errText}`);
+      throw new Error('Xero token expired. Please reconnect in Farm Settings.');
+    }
     const refreshed = await tokenRes.json();
     await sbPatch(`xero_tokens?farm_id=eq.${farmId}`, {
       access_token:  refreshed.access_token,
@@ -82,7 +89,8 @@ function parseXeroDate(val) {
 }
 
 // ── Xero API helper ──────────────────────────────────────────────────────────
-async function xeroGet(url, accessToken, tenantId, retries = 3) {
+// onUnauthorized: optional async () => newAccessToken — called once on 401 to force-refresh
+async function xeroGet(url, accessToken, tenantId, retries = 3, onUnauthorized = null) {
   const res = await fetch(url, {
     headers: {
       'Authorization':  `Bearer ${accessToken}`,
@@ -95,7 +103,13 @@ async function xeroGet(url, accessToken, tenantId, retries = 3) {
     const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
     const delay = retryAfter > 0 ? retryAfter * 1000 : (4 - retries) * 2000;
     await new Promise(r => setTimeout(r, delay));
-    return xeroGet(url, accessToken, tenantId, retries - 1);
+    return xeroGet(url, accessToken, tenantId, retries - 1, onUnauthorized);
+  }
+  if (res.status === 401 && onUnauthorized) {
+    // Token was stale despite expires_at — force a refresh and retry once
+    console.warn('[xero-account-txns] got 401 — forcing token refresh and retrying');
+    const newToken = await onUnauthorized();
+    return xeroGet(url, newToken, tenantId, 0, null); // no further 401 retry
   }
   if (!res.ok) {
     const text = await res.text();
@@ -137,14 +151,21 @@ exports.handler = async (event) => {
   console.log(`[xero-account-txns] PARAMS: farm=${farmId} accountId="${accountId}" accountCode="${accountCode}" accountName="${accountName}" from=${fromDate} to=${toDate}`);
 
   try {
-    const { accessToken, tenantId } = await getAccessToken(farmId);
+    let { accessToken, tenantId } = await getAccessToken(farmId);
+
+    // Helper passed to xeroGet so it can force-refresh on 401 and retry
+    const forceRefresh = async () => {
+      const t = await getAccessToken(farmId, true);
+      accessToken = t.accessToken;
+      return accessToken;
+    };
 
     // ── Resolve accountID from name/code if needed ───────────────────────────
     // We need accountId (UUID) to use the AccountTransactions report.
     // If we only have accountCode, look it up from the Accounts list.
     // This is ONE fast call vs fetching all transactions and filtering client-side.
     if (!accountId) {
-      const acctData = await xeroGet('https://api.xero.com/api.xro/2.0/Accounts', accessToken, tenantId);
+      const acctData = await xeroGet('https://api.xero.com/api.xro/2.0/Accounts', accessToken, tenantId, 3, forceRefresh);
       const norm     = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
       const accounts = acctData.Accounts || [];
 
@@ -178,7 +199,7 @@ exports.handler = async (event) => {
       rUrl.searchParams.set('ToDate',    toDate);
 
       console.log(`[xero-account-txns] fetching AccountTransactions report for accountId=${accountId}`);
-      const reportData = await xeroGet(rUrl.toString(), accessToken, tenantId);
+      const reportData = await xeroGet(rUrl.toString(), accessToken, tenantId, 3, forceRefresh);
       const report     = reportData?.Reports?.[0];
 
       // Report rows: each row has Cells with transaction details
