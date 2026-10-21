@@ -528,10 +528,9 @@ async function _render(container) {
       // Show drilldown whenever we have a Xero actual — use accountID if available, fall back to name-based lookup
       const canDrill      = lineAct !== null;
       const drillClick    = canDrill
-        ? 'style="cursor:pointer" onclick="window._mgmtXeroTxns(\'' + farm.id + '\',\'' + lineAccountID.replace(/'/g, '') + '\',\'' + lineAcctName.replace(/'/g, '') + '\',\'' + (xeroYtdFrom || '') + '\',\'' + (xeroYtdTo || '') + '\')"'
+        ? 'onclick="window._mgmtXeroTxns(\'' + farm.id + '\',\'' + lineAccountID.replace(/'/g, '') + '\',\'' + lineAcctName.replace(/'/g, '') + '\',\'' + (xeroYtdFrom || '') + '\',\'' + (xeroYtdTo || '') + '\')"'
         : '';
-      const drillTitle    = canDrill ? ' title="Click to see Xero transactions ↗"' : '';
-      const drillIcon     = canDrill ? ' <span style="font-size:10px;color:var(--blue);opacity:.8">↗</span>' : '';
+      const drillTitle    = canDrill ? ' title="Click to see Xero transactions"' : '';
 
       const monthLineCols  = _selectedMonth ? `
           <td style="${tdR};color:var(--red);font-size:11px">${lineActMonth !== null ? '-' + fC(lineActMonth) : '—'}</td>
@@ -543,7 +542,7 @@ async function _render(container) {
             ${c.description}${commentChip(rowKey)}
           </td>
           ${monthLineCols}
-          <td ${drillClick} style="${tdR};color:var(--red);font-size:11px">${lineAct !== null ? '-' + fC(lineAct) + drillIcon : '—'}</td>
+          <td style="${tdR};color:var(--red);font-size:11px">${canDrill ? '<span ' + drillClick + ' style="cursor:pointer;text-decoration:underline;text-underline-offset:2px">-' + fC(lineAct) + '</span>' : (lineAct !== null ? '-' + fC(lineAct) : '—')}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amtYTD)}</td>
           <td style="${tdR};font-size:11px">${lineVar !== null ? '<span style="' + lineVarStyle + ';font-weight:600">' + lineVarLabel + '</span>' : '—'}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amt)}</td>
@@ -701,7 +700,7 @@ async function _render(container) {
   const netIncomeRowIncomeOnly = '<tr style="background:#eff6ff;border-top:2px solid var(--border)">' +
     '<td style="' + td + ';font-weight:700;font-size:13px;color:var(--blue)">Net income (income only)</td>' +
     incomeOnlyMonthCols +
-    '<td style="' + tdR + ';color:var(--blue);font-weight:700;font-size:13px">' + fC(grandActual) + '</td>' +
+    '<td style="' + tdR + ';color:' + (grandActual ? 'var(--blue)' : 'var(--hint)') + ';font-weight:700;font-size:13px">' + (grandActual ? fC(grandActual) : '—') + '</td>' +
     '<td style="' + tdR + ';font-weight:700">' + fC(grandBudgetYTD) + '</td>' +
     '<td style="' + tdR + '">' + varCell(grandActual, grandBudgetYTD) + '</td>' +
     '<td style="' + tdR + ';font-weight:700">' + fC(grandBudget) + '</td>' +
@@ -803,7 +802,7 @@ async function _render(container) {
             <tr style="background:#f0fdf4;border-top:2px solid var(--border)">
               <td style="${td};font-weight:700">Total income</td>
               ${incomeTotalMonthCols}
-              <td style="${tdR};color:var(--green);font-weight:700;font-size:13px">${fC(grandActual)}</td>
+              <td style="${tdR};color:${grandActual ? 'var(--green)' : 'var(--hint)'};font-weight:700;font-size:13px">${grandActual ? fC(grandActual) : '—'}</td>
               <td style="${tdR};font-weight:700">${fC(grandBudgetYTD)}</td>
               <td style="${tdR}">${varCell(grandActual, grandBudgetYTD)}</td>
               <td style="${tdR};font-weight:700">${fC(grandBudget)}</td>
