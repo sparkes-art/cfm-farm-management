@@ -477,10 +477,22 @@ async function _loadXeroStatus(farm) {
           <span style="font-size:20px">✅</span>
           <div>
             <p style="font-size:var(--text-sm);font-weight:600;color:var(--ink)">${data.tenant_name}</p>
-            <p style="font-size:var(--text-xs);color:var(--muted)">${isExpired ? 'Token expired — reconnect below' : 'Connected · Last updated ' + new Date(data.updated_at).toLocaleDateString('en-AU')}</p>
+            <p style="font-size:var(--text-xs);color:var(--muted)">${isExpired ? 'Token expired — disconnect and reconnect below' : 'Connected · Last updated ' + new Date(data.updated_at).toLocaleDateString('en-AU')}</p>
           </div>
-          <a href="/api/xero-auth?action=connect&farm_id=${farm.id}" class="btn btn-secondary btn-sm" style="margin-left:auto">Reconnect</a>
+          <div style="display:flex;gap:8px;margin-left:auto">
+            <button class="btn btn-danger btn-sm" id="xero-disconnect-btn">Disconnect</button>
+            <a href="/api/xero-auth?action=connect&farm_id=${farm.id}" class="btn btn-secondary btn-sm">Reconnect</a>
+          </div>
         </div>`;
+      wrap.querySelector('#xero-disconnect-btn').onclick = async () => {
+        if (!confirm('Disconnect Xero from this farm? You can reconnect at any time.')) return;
+        try {
+          const r = await fetch('/api/xero-auth?action=disconnect&farm_id=' + encodeURIComponent(farm.id));
+          const d = await r.json();
+          if (d.success) { toast('Xero disconnected'); _loadXeroStatus(farm, wrap); }
+          else toast('Disconnect failed: ' + (d.error || 'unknown error'), 'error');
+        } catch { toast('Disconnect failed', 'error'); }
+      };
     } else {
       wrap.innerHTML = `
         <div style="display:flex;align-items:center;gap:12px;padding:4px 0">

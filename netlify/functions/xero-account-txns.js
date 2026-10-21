@@ -77,60 +77,35 @@ async function getAccessToken(farmId) {
   return { accessToken: token.access_token, tenantId: token.tenant_id };
 }
 
-// ── Parse AccountTransactions report ─────────────────────────────────────────
-// Xero report structure for AccountTransactions:
-// Reports[0].Rows[] where RowType='Row' → individual transactions
-// Cells: [ Date, Description (source doc ref), Reference, Debit, Credit, Balance ]
-// Note: the report may also have Section rows with summary info — skip those.
-function parseAccountTransactions(reportData) {
-  const txns   = [];
-  const report = reportData?.Reports?.[0];
-  if (!report) return txns;
+// ── Parse Xero Journals response ──────────────────────────────────────────────
+// Uses GET /api.xro/2.0/Journals (accounting.manualjournals.read scope).
+// Each journal has JournalLines[] — we filter to lines matching our accountID.
+// Journal types: ACCPAY (bill), ACCREC (invoice), SPEND, RECEIVE, MANJOURNAL, etc.
+function parseJournals(journalsData, accountId) {
+  const txns = [];
+  const journals = journalsData?.Journals || [];
 
-  // Account name/code sits in the ReportTitles or in the header section
-  let accountName = report.ReportName || '';
+  for (const j of journals) {
+    const dateStr = j.JournalDate || '';
+    const ref     = j.Reference   || '';
+    const type    = j.SourceType  || '';
 
-  for (const section of (report.Rows || [])) {
-    // Header section sometimes has account name
-    if (section.RowType === 'Header') continue;
+    for (const line of (j.JournalLines || [])) {
+      if (line.AccountID !== accountId) continue;
 
-    const rows = section.RowType === 'Section' ? (section.Rows || []) : [section];
+      const net = parseFloat(line.NetAmount) || 0;
+      if (net === 0) continue;
 
-    for (const row of rows) {
-      if (row.RowType !== 'Row') continue;
-      const cells = row.Cells || [];
-
-      // Xero AccountTransactions report columns (standard layout):
-      // 0: Date  1: Source (type)  2: Description/Contact  3: Reference  4: Debit  5: Credit  6: Balance
-      // But layout can vary — be defensive
-      if (cells.length < 4) continue;
-
-      const dateStr    = cells[0]?.Value || '';
-      const sourceType = cells[1]?.Value || ''; // e.g. 'ACCPAY', 'SPEND', 'MANJOURNAL'
-      const contact    = cells[2]?.Value || '';
-      const reference  = cells[3]?.Value || '';
-      const debitStr   = cells[4]?.Value?.replace(/,/g, '') || '0';
-      const creditStr  = cells[5]?.Value?.replace(/,/g, '') || '0';
-
-      const debit  = parseFloat(debitStr)  || 0;
-      const credit = parseFloat(creditStr) || 0;
-
-      // Skip rows that look like totals or opening balance
-      if (!dateStr || dateStr.toLowerCase().includes('balance') || dateStr.toLowerCase().includes('total')) continue;
-      if (debit === 0 && credit === 0) continue;
-
-      // For expense accounts: debits increase the balance (cost), credits decrease it (reversal)
-      // Net amount — positive = expense, negative = credit/reversal
-      const amount = debit - credit;
-
+      // NetAmount: positive = debit (expense increase), negative = credit (reversal)
       txns.push({
-        date:      dateStr,   // Xero returns as '/Date(ms)/' or 'DD MMM YYYY'
-        type:      sourceType,
-        contact,
-        reference,
-        debit,
-        credit,
-        amount,
+        date:      dateStr,
+        type,
+        contact:   j.SourceType === 'ACCPAY' ? (line.Description || '') : (line.Description || ''),
+        reference: ref,
+        debit:     net > 0 ? net  : 0,
+        credit:    net < 0 ? -net : 0,
+        amount:    net,
+        description: line.Description || '',
       });
     }
   }
@@ -218,32 +193,56 @@ exports.handler = async (event) => {
       };
     }
 
-    // Xero AccountTransactions report
-    const url = new URL('https://api.xero.com/api.xro/2.0/Reports/AccountTransactions');
-    url.searchParams.set('accountID', accountId);
-    url.searchParams.set('fromDate',  fromDate);
-    url.searchParams.set('toDate',    toDate);
+    // Fetch journals for the date range — accounting.manualjournals.read scope
+    // Journals cover all account movements: bills (ACCPAY), spend money, manual journals, etc.
+    // Xero returns max 100 journals per page; paginate with offset.
+    let allJournals = [];
+    let offset = 0;
+    const pageSize = 100;
+    while (true) {
+      const url = new URL('https://api.xero.com/api.xro/2.0/Journals');
+      url.searchParams.set('offset', offset);
+      // Xero Journals API doesn't support date filtering natively — filter client-side
+      const res = await fetch(url.toString(), {
+        headers: {
+          'Authorization':  `Bearer ${accessToken}`,
+          'Xero-Tenant-Id': tenantId,
+          'Accept':         'application/json',
+          'If-Modified-Since': fromDate, // reduces payload — Xero uses this as a modified-since filter
+        },
+      });
 
-    const res = await fetch(url.toString(), {
-      headers: {
-        'Authorization':  `Bearer ${accessToken}`,
-        'Xero-Tenant-Id': tenantId,
-        'Accept':         'application/json',
-      },
-    });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Xero Journals API error ${res.status}: ${errText}`);
+      }
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Xero AccountTransactions API error ${res.status}: ${errText}`);
+      const data     = await res.json();
+      const page     = data?.Journals || [];
+      allJournals    = allJournals.concat(page);
+      if (page.length < pageSize) break;
+      offset += pageSize;
+      if (offset > 2000) break; // safety cap
     }
 
-    const reportData = await res.json();
-    const rawTxns    = parseAccountTransactions(reportData);
+    // Filter journals to the requested date range
+    const from = new Date(fromDate);
+    const to   = new Date(toDate);
+    to.setHours(23, 59, 59, 999);
+
+    const filteredJournals = allJournals.filter(j => {
+      const d = parseXeroDate(j.JournalDate);
+      if (!d) return false;
+      const jd = new Date(d);
+      return jd >= from && jd <= to;
+    });
+
+    const rawTxns = parseJournals({ Journals: filteredJournals }, accountId);
 
     // Parse dates to ISO format
     const transactions = rawTxns.map(t => ({ ...t, date: parseXeroDate(t.date) }));
 
-    console.log(`[xero-account-txns] farm=${farmId} account=${accountId} (${accountName}) ${fromDate}→${toDate} txns=${transactions.length}`);
+    console.log(`[xero-account-txns] farm=${farmId} account=${accountId} (${accountName}) ${fromDate}→${toDate} journals=${allJournals.length} filtered=${filteredJournals.length} txns=${transactions.length}`);
 
     return {
       statusCode: 200,

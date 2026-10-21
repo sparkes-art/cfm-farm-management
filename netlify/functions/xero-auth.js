@@ -9,7 +9,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const BASE_URL = 'https://profound-tiramisu-8b956e.netlify.app';
 const REDIRECT_URI = `${BASE_URL}/xero/callback`;
-const SCOPES = 'openid profile email accounting.invoices accounting.contacts accounting.settings.read accounting.reports.read offline_access';
+const SCOPES = 'openid profile email accounting.invoices accounting.invoices.read accounting.contacts accounting.contacts.read accounting.settings.read accounting.reports.profitandloss.read accounting.banktransactions.read accounting.manualjournals.read offline_access';
 
 // Maps CFM farm_id → keywords that should appear in the Xero tenant name.
 // Used to auto-select the right org when multiple orgs are returned after auth.
@@ -209,6 +209,19 @@ exports.handler = async (event) => {
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ success: true }),
+    };
+  }
+
+  // Disconnect — delete the stored token for this farm
+  if (action === 'disconnect') {
+    const farmId = params.farm_id;
+    if (!farmId) return { statusCode: 400, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Missing farm_id' }) };
+    await sb('DELETE', `xero_tokens?farm_id=eq.${farmId}`);
+    console.log(`[xero-auth] Disconnected Xero for farm=${farmId}`);
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
       body: JSON.stringify({ success: true }),
     };
   }
