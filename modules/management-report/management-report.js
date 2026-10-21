@@ -66,7 +66,8 @@ async function _render(container) {
 
   // ── Xero fixed-cost actuals (non-blocking — shows — if Xero not connected) ─
   // Pulls YTD expense totals from Xero P&L via /.netlify/functions/xero-pull
-  let xeroActuals = null; // { labour, overhead, rm, fund_mgmt } or null
+  let xeroActuals  = null; // { labour, overhead, rm, fund_mgmt } or null
+  let xeroAccounts = null; // raw account array for line-level matching
   let xeroYtdLabel = null;
   try {
     const xeroRes = await fetch(`/.netlify/functions/xero-pull?farm_id=${farm.id}&season=${encodeURIComponent(season)}`);
@@ -74,13 +75,47 @@ async function _render(container) {
       const xeroData = await xeroRes.json();
       if (xeroData.ok) {
         xeroActuals  = xeroData.categories;
-        xeroYtdLabel = xeroData.ytd_to; // e.g. '2026-10-21'
-        console.log('[MgmtReport] Xero actuals loaded:', xeroActuals, 'to:', xeroYtdLabel);
+        xeroAccounts = xeroData.accounts || [];
+        xeroYtdLabel = xeroData.ytd_to;
+        console.log('[MgmtReport] Xero actuals loaded:', xeroActuals, 'accounts:', xeroAccounts.length, 'to:', xeroYtdLabel);
       }
     }
   } catch (xeroErr) {
     console.log('[MgmtReport] Xero not available (farm may not be connected):', xeroErr.message);
   }
+
+  // ── Xero line-level matcher ────────────────────────────────────────────────
+  // Match a budget line description to a Xero account name.
+  // Uses normalised substring matching — strips punctuation and compares words.
+  // Returns the matched Xero account's amount, or null if no match.
+  const xeroLineActual = xeroAccounts ? (() => {
+    // Pre-normalise all Xero account names once
+    const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    const xeroNorm = xeroAccounts.map(a => ({ ...a, _norm: norm(a.name) }));
+
+    return (description) => {
+      const dNorm = norm(description);
+      // 1. Exact normalised match
+      let hit = xeroNorm.find(a => a._norm === dNorm);
+      if (hit) return hit.amount;
+
+      // 2. One contains the other
+      hit = xeroNorm.find(a => a._norm.includes(dNorm) || dNorm.includes(a._norm));
+      if (hit) return hit.amount;
+
+      // 3. Word overlap — at least half the budget description words appear in the Xero name
+      const dWords = dNorm.split(' ').filter(w => w.length > 2);
+      if (dWords.length) {
+        hit = xeroNorm.find(a => {
+          const matches = dWords.filter(w => a._norm.includes(w));
+          return matches.length >= Math.ceil(dWords.length / 2);
+        });
+        if (hit) return hit.amount;
+      }
+
+      return null;
+    };
+  })() : () => null;
 
   // ── Season-scoped invoices ──────────────────────────────────────────────────
   // Prior-year-flagged invoices are handled separately below — exclude them here
@@ -336,15 +371,20 @@ async function _render(container) {
     return `
       ${commRow(cat.label)}
       ${lines.map(c => {
-        const amt    = parseFloat(c.budget_amount) || 0;
-        const amtYTD = amt * ytdFraction;
+        const amt      = parseFloat(c.budget_amount) || 0;
+        const amtYTD   = amt * ytdFraction;
+        const lineAct  = xeroLineActual(c.description);
+        const lineVar  = lineAct !== null ? (amtYTD - lineAct) : null;
+        const lineVarStyle = lineVar !== null
+          ? (lineVar >= 0 ? 'color:var(--green)' : 'color:var(--red)')
+          : '';
         return `
         <tr>
           <td style="${td};padding-left:28px;font-size:11px;color:var(--hint)">${c.description}</td>
-          <td style="${tdR};color:var(--hint)">—</td>
+          <td style="${tdR};color:var(--red);font-size:11px">${lineAct !== null ? '-' + fC(lineAct) : '—'}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amtYTD)}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amt)}</td>
-          <td style="${tdR}">—</td>
+          <td style="${tdR};font-size:11px">${lineVar !== null ? `<span style="${lineVarStyle};font-weight:600">${lineVar >= 0 ? '+' : ''}${fC(lineVar)}</span>` : '—'}</td>
         </tr>`;
       }).join('')}
       <tr style="background:var(--page-bg)">

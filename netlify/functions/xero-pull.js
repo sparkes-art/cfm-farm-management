@@ -184,8 +184,9 @@ function parseExpenseAccounts(reportData) {
       const code   = nameCell?.Attributes?.find(a => a.Id === 'account')?.Value || '';
       const rawAmt = parseFloat(amountCell?.Value?.replace(/,/g, '') || '0');
 
-      // Skip totals / blank rows
+      // Skip totals, summary rows, and blank rows
       if (!name || name.toLowerCase().includes('total')) continue;
+      if (name.toLowerCase() === 'net profit' || name.toLowerCase() === 'net loss') continue;
       if (rawAmt === 0) continue;
 
       // In Xero P&L, expenses are returned as positive numbers (debit balances)
