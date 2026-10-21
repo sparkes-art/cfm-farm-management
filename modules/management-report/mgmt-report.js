@@ -608,8 +608,8 @@ async function _render(container) {
   // Group by budget_code; within each group, if multiple distinct descriptions exist they
   // are line items from the dedicated CAPEX sheet and should be shown as sub-rows.
   // PC development codes are excluded from line-item drill-down (show total only).
-  const PC_CODES = new Set(['PC DEVELOPMENT', 'PC development', 'pc development']);
-  const isPcCode = code => PC_CODES.has(code) || /pc\s+dev/i.test(code);
+  // Any code starting with "PC " is a PC development line — no sub-item drill-down
+  const isPcCode = code => /^pc\s+/i.test(code.trim());
 
   const capexCosts = budgetCosts.filter(c => c.category === 'capex');
   const capexByCode = new Map();
