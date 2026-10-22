@@ -192,14 +192,21 @@ function parseExpenseAccounts(reportData) {
 
       const name      = nameCell?.Value || '';
       const attrs     = nameCell?.Attributes || [];
-      const code      = attrs.find(a => a.Id === 'account')?.Value   || '';
-      const accountID = attrs.find(a => a.Id === 'accountID')?.Value || ''; // UUID for transaction drilldown
+      // In Xero P&L report cell attributes:
+      //   Id === 'account'   → contains the UUID (not the account code as the name implies)
+      //   Id === 'accountID' → always returns empty string
+      // So we use 'account' for the UUID used in drilldown queries.
+      const accountID = attrs.find(a => a.Id === 'account')?.Value || ''; // UUID for transaction drilldown
+      const code      = ''; // Xero P&L doesn't return account code — accountID (UUID) is used for lookups
       const rawAmt    = parseFloat(amountCell?.Value?.replace(/,/g, '') || '0');
 
       // Skip totals, summary rows, and blank rows
       if (!name || name.toLowerCase().includes('total')) continue;
       if (name.toLowerCase() === 'net profit' || name.toLowerCase() === 'net loss') continue;
-      if (rawAmt === 0) continue;
+      // Skip zero amounts and NEGATIVE amounts — negatives are credits/reversals in Xero P&L,
+      // not costs. Showing them as costs would be incorrect (e.g. "License Fees" credit of
+      // -$5,420 was showing as a cost when it should be zero from a management report perspective).
+      if (rawAmt <= 0) continue;
 
       // In Xero P&L, expenses are returned as positive numbers (debit balances)
       accounts.push({
