@@ -423,7 +423,8 @@ async function _render(container) {
 
   const buildCommRow = (g, opts = {}) => {
     const { bIncome, bYTD, bMonth, bArea, bYield, bProd, bPrice } = budgetForGroup(g, { carryOver: opts.carryOver });
-    const invSource = opts.carryOver ? priorYearInvoices : seasonInvoices;
+    // All invoices (carryover or not) are now date-filtered into seasonInvoices
+    const invSource = seasonInvoices;
     const inv       = invTotals(invSource, g.name);
     const invMonth  = _selectedMonth ? invTotals(monthInvoices, g.name) : null;
     const unit      = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
