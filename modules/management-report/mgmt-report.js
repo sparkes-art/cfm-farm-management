@@ -1242,13 +1242,8 @@ window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, 
 
     const total = txns.reduce((s, t) => s + (t.amount || 0), 0);
 
-    // If all results came from journals, show a note so managers understand
-    const journalNote = data.has_journals
-      ? '<div style="font-size:11px;color:var(--hint);font-style:italic;padding:4px 10px 8px;border-bottom:1px solid var(--border-light,#eee)">⚠ This account is posted via accounting journal entries, not invoices or bank transactions.</div>'
-      : '';
-
     const typeLabel = t => {
-      const map = { ACCPAY: 'Bill', ACCREC: 'Invoice', SPEND: 'Bank spend', RECEIVE: 'Bank receive', JOURNAL: 'Journal entry', MANJOURNAL: 'Journal', MANUALJOURNAL: 'Journal', CASHREC: 'Cash receipt', CASHPAID: 'Cash payment' };
+      const map = { ACCPAY: 'Bill', ACCREC: 'Invoice', SPEND: 'Bank spend', RECEIVE: 'Bank receive', CASHREC: 'Cash receipt', CASHPAID: 'Cash payment' };
       return map[t] || t || '—';
     };
 
@@ -1269,7 +1264,7 @@ window._mgmtXeroTxns = async function(farmId, accountId, accountName, fromDate, 
       '</tr>';
     }).join('');
 
-    body.innerHTML = journalNote + `
+    body.innerHTML = `
       <table style="width:100%;border-collapse:collapse">
         <thead>
           <tr style="border-bottom:1px solid var(--border);background:var(--page-bg,#f8fafc)">
