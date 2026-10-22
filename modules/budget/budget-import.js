@@ -1085,7 +1085,10 @@ function _parseCapexSheet(rows, sheetName) {
   // Detection: if the header row has 'code' or 'total value' in col 2 or 3 → Layout B
 
   let layoutB = false;
-  for (const row of rows.slice(0, 6)) {
+  // Scan up to row 20 — some CAPEX sheets have title/commentary rows before the
+  // column header row, so the header with 'Code' / 'Total Value' may not appear
+  // until row 10+ (e.g. Blackbull: rows 0-10 are titles, row 11 is the header)
+  for (const row of rows.slice(0, 20)) {
     const c2 = row[2] != null ? String(row[2]).toLowerCase().trim() : '';
     const c3 = row[3] != null ? String(row[3]).toLowerCase().trim() : '';
     if (c2 === 'code' || c3 === 'total value' || c3 === 'total') {
