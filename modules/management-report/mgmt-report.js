@@ -409,14 +409,15 @@ async function _render(container) {
     if (!g.budgets.length) return { bIncome: null, bYTD: null, bMonth: null, bArea: null, bYield: null, bProd: null, bPrice: null };
     if (opts.carryOver) {
       const bIncome = g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_gross_revenue) || 0), 0) || null;
-      // For carryover rows imported from budget Excel:
-      //   budgeted_yield_per_ha stores the production quantity (units sold),
-      //   budgeted_price stores the implied $/unit price (total ÷ units).
-      // Both are null for old-format rows without a Units column.
-      const bProd  = g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_yield_per_ha) || 0), 0) || null;
-      const bPrice = g.budgets.some(b => parseFloat(b.budgeted_price))
-        ? g.budgets.reduce((s, b) => s + bField(b, 'price', 'budgeted_price'), 0) / g.budgets.filter(b => parseFloat(b.budgeted_price)).length
+      // For carryover rows imported from budget Excel, budgeted_yield_per_ha stores the total
+      // production quantity (units sold) — identified by area_ha being null (no per-ha data).
+      // Regular farming rows have area_ha set and budgeted_yield_per_ha = yield/ha (not total units).
+      const carryBudgets = g.budgets.filter(b => b.area_ha == null || b.notes === 'carryover');
+      const bProd  = carryBudgets.length
+        ? carryBudgets.reduce((s, b) => s + (parseFloat(b.budgeted_yield_per_ha) || 0), 0) || null
         : null;
+      // Always derive price as total revenue ÷ production units so it's consistent
+      const bPrice = (bIncome && bProd) ? bIncome / bProd : null;
       return { bIncome, bYTD: bIncome != null ? bIncome * ytdFraction : null, bMonth: bIncome != null ? bIncome / 12 : null, bArea: null, bYield: null, bProd, bPrice };
     }
     const bArea   = g.budgets.reduce((s, b) => s + (parseFloat(b.area_ha) || 0), 0);
@@ -499,10 +500,22 @@ async function _render(container) {
         const date  = i.invoice_date?.slice(0, 10);
         const buyer = i.buyer;
         const id    = i.id;
+        const linked = contracts.find(c => c.id === i.forward_contract_id);
         if (i.batches) {
           const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
-          // One row per batch — lets the drilldown show each picking / delivery separately
-          return b.map((x, idx) => {
+          // One row per batch — filter to only batches matching this commodity row
+          const targetKey = g.name.trim().toUpperCase().replace(/\s+/g, ' ');
+          const targetIsLivestock = /cattle|livestock/i.test(g.name);
+          const matchingBatches = b.filter(x => {
+            const saleLine = (x.lines || []).find(l => l.type === 'income' && l.line_type !== 'qa');
+            const bComm = linked?.commodity || x.commodity || saleLine?.description || '';
+            const bKey = bComm.trim().toUpperCase().replace(/\s+/g, ' ');
+            const bIsLivestock = /cattle|livestock/i.test(bComm);
+            if (targetIsLivestock && bIsLivestock) return true;
+            return commMatches(bKey, targetKey);
+          });
+          let firstShown = false;
+          return matchingBatches.map((x, idx) => {
             const saleLine = (x.lines || []).find(l => l.type === 'income' && l.line_type !== 'qa');
             const qaLine   = (x.lines || []).find(l => l.type === 'income' && l.line_type === 'qa');
             const qty      = parseFloat(x.qty) || 0;
@@ -510,10 +523,11 @@ async function _render(container) {
             const qa       = parseFloat(qaLine?.amount)   || 0;
             const inc      = gross + qa;
             const cropYear = x.crop_year || '';
+            const showBuyer = !firstShown && (firstShown = true);
             return {
               id,
               date,
-              buyer: idx === 0 ? buyer : '',   // only show buyer on first batch row
+              buyer: showBuyer ? buyer : '',   // only show buyer on first matched batch row
               qty,
               inc,
               gross,
@@ -521,7 +535,7 @@ async function _render(container) {
               unit: x.unit || unit,
               crop_year: cropYear,
               price: saleLine?.eff_per_unit || (qty && gross ? gross / qty : null),
-              batchIdx: idx,
+              batchIdx: b.indexOf(x),
               batchCount: b.length,
             };
           });
