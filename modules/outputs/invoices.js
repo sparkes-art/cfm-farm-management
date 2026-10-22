@@ -933,12 +933,6 @@ export async function openInvoiceForm(container, existing = null) {
           <label class="form-label">Date <span style="color:var(--red)">*</span></label>
           <input class="form-input" id="f-date" type="date" value="${existing?.invoice_date||new Date().toISOString().slice(0,10)}">
         </div>
-        <div class="form-group" style="margin:0">
-          <label class="form-label">Unit</label>
-          <select class="form-select" id="f-master-unit">
-            ${['bale','t','kg','head','each'].map(u=>`<option${u===(existing?.master_unit||'bale')?' selected':''}>${u}</option>`).join('')}
-          </select>
-        </div>
       </div>
 
       <!-- Grade (grain) -->
@@ -955,7 +949,7 @@ export async function openInvoiceForm(container, existing = null) {
         </div>
 
         <!-- Line headers -->
-        <div style="display:grid;grid-template-columns:100px 1fr 1fr 70px 90px 100px 100px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
+        <div style="display:grid;grid-template-columns:100px 120px 2fr 70px 90px 100px 100px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
           ${['Season','Crop','Description','Unit','Qty','Gross ($)','Quality adj ($)',''].map(h =>
             `<div style="font-size:9px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${h}</div>`
           ).join('')}
@@ -1244,7 +1238,7 @@ export async function openInvoiceForm(container, existing = null) {
 
   const buildCropLine = (data = {}) => {
     const lineDiv = document.createElement('div');
-    lineDiv.style.cssText = 'display:grid;grid-template-columns:100px 1fr 1fr 70px 90px 100px 100px 30px;gap:6px;margin-bottom:6px;align-items:center';
+    lineDiv.style.cssText = 'display:grid;grid-template-columns:100px 120px 2fr 70px 90px 100px 100px 30px;gap:6px;margin-bottom:6px;align-items:center';
 
     const selectedSeason = data.crop_year || activeSeason;
     const seasonOpts = allSeasons.map(s =>
@@ -1260,7 +1254,7 @@ export async function openInvoiceForm(container, existing = null) {
         ${cropOptsForSeason(selectedSeason, data.commodity||'')}
       </select>
       <input class="form-input cl-description" type="text" placeholder="Description / notes" value="${esc(data.description||'')}" style="font-size:12px;padding:6px 8px">
-      <input class="form-input cl-unit" type="text" placeholder="bale" value="${esc(data.unit||'bale')}" style="font-size:12px;padding:6px 8px">
+      <select class="form-select cl-unit" style="font-size:11px;padding:4px 6px">${['bale','t','kg','head','each'].map(u=>`<option value="${u}"${(data.unit||'bale')===u?' selected':''}>${u}</option>`).join('')}</select>
       <input class="form-input cl-qty" type="number" step="any" min="0" placeholder="0" value="${data.qty||''}" style="font-size:12px;padding:6px 8px">
       <input class="form-input cl-gross" type="number" step="0.01" placeholder="0.00" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600">
       <input class="form-input cl-qa" type="number" step="0.01" placeholder="0.00" value="${data.qa||''}" style="font-size:12px;padding:6px 8px" title="Quality adjustment (negative = discount)">
@@ -1319,7 +1313,6 @@ export async function openInvoiceForm(container, existing = null) {
 
       const buyer = modal.querySelector('#f-buyer')?.value?.trim();
       const date = modal.querySelector('#f-date')?.value;
-      const masterUnit = modal.querySelector('#f-master-unit')?.value || 'bale';
       const contractId = contractHidden?.value || null;
       const selectedContract = _contracts.find(c => c.id === contractId);
       const notes = modal.querySelector('#f-notes')?.value?.trim() || '';
@@ -1338,7 +1331,7 @@ export async function openInvoiceForm(container, existing = null) {
         saleLines.push({
           commodity:    div.querySelector('.cl-commodity')?.value?.trim() || selectedContract?.commodity || 'Sale',
           crop_year:    div.querySelector('.cl-season')?.value || activeSeason,
-          unit:         div.querySelector('.cl-unit')?.value?.trim() || masterUnit,
+          unit:         div.querySelector('.cl-unit')?.value?.trim() || 'bale',
           description:  div.querySelector('.cl-description')?.value?.trim() || '',
           qty,
           gross,
@@ -1349,6 +1342,9 @@ export async function openInvoiceForm(container, existing = null) {
 
       if (!saleLines.length) throw new Error('Please add at least one line item');
       if (saleLines.every(l => !l.gross)) throw new Error('Please enter gross proceeds for at least one line');
+
+      // Derive master unit from first line (used for row-level field and legacy compat)
+      const masterUnit = saleLines[0]?.unit || 'bale';
 
       // Upload RCTI file (shared across all lines — attaches to first batch)
       const uploadFile = async (file, prefix) => {
