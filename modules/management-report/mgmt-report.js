@@ -322,8 +322,12 @@ async function _render(container) {
         const invoiceIsLivestock = /cattle|livestock/i.test(iComm);
         if (targetIsLivestock && invoiceIsLivestock) { /* match */ }
         else if (iCommKey !== targetKey) {
-          console.log('[CFM mgmt] commodity mismatch — inv', inv.id, 'iCommKey:', JSON.stringify(iCommKey), 'targetKey:', JSON.stringify(targetKey), '| linked:', linked?.commodity, 'inv.commodity_type:', inv.commodity_type, 'batchComm:', batchComm);
-          return;
+          // Fuzzy fallback: match if one is a substring of the other
+          // e.g. invoice "JARRAH" matches budget "JARRAH HAY"
+          const fuzzyMatch = iCommKey && targetKey && (
+            targetKey.includes(iCommKey) || iCommKey.includes(targetKey)
+          );
+          if (!fuzzyMatch) return;
         }
       }
       matchedInvs.push(inv);
