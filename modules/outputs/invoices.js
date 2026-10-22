@@ -815,24 +815,42 @@ export async function openInvoiceForm(container, existing = null) {
   const modal = document.createElement('div');
   modal.style.cssText = 'background:var(--white);border-radius:var(--radius-xl);max-width:760px;margin:0 auto;display:flex;flex-direction:column;overflow:hidden';
 
-  // Existing data — sum across ALL batches for multi-batch invoices
+  // Existing data — parse batches into per-line data for the multi-line form
   const existingBatches = existing?.batches
     ? (typeof existing.batches === 'string' ? JSON.parse(existing.batches) : existing.batches)
     : [];
-  const isMultiBatch = existingBatches.length > 1;
-  // Sum qty and amounts across all income batches
-  const existingQty = existingBatches.length
-    ? existingBatches.filter(b => (b.lines||[]).some(l => l.type==='income' && l.line_type!=='qa'))
-        .reduce((s, b) => s + (parseFloat(b.qty)||0), 0) || existing?.total_qty || ''
-    : existing?.total_qty || '';
-  const existingGross = existingBatches.length
-    ? existingBatches.flatMap(b => b.lines||[]).filter(l => l.type==='income' && l.line_type!=='qa')
-        .reduce((s, l) => s + (parseFloat(l.amount)||0), 0) || existing?.gross_amount || ''
-    : existing?.gross_amount || '';
-  const existingQA = existingBatches.length
-    ? existingBatches.flatMap(b => b.lines||[]).filter(l => l.type==='income' && l.line_type==='qa')
-        .reduce((s, l) => s + (parseFloat(l.amount)||0), 0) || existing?.total_quality_adj || ''
-    : existing?.total_quality_adj || '';
+
+  // Build line data from batches: each batch → one line item in the form
+  // A batch has: qty, crop_year, lines[] (income sale + optional qa)
+  const existingLines = existingBatches.length
+    ? existingBatches.map(b => {
+        const saleLine = (b.lines||[]).find(l => l.type==='income' && l.line_type!=='qa');
+        const qaLine   = (b.lines||[]).find(l => l.type==='income' && l.line_type==='qa');
+        return {
+          commodity:  saleLine?.description || '',
+          crop_year:  b.crop_year || activeSeason,
+          qty:        parseFloat(b.qty) || '',
+          gross:      saleLine ? parseFloat(saleLine.amount) || '' : '',
+          qa:         qaLine   ? parseFloat(qaLine.amount)   || '' : '',
+          income_files: b.income_files || [],
+          prior_year_income: !!b.prior_year_income,
+        };
+      })
+    : existing
+      ? [{
+          commodity:  (existing.line_items||[])[0]?.commodity || '',
+          crop_year:  existing.season || activeSeason,
+          qty:        existing.total_qty || '',
+          gross:      existing.gross_amount || '',
+          qa:         existing.total_quality_adj || '',
+          income_files: existing.rcti_files || [],
+        }]
+      : [];
+
+  // Sum totals for legacy uses
+  const existingQty   = existingLines.reduce((s, l) => s + (parseFloat(l.qty)||0), 0) || '';
+  const existingGross = existingLines.reduce((s, l) => s + (parseFloat(l.gross)||0), 0) || '';
+  const existingQA    = existingLines.reduce((s, l) => s + (parseFloat(l.qa)||0), 0) || '';
   const existingRctiFiles = existing?.rcti_files
     || existingBatches.flatMap(b => b.income_files||[])
     || [];
@@ -959,20 +977,21 @@ export async function openInvoiceForm(container, existing = null) {
         </div>`;
       })()}
 
-      <!-- Quantities and amounts -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
-        <div class="form-group" style="margin:0">
-          <label class="form-label">Quantity <span style="color:var(--red)">*</span></label>
-          <input class="form-input" id="f-qty" type="number" step="any" min="0" value="${existingQty ? parseFloat(existingQty) : ''}" placeholder="0.00">
+      <!-- Line items -->
+      <div style="margin-bottom:16px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <label class="form-label" style="margin:0">Sale lines <span style="color:var(--red)">*</span></label>
+          <button class="btn btn-ghost btn-sm" id="f-add-line" type="button">+ Add line</button>
         </div>
-        <div class="form-group" style="margin:0">
-          <label class="form-label">Gross proceeds <span style="color:var(--red)">*</span></label>
-          <input class="form-input" id="f-gross" type="number" step="0.01" value="${existingGross||''}" placeholder="0.00">
+
+        <!-- Line headers -->
+        <div style="display:grid;grid-template-columns:1fr 90px 100px 100px 100px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
+          ${['Crop / commodity','Season','Qty','Gross ($)','Quality adj ($)',''].map(h =>
+            `<div style="font-size:9px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${h}</div>`
+          ).join('')}
         </div>
-        <div class="form-group" style="margin:0">
-          <label class="form-label">Quality adjustment</label>
-          <input class="form-input" id="f-qa" type="number" step="0.01" value="${existingQA||''}" placeholder="0.00 (negative = discount)">
-        </div>
+
+        <div id="f-lines"></div>
       </div>
 
       <!-- Totals display -->
@@ -1037,7 +1056,7 @@ export async function openInvoiceForm(container, existing = null) {
       if (!extracted) throw new Error('No data returned');
       _rctiFiles.push(file);
 
-      // Populate fields
+      // Populate header fields
       const setField = (id, val, _unused) => {
         const el = modal.querySelector('#' + id);
         if (!el || val == null || val === '') return;
@@ -1047,13 +1066,28 @@ export async function openInvoiceForm(container, existing = null) {
       };
       if (!modal.querySelector('#f-buyer').value) setField('f-buyer', extracted.gin_name);
       if (!modal.querySelector('#f-date').value) setField('f-date', extracted.invoice_date);
-      setField('f-qty', extracted.bale_count, false);
-      setField('f-gross', extracted.gross_proceeds, false);
-      // QA: use quality_adj from extraction directly (already derived server-side as net - gross)
-      const qaVal = extracted.quality_adj != null && extracted.quality_adj !== 0
-        ? extracted.quality_adj
-        : null;
-      if (qaVal != null) setField('f-qa', qaVal, false);
+
+      // Populate first line item with extracted values
+      const firstLine = linesWrap.querySelector(':scope > div');
+      if (firstLine) {
+        const setLine = (cls, val) => {
+          if (val == null || val === '') return;
+          const el = firstLine.querySelector('.' + cls);
+          if (el) { el.value = val; el.dispatchEvent(new Event('input')); }
+        };
+        setLine('cl-qty', extracted.bale_count);
+        setLine('cl-gross', extracted.gross_proceeds);
+        // QA: use quality_adj from extraction directly (already derived server-side as net - gross)
+        const qaVal = extracted.quality_adj != null && extracted.quality_adj !== 0
+          ? extracted.quality_adj : null;
+        if (qaVal != null) setLine('cl-qa', qaVal);
+        // Pre-fill commodity from matched contract if available
+        const contractEl = contractHidden;
+        if (!firstLine.querySelector('.cl-commodity').value && contractEl?.value) {
+          const mc = _contracts.find(c => c.id === contractEl.value);
+          if (mc?.commodity) firstLine.querySelector('.cl-commodity').value = mc.commodity;
+        }
+      }
 
       // Auto-match contract number from document
       if (extracted.contract_number_matched) {
@@ -1080,7 +1114,7 @@ export async function openInvoiceForm(container, existing = null) {
 
       // Flag missing required fields
       const missing = [];
-      ['f-buyer','f-date','f-qty','f-gross'].forEach(id => {
+      ['f-buyer','f-date'].forEach(id => {
         const el = modal.querySelector('#' + id);
         if (el && !el.value) {
           el.style.borderColor = 'var(--red)'; el.style.background = '#fff5f5';
@@ -1088,6 +1122,10 @@ export async function openInvoiceForm(container, existing = null) {
           el.addEventListener('input', () => { el.style.borderColor=''; el.style.background=''; }, { once: true });
         }
       });
+      // Check first line for qty/gross
+      const fl = linesWrap.querySelector(':scope > div');
+      if (fl && !fl.querySelector('.cl-gross')?.value) missing.push('gross');
+      if (fl && !fl.querySelector('.cl-qty')?.value) missing.push('qty');
 
       // Save correction for continuous learning — store extraction_id for later
       modal._extractionId = extraction_id;
@@ -1217,20 +1255,63 @@ export async function openInvoiceForm(container, existing = null) {
     if (c) _updateGradeVisibility(c.commodity);
   }
 
+  // ── Multi-line crop sale lines ──────────────────────────────
+  const linesWrap = modal.querySelector('#f-lines');
+  // Seasons to offer in each line's season picker
+  const allSeasons = (() => {
+    const [cy] = (activeSeason || '').split('-').map(Number);
+    const seasons = cy ? [0,1,2,3].map(n => `${cy-n}-${String(cy-n+1).slice(-2)}`) : (activeSeason ? [activeSeason] : []);
+    return seasons;
+  })();
+
+  const buildCropLine = (data = {}) => {
+    const lineDiv = document.createElement('div');
+    lineDiv.style.cssText = 'display:grid;grid-template-columns:1fr 90px 100px 100px 100px 30px;gap:6px;margin-bottom:6px;align-items:center';
+
+    const seasonOpts = allSeasons.map(s =>
+      `<option value="${s}"${s===(data.crop_year||activeSeason)?' selected':''}>${s}</option>`
+    ).join('');
+
+    lineDiv.innerHTML = `
+      <input class="form-input cl-commodity" type="text" placeholder="e.g. Cotton, Canola" value="${data.commodity||''}" style="font-size:12px;padding:6px 8px">
+      <select class="form-select cl-season" style="font-size:11px;padding:4px 6px">${seasonOpts}</select>
+      <input class="form-input cl-qty" type="number" step="any" min="0" placeholder="0" value="${data.qty||''}" style="font-size:12px;padding:6px 8px">
+      <input class="form-input cl-gross" type="number" step="0.01" placeholder="0.00" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600">
+      <input class="form-input cl-qa" type="number" step="0.01" placeholder="0.00" value="${data.qa||''}" style="font-size:12px;padding:6px 8px" title="Quality adjustment (negative = discount)">
+      <button class="btn btn-ghost cl-remove" type="button" style="padding:4px;font-size:16px;color:var(--hint)">✕</button>
+    `;
+    lineDiv._incomeFiles = data.income_files || [];
+    lineDiv.querySelector('.cl-gross').addEventListener('input', recalcTotals);
+    lineDiv.querySelector('.cl-qa').addEventListener('input', recalcTotals);
+    lineDiv.querySelector('.cl-qty').addEventListener('input', recalcTotals);
+    lineDiv.querySelector('.cl-remove').addEventListener('click', () => { lineDiv.remove(); recalcTotals(); });
+    return lineDiv;
+  };
+
   // ── Totals recalc ────────────────────────────────────────────
   function recalcTotals() {
-    const gross = parseFloat(modal.querySelector('#f-gross')?.value) || 0;
-    const qa = parseFloat(modal.querySelector('#f-qa')?.value) || 0;
-    const total = gross + qa;
+    let totalGross = 0, totalQa = 0;
+    linesWrap.querySelectorAll(':scope > div').forEach(div => {
+      totalGross += parseFloat(div.querySelector('.cl-gross')?.value) || 0;
+      totalQa    += parseFloat(div.querySelector('.cl-qa')?.value)    || 0;
+    });
+    const total = totalGross + totalQa;
     const tg = modal.querySelector('#t-gross');
     const tqa = modal.querySelector('#t-qa');
     const tt = modal.querySelector('#t-total');
-    if (tg) tg.textContent = gross ? formatCurrency(gross, 2) : '—';
-    if (tqa) tqa.textContent = qa ? (qa>0?'+':'')+formatCurrency(qa,2) : '—';
+    if (tg) tg.textContent = totalGross ? formatCurrency(totalGross, 2) : '—';
+    if (tqa) tqa.textContent = totalQa ? (totalQa>0?'+':'')+formatCurrency(totalQa,2) : '—';
     if (tt) { tt.textContent = total ? formatCurrency(total, 2) : '—'; tt.style.color = total < 0 ? 'var(--red)' : 'var(--blue)'; }
   }
-  modal.querySelector('#f-gross').addEventListener('input', recalcTotals);
-  modal.querySelector('#f-qa').addEventListener('input', recalcTotals);
+
+  // Render initial lines (or one blank if new invoice)
+  const initLines = existingLines.length ? existingLines : [{}];
+  initLines.forEach(d => linesWrap.appendChild(buildCropLine(d)));
+  modal.querySelector('#f-add-line').addEventListener('click', () => {
+    // Default new line's season to active season
+    linesWrap.appendChild(buildCropLine({ crop_year: activeSeason }));
+    recalcTotals();
+  });
   recalcTotals();
 
   // ── Prior year toggle ────────────────────────────────────────
@@ -1262,25 +1343,41 @@ export async function openInvoiceForm(container, existing = null) {
 
       const buyer = modal.querySelector('#f-buyer')?.value?.trim();
       const date = modal.querySelector('#f-date')?.value;
-      const qty = parseFloat(modal.querySelector('#f-qty')?.value || 0) || 0;
-      const gross = parseFloat(modal.querySelector('#f-gross')?.value) || 0;
-      const qa = parseFloat(modal.querySelector('#f-qa')?.value) || 0;
       const masterUnit = modal.querySelector('#f-master-unit')?.value || 'bale';
       const contractId = contractHidden?.value || null;
       const selectedContract = _contracts.find(c => c.id === contractId);
       const notes = modal.querySelector('#f-notes')?.value?.trim() || '';
+      const grade = modal.querySelector('#f-grade')?.value?.trim() || '';
 
-      // Prior year handling
+      // Prior year handling (applies to ALL lines when checked — legacy single-line behaviour)
       const isPriorYear = modal.querySelector('#f-prior-year')?.checked || false;
       const priorSeason = isPriorYear ? (modal.querySelector('#f-prior-season')?.value || '') : '';
       const priorCommodity = isPriorYear ? (modal.querySelector('#f-prior-commodity')?.value || '') : '';
 
       if (!date) throw new Error('Please enter a date');
       if (!buyer) throw new Error('Please enter a buyer');
-      if (!qty) throw new Error('Please enter a quantity');
-      if (!gross) throw new Error('Please enter gross proceeds');
 
-      // Upload RCTI file
+      // Collect lines from the multi-line UI
+      const saleLines = [];
+      linesWrap.querySelectorAll(':scope > div').forEach(div => {
+        const qty   = parseFloat(div.querySelector('.cl-qty')?.value)   || 0;
+        const gross = parseFloat(div.querySelector('.cl-gross')?.value) || 0;
+        const qa    = parseFloat(div.querySelector('.cl-qa')?.value)    || 0;
+        if (!gross && !qty) return; // skip empty lines
+        saleLines.push({
+          commodity:    div.querySelector('.cl-commodity')?.value?.trim() || selectedContract?.commodity || 'Sale',
+          crop_year:    div.querySelector('.cl-season')?.value || activeSeason,
+          qty,
+          gross,
+          qa,
+          income_files: div._incomeFiles || [],
+        });
+      });
+
+      if (!saleLines.length) throw new Error('Please add at least one line item');
+      if (saleLines.every(l => !l.gross)) throw new Error('Please enter gross proceeds for at least one line');
+
+      // Upload RCTI file (shared across all lines — attaches to first batch)
       const uploadFile = async (file, prefix) => {
         const path = `invoices/${farm.id}/${Date.now()}_${prefix}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
         const ct = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
@@ -1291,29 +1388,67 @@ export async function openInvoiceForm(container, existing = null) {
         return { url:`https://nqvfuqvindsgnogejaei.supabase.co/storage/v1/object/public/cfm-documents/${path}`, filename:file.name };
       };
 
-      // Upload new RCTI file if one was selected
       const fileInput = modal.querySelector('#rcti-pdf-upload');
       const newFile = fileInput?.files?.[0];
-      let rctiFiles = [...existingRctiFiles];
+      let sharedRctiFiles = [...existingRctiFiles];
       if (newFile) {
         const uploaded = await uploadFile(newFile, 'rcti');
-        rctiFiles = [...rctiFiles, uploaded];
+        sharedRctiFiles = [...sharedRctiFiles, uploaded];
       }
 
-      // Build batch structure
-      const lines = [];
-      // Prior year income: use the prior commodity name (mixed-case = carry-over in management report)
-      // Regular: use the linked contract's commodity
-      const commodity = isPriorYear
-        ? (priorCommodity || selectedContract?.commodity || 'Prior year income')
-        : (selectedContract?.commodity || 'Sale');
+      // Build one batch per line item
+      const batches = saleLines.map((sl, idx) => {
+        const { commodity, crop_year, qty, gross, qa, income_files } = sl;
 
-      if (gross) lines.push({ type:'income', line_type:'sale', description:commodity, amount:gross, eff_per_unit: qty ? Math.round(gross/qty*10000)/10000 : null });
-      if (qa) lines.push({ type:'income', line_type:'qa', description:'Quality adjustment', amount:qa, eff_per_unit: qty ? Math.round(qa/qty*10000)/10000 : null });
+        // Prior year override: use priorSeason and priorCommodity when checked
+        const effectiveCropYear = isPriorYear ? priorSeason : (crop_year || selectedContract?.crop_year || activeSeason);
+        const effectiveCommodity = isPriorYear
+          ? (priorCommodity || commodity || 'Prior year income')
+          : commodity;
 
-      // Prior year income: season = prior season (e.g. 2024-25); current invoice date stays as-is
-      const cropYear = isPriorYear ? priorSeason : (selectedContract?.crop_year || activeSeason);
-      const batch = { qty, crop_year: cropYear, income_files: rctiFiles, lines, ...(isPriorYear ? { prior_year_income: true } : {}) };
+        const batchLines = [];
+        if (gross) batchLines.push({
+          type: 'income', line_type: 'sale',
+          description: effectiveCommodity,
+          amount: gross,
+          eff_per_unit: qty ? Math.round(gross/qty*10000)/10000 : null,
+        });
+        if (qa) batchLines.push({
+          type: 'income', line_type: 'qa',
+          description: 'Quality adjustment',
+          amount: qa,
+          eff_per_unit: qty ? Math.round(qa/qty*10000)/10000 : null,
+        });
+
+        // RCTI files: attach shared file to first line; per-line files always included
+        const batchFiles = [...(idx === 0 ? sharedRctiFiles : []), ...income_files];
+
+        return {
+          qty,
+          crop_year: effectiveCropYear,
+          income_files: batchFiles,
+          lines: batchLines,
+          ...(isPriorYear ? { prior_year_income: true } : {}),
+        };
+      });
+
+      // Aggregate totals across all batches
+      const totalQty   = saleLines.reduce((s, l) => s + l.qty, 0);
+      const totalGross = saleLines.reduce((s, l) => s + l.gross, 0);
+      const totalQA    = saleLines.reduce((s, l) => s + l.qa, 0);
+
+      // Primary season is taken from first line (or prior season if prior year)
+      const primarySeason = isPriorYear ? priorSeason : (saleLines[0]?.crop_year || selectedContract?.crop_year || activeSeason);
+
+      // Legacy line_items for compatibility (one entry per sale line)
+      const legacyLineItems = saleLines.flatMap(sl => {
+        const effectiveCropYear = isPriorYear ? priorSeason : (sl.crop_year || activeSeason);
+        const effectiveCommodity = isPriorYear ? (priorCommodity || sl.commodity) : sl.commodity;
+        const items = [];
+        if (sl.gross) items.push({ type:'income', line_type:'sale', commodity: effectiveCommodity, docket:'', qty: sl.qty, unit:masterUnit, season: effectiveCropYear, total:sl.gross, price: sl.qty ? sl.gross/sl.qty : 0 });
+        if (sl.qa)    items.push({ type:'income', line_type:'qa',   commodity: effectiveCommodity, docket:'', qty: sl.qty, unit:masterUnit, season: effectiveCropYear, total:sl.qa,    price: sl.qty ? sl.qa/sl.qty : 0 });
+        return items;
+      });
 
       const row = {
         farm_id: farm.id,
@@ -1323,37 +1458,35 @@ export async function openInvoiceForm(container, existing = null) {
         sale_type: contractId ? 'against_contract' : 'cash',
         gst_type: 'ex',
         master_unit: masterUnit,
-        season: cropYear,
-        batches: [batch],
-        total_qty: qty,
-        gross_amount: gross,
-        total_quality_adj: qa || 0,
+        season: primarySeason,
+        batches,
+        total_qty: totalQty,
+        gross_amount: totalGross,
+        total_quality_adj: totalQA,
         notes,
-        rcti_files: rctiFiles,
-        rcti_url: rctiFiles[0]?.url || null,
-        rcti_filename: rctiFiles[0]?.filename || null,
+        grade: grade || null,
+        rcti_files: sharedRctiFiles,
+        rcti_url: sharedRctiFiles[0]?.url || null,
+        rcti_filename: sharedRctiFiles[0]?.filename || null,
         gin_files: [], gin_url: null, gin_filename: null, other_files: [],
         status: existing?.xero_invoice_number ? 'complete' : (existing?.status || 'pending'),
-        // Legacy line_items for compatibility
-        line_items: [
-          ...(gross ? [{ type:'income', line_type:'sale', commodity: commodity, docket:'', qty, unit:masterUnit, season:cropYear, total:gross, price:qty?gross/qty:0 }] : []),
-          ...(qa ? [{ type:'income', line_type:'qa', commodity: commodity, docket:'', qty, unit:masterUnit, season:cropYear, total:qa, price:qty?qa/qty:0 }] : []),
-        ],
+        line_items: legacyLineItems,
       };
 
       if (existing?.xero_invoice_number) { row.xero_invoice_number = existing.xero_invoice_number; row.xero_invoice_id = existing.xero_invoice_id; row.xero_invoice_url = existing.xero_invoice_url; }
 
-      // Save extraction correction with actual user-entered values (not original AI values)
-      if (modal._extractionId) {
+      // Save extraction correction with actual user-entered values (uses first line for AI learning)
+      if (modal._extractionId && saleLines.length) {
+        const firstLine = saleLines[0];
         const corrected = Object.assign({}, modal._extracted || {}, {
           buyer_name: buyer,
           gin_name: buyer,
           invoice_date: date,
-          bale_count: qty,
-          gross_proceeds: gross,
-          quality_adj: qa || 0,
-          quality_premiums_discounts: qa ? [{ description: 'Quality adjustment', total_amount: qa }] : [],
-          net_payment: gross + (qa || 0),
+          bale_count: firstLine.qty,
+          gross_proceeds: firstLine.gross,
+          quality_adj: firstLine.qa || 0,
+          quality_premiums_discounts: firstLine.qa ? [{ description: 'Quality adjustment', total_amount: firstLine.qa }] : [],
+          net_payment: firstLine.gross + (firstLine.qa || 0),
         });
         fetch('/api/extract-rcti', {
           method:'POST', headers:{'Content-Type':'application/json'},
