@@ -150,12 +150,14 @@ async function xeroFetch(url, accessToken, tenantId, retries = 3) {
 
 async function fetchProfitAndLoss(accessToken, tenantId, fromDate, toDate) {
   const url = new URL('https://api.xero.com/api.xro/2.0/Reports/ProfitAndLoss');
-  url.searchParams.set('fromDate', fromDate);
-  url.searchParams.set('toDate',   toDate);
-  // Payments basis = cash transactions only — excludes manual journals, accruals,
-  // and quarter-end adjustments. Correct for a management report where managers
-  // only want to see real invoices and bank transactions.
-  url.searchParams.set('standardLayout', 'true');
+  url.searchParams.set('fromDate',      fromDate);
+  url.searchParams.set('toDate',        toDate);
+  url.searchParams.set('standardLayout','true');
+  // paymentsOnly=true → cash/payments basis: only real invoices and bank transactions.
+  // Excludes manual journals, accruals, and prepayments — correct for a management
+  // report. Without this, Xero returns accrual-basis figures which can show amounts
+  // for accounts that have no actual transactions (e.g. journals from prior periods).
+  url.searchParams.set('paymentsOnly',  'true');
 
   return xeroFetch(url.toString(), accessToken, tenantId);
 }
