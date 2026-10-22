@@ -89,7 +89,7 @@ async function _loadData() {
   const [invoices, contracts, profiles] = await Promise.all([
     dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&select=*&order=sale_date.desc'),
-    dbSelect('user_profiles', 'select=id,full_name,email&limit=200').catch(e => { console.warn('[CFM] user_profiles load failed:', e.message); return []; }),
+    dbSelect('user_profiles', 'select=id,full_name&limit=200').catch(e => { console.warn('[CFM] user_profiles load failed:', e.message); return []; }),
   ]);
   _invoices = invoices;
   _contracts = contracts;
@@ -532,7 +532,7 @@ function _openDetail(inv, container) {
       <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border-light);font-size:11px;color:var(--hint);display:flex;justify-content:space-between;align-items:center">
         <span>
           ${inv.created_at ? 'Entered ' + new Date(inv.created_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) + ' at ' + new Date(inv.created_at).toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'}) : ''}
-          ${inv.created_by && _userProfiles[inv.created_by] ? ' · ' + (_userProfiles[inv.created_by].full_name || _userProfiles[inv.created_by].email || '') : ''}
+          ${inv.created_by && _userProfiles[inv.created_by] ? ' · ' + (_userProfiles[inv.created_by].full_name || '') : ''}
         </span>
         ${inv.updated_at && inv.updated_at !== inv.created_at ? '<span>Last edited ' + new Date(inv.updated_at).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}) + '</span>' : ''}
       </div>
