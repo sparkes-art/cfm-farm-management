@@ -550,14 +550,15 @@ async function _render(container) {
     const catTotal  = lines.reduce((s, c) => s + (parseFloat(c.budget_amount) || 0), 0);
     totalFixedBudget += catTotal;
 
-    const catActual      = xeroActuals  ? (xeroActuals[cat.key]  || 0) : null;
-    const catActualMonth = xeroMonthActuals ? (xeroMonthActuals[cat.key] || 0) : null;
-    if (catActual !== null) totalFixedActual += catActual;
-    if (catActualMonth !== null) totalFixedActualMonth += catActualMonth;
-
     const catYTD      = catTotal * ytdFraction;
-    const catVariance = catActual !== null ? catYTD - catActual : null;
-    const varStyle    = catVariance !== null ? (catVariance >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
+
+    // Accumulate line-level actuals into category total.
+    // Using the raw Xero bucket (xeroActuals[cat.key]) causes the category total to
+    // differ from the sum of line actuals because the bucket includes accounts that
+    // have no matching budget line. We sum the line matches instead so the total
+    // is always the sum of what's visible on screen.
+    let catActual = null;
+    let catActualMonth = null;
 
     const lineRowsHtml = lines.map(c => {
       const amt            = parseFloat(c.budget_amount) || 0;
@@ -570,6 +571,15 @@ async function _render(container) {
       const lineAccountID  = lineActMatch?.accountID   || lineActMoMatch?.accountID || '';
       const lineAcctName   = lineActMatch?.accountName || c.description;
       const lineAcctCode   = lineActMatch?.accountCode || lineActMoMatch?.accountCode || '';
+
+      // Accumulate into category totals (line-by-line, so total = sum of visible lines)
+      if (lineAct !== null) {
+        catActual = (catActual || 0) + lineAct;
+      }
+      if (lineActMonth !== null) {
+        catActualMonth = (catActualMonth || 0) + lineActMonth;
+      }
+
       const lineVar      = lineAct !== null ? amtYTD - lineAct : null;
       const lineVarStyle = lineVar !== null ? (lineVar >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
       const lineVarPct   = lineVar !== null && amtYTD ? lineVar / amtYTD * 100 : null;
@@ -607,10 +617,15 @@ async function _render(container) {
         </tr>`;
     }).join('');
 
-    const catYTDV        = catVariance;
-    const catVarPct      = catYTDV !== null && catYTD ? catYTDV / catYTD * 100 : null;
-    const catVarLabel    = catYTDV !== null
-      ? (catYTDV >= 0 ? '+' : '') + fC(catYTDV) + (catVarPct !== null ? ' (' + (catVarPct >= 0 ? '+' : '') + catVarPct.toFixed(0) + '%)' : '')
+    // Accumulate into overall fixed cost totals (after lineRowsHtml so catActual is fully summed)
+    if (catActual !== null) totalFixedActual += catActual;
+    if (catActualMonth !== null) totalFixedActualMonth += catActualMonth;
+
+    const catVariance = catActual !== null ? catYTD - catActual : null;
+    const varStyle    = catVariance !== null ? (catVariance >= 0 ? 'color:var(--green)' : 'color:var(--red)') : '';
+    const catVarPct   = catVariance !== null && catYTD ? catVariance / catYTD * 100 : null;
+    const catVarLabel = catVariance !== null
+      ? (catVariance >= 0 ? '+' : '') + fC(catVariance) + (catVarPct !== null ? ' (' + (catVarPct >= 0 ? '+' : '') + catVarPct.toFixed(0) + '%)' : '')
       : '—';
 
     const catMonthCols = _selectedMonth ? `
