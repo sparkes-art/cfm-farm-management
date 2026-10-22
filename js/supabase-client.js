@@ -91,7 +91,11 @@ export async function dbInsert(table, row) {
     headers: _headers(bulk ? { 'Prefer': 'return=minimal' } : {}),
     body: JSON.stringify(row),
   });
-  if (!res.ok) throw new Error(`INSERT ${table} failed: ${await res.text()}`);
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`[CFM] INSERT ${table} ${res.status}:`, errText, '\nPayload keys:', Array.isArray(row) ? row.map(r=>Object.keys(r)) : Object.keys(row));
+    throw new Error(`INSERT ${table} failed: ${errText}`);
+  }
   if (bulk) return;
   const rows = await res.json();
   return Array.isArray(rows) ? rows[0] : rows;
@@ -103,7 +107,11 @@ export async function dbUpdate(table, id, patch) {
     headers: _headers(),
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error(`UPDATE ${table} failed: ${await res.text()}`);
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`[CFM] UPDATE ${table} ${res.status}:`, errText, '\nPatch keys:', Object.keys(patch));
+    throw new Error(`UPDATE ${table} failed: ${errText}`);
+  }
   const rows = await res.json();
   return Array.isArray(rows) ? rows[0] : rows;
 }

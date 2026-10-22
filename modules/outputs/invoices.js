@@ -89,7 +89,7 @@ async function _loadData() {
   const [invoices, contracts, profiles] = await Promise.all([
     dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&select=*&order=sale_date.desc'),
-    dbSelect('user_profiles', 'select=id,full_name,email&limit=200').catch(() => []),
+    dbSelect('user_profiles', 'select=id,full_name,email&limit=200').catch(e => { console.warn('[CFM] user_profiles load failed:', e.message); return []; }),
   ]);
   _invoices = invoices;
   _contracts = contracts;
