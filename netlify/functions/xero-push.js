@@ -154,39 +154,42 @@ exports.handler = async (event) => {
 
           if (line.type === 'income' && line.line_type !== 'qa') {
             // Sale income line
-            // Description: [Commodity], [Crop Year], Contract [Contract Number], [Qty] [unit] @ $[eff $/unit]
-            const effPrice = batchQty ? amount / batchQty : 0;
+            // Use stored eff_per_unit if available, otherwise calculate
+            const effPrice = line.eff_per_unit || (batchQty ? amount / batchQty : 0);
             const desc = [
               commodity,
               cropYear,
               contractNumber ? `Contract ${contractNumber}` : '',
-              `${batchQty} ${masterUnit}`,
-              `@ $${effPrice.toFixed(2)}`,
+              batchQty ? `${batchQty} ${batch.unit || masterUnit}` : '',
+              effPrice ? `@ $${effPrice.toFixed(2)}/${batch.unit || masterUnit}` : '',
               incomeDocket ? `Docket ${incomeDocket}` : '',
             ].filter(Boolean).join(', ');
-            // Use Qty:1 + full LineAmount to avoid Xero rounding on recalc
+            // Set real Qty + UnitAmount; keep LineAmount as the authoritative total
+            // so Xero doesn't recalculate and introduce rounding drift
             lineItems.push({
               Description: desc,
-              Quantity: 1,
-              UnitAmount: Math.round(amount * 100) / 100,
+              Quantity: batchQty || 1,
+              UnitAmount: batchQty ? Math.round(effPrice * 10000) / 10000 : Math.round(amount * 100) / 100,
               LineAmount: Math.round(amount * 100) / 100,
               TaxType: taxType,
             });
 
           } else if (line.type === 'income' && line.line_type === 'qa') {
-            // Quality adjustment line
+            // Quality adjustment line — keep as qty 1 since QA is a lump adjustment
+            const effQaPrice = line.eff_per_unit || (batchQty ? amount / batchQty : 0);
             const desc = [
               'QUALITY ADJUSTMENT:',
               commodity,
               cropYear,
               contractNumber ? `Contract ${contractNumber}` : '',
-              `${batchQty} ${masterUnit}`,
+              batchQty ? `${batchQty} ${batch.unit || masterUnit}` : '',
+              effQaPrice ? `@ $${effQaPrice.toFixed(2)}/${batch.unit || masterUnit}` : '',
               incomeDocket ? `Docket ${incomeDocket}` : '',
             ].filter(Boolean).join(' ');
             lineItems.push({
               Description: desc,
-              Quantity: 1,
-              UnitAmount: Math.round(amount * 100) / 100,
+              Quantity: batchQty || 1,
+              UnitAmount: batchQty ? Math.round(effQaPrice * 10000) / 10000 : Math.round(amount * 100) / 100,
               LineAmount: Math.round(amount * 100) / 100,
               TaxType: taxType,
             });
