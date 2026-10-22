@@ -196,12 +196,18 @@ exports.handler = async (event) => {
       console.log(`[xero-account-txns] fetching invoices+banktxns for accountId=${accountId} accountCode="${accountCode}" ${fromDate}→${toDate}`);
 
       // Helper: extract matching line items from a document
+      // Strict date post-filter ensures Xero's server-side filtering hasn't leaked
+      // records outside the requested range (can happen when PAID status is included).
       const extractLines = (doc, docType, dateField, contactField) => {
         const rawDate = doc[dateField] || '';
         const msMatch = rawDate.match(/\/Date\((\d+)/);
         const date    = msMatch
           ? new Date(parseInt(msMatch[1])).toISOString().slice(0, 10)
           : new Date(rawDate).toISOString().slice(0, 10);
+
+        // Strict date guard — drop anything outside [fromDate, toDate]
+        if (date < fromDate || date > toDate) return;
+
         const contact = doc[contactField]?.Name || doc[contactField] || '';
         const ref     = doc.Reference || doc.InvoiceNumber || '';
 
@@ -223,27 +229,49 @@ exports.handler = async (event) => {
         }
       };
 
-      // 1. Bills (ACCPAY invoices) — expense accounts hit by supplier bills
-      const invUrl = new URL('https://api.xero.com/api.xro/2.0/Invoices');
-      invUrl.searchParams.set('Type',     'ACCPAY');
-      invUrl.searchParams.set('Statuses', 'AUTHORISED,PAID');
-      invUrl.searchParams.set('DateFrom', fromDate);
-      invUrl.searchParams.set('DateTo',   toDate);
-      invUrl.searchParams.set('unitdp',   '4');
+      // 1. Bills (ACCPAY) — supplier bills / purchase invoices
+      const invUrlPay = new URL('https://api.xero.com/api.xro/2.0/Invoices');
+      invUrlPay.searchParams.set('Type',     'ACCPAY');
+      invUrlPay.searchParams.set('Statuses', 'AUTHORISED,PAID');
+      invUrlPay.searchParams.set('DateFrom', fromDate);
+      invUrlPay.searchParams.set('DateTo',   toDate);
+      invUrlPay.searchParams.set('unitdp',   '4');
 
-      const invData = await xeroGet(invUrl.toString(), accessToken, tenantId, 3, forceRefresh);
-      for (const inv of (invData?.Invoices || [])) extractLines(inv, 'ACCPAY', 'Date', 'Contact');
-      console.log(`[xero-account-txns] ACCPAY invoices: ${invData?.Invoices?.length || 0}, matched lines so far: ${transactions.length}`);
+      const invPayData = await xeroGet(invUrlPay.toString(), accessToken, tenantId, 3, forceRefresh);
+      for (const inv of (invPayData?.Invoices || [])) extractLines(inv, 'ACCPAY', 'Date', 'Contact');
+      console.log(`[xero-account-txns] ACCPAY invoices: ${invPayData?.Invoices?.length || 0}, matched lines so far: ${transactions.length}`);
 
-      // 2. Spend Money bank transactions — cash expenses posted to an account
-      const btUrl = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
-      btUrl.searchParams.set('Type',    'SPEND');
-      btUrl.searchParams.set('FromDate', fromDate);
-      btUrl.searchParams.set('ToDate',   toDate);
+      // 2. Sales invoices (ACCREC) — revenue or adjustments that credit expense accounts
+      const invUrlRec = new URL('https://api.xero.com/api.xro/2.0/Invoices');
+      invUrlRec.searchParams.set('Type',     'ACCREC');
+      invUrlRec.searchParams.set('Statuses', 'AUTHORISED,PAID');
+      invUrlRec.searchParams.set('DateFrom', fromDate);
+      invUrlRec.searchParams.set('DateTo',   toDate);
+      invUrlRec.searchParams.set('unitdp',   '4');
 
-      const btData = await xeroGet(btUrl.toString(), accessToken, tenantId, 3, forceRefresh);
-      for (const bt of (btData?.BankTransactions || [])) extractLines(bt, 'SPEND', 'Date', 'Contact');
-      console.log(`[xero-account-txns] SPEND banktxns: ${btData?.BankTransactions?.length || 0}, total matched lines: ${transactions.length}`);
+      const invRecData = await xeroGet(invUrlRec.toString(), accessToken, tenantId, 3, forceRefresh);
+      for (const inv of (invRecData?.Invoices || [])) extractLines(inv, 'ACCREC', 'Date', 'Contact');
+      console.log(`[xero-account-txns] ACCREC invoices: ${invRecData?.Invoices?.length || 0}, matched lines so far: ${transactions.length}`);
+
+      // 3. Spend Money bank transactions — cash expenses posted directly to an account
+      const btUrlSpend = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
+      btUrlSpend.searchParams.set('Type',     'SPEND');
+      btUrlSpend.searchParams.set('FromDate', fromDate);
+      btUrlSpend.searchParams.set('ToDate',   toDate);
+
+      const btSpendData = await xeroGet(btUrlSpend.toString(), accessToken, tenantId, 3, forceRefresh);
+      for (const bt of (btSpendData?.BankTransactions || [])) extractLines(bt, 'SPEND', 'Date', 'Contact');
+      console.log(`[xero-account-txns] SPEND banktxns: ${btSpendData?.BankTransactions?.length || 0}, matched lines so far: ${transactions.length}`);
+
+      // 4. Receive Money bank transactions — cash receipts that may hit expense accounts
+      const btUrlRecv = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
+      btUrlRecv.searchParams.set('Type',     'RECEIVE');
+      btUrlRecv.searchParams.set('FromDate', fromDate);
+      btUrlRecv.searchParams.set('ToDate',   toDate);
+
+      const btRecvData = await xeroGet(btUrlRecv.toString(), accessToken, tenantId, 3, forceRefresh);
+      for (const bt of (btRecvData?.BankTransactions || [])) extractLines(bt, 'RECEIVE', 'Date', 'Contact');
+      console.log(`[xero-account-txns] RECEIVE banktxns: ${btRecvData?.BankTransactions?.length || 0}, total matched lines: ${transactions.length}`);
 
     } else {
       console.warn(`[xero-account-txns] no accountId resolved — cannot fetch transactions`);
