@@ -266,6 +266,13 @@ exports.handler = async (event) => {
       btUrlSpend.searchParams.set('dateTo',   toDate);
 
       const btSpendData = await xeroGet(btUrlSpend.toString(), accessToken, tenantId, 3, forceRefresh);
+      // DEBUG: log first BankTransaction to inspect line item field names
+      if (btSpendData?.BankTransactions?.length > 0) {
+        const sample = btSpendData.BankTransactions[0];
+        console.log(`[xero-account-txns] SPEND sample keys: ${Object.keys(sample).join(', ')}`);
+        console.log(`[xero-account-txns] SPEND sample LineItems[0]: ${JSON.stringify(sample.LineItems?.[0])}`);
+        console.log(`[xero-account-txns] SPEND sample Date: ${sample.Date}, looking for accountId: ${accountId}`);
+      }
       for (const bt of (btSpendData?.BankTransactions || [])) extractLines(bt, 'SPEND', 'Date', 'Contact');
       console.log(`[xero-account-txns] SPEND banktxns: ${btSpendData?.BankTransactions?.length || 0}, matched lines so far: ${transactions.length}`);
 
