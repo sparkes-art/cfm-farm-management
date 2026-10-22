@@ -799,14 +799,18 @@ export async function openInvoiceForm(container, existing = null) {
   const isEdit = !!existing;
   const activeSeason = getActiveSeason() || '';
 
-  // Pre-fetch prior season budgets for the carry-over crop dropdown
+  // Pre-fetch budgets for all available seasons → drives the crop dropdown per line
   const [curY] = (activeSeason || '').split('-').map(Number);
-  const priorSeasons = curY ? [1,2,3].map(n => `${curY-n}-${String(curY-n+1).slice(-2)}`) : [];
-  let priorBudgets = [];
-  if (priorSeasons.length && farm) {
+  const allSeasons = curY ? [0,1,2,3].map(n => `${curY-n}-${String(curY-n+1).slice(-2)}`) : (activeSeason ? [activeSeason] : []);
+  let seasonBudgets = {}; // { season: [commodity,...] }
+  if (allSeasons.length && farm) {
     try {
-      priorBudgets = await dbSelect('budgets', `farm_id=eq.${farm.id}&season=in.(${priorSeasons.join(',')})&select=commodity,season`);
-    } catch(e) { priorBudgets = []; }
+      const rows = await dbSelect('budgets', `farm_id=eq.${farm.id}&season=in.(${allSeasons.join(',')})&select=commodity,season`);
+      allSeasons.forEach(s => {
+        const crops = [...new Set(rows.filter(r=>r.season===s&&r.commodity).map(r=>r.commodity.trim()))].sort();
+        seasonBudgets[s] = crops;
+      });
+    } catch(e) { /* silently skip — free text still works */ }
   }
 
   const formEl = document.createElement('div');
@@ -830,10 +834,11 @@ export async function openInvoiceForm(container, existing = null) {
           commodity:  saleLine?.description || '',
           crop_year:  b.crop_year || activeSeason,
           qty:        parseFloat(b.qty) || '',
+          unit:       b.unit || existing?.master_unit || 'bale',
+          description: b.description || '',
           gross:      saleLine ? parseFloat(saleLine.amount) || '' : '',
           qa:         qaLine   ? parseFloat(qaLine.amount)   || '' : '',
           income_files: b.income_files || [],
-          prior_year_income: !!b.prior_year_income,
         };
       })
     : existing
@@ -841,6 +846,8 @@ export async function openInvoiceForm(container, existing = null) {
           commodity:  (existing.line_items||[])[0]?.commodity || '',
           crop_year:  existing.season || activeSeason,
           qty:        existing.total_qty || '',
+          unit:       existing.master_unit || 'bale',
+          description: '',
           gross:      existing.gross_amount || '',
           qa:         existing.total_quality_adj || '',
           income_files: existing.rcti_files || [],
@@ -940,44 +947,6 @@ export async function openInvoiceForm(container, existing = null) {
         <input class="form-input" id="f-grade" type="text" value="${existing?.grade||''}" placeholder="e.g. APW1, Malt, Canola SQ">
       </div>
 
-      <!-- Prior year income toggle -->
-      ${(() => {
-        // Detect if existing invoice is already flagged as prior year
-        // (its season differs from activeSeason, or prior_year flag is set)
-        const isPriorYear = existing ? (() => { const b = existing.batches ? (typeof existing.batches==='string'?JSON.parse(existing.batches):existing.batches) : []; return b.some(x=>x.prior_year_income) || (existing.season && existing.season !== activeSeason); })() : false;
-        const existingPriorComm = (() => { if (!existing) return ''; const b = existing.batches?(typeof existing.batches==='string'?JSON.parse(existing.batches):existing.batches):[]; return b.flatMap(x=>x.lines||[]).find(l=>l.type==='income'&&l.description)?.description || (existing.line_items||[])[0]?.commodity || ''; })();
-        const defaultPriorSeason = existing?.season && priorSeasons.includes(existing.season) ? existing.season : priorSeasons[0] || '';
-        const cropOptsForSeason = (s) => {
-          const crops = [...new Set(priorBudgets.filter(b=>b.season===s&&b.commodity).map(b=>b.commodity.trim()))].sort();
-          if (!crops.length) return `<option value="">— no budget crops found —</option>`;
-          return `<option value="">— select crop —</option>` + crops.map(c=>`<option value="${c}" ${c===existingPriorComm?'selected':''}>${c}</option>`).join('');
-        };
-        return `
-        <div id="f-prior-year-wrap" style="background:#fffbeb;border:1px solid #fcd34d;border-radius:var(--radius-md);padding:12px 14px;margin-bottom:16px">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
-            <input type="checkbox" id="f-prior-year" style="width:16px;height:16px;cursor:pointer" ${isPriorYear?'checked':''}>
-            <span style="font-size:13px;font-weight:600;color:#92400e">Prior year income</span>
-            <span style="font-size:11px;color:#a16207;font-weight:400">— payment received this season for a prior year's crop</span>
-          </label>
-          <div id="f-prior-year-fields" style="display:${isPriorYear?'grid':'none'};grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
-            <div>
-              <label class="form-label" style="font-size:11px">Prior season</label>
-              <select class="form-select" id="f-prior-season" style="font-size:13px">
-                ${priorSeasons.map((s,i) => `<option value="${s}" ${(existing?.season===s)||(i===0&&!existing)?'selected':''}>${s}</option>`).join('')}
-              </select>
-              <div style="font-size:10px;color:var(--hint);margin-top:3px">Which season this income belongs to</div>
-            </div>
-            <div>
-              <label class="form-label" style="font-size:11px">Crop / description (prior year)</label>
-              <select class="form-select" id="f-prior-commodity" style="font-size:13px">
-                ${cropOptsForSeason(defaultPriorSeason)}
-              </select>
-              <div style="font-size:10px;color:var(--hint);margin-top:3px">Select the prior year crop — sourced from that season's budget</div>
-            </div>
-          </div>
-        </div>`;
-      })()}
-
       <!-- Line items -->
       <div style="margin-bottom:16px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
@@ -986,8 +955,8 @@ export async function openInvoiceForm(container, existing = null) {
         </div>
 
         <!-- Line headers -->
-        <div style="display:grid;grid-template-columns:1fr 90px 100px 100px 100px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
-          ${['Crop / commodity','Season','Qty','Gross ($)','Quality adj ($)',''].map(h =>
+        <div style="display:grid;grid-template-columns:100px 1fr 1fr 70px 90px 100px 100px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
+          ${['Season','Crop','Description','Unit','Qty','Gross ($)','Quality adj ($)',''].map(h =>
             `<div style="font-size:9px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${h}</div>`
           ).join('')}
         </div>
@@ -1078,15 +1047,22 @@ export async function openInvoiceForm(container, existing = null) {
         };
         setLine('cl-qty', extracted.bale_count);
         setLine('cl-gross', extracted.gross_proceeds);
+        if (extracted.unit) setLine('cl-unit', extracted.unit);
         // QA: use quality_adj from extraction directly (already derived server-side as net - gross)
         const qaVal = extracted.quality_adj != null && extracted.quality_adj !== 0
           ? extracted.quality_adj : null;
         if (qaVal != null) setLine('cl-qa', qaVal);
-        // Pre-fill commodity from matched contract if available
+        // Pre-fill commodity from matched contract if available (select dropdown)
         const contractEl = contractHidden;
         if (!firstLine.querySelector('.cl-commodity').value && contractEl?.value) {
           const mc = _contracts.find(c => c.id === contractEl.value);
-          if (mc?.commodity) firstLine.querySelector('.cl-commodity').value = mc.commodity;
+          if (mc?.commodity) {
+            // Try to select from dropdown; if not present add it as an option
+            const sel = firstLine.querySelector('.cl-commodity');
+            const opt = [...sel.options].find(o => o.value === mc.commodity);
+            if (opt) { sel.value = mc.commodity; }
+            else { sel.insertAdjacentHTML('beforeend', `<option value="${mc.commodity}" selected>${mc.commodity}</option>`); }
+          }
         }
       }
 
@@ -1258,30 +1234,48 @@ export async function openInvoiceForm(container, existing = null) {
 
   // ── Multi-line crop sale lines ──────────────────────────────
   const linesWrap = modal.querySelector('#f-lines');
-  // Seasons to offer in each line's season picker
-  const allSeasons = (() => {
-    const [cy] = (activeSeason || '').split('-').map(Number);
-    const seasons = cy ? [0,1,2,3].map(n => `${cy-n}-${String(cy-n+1).slice(-2)}`) : (activeSeason ? [activeSeason] : []);
-    return seasons;
-  })();
+
+  // Build crop options for a given season from pre-fetched budgets
+  const cropOptsForSeason = (season, selectedCrop = '') => {
+    const crops = seasonBudgets[season] || [];
+    const opts = crops.map(c => `<option value="${c}"${c===selectedCrop?' selected':''}>${c}</option>`).join('');
+    return `<option value="">— select or type —</option>${opts}`;
+  };
 
   const buildCropLine = (data = {}) => {
     const lineDiv = document.createElement('div');
-    lineDiv.style.cssText = 'display:grid;grid-template-columns:1fr 90px 100px 100px 100px 30px;gap:6px;margin-bottom:6px;align-items:center';
+    lineDiv.style.cssText = 'display:grid;grid-template-columns:100px 1fr 1fr 70px 90px 100px 100px 30px;gap:6px;margin-bottom:6px;align-items:center';
 
+    const selectedSeason = data.crop_year || activeSeason;
     const seasonOpts = allSeasons.map(s =>
-      `<option value="${s}"${s===(data.crop_year||activeSeason)?' selected':''}>${s}</option>`
+      `<option value="${s}"${s===selectedSeason?' selected':''}>${s}</option>`
     ).join('');
 
+    // Escape value for html attribute
+    const esc = v => (v||'').replace(/"/g,'&quot;');
+
     lineDiv.innerHTML = `
-      <input class="form-input cl-commodity" type="text" placeholder="e.g. Cotton, Canola" value="${data.commodity||''}" style="font-size:12px;padding:6px 8px">
       <select class="form-select cl-season" style="font-size:11px;padding:4px 6px">${seasonOpts}</select>
+      <select class="form-select cl-commodity" style="font-size:12px;padding:5px 6px">
+        ${cropOptsForSeason(selectedSeason, data.commodity||'')}
+      </select>
+      <input class="form-input cl-description" type="text" placeholder="Description / notes" value="${esc(data.description||'')}" style="font-size:12px;padding:6px 8px">
+      <input class="form-input cl-unit" type="text" placeholder="bale" value="${esc(data.unit||'bale')}" style="font-size:12px;padding:6px 8px">
       <input class="form-input cl-qty" type="number" step="any" min="0" placeholder="0" value="${data.qty||''}" style="font-size:12px;padding:6px 8px">
       <input class="form-input cl-gross" type="number" step="0.01" placeholder="0.00" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600">
       <input class="form-input cl-qa" type="number" step="0.01" placeholder="0.00" value="${data.qa||''}" style="font-size:12px;padding:6px 8px" title="Quality adjustment (negative = discount)">
       <button class="btn btn-ghost cl-remove" type="button" style="padding:4px;font-size:16px;color:var(--hint)">✕</button>
     `;
+
     lineDiv._incomeFiles = data.income_files || [];
+
+    // When season changes, repopulate the crop dropdown preserving current selection
+    lineDiv.querySelector('.cl-season').addEventListener('change', function() {
+      const commoditySel = lineDiv.querySelector('.cl-commodity');
+      const current = commoditySel.value;
+      commoditySel.innerHTML = cropOptsForSeason(this.value, current);
+    });
+
     lineDiv.querySelector('.cl-gross').addEventListener('input', recalcTotals);
     lineDiv.querySelector('.cl-qa').addEventListener('input', recalcTotals);
     lineDiv.querySelector('.cl-qty').addEventListener('input', recalcTotals);
@@ -1315,25 +1309,6 @@ export async function openInvoiceForm(container, existing = null) {
   });
   recalcTotals();
 
-  // ── Prior year toggle ────────────────────────────────────────
-  const priorYearCb = modal.querySelector('#f-prior-year');
-  const priorYearFields = modal.querySelector('#f-prior-year-fields');
-  priorYearCb?.addEventListener('change', () => {
-    priorYearFields.style.display = priorYearCb.checked ? 'grid' : 'none';
-  });
-
-  // When prior season changes, repopulate the crop dropdown
-  const priorSeasonSel = modal.querySelector('#f-prior-season');
-  const priorCommoditySel = modal.querySelector('#f-prior-commodity');
-  priorSeasonSel?.addEventListener('change', () => {
-    const s = priorSeasonSel.value;
-    const crops = [...new Set(priorBudgets.filter(b=>b.season===s&&b.commodity).map(b=>b.commodity.trim()))].sort();
-    if (!crops.length) {
-      priorCommoditySel.innerHTML = `<option value="">— no budget crops found —</option>`;
-    } else {
-      priorCommoditySel.innerHTML = `<option value="">— select crop —</option>` + crops.map(c=>`<option value="${c}">${c}</option>`).join('');
-    }
-  });
 
   // ── Save ─────────────────────────────────────────────────────
   modal.querySelector('#f-save').addEventListener('click', async () => {
@@ -1350,11 +1325,6 @@ export async function openInvoiceForm(container, existing = null) {
       const notes = modal.querySelector('#f-notes')?.value?.trim() || '';
       const grade = modal.querySelector('#f-grade')?.value?.trim() || '';
 
-      // Prior year handling (applies to ALL lines when checked — legacy single-line behaviour)
-      const isPriorYear = modal.querySelector('#f-prior-year')?.checked || false;
-      const priorSeason = isPriorYear ? (modal.querySelector('#f-prior-season')?.value || '') : '';
-      const priorCommodity = isPriorYear ? (modal.querySelector('#f-prior-commodity')?.value || '') : '';
-
       if (!date) throw new Error('Please enter a date');
       if (!buyer) throw new Error('Please enter a buyer');
 
@@ -1368,6 +1338,8 @@ export async function openInvoiceForm(container, existing = null) {
         saleLines.push({
           commodity:    div.querySelector('.cl-commodity')?.value?.trim() || selectedContract?.commodity || 'Sale',
           crop_year:    div.querySelector('.cl-season')?.value || activeSeason,
+          unit:         div.querySelector('.cl-unit')?.value?.trim() || masterUnit,
+          description:  div.querySelector('.cl-description')?.value?.trim() || '',
           qty,
           gross,
           qa,
@@ -1399,13 +1371,11 @@ export async function openInvoiceForm(container, existing = null) {
 
       // Build one batch per line item
       const batches = saleLines.map((sl, idx) => {
-        const { commodity, crop_year, qty, gross, qa, income_files } = sl;
+        const { commodity, crop_year, qty, unit: slUnit, description: slDesc, gross, qa, income_files } = sl;
 
-        // Prior year override: use priorSeason and priorCommodity when checked
-        const effectiveCropYear = isPriorYear ? priorSeason : (crop_year || selectedContract?.crop_year || activeSeason);
-        const effectiveCommodity = isPriorYear
-          ? (priorCommodity || commodity || 'Prior year income')
-          : commodity;
+        const effectiveCropYear = crop_year || selectedContract?.crop_year || activeSeason;
+        const effectiveCommodity = commodity;
+        const effectiveUnit = slUnit || masterUnit;
 
         const batchLines = [];
         if (gross) batchLines.push({
@@ -1426,10 +1396,11 @@ export async function openInvoiceForm(container, existing = null) {
 
         return {
           qty,
+          unit: effectiveUnit,
           crop_year: effectiveCropYear,
+          description: slDesc || '',
           income_files: batchFiles,
           lines: batchLines,
-          ...(isPriorYear ? { prior_year_income: true } : {}),
         };
       });
 
@@ -1438,16 +1409,17 @@ export async function openInvoiceForm(container, existing = null) {
       const totalGross = saleLines.reduce((s, l) => s + l.gross, 0);
       const totalQA    = saleLines.reduce((s, l) => s + l.qa, 0);
 
-      // Primary season is taken from first line (or prior season if prior year)
-      const primarySeason = isPriorYear ? priorSeason : (saleLines[0]?.crop_year || selectedContract?.crop_year || activeSeason);
+      // Primary season taken from first line
+      const primarySeason = saleLines[0]?.crop_year || selectedContract?.crop_year || activeSeason;
 
       // Legacy line_items for compatibility (one entry per sale line)
       const legacyLineItems = saleLines.flatMap(sl => {
-        const effectiveCropYear = isPriorYear ? priorSeason : (sl.crop_year || activeSeason);
-        const effectiveCommodity = isPriorYear ? (priorCommodity || sl.commodity) : sl.commodity;
+        const effectiveCropYear = sl.crop_year || activeSeason;
+        const effectiveCommodity = sl.commodity;
+        const effectiveUnit = sl.unit || masterUnit;
         const items = [];
-        if (sl.gross) items.push({ type:'income', line_type:'sale', commodity: effectiveCommodity, docket:'', qty: sl.qty, unit:masterUnit, season: effectiveCropYear, total:sl.gross, price: sl.qty ? sl.gross/sl.qty : 0 });
-        if (sl.qa)    items.push({ type:'income', line_type:'qa',   commodity: effectiveCommodity, docket:'', qty: sl.qty, unit:masterUnit, season: effectiveCropYear, total:sl.qa,    price: sl.qty ? sl.qa/sl.qty : 0 });
+        if (sl.gross) items.push({ type:'income', line_type:'sale', commodity: effectiveCommodity, description: sl.description||'', docket:'', qty: sl.qty, unit: effectiveUnit, season: effectiveCropYear, total:sl.gross, price: sl.qty ? sl.gross/sl.qty : 0 });
+        if (sl.qa)    items.push({ type:'income', line_type:'qa',   commodity: effectiveCommodity, description: sl.description||'', docket:'', qty: sl.qty, unit: effectiveUnit, season: effectiveCropYear, total:sl.qa,    price: sl.qty ? sl.qa/sl.qty : 0 });
         return items;
       });
 
