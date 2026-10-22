@@ -119,13 +119,20 @@ function _filtered() {
         : i.forward_contract_id === contract;
     if (!season) return commodityMatch && contractMatch && monthMatch;
     // Season match: invoice belongs in a season if its invoice_date falls within
-    // that season's financial year (1 Jul – 30 Jun). crop_year on batch lines is
-    // a label for the crop, not a filter gate — carryover income from a prior crop
-    // still flows into the season it was received in.
+    // that season's year, using the farm's configured year start month.
+    // crop_year on batch lines is a label for the crop, not a filter gate —
+    // carryover income from a prior crop received in the current season still shows here.
+    const farm = getActiveFarm();
+    const ym = parseInt(farm?.settings?.yearStartMonth || 7);
     const [sy] = season.split('-').map(Number);
-    const seasonStart = `${sy}-07-01`;
-    const seasonEnd   = `${sy+1}-07-01`;
-    const d = i.invoice_date?.slice(0,10) || '';
+    // Season "2026-27" with Oct start = 1 Oct 2026 – 30 Sep 2027
+    // Season "2026-27" with Jul start = 1 Jul 2026 – 30 Jun 2027
+    // Season "2026-27" with Jan start = 1 Jan 2026 – 31 Dec 2026
+    // In all cases: start = month ym of year sy; end = month ym of year sy+1
+    const mm = String(ym).padStart(2, '0');
+    const seasonStart = `${sy}-${mm}-01`;
+    const seasonEnd   = `${sy + 1}-${mm}-01`;
+    const d = i.invoice_date?.slice(0, 10) || '';
     const dateInSeason = d >= seasonStart && d < seasonEnd;
     return dateInSeason && commodityMatch && contractMatch && monthMatch;
   });
