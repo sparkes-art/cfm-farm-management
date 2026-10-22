@@ -234,12 +234,17 @@ async function _render(container) {
       }
 
       // 2. Fuzzy name match fallback
+      // Generic words that appear in many account names and must NOT drive a match on their own.
+      const STOP_WORDS = new Set(['fee', 'fees', 'cost', 'costs', 'general', 'and', 'the',
+                                   'for', 'inc', 'gst', 'tax', 'other', 'misc', 'miscellaneous']);
       const dNorm = norm(description);
       let hit = normAccounts.find(a => a._norm === dNorm);
       if (hit) return mkResult(hit);
       hit = normAccounts.find(a => a._norm.includes(dNorm) || dNorm.includes(a._norm));
       if (hit) return mkResult(hit);
-      const dWords = dNorm.split(' ').filter(w => w.length > 2);
+      // Word-based fuzzy: require at least one MEANINGFUL shared word (not a stop word).
+      // This prevents "Filling Fees" matching "Licencing & Compliance Fees" via the word "fees".
+      const dWords = dNorm.split(' ').filter(w => w.length > 2 && !STOP_WORDS.has(w));
       if (dWords.length) {
         hit = normAccounts.find(a => {
           const matches = dWords.filter(w => a._norm.includes(w));
@@ -1356,13 +1361,15 @@ window._mgmtXeroMapping = async function(farmId, season) {
     // used here to show which Xero account each line auto-resolves to.
     const normStr = s => (s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
     const normAccounts = xeroAccounts.map(a => ({ ...a, _norm: normStr(a.Name) }));
+    const FUZZY_STOP_WORDS = new Set(['fee', 'fees', 'cost', 'costs', 'general', 'and', 'the',
+                                       'for', 'inc', 'gst', 'tax', 'other', 'misc', 'miscellaneous']);
     const fuzzyMatch = (description) => {
       const dNorm = normStr(description);
       let hit = normAccounts.find(a => a._norm === dNorm);
       if (hit) return hit;
       hit = normAccounts.find(a => a._norm.includes(dNorm) || dNorm.includes(a._norm));
       if (hit) return hit;
-      const dWords = dNorm.split(' ').filter(w => w.length > 2);
+      const dWords = dNorm.split(' ').filter(w => w.length > 2 && !FUZZY_STOP_WORDS.has(w));
       if (dWords.length) {
         hit = normAccounts.find(a => {
           const matches = dWords.filter(w => a._norm.includes(w));
