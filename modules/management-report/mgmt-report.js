@@ -941,7 +941,7 @@ window._mgmtCapexDetail = function(codeKey) {
         </tr>`;
       }).join('')
     : `<tr><td colspan="2" style="padding:20px 16px;text-align:center;font-size:13px;color:#999;font-style:italic">
-        No line items — re-import the budget to see individual items here.
+        Budget entered as a lump sum — no individual line items recorded.
       </td></tr>`;
 
   const total = items.reduce((s, i) => s + i.amt, 0);
