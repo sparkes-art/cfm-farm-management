@@ -105,10 +105,13 @@ exports.handler = async (event) => {
   if (!invoice_id || !farm_id) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing invoice_id or farm_id' }) };
 
   try {
-    // Load invoice from Supabase
+    // Load invoice and farm from Supabase
     const invoices = await sb(`invoices?id=eq.${invoice_id}&select=*`);
     const inv = invoices[0];
     if (!inv) return { statusCode: 404, headers, body: JSON.stringify({ error: 'Invoice not found' }) };
+
+    const farms = await sb(`farms?id=eq.${farm_id}&select=name`);
+    const farmName = farms[0]?.name || '';
 
     // Get Xero access token
     const { accessToken, tenantId } = await getAccessToken(farm_id);
@@ -153,11 +156,12 @@ exports.handler = async (event) => {
           if (!amount) return;
 
           if (line.type === 'income' && line.line_type !== 'qa') {
-            // Sale income line
-            // Use stored eff_per_unit if available, otherwise calculate
+            // Sale income line — use per-batch commodity (line.description) not top-level commodity
+            const lineCommodity = line.description || batch.commodity || commodity;
             const effPrice = line.eff_per_unit || (batchQty ? amount / batchQty : 0);
             const desc = [
-              commodity,
+              farmName,
+              lineCommodity,
               cropYear,
               contractNumber ? `Contract ${contractNumber}` : '',
               batchQty ? `${batchQty} ${batch.unit || masterUnit}` : '',
@@ -175,11 +179,13 @@ exports.handler = async (event) => {
             });
 
           } else if (line.type === 'income' && line.line_type === 'qa') {
-            // Quality adjustment line — keep as qty 1 since QA is a lump adjustment
+            // Quality adjustment line — use per-batch commodity
+            const lineCommodity = line.description || batch.commodity || commodity;
             const effQaPrice = line.eff_per_unit || (batchQty ? amount / batchQty : 0);
             const desc = [
+              farmName,
               'QUALITY ADJUSTMENT:',
-              commodity,
+              lineCommodity,
               cropYear,
               contractNumber ? `Contract ${contractNumber}` : '',
               batchQty ? `${batchQty} ${batch.unit || masterUnit}` : '',
@@ -204,6 +210,7 @@ exports.handler = async (event) => {
         const qty = parseFloat(l.qty) || 1;
         const price = parseFloat(l.price) || 0;
         const desc = [
+          farmName,
           l.commodity || commodity,
           l.season,
           contractNumber ? `Contract ${contractNumber}` : '',
