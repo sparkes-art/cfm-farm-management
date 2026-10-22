@@ -256,11 +256,14 @@ exports.handler = async (event) => {
       for (const inv of (invRecData?.Invoices || [])) extractLines(inv, 'ACCREC', 'Date', 'Contact');
       console.log(`[xero-account-txns] ACCREC invoices: ${invRecData?.Invoices?.length || 0}, matched lines so far: ${transactions.length}`);
 
-      // 3. Spend Money bank transactions — cash expenses posted directly to an account
+      // 3. Spend Money + Receive Money bank transactions
+      // NOTE: BankTransactions endpoint uses 'dateFrom'/'dateTo' (not 'FromDate'/'ToDate' like Invoices)
+      // We fetch both types in one call by omitting Type and filtering client-side, to avoid two round trips.
+      // Alternatively pass Type=SPEND and Type=RECEIVE separately with correct param names.
       const btUrlSpend = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
       btUrlSpend.searchParams.set('Type',     'SPEND');
-      btUrlSpend.searchParams.set('FromDate', fromDate);
-      btUrlSpend.searchParams.set('ToDate',   toDate);
+      btUrlSpend.searchParams.set('dateFrom', fromDate);
+      btUrlSpend.searchParams.set('dateTo',   toDate);
 
       const btSpendData = await xeroGet(btUrlSpend.toString(), accessToken, tenantId, 3, forceRefresh);
       for (const bt of (btSpendData?.BankTransactions || [])) extractLines(bt, 'SPEND', 'Date', 'Contact');
@@ -269,8 +272,8 @@ exports.handler = async (event) => {
       // 4. Receive Money bank transactions — cash receipts that may hit expense accounts
       const btUrlRecv = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
       btUrlRecv.searchParams.set('Type',     'RECEIVE');
-      btUrlRecv.searchParams.set('FromDate', fromDate);
-      btUrlRecv.searchParams.set('ToDate',   toDate);
+      btUrlRecv.searchParams.set('dateFrom', fromDate);
+      btUrlRecv.searchParams.set('dateTo',   toDate);
 
       const btRecvData = await xeroGet(btUrlRecv.toString(), accessToken, tenantId, 3, forceRefresh);
       for (const bt of (btRecvData?.BankTransactions || [])) extractLines(bt, 'RECEIVE', 'Date', 'Contact');
