@@ -187,79 +187,64 @@ exports.handler = async (event) => {
       }
     }
 
-    // ── Fetch via Journals endpoint — works with accounting.invoices.read scope ─
-    // Reports/AccountTransactions requires the deprecated accounting.reports.read
-    // scope (removed for apps created after March 2026). Instead we use the Journals
-    // endpoint which returns all journal lines and filter by accountId client-side.
-    // Page size is 100 (Xero default) so we paginate until we have all lines in range.
+    // ── Fetch via Invoices + BankTransactions — covered by accounting.invoices.read ─
+    // Both endpoints support date filtering and line-item account filtering.
+    // We fetch bills (ACCPAY) and spend-money transactions for the account in range.
     const transactions = [];
 
     if (accountId) {
-      // Journals endpoint: GET /api.xro/2.0/Journals?offset=N
-      // Each journal has a JournalDate and JournalLines[].AccountID
-      // We filter to our date range and accountId, then build transaction rows.
-      // Journals are returned in JournalNumber order; we stop when JournalDate > toDate.
+      console.log(`[xero-account-txns] fetching invoices+banktxns for accountId=${accountId} accountCode="${accountCode}" ${fromDate}→${toDate}`);
 
-      const fromMs = new Date(fromDate).getTime();
-      const toMs   = new Date(toDate).getTime() + 86400000 - 1; // end of toDate
+      // Helper: extract matching line items from a document
+      const extractLines = (doc, docType, dateField, contactField) => {
+        const rawDate = doc[dateField] || '';
+        const msMatch = rawDate.match(/\/Date\((\d+)/);
+        const date    = msMatch
+          ? new Date(parseInt(msMatch[1])).toISOString().slice(0, 10)
+          : new Date(rawDate).toISOString().slice(0, 10);
+        const contact = doc[contactField]?.Name || doc[contactField] || '';
+        const ref     = doc.Reference || doc.InvoiceNumber || '';
 
-      let offset = 0;
-      let done   = false;
-      let pages  = 0;
-      const MAX_PAGES = 50; // safety ceiling (~5000 journals)
-
-      console.log(`[xero-account-txns] fetching Journals for accountId=${accountId} ${fromDate}→${toDate} tenantId=${tenantId} tokenPrefix=${accessToken?.slice(0,12)}`);
-
-      while (!done && pages < MAX_PAGES) {
-        const jUrl = `https://api.xero.com/api.xro/2.0/Journals?offset=${offset}`;
-        const data  = await xeroGet(jUrl, accessToken, tenantId, 3, forceRefresh);
-        const page  = data?.Journals || [];
-        pages++;
-
-        if (page.length === 0) break;
-
-        for (const j of page) {
-          // Parse Xero's /Date(ms+tz)/ format
-          const rawDate = j.JournalDate || '';
-          const msMatch = rawDate.match(/\/Date\((\d+)/);
-          const jDateMs = msMatch ? parseInt(msMatch[1]) : new Date(rawDate).getTime();
-          const jDate   = new Date(jDateMs).toISOString().slice(0, 10);
-
-          // Journals come in ascending JournalNumber order.
-          // Once we're past toDate we can stop paging.
-          if (jDateMs > toMs) { done = true; break; }
-          if (jDateMs < fromMs) continue; // before our window — keep going
-
-          for (const line of (j.JournalLines || [])) {
-            if (line.AccountID !== accountId) continue;
-
-            const net = parseFloat(line.NetAmount) || 0;
-            if (net === 0) continue;
-
-            // In Xero journals, positive NetAmount = debit to this account,
-            // negative = credit. We expose both columns for display.
-            const debit  = net > 0 ? net  : 0;
-            const credit = net < 0 ? -net : 0;
-
-            transactions.push({
-              date:        jDate,
-              type:        j.SourceType || 'TXN',
-              contact:     line.Description || j.Reference || '',
-              reference:   j.Reference || '',
-              description: line.Description || '',
-              debit,
-              credit,
-              amount: net,
-            });
-          }
+        for (const line of (doc.LineItems || [])) {
+          // Match by AccountID (UUID) or AccountCode
+          if (line.AccountID !== accountId && line.AccountCode !== accountCode) continue;
+          const amount = parseFloat(line.LineAmount) || 0;
+          if (amount === 0) continue;
+          transactions.push({
+            date,
+            type:        docType,
+            contact,
+            reference:   ref,
+            description: line.Description || '',
+            debit:       amount > 0 ? amount : 0,
+            credit:      amount < 0 ? -amount : 0,
+            amount,
+          });
         }
+      };
 
-        // Xero returns exactly 100 journals per page; fewer means last page
-        if (page.length < 100) break;
-        offset += page.length;
-      }
+      // 1. Bills (ACCPAY invoices) — expense accounts hit by supplier bills
+      const invUrl = new URL('https://api.xero.com/api.xro/2.0/Invoices');
+      invUrl.searchParams.set('Type',     'ACCPAY');
+      invUrl.searchParams.set('Statuses', 'AUTHORISED,PAID');
+      invUrl.searchParams.set('DateFrom', fromDate);
+      invUrl.searchParams.set('DateTo',   toDate);
+      invUrl.searchParams.set('unitdp',   '4');
 
-      console.log(`[xero-account-txns] Journals scan: ${pages} page(s), ${transactions.length} matching lines`);
+      const invData = await xeroGet(invUrl.toString(), accessToken, tenantId, 3, forceRefresh);
+      for (const inv of (invData?.Invoices || [])) extractLines(inv, 'ACCPAY', 'Date', 'Contact');
+      console.log(`[xero-account-txns] ACCPAY invoices: ${invData?.Invoices?.length || 0}, matched lines so far: ${transactions.length}`);
+
+      // 2. Spend Money bank transactions — cash expenses posted to an account
+      const btUrl = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
+      btUrl.searchParams.set('Type',    'SPEND');
+      btUrl.searchParams.set('FromDate', fromDate);
+      btUrl.searchParams.set('ToDate',   toDate);
+
+      const btData = await xeroGet(btUrl.toString(), accessToken, tenantId, 3, forceRefresh);
+      for (const bt of (btData?.BankTransactions || [])) extractLines(bt, 'SPEND', 'Date', 'Contact');
+      console.log(`[xero-account-txns] SPEND banktxns: ${btData?.BankTransactions?.length || 0}, total matched lines: ${transactions.length}`);
+
     } else {
       console.warn(`[xero-account-txns] no accountId resolved — cannot fetch transactions`);
     }
