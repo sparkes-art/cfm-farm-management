@@ -319,46 +319,67 @@ async function _render(container) {
   };
 
   // ── Invoice totals ─────────────────────────────────────────────────────────
+  // Helper: does a commodity key fuzzy-match the target?
+  const commMatches = (iCommKey, targetKey) => {
+    if (!iCommKey || !targetKey) return false;
+    if (iCommKey === targetKey) return true;
+    return targetKey.includes(iCommKey) || iCommKey.includes(targetKey);
+  };
+
   const invTotals = (invList, commName) => {
     let qty = 0, income = 0, qa = 0, costs = 0;
     const matchedInvs = [];
     const targetKey = commName ? commName.trim().toUpperCase().replace(/\s+/g, ' ') : null;
     const targetIsLivestock = targetKey && /cattle|livestock/i.test(targetKey);
+
     invList.forEach(inv => {
-      const linked   = contracts.find(c => c.id === inv.forward_contract_id);
-      const batchComm = (() => {
-        if (!inv.batches) return '';
-        const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-        // Prefer batch-level commodity (e.g. "Cotton Lint") over line description (variety name like "Jarrah")
-        const batchLevel = b.map(x => x.commodity).find(Boolean);
-        if (batchLevel) return batchLevel;
-        return b.flatMap(x => x.lines || []).find(l => l.type === 'income' && l.description)?.description || '';
-      })();
-      const iComm    = linked?.commodity || inv.commodity_type || batchComm || (inv.line_items || [])[0]?.commodity || '';
-      const iCommKey = iComm.trim().toUpperCase().replace(/\s+/g, ' ');
-      if (targetKey) {
-        const invoiceIsLivestock = /cattle|livestock/i.test(iComm);
-        if (targetIsLivestock && invoiceIsLivestock) { /* match */ }
-        else if (iCommKey !== targetKey) {
-          // Fuzzy fallback: match if one is a substring of the other
-          // e.g. invoice "JARRAH" matches budget "JARRAH HAY"
-          const fuzzyMatch = iCommKey && targetKey && (
-            targetKey.includes(iCommKey) || iCommKey.includes(targetKey)
-          );
-          if (!fuzzyMatch) return;
-        }
-      }
-      matchedInvs.push(inv);
+      const linked = contracts.find(c => c.id === inv.forward_contract_id);
+
       if (inv.batches) {
+        // ── New batch format: match and sum at the BATCH level ──────────────
         const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-        qty += b.filter(x => (x.lines || []).some(l => l.type === 'income' && l.line_type !== 'qa'))
-                 .reduce((s, x) => s + (parseFloat(x.qty) || 0), 0);
+        let batchQty = 0, batchIncome = 0, batchQA = 0;
+
+        b.forEach(batch => {
+          // Determine this batch's commodity
+          const saleLine = (batch.lines || []).find(l => l.type === 'income' && l.line_type !== 'qa');
+          const qaLine   = (batch.lines || []).find(l => l.type === 'income' && l.line_type === 'qa');
+          const bComm = linked?.commodity || inv.commodity_type || batch.commodity || saleLine?.description || '';
+          const bCommKey = bComm.trim().toUpperCase().replace(/\s+/g, ' ');
+
+          // Check if this batch matches the target commodity
+          if (targetKey) {
+            const batchIsLivestock = /cattle|livestock/i.test(bComm);
+            if (targetIsLivestock && batchIsLivestock) { /* match */ }
+            else if (!commMatches(bCommKey, targetKey)) return; // skip this batch
+          }
+
+          batchQty    += parseFloat(batch.qty) || 0;
+          batchIncome += parseFloat(saleLine?.amount) || 0;
+          batchQA     += parseFloat(qaLine?.amount)   || 0;
+        });
+
+        if (!targetKey || batchQty || batchIncome || batchQA) {
+          if (batchIncome || batchQA) matchedInvs.push(inv);
+          qty    += batchQty;
+          income += batchIncome;
+          qa     += batchQA;
+        }
+
       } else {
-        qty += parseFloat(inv.total_qty) || 0;
+        // ── Legacy line_items format ─────────────────────────────────────────
+        const legacyComm = linked?.commodity || inv.commodity_type || (inv.line_items || [])[0]?.commodity || '';
+        const legacyKey  = legacyComm.trim().toUpperCase().replace(/\s+/g, ' ');
+        if (targetKey) {
+          const isLs = /cattle|livestock/i.test(legacyComm);
+          if (!(targetIsLivestock && isLs) && !commMatches(legacyKey, targetKey)) return;
+        }
+        matchedInvs.push(inv);
+        qty    += parseFloat(inv.total_qty)          || 0;
+        income += parseFloat(inv.gross_amount)       || 0;
+        qa     += parseFloat(inv.total_quality_adj)  || 0;
+        costs  += parseFloat(inv.total_deductions)   || 0;
       }
-      income += parseFloat(inv.gross_amount)      || 0;
-      qa     += parseFloat(inv.total_quality_adj) || 0;
-      costs  += parseFloat(inv.total_deductions)  || 0;
     });
     return { qty, income, qa, totalIncome: income + qa, costs, avgPrice: qty ? (income + qa) / qty : null, invoices: matchedInvs };
   };
