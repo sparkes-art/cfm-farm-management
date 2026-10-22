@@ -266,3 +266,25 @@ CREATE TRIGGER budgets_updated_at
 CREATE TRIGGER user_profiles_updated_at
   BEFORE UPDATE ON user_profiles
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- MANAGEMENT COMMENTS
+-- Line-level notes on management report rows
+-- row_key: identifies the report row (e.g. 'rev:Cotton' or 'cost:Labour')
+-- month: YYYY-MM or null for season-level notes
+-- ============================================================
+CREATE TABLE IF NOT EXISTS management_comments (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  farm_id     text NOT NULL REFERENCES farms(id),
+  season      text NOT NULL,          -- e.g. '2025-26'
+  month       text,                   -- 'YYYY-MM' or null = season-level
+  row_key     text,                   -- null = season-level note
+  comment     text NOT NULL,
+  created_by  uuid REFERENCES auth.users(id),
+  created_at  timestamptz NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE management_comments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "mgmt_comments_read"  ON management_comments FOR SELECT USING (can_read(farm_id));
+CREATE POLICY "mgmt_comments_write" ON management_comments FOR ALL    USING (can_write(farm_id));

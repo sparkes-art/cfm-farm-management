@@ -10,7 +10,8 @@ import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/a
 import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1792559266387';
 
 // Module-level state — persists across re-renders within a session
-let _selectedMonth = null; // 'YYYY-MM' or null = full YTD
+let _selectedMonth = null;   // 'YYYY-MM' or null = full YTD
+let _lastContainer = null;   // last container passed to _render, for post-save re-render
 
 export function unmountManagementReport() {
   _selectedMonth = null;
@@ -107,6 +108,7 @@ function _populateMonthSelector(container, farm, season) {
 }
 
 async function _render(container) {
+  if (container) _lastContainer = container;
   const farm   = getActiveFarm();
   const season = getActiveSeason();
   if (!farm || !season) return;
@@ -523,11 +525,10 @@ async function _render(container) {
             const qa       = parseFloat(qaLine?.amount)   || 0;
             const inc      = gross + qa;
             const cropYear = x.crop_year || '';
-            const showBuyer = !firstShown && (firstShown = true);
             return {
               id,
               date,
-              buyer: showBuyer ? buyer : '',   // only show buyer on first matched batch row
+              buyer,   // show date + buyer on every batch row
               qty,
               inc,
               gross,
@@ -1150,8 +1151,8 @@ window._mgmtOpenModal = function(d) {
             const rowBorder     = isLastBatch ? 'border-bottom:1px solid var(--border)' : 'border-bottom:0.5px dashed var(--border-light)';
             const dateStr       = i.date ? new Date(i.date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
             const unitLabel     = i.unit || d.unit;
-            return '<tr style="' + rowBorder + (isFirstBatch && i.batchCount > 1 ? ';background:rgba(59,130,246,.03)' : '') + '">' +
-              '<td style="padding:5px 8px;color:var(--ink)">' + (isFirstBatch ? dateStr + (i.buyer ? ' · <span style="color:var(--hint)">' + i.buyer + '</span>' : '') : '<span style="color:var(--hint);padding-left:10px">↳</span>') + '</td>' +
+            return '<tr style="' + rowBorder + '">' +
+              '<td style="padding:5px 8px;color:var(--ink)">' + dateStr + (i.buyer ? ' · <span style="color:var(--hint)">' + i.buyer + '</span>' : '') + '</td>' +
               '<td style="padding:5px 8px;color:var(--hint);font-size:10px">' + (i.crop_year || '—') + '</td>' +
               '<td style="padding:5px 8px;text-align:right;color:var(--hint)">' + (i.qty ? fN(i.qty, 2) + ' ' + unitLabel : '—') + '</td>' +
               '<td style="padding:5px 8px;text-align:right;color:var(--hint)">' + (i.price ? '$' + fN(i.price, 4) + '/' + unitLabel : '—') + '</td>' +
@@ -1265,11 +1266,7 @@ window._mgmtLineComment = async function(rowKey) {
         toast('Comment saved', 'success');
         modal.remove();
         // Re-render so comment badges update
-        const appContainer = document.getElementById('main');
-        if (appContainer) {
-          const mgmtContainer = appContainer.querySelector('[id="mgmt-body"]')?.closest('div[style*="max-width:1200px"]')?.parentElement;
-          if (mgmtContainer) _render(mgmtContainer.closest('[id]') || appContainer);
-        }
+        if (_lastContainer) _render(_lastContainer);
       } catch (e) {
         toast('Could not save comment', 'error');
         saveBtn.disabled = false;
