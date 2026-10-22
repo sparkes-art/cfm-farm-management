@@ -949,8 +949,8 @@ export async function openInvoiceForm(container, existing = null) {
         </div>
 
         <!-- Line headers -->
-        <div style="display:grid;grid-template-columns:100px 120px 2fr 70px 90px 100px 100px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
-          ${['Season','Crop','Description','Unit','Qty','Gross ($)','Quality adj ($)',''].map(h =>
+        <div style="display:grid;grid-template-columns:100px 1fr 70px 90px 100px 100px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
+          ${['Season','Crop','Unit','Qty','Gross ($)','Quality adj ($)',''].map(h =>
             `<div style="font-size:9px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${h}</div>`
           ).join('')}
         </div>
@@ -1238,7 +1238,7 @@ export async function openInvoiceForm(container, existing = null) {
 
   const buildCropLine = (data = {}) => {
     const lineDiv = document.createElement('div');
-    lineDiv.style.cssText = 'display:grid;grid-template-columns:100px 120px 2fr 70px 90px 100px 100px 30px;gap:6px;margin-bottom:6px;align-items:center';
+    lineDiv.style.cssText = 'display:grid;grid-template-columns:100px 1fr 70px 90px 100px 100px 30px;gap:6px;margin-bottom:6px;align-items:center';
 
     const selectedSeason = data.crop_year || activeSeason;
     const seasonOpts = allSeasons.map(s =>
@@ -1253,7 +1253,6 @@ export async function openInvoiceForm(container, existing = null) {
       <select class="form-select cl-commodity" style="font-size:12px;padding:5px 6px">
         ${cropOptsForSeason(selectedSeason, data.commodity||'')}
       </select>
-      <input class="form-input cl-description" type="text" placeholder="Description / notes" value="${esc(data.description||'')}" style="font-size:12px;padding:6px 8px">
       <select class="form-select cl-unit" style="font-size:11px;padding:4px 6px">${['bale','t','kg','head','each'].map(u=>`<option value="${u}"${(data.unit||'bale')===u?' selected':''}>${u}</option>`).join('')}</select>
       <input class="form-input cl-qty" type="number" step="any" min="0" placeholder="0" value="${data.qty||''}" style="font-size:12px;padding:6px 8px">
       <input class="form-input cl-gross" type="number" step="0.01" placeholder="0.00" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600">
@@ -1332,7 +1331,7 @@ export async function openInvoiceForm(container, existing = null) {
           commodity:    div.querySelector('.cl-commodity')?.value?.trim() || selectedContract?.commodity || 'Sale',
           crop_year:    div.querySelector('.cl-season')?.value || activeSeason,
           unit:         div.querySelector('.cl-unit')?.value?.trim() || 'bale',
-          description:  div.querySelector('.cl-description')?.value?.trim() || '',
+          description:  '',
           qty,
           gross,
           qa,
