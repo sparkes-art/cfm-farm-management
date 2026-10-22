@@ -1468,7 +1468,6 @@ export async function openInvoiceForm(container, existing = null) {
         gross_amount: totalGross,
         total_quality_adj: totalQA,
         notes,
-        grade: grade || null,
         rcti_files: sharedRctiFiles,
         rcti_url: sharedRctiFiles[0]?.url || null,
         rcti_filename: sharedRctiFiles[0]?.filename || null,
