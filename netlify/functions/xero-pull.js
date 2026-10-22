@@ -155,7 +155,6 @@ async function fetchProfitAndLoss(accessToken, tenantId, fromDate, toDate) {
   // Payments basis = cash transactions only — excludes manual journals, accruals,
   // and quarter-end adjustments. Correct for a management report where managers
   // only want to see real invoices and bank transactions.
-  url.searchParams.set('paymentsOnly', 'true');
   url.searchParams.set('standardLayout', 'true');
 
   return xeroFetch(url.toString(), accessToken, tenantId);
