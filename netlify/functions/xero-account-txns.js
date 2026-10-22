@@ -276,40 +276,7 @@ exports.handler = async (event) => {
       for (const bt of (btRecvData?.BankTransactions || [])) extractLines(bt, 'RECEIVE', 'Date', 'Contact');
       console.log(`[xero-account-txns] RECEIVE banktxns: ${btRecvData?.BankTransactions?.length || 0}, matched lines so far: ${transactions.length}`);
 
-      // 5. Manual journals — adjustments, accruals, reversals that post to any account
-      // These are what the P&L picks up but don't appear in invoice/banktxn endpoints.
-      const mjUrl = new URL('https://api.xero.com/api.xro/2.0/ManualJournals');
-      mjUrl.searchParams.set('Status', 'POSTED');
-
-      const mjData = await xeroGet(mjUrl.toString(), accessToken, tenantId, 3, forceRefresh);
-      for (const mj of (mjData?.ManualJournals || [])) {
-        const rawDate = mj.Date || '';
-        const msMatch = rawDate.match(/\/Date\((\d+)/);
-        const date    = msMatch
-          ? new Date(parseInt(msMatch[1])).toISOString().slice(0, 10)
-          : new Date(rawDate).toISOString().slice(0, 10);
-
-        // Strict date guard
-        if (date < fromDate || date > toDate) continue;
-
-        const narration = mj.Narration || '';
-        for (const line of (mj.JournalLines || [])) {
-          if (line.AccountID !== accountId && line.AccountCode !== accountCode) continue;
-          const amount = parseFloat(line.LineAmount) || 0;
-          if (amount === 0) continue;
-          transactions.push({
-            date,
-            type:        'JOURNAL',
-            contact:     narration,
-            reference:   mj.ManualJournalID || '',
-            description: line.Description || narration,
-            debit:       amount > 0 ? amount : 0,
-            credit:      amount < 0 ? -amount : 0,
-            amount,
-          });
-        }
-      }
-      console.log(`[xero-account-txns] ManualJournals: ${mjData?.ManualJournals?.length || 0}, total matched lines: ${transactions.length}`);
+      console.log(`[xero-account-txns] total matched lines: ${transactions.length}`);
 
     } else {
       console.warn(`[xero-account-txns] no accountId resolved — cannot fetch transactions`);

@@ -152,7 +152,10 @@ async function fetchProfitAndLoss(accessToken, tenantId, fromDate, toDate) {
   const url = new URL('https://api.xero.com/api.xro/2.0/Reports/ProfitAndLoss');
   url.searchParams.set('fromDate', fromDate);
   url.searchParams.set('toDate',   toDate);
-  // Payments basis = cash; Accrual = invoice date basis. Accrual is more typical.
+  // Payments basis = cash transactions only — excludes manual journals, accruals,
+  // and quarter-end adjustments. Correct for a management report where managers
+  // only want to see real invoices and bank transactions.
+  url.searchParams.set('paymentsOnly', 'true');
   url.searchParams.set('standardLayout', 'true');
 
   return xeroFetch(url.toString(), accessToken, tenantId);
