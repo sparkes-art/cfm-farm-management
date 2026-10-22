@@ -278,6 +278,49 @@ exports.handler = async (event) => {
 
       console.log(`[xero-account-txns] total matched lines: ${transactions.length}`);
 
+      // ── Journal fallback ─────────────────────────────────────────────────────
+      // If no invoices or bank transactions matched, the amount in the P&L may
+      // have been posted via manual journals (common in Blackbull). Fetch journals
+      // as a fallback so the drilldown shows something rather than "no transactions".
+      // These are labelled as accounting entries so managers understand what they are.
+      if (transactions.length === 0 && accountId) {
+        console.log(`[xero-account-txns] no invoice/banktxn matches — trying manual journals as fallback`);
+        try {
+          const jUrl = new URL('https://api.xero.com/api.xro/2.0/ManualJournals');
+          jUrl.searchParams.set('fromDate', fromDate);
+          jUrl.searchParams.set('toDate',   toDate);
+          jUrl.searchParams.set('Status',   'POSTED');
+          const jData = await xeroGet(jUrl.toString(), accessToken, tenantId, 3, forceRefresh);
+          for (const j of (jData?.ManualJournals || [])) {
+            const rawDate = j.Date || '';
+            const msMatch = rawDate.match(/\/Date\((\d+)/);
+            const date    = msMatch
+              ? new Date(parseInt(msMatch[1])).toISOString().slice(0, 10)
+              : new Date(rawDate).toISOString().slice(0, 10);
+            if (date < fromDate || date > toDate) continue;
+            for (const line of (j.JournalLines || [])) {
+              if (line.AccountID !== accountId) continue;
+              const amount = parseFloat(line.LineAmount) || 0;
+              if (amount === 0) continue;
+              transactions.push({
+                date,
+                type:        'JOURNAL',
+                contact:     j.Narration || '',
+                reference:   j.ManualJournalID || '',
+                description: line.Description || j.Narration || '',
+                debit:       amount > 0 ? amount : 0,
+                credit:      amount < 0 ? -amount : 0,
+                amount,
+                isJournal:   true,
+              });
+            }
+          }
+          console.log(`[xero-account-txns] journal fallback found: ${transactions.length}`);
+        } catch (jErr) {
+          console.warn(`[xero-account-txns] journal fallback failed: ${jErr.message}`);
+        }
+      }
+
     } else {
       console.warn(`[xero-account-txns] no accountId resolved — cannot fetch transactions`);
     }
@@ -285,7 +328,9 @@ exports.handler = async (event) => {
     // Sort by date ascending
     transactions.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
-    console.log(`[xero-account-txns] farm=${farmId} account=${accountId} (${accountName}) ${fromDate}→${toDate} txns=${transactions.length}`);
+    const hasJournals = transactions.some(t => t.isJournal);
+
+    console.log(`[xero-account-txns] farm=${farmId} account=${accountId} (${accountName}) ${fromDate}→${toDate} txns=${transactions.length} hasJournals=${hasJournals}`);
 
     return {
       statusCode: 200,
@@ -298,6 +343,7 @@ exports.handler = async (event) => {
         from:         fromDate,
         to:           toDate,
         transactions,
+        has_journals: hasJournals,
       }),
     };
 
