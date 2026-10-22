@@ -311,14 +311,20 @@ async function _render(container) {
       const batchComm = (() => {
         if (!inv.batches) return '';
         const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+        // Prefer batch-level commodity (e.g. "Cotton Lint") over line description (variety name like "Jarrah")
+        const batchLevel = b.map(x => x.commodity).find(Boolean);
+        if (batchLevel) return batchLevel;
         return b.flatMap(x => x.lines || []).find(l => l.type === 'income' && l.description)?.description || '';
       })();
-      const iComm    = linked?.commodity || batchComm || (inv.line_items || [])[0]?.commodity || '';
+      const iComm    = linked?.commodity || inv.commodity_type || batchComm || (inv.line_items || [])[0]?.commodity || '';
       const iCommKey = iComm.trim().toUpperCase().replace(/\s+/g, ' ');
       if (targetKey) {
         const invoiceIsLivestock = /cattle|livestock/i.test(iComm);
         if (targetIsLivestock && invoiceIsLivestock) { /* match */ }
-        else if (iCommKey !== targetKey) return;
+        else if (iCommKey !== targetKey) {
+          console.log('[CFM mgmt] commodity mismatch — inv', inv.id, 'iCommKey:', JSON.stringify(iCommKey), 'targetKey:', JSON.stringify(targetKey), '| linked:', linked?.commodity, 'inv.commodity_type:', inv.commodity_type, 'batchComm:', batchComm);
+          return;
+        }
       }
       matchedInvs.push(inv);
       if (inv.batches) {
@@ -344,8 +350,10 @@ async function _render(container) {
     groups[key].budgets.push(b);
   });
   priorYearInvoices.forEach(inv => {
-    const batches  = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-    const commName = batches.flatMap(b => b.lines || []).find(l => l.type === 'income' && l.description)?.description
+    const batches  = inv.batches ? (typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches) : [];
+    const commName = inv.commodity_type
+      || batches.map(b => b.commodity).find(Boolean)
+      || batches.flatMap(b => b.lines || []).find(l => l.type === 'income' && l.description)?.description
       || (inv.line_items || [])[0]?.commodity || null;
     if (!commName) return;
     const key = commName.trim().toUpperCase().replace(/\s+/g, ' ');
@@ -501,7 +509,7 @@ async function _render(container) {
         </td>
         ${monthCols}
         <td style="${tdR};color:${actualYTD ? 'var(--green)' : 'var(--hint)'};font-weight:600">${actualYTD ? fC(actualYTD) : '—'}</td>
-        <td style="${tdR}">${actualYTD && bYTD != null ? fC(bYTD) : '—'}</td>
+        <td style="${tdR}">${bYTD != null ? fC(bYTD) : '—'}</td>
         <td style="${tdR}">${actualYTD ? varCell(actualYTD, bYTD) : '<span style="color:var(--hint)">—</span>'}</td>
         <td style="${tdR}">${bIncome != null ? fC(bIncome) : '—'}</td>
       </tr>
