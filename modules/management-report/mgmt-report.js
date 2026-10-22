@@ -267,16 +267,14 @@ async function _render(container) {
     return b.some(batch => batch.prior_year_income);
   };
 
-  const seasonInvoices   = allInvoices.filter(inv => {
-    if (isPriorYearInv(inv)) return false;
-    if (inv.season === season) return true;
-    if (inv.batches) {
-      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-      if (b.some(batch => batch.crop_year === season)) return true;
-    }
-    const linked = contracts.find(c => c.id === inv.forward_contract_id);
-    if (linked?.crop_year === season) return true;
-    return false;
+  // Season date window — matches invoices.js filter logic
+  const mm = String(yearStartMonth).padStart(2, '0');
+  const seasonDateStart = `${seasonYear}-${mm}-01`;
+  const seasonDateEnd   = `${seasonYear + 1}-${mm}-01`;
+
+  const seasonInvoices = allInvoices.filter(inv => {
+    const d = inv.invoice_date?.slice(0, 10) || '';
+    return d >= seasonDateStart && d < seasonDateEnd;
   });
 
   const priorYearInvoices = allInvoices.filter(isPriorYearInv);
