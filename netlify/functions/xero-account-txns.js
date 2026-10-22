@@ -218,10 +218,19 @@ exports.handler = async (event) => {
         // SPEND with no contact = bank-to-bank transfer that happens to touch this account
         if (docType === 'SPEND' && !contact) return;
 
+        // Determine if line amounts are tax-inclusive at the document level.
+        // Xero P&L always reports ex-GST; we must match that so drilldown totals
+        // agree with the report. When LineAmountTypes === 'INCLUSIVE', LineAmount
+        // already includes GST, so we subtract TaxAmount to get the net figure.
+        // For EXCLUSIVE (most invoices) or NOTAX, LineAmount is already net.
+        const inclusive = (doc.LineAmountTypes || '').toUpperCase() === 'INCLUSIVE';
+
         for (const line of (doc.LineItems || [])) {
           // Match by AccountID (UUID) or AccountCode
           if (line.AccountID !== accountId && line.AccountCode !== accountCode) continue;
-          const amount = parseFloat(line.LineAmount) || 0;
+          const gross     = parseFloat(line.LineAmount) || 0;
+          const taxAmt    = inclusive ? (parseFloat(line.TaxAmount) || 0) : 0;
+          const amount    = gross - taxAmt;   // ex-GST amount to match P&L
           if (amount === 0) continue;
           transactions.push({
             date,
