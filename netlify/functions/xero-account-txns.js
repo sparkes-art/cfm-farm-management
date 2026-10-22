@@ -178,8 +178,10 @@ exports.handler = async (event) => {
       }
       if (!match && accountName) {
         const namNorm = norm(accountName);
-        match = accounts.find(a => norm(a.Name) === namNorm)
-             || accounts.find(a => norm(a.Name).includes(namNorm) || namNorm.includes(norm(a.Name)));
+        // Exact name match only — substring fallback was too loose (e.g. "hire of plant"
+        // matching "R&M Plant, Vehicles, General" via the word "plant").
+        // The P&L UUID should always be passed as account_id; name resolution is last resort.
+        match = accounts.find(a => norm(a.Name) === namNorm);
       }
       if (match) {
         accountId   = match.AccountID;

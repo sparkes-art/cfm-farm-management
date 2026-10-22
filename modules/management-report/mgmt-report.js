@@ -242,13 +242,14 @@ async function _render(container) {
       if (hit) return mkResult(hit);
       hit = normAccounts.find(a => a._norm.includes(dNorm) || dNorm.includes(a._norm));
       if (hit) return mkResult(hit);
-      // Word-based fuzzy: require at least one MEANINGFUL shared word (not a stop word).
-      // This prevents "Filling Fees" matching "Licencing & Compliance Fees" via the word "fees".
+      // Word-based fuzzy: require at least 2 MEANINGFUL shared words (not stop words).
+      // Using a minimum of 2 prevents single common words like "plant", "hire", "labour"
+      // from matching unrelated accounts (e.g. "Hire of Plant" matching "R&M Plant, Vehicles").
       const dWords = dNorm.split(' ').filter(w => w.length > 2 && !STOP_WORDS.has(w));
-      if (dWords.length) {
+      if (dWords.length >= 2) {
         hit = normAccounts.find(a => {
           const matches = dWords.filter(w => a._norm.includes(w));
-          return matches.length >= Math.ceil(dWords.length / 2);
+          return matches.length >= 2;  // require at least 2 meaningful words in common
         });
         if (hit) return mkResult(hit);
       }
@@ -1371,11 +1372,13 @@ window._mgmtXeroMapping = async function(farmId, season) {
       if (hit) return hit;
       hit = normAccounts.find(a => a._norm.includes(dNorm) || dNorm.includes(a._norm));
       if (hit) return hit;
+      // Word-based fuzzy: require at least 2 meaningful shared words.
+      // Prevents single common words like "plant" matching unrelated accounts.
       const dWords = dNorm.split(' ').filter(w => w.length > 2 && !FUZZY_STOP_WORDS.has(w));
-      if (dWords.length) {
+      if (dWords.length >= 2) {
         hit = normAccounts.find(a => {
           const matches = dWords.filter(w => a._norm.includes(w));
-          return matches.length >= Math.ceil(dWords.length / 2);
+          return matches.length >= 2;
         });
         if (hit) return hit;
       }
