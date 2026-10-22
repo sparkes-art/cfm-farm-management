@@ -123,6 +123,9 @@ exports.handler = async (event) => {
   const headers = {
     'Content-Type':                'application/json',
     'Access-Control-Allow-Origin': '*',
+    'Cache-Control':               'no-store, no-cache, must-revalidate',
+    'Netlify-CDN-Cache-Control':   'no-store',
+    'Surrogate-Control':           'no-store',
   };
 
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers };
