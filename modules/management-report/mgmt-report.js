@@ -279,13 +279,31 @@ async function _render(container) {
 
   const priorYearInvoices = allInvoices.filter(isPriorYearInv);
 
-  // Filter invoices to selected month if applicable
+  // The active season string (e.g. "2026-27") — used to split invoices by crop_year
+  const activeSeason = `${seasonYear}-${String(seasonYear + 1).slice(-2)}`;
+
+  // Helper: does an invoice's batch crop_year match the current season?
+  const invIsCurrentSeason = inv => {
+    if (!inv.batches) return true; // legacy — treat as current
+    const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+    // An invoice belongs to the current season if ANY batch has a crop_year matching activeSeason
+    // (or has no crop_year set — treat as current)
+    return b.some(x => !x.crop_year || x.crop_year === activeSeason);
+  };
+
+  // Split season invoices: current-crop vs carry-over (prior crop_year paid this season)
+  const currentCropInvoices   = seasonInvoices.filter(inv => invIsCurrentSeason(inv));
+  const carryOverCropInvoices = seasonInvoices.filter(inv => !invIsCurrentSeason(inv));
+
+  // Month splits — same logic
   const monthInvoices = _selectedMonth
     ? seasonInvoices.filter(inv => {
         const d = inv.invoice_date?.slice(0, 7); // 'YYYY-MM'
         return d === _selectedMonth;
       })
     : [];
+  const currentCropMonthInvoices   = monthInvoices.filter(inv => invIsCurrentSeason(inv));
+  const carryOverCropMonthInvoices = monthInvoices.filter(inv => !invIsCurrentSeason(inv));
 
   // ── Formatters ─────────────────────────────────────────────────────────────
   const fC  = n => n != null ? formatCurrency(n, 0) : '—';
@@ -435,10 +453,11 @@ async function _render(container) {
 
   const buildCommRow = (g, opts = {}) => {
     const { bIncome, bYTD, bMonth, bArea, bYield, bProd, bPrice } = budgetForGroup(g, { carryOver: opts.carryOver });
-    // All invoices (carryover or not) are now date-filtered into seasonInvoices
-    const invSource = seasonInvoices;
+    // Route invoices: carryover rows get prior-crop-year invoices; farming rows get current-crop invoices
+    const invSource      = opts.carryOver ? carryOverCropInvoices : currentCropInvoices;
+    const invMonthSource = opts.carryOver ? carryOverCropMonthInvoices : currentCropMonthInvoices;
     const inv       = invTotals(invSource, g.name);
-    const invMonth  = _selectedMonth ? invTotals(monthInvoices, g.name) : null;
+    const invMonth  = _selectedMonth ? invTotals(invMonthSource, g.name) : null;
     const unit      = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
     const isLs      = isCattle(g.name);
 
@@ -550,7 +569,7 @@ async function _render(container) {
         <td style="${td};font-weight:600;font-size:11px;padding-left:16px;color:var(--hint)">${label} total</td>
         ${monthSubtotalCols}
         <td style="${tdR};color:var(--green);font-weight:600">${secActual ? fC(secActual) : '—'}</td>
-        <td style="${tdR};font-weight:600">${secActual && secBudgetYTD ? fC(secBudgetYTD) : '—'}</td>
+        <td style="${tdR};font-weight:600">${secBudgetYTD ? fC(secBudgetYTD) : '—'}</td>
         <td style="${tdR}">${secActual ? varCell(secActual, secBudgetYTD) : '<span style="color:var(--hint)">—</span>'}</td>
         <td style="${tdR};font-weight:600">${secBudget ? fC(secBudget) : '—'}</td>
       </tr>`;
