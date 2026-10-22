@@ -158,7 +158,7 @@ function _subscribeRealtime() {
 
 function _renderTable(container) {
   const wrap = qs('#inv-table-wrap', container || document);
-  if (!wrap) return;
+  if (!wrap) { console.warn('[CFM] _renderTable: #inv-table-wrap not found', { container: container?.id || container?.className || typeof container }); return; }
   // Rebuild month filter — only show months from season-filtered invoices
   const _monthSel = document.getElementById('inv-filter-month');
   if (_monthSel) {
@@ -1507,6 +1507,7 @@ export async function openInvoiceForm(container, existing = null) {
         await dbInsert('invoices', row);
         toast('Invoice saved', 'success');
       }
+      console.log('[CFM] Invoice saved OK, closing form and reloading list. Container:', container?.id || container?.tagName);
       close();
       try {
         await _loadData();
