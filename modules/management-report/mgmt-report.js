@@ -670,7 +670,9 @@ async function _render(container) {
     totalCapexBudget += entry.total;
     const rowKey   = 'capex:' + codeKey;
     const colColor = isSale ? 'var(--green)' : 'var(--red)';
-    const isClickable = !isPcCode(codeKey);
+    // Only clickable if there are actual sub-items to show — cashflow-style budgets
+    // have the code as the item itself (no sub-rows), so no modal to open.
+    const isClickable = !isPcCode(codeKey) && !!capexItemData[codeKey];
 
     const monthCapexCols = _selectedMonth ? `
         <td style="${tdR};color:var(--hint)">—</td>
