@@ -819,6 +819,10 @@ export async function openInvoiceForm(container, existing = null) {
     ? (typeof existing.batches === 'string' ? JSON.parse(existing.batches) : existing.batches)
     : [];
 
+  // Prior year mode — determines if this invoice's batches are flagged as prior_year_income
+  // Detect from existing invoice (any batch with prior_year_income=true), or start false for new
+  let priorYearMode = existingBatches.some(b => b.prior_year_income === true);
+
   // Build line data from batches: each batch → one line item in the form
   // A batch has: qty, crop_year, lines[] (income sale + optional qa)
   const existingLines = existingBatches.length
@@ -861,9 +865,19 @@ export async function openInvoiceForm(container, existing = null) {
   modal.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border-light);background:#fafbfc">
       <h2 style="font-size:var(--text-md);font-weight:600">${isEdit ? 'Edit invoice' : 'New invoice'}</h2>
-      <button id="inv-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--hint);padding:2px 6px;border-radius:4px">✕</button>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${canWrite() ? `<button id="btn-prior-year-toggle" type="button" class="btn btn-sm" style="font-size:11px;padding:4px 10px;border-radius:20px;transition:all .2s;${priorYearMode ? 'background:#fef3c7;color:#92400e;border:1.5px solid #fcd34d;font-weight:600' : 'background:var(--page-bg);color:var(--ink-mid);border:1px solid var(--border)'}">
+          ⏮ Prior year entry
+        </button>` : ''}
+        <button id="inv-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--hint);padding:2px 6px;border-radius:4px">✕</button>
+      </div>
     </div>
     <div style="padding:20px;overflow-y:auto;flex:1" id="inv-form-body">
+
+      <!-- Prior year mode banner -->
+      <div id="prior-year-banner" style="display:${priorYearMode ? '' : 'none'};background:#fffbeb;border:1.5px solid #fcd34d;border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e">
+        <strong>⏮ Prior year entry mode</strong> — this invoice will be recorded as carryover income in the current season's management report. The contract selector shows contracts from the prior season (${(() => { const [y] = (activeSeason||'').split('-').map(Number); return y ? `${y-1}-${String(y).slice(-2)}` : 'prior year'; })()}).
+      </div>
 
       ${isMultiBatch ? `<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e">
         ⚠ This invoice has ${existingBatches.length} batches. Totals are summed across all batches — saving will consolidate them into one.
@@ -990,6 +1004,22 @@ export async function openInvoiceForm(container, existing = null) {
   modal.querySelector('#inv-close')?.addEventListener('click', close);
   modal.querySelector('#f-cancel')?.addEventListener('click', close);
   formEl.addEventListener('click', e => { if (e.target === formEl) close(); });
+
+  // ── Prior year toggle ─────────────────────────────────────────
+  modal.querySelector('#btn-prior-year-toggle')?.addEventListener('click', () => {
+    priorYearMode = !priorYearMode;
+    const btn    = modal.querySelector('#btn-prior-year-toggle');
+    const banner = modal.querySelector('#prior-year-banner');
+    if (btn) {
+      btn.style.cssText = btn.style.cssText.replace(/background:[^;]+;color:[^;]+;border:[^;]+;font-weight:[^;]+/,
+        priorYearMode
+          ? 'background:#fef3c7;color:#92400e;border:1.5px solid #fcd34d;font-weight:600'
+          : 'background:var(--page-bg);color:var(--ink-mid);border:1px solid var(--border)');
+    }
+    if (banner) banner.style.display = priorYearMode ? '' : 'none';
+    // Refresh the contract dropdown with correct season scope
+    renderContractOpts('');
+  });
 
   // ── RCTI extraction ──────────────────────────────────────────
   let _rctiFiles = [...existingRctiFiles];
@@ -1164,10 +1194,14 @@ export async function openInvoiceForm(container, existing = null) {
   }
 
   const renderContractOpts = (filter='') => {
-    const season = getActiveSeason();
+    const currentSeason = getActiveSeason();
+    // In prior year mode, show contracts from the previous season
+    const [curY] = (currentSeason||'').split('-').map(Number);
+    const priorSeason = (priorYearMode && curY) ? `${curY-1}-${String(curY).slice(-2)}` : null;
+    const targetSeason = priorYearMode ? priorSeason : currentSeason;
     const lower = filter.toLowerCase();
     const matches = _contracts.filter(c => {
-      if (season && c.crop_year && c.crop_year !== season) return false;
+      if (targetSeason && c.crop_year && c.crop_year !== targetSeason) return false;
       return !lower || (c.contract_number||'').toLowerCase().includes(lower) ||
         (c.counterparty||c.buyer||'').toLowerCase().includes(lower) ||
         (c.commodity||'').toLowerCase().includes(lower);
@@ -1175,8 +1209,9 @@ export async function openInvoiceForm(container, existing = null) {
     contractOpts.innerHTML = matches.length
       ? matches.map(c => `<div class="con-opt" data-id="${c.id}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border-light);font-size:13px">
           <strong>${c.contract_number||'—'}</strong> — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}
+          ${priorYearMode ? `<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;margin-left:6px">${c.crop_year||''}</span>` : ''}
         </div>`).join('')
-      : '<div style="padding:10px 14px;color:var(--hint);font-size:13px">No contracts found</div>';
+      : `<div style="padding:10px 14px;color:var(--hint);font-size:13px">${priorYearMode ? `No contracts found for ${priorSeason||'prior season'}` : 'No contracts found'}</div>`;
     contractOpts.querySelectorAll('.con-opt').forEach(opt => {
       opt.addEventListener('mousedown', e => {
         e.preventDefault();
@@ -1427,6 +1462,7 @@ export async function openInvoiceForm(container, existing = null) {
           description: slDesc || '',
           income_files: batchFiles,
           lines: batchLines,
+          ...(priorYearMode ? { prior_year_income: true } : {}),
         };
       });
 

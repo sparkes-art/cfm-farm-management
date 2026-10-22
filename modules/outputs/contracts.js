@@ -113,13 +113,28 @@ function _getFilterState() {
   return { activeCommodityPills, activeStatusPill, activeMonthPills, search };
 }
 
+// Check if a prior-year contract has carryover invoices in the current season
+function _isCarryoverContract(contract) {
+  const season = getActiveSeason() || '';
+  if (!season || !contract.crop_year || contract.crop_year === season) return false;
+  // It's a prior-year contract — check if any invoices against it are flagged prior_year_income
+  return _invoices.some(inv => {
+    if (inv.forward_contract_id !== contract.id) return false;
+    if (!inv.batches) return false;
+    const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+    return b.some(bt => bt.prior_year_income === true);
+  });
+}
+
 function _filtered() {
   const season = getActiveSeason() || '';
   const { activeCommodityPills, activeStatusPill, activeMonthPills, search } = _getFilterState();
 
   return _contracts.filter(c => {
-    // Season
-    if (season && c.crop_year && c.crop_year !== season) return false;
+    // Season: include current season contracts, AND prior-year contracts with carryover invoices
+    if (season && c.crop_year && c.crop_year !== season) {
+      if (!_isCarryoverContract(c)) return false;
+    }
     // Commodity pills
     if (activeCommodityPills.length && !activeCommodityPills.includes(c.commodity)) return false;
     // Search
@@ -457,11 +472,13 @@ function _renderTable() {
           const delivery = c.delivery_start
             ? `${formatDate(c.delivery_start)}${c.delivery_end ? ` – ${formatDate(c.delivery_end)}` : ''}`
             : '—';
+          const isCarryover = _isCarryoverContract(c);
           return `
-            <tr data-id="${c.id}" style="cursor:pointer">
+            <tr data-id="${c.id}" style="cursor:pointer${isCarryover ? ';background:rgba(254,243,199,.25)' : ''}">
               <td>
                 <strong>${c.contract_number || '—'}</strong>
                 ${c.is_complete ? '<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:600;color:white;background:var(--green);border-radius:10px;padding:1px 7px">✓ Complete</span>' : ''}
+                ${isCarryover ? `<span style="display:inline-block;margin-left:6px;font-size:10px;font-weight:600;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:1px 7px">⏮ Carryover ${c.crop_year||''}</span>` : ''}
               </td>
               <td><span class="badge badge-${c.commodity}">${_cap(c.commodity || 'other')}</span></td>
               <td>${c.counterparty || '—'}</td>
@@ -984,12 +1001,16 @@ function _openDetailModal(c) {
     ? `${formatDate(c.delivery_start)}${c.delivery_end ? ` to ${formatDate(c.delivery_end)}` : ''}`
     : '—';
 
+  const isCarryover = _isCarryoverContract(c);
   openModal({
     title: `Contract ${c.contract_number || ''}`,
     confirmLabel: canWrite() ? 'Edit contract' : null,
     onConfirm: canWrite() ? async () => openContractModal(c) : null,
     confirmClass: 'btn-secondary',
     bodyHTML: `
+      ${isCarryover ? `<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:var(--radius-md);padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e">
+        <strong>⏮ Carryover contract</strong> — this ${c.crop_year||''} contract has invoices recorded as carryover income in the current season's management report.
+      </div>` : ''}
       <div class="form-row">
         <div>
           <p class="text-xs text-muted">Crop year</p>
