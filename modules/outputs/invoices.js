@@ -854,6 +854,7 @@ export async function openInvoiceForm(container, existing = null) {
   const existingRctiFiles = existing?.rcti_files
     || existingBatches.flatMap(b => b.income_files||[])
     || [];
+  const isMultiBatch = existingBatches.length > 1;
 
   modal.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border-light);background:#fafbfc">
