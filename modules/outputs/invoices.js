@@ -152,15 +152,15 @@ function _subscribeRealtime() {
     if (event === 'INSERT') { if (!_invoices.find(i => i.id === payload.record.id)) _invoices.unshift(payload.record); }
     else if (event === 'UPDATE') { const idx = _invoices.findIndex(i => i.id === payload.record.id); if (idx >= 0) _invoices[idx] = payload.record; }
     else if (event === 'DELETE') { _invoices = _invoices.filter(i => i.id !== payload.old_record.id); }
-    _renderTable(document.getElementById('inv-table-wrap')?.closest('[id]'));
+    _renderTable(null);
   });
 }
 
 function _renderTable(container) {
-  // Always find the wrap from document — container reference may be the outer outputs
-  // container rather than the invoices tab-content div
-  const wrap = document.getElementById('inv-table-wrap') || qs('#inv-table-wrap', container || document);
-  if (!wrap) return;
+  // Always find the wrap via document.getElementById — never depend on container
+  // because container may be the outer outputs div, not the invoices tab-content
+  const wrap = document.getElementById('inv-table-wrap');
+  if (!wrap) { console.warn('[CFM] _renderTable: #inv-table-wrap not found'); return; }
   // Rebuild month filter — only show months from season-filtered invoices
   const _monthSel = document.getElementById('inv-filter-month');
   if (_monthSel) {
@@ -173,7 +173,7 @@ function _renderTable(container) {
         const label = new Date(y, mo-1).toLocaleDateString('en-AU',{month:'short',year:'numeric'});
         return `<option value="${m}" ${_mv===m?'selected':''}>${label}</option>`;
       }).join('');
-    if (!_monthSel.dataset.wired) { _monthSel.dataset.wired = '1'; _monthSel.addEventListener('change', () => _renderTable(container)); }
+    if (!_monthSel.dataset.wired) { _monthSel.dataset.wired = '1'; _monthSel.addEventListener('change', () => _renderTable(null)); }
   }
 
   // Rebuild commodity filter with live data
@@ -1510,17 +1510,8 @@ export async function openInvoiceForm(container, existing = null) {
         toast('Invoice saved', 'success');
       }
       close();
-      try {
-        await _loadData();
-        _renderTable(container);
-      } catch(renderErr) {
-        console.error('Render after save failed:', renderErr);
-        // Force a full reload of the invoice list
-        const wrap = qs('#inv-table-wrap', container || document);
-        if (wrap) { wrap.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>'; }
-        await _loadData().catch(() => {});
-        _renderTable(container);
-      }
+      await _loadData();
+      _renderTable(null);
     } catch(err) {
       const msg = err.message || 'Save failed';
       toast(msg, 'error');
