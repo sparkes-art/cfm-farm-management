@@ -444,15 +444,41 @@ async function _render(container) {
       name: g.name, unit, isLs, carryOver: !!opts.carryOver,
       bIncome, bYTD, bArea, bYield, bProd, bPrice,
       lsHead, lsKg, lsIncome,
-      invoices: inv.invoices.map(i => {
-        let qty = 0;
+      invoices: inv.invoices.flatMap(i => {
+        const date  = i.invoice_date?.slice(0, 10);
+        const buyer = i.buyer;
+        const id    = i.id;
         if (i.batches) {
           const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
-          qty = b.filter(x => (x.lines || []).some(l => l.type === 'income' && l.line_type !== 'qa'))
-                  .reduce((s, x) => s + (parseFloat(x.qty) || 0), 0);
-        } else { qty = parseFloat(i.total_qty) || 0; }
+          // One row per batch — lets the drilldown show each picking / delivery separately
+          return b.map((x, idx) => {
+            const saleLine = (x.lines || []).find(l => l.type === 'income' && l.line_type !== 'qa');
+            const qaLine   = (x.lines || []).find(l => l.type === 'income' && l.line_type === 'qa');
+            const qty      = parseFloat(x.qty) || 0;
+            const gross    = parseFloat(saleLine?.amount) || 0;
+            const qa       = parseFloat(qaLine?.amount)   || 0;
+            const inc      = gross + qa;
+            const cropYear = x.crop_year || '';
+            return {
+              id,
+              date,
+              buyer: idx === 0 ? buyer : '',   // only show buyer on first batch row
+              qty,
+              inc,
+              gross,
+              qa,
+              unit: x.unit || unit,
+              crop_year: cropYear,
+              price: saleLine?.eff_per_unit || (qty && gross ? gross / qty : null),
+              batchIdx: idx,
+              batchCount: b.length,
+            };
+          });
+        }
+        // Legacy single-line invoice
+        const qty = parseFloat(i.total_qty) || 0;
         const inc = (parseFloat(i.gross_amount) || 0) + (parseFloat(i.total_quality_adj) || 0);
-        return { id: i.id, date: i.invoice_date?.slice(0, 10), buyer: i.buyer, qty, inc, price: (qty && inc) ? inc / qty : null };
+        return [{ id, date, buyer, qty, inc, gross: parseFloat(i.gross_amount) || 0, qa: parseFloat(i.total_quality_adj) || 0, unit, crop_year: i.season || '', price: (qty && inc) ? inc / qty : null, batchIdx: 0, batchCount: 1 }];
       }),
     };
     const dataAttr  = JSON.stringify(modalData).replace(/"/g, '&quot;');
@@ -1045,19 +1071,30 @@ window._mgmtOpenModal = function(d) {
       <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:12px">
         <thead><tr style="border-bottom:1px solid var(--border)">
           <th style="text-align:left;padding:4px 8px;color:var(--hint);font-weight:500">Date · Buyer</th>
+          <th style="text-align:left;padding:4px 8px;color:var(--hint);font-weight:500">Season</th>
           <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Qty</th>
           <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Price</th>
-          <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Amount</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Gross</th>
+          <th style="text-align:right;padding:4px 8px;color:var(--hint);font-weight:500">Adj</th>
           <th style="padding:4px 8px;color:var(--hint);font-weight:500"></th>
         </tr></thead>
         <tbody>
-          ${d.invoices.map(i => '<tr style="border-bottom:0.5px solid var(--border-light)">' +
-            '<td style="padding:5px 8px;color:var(--ink)">' + (i.date ? new Date(i.date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—') + (i.buyer ? ' · ' + i.buyer : '') + '</td>' +
-            '<td style="padding:5px 8px;text-align:right;color:var(--hint)">' + (i.qty ? fN(i.qty, 2) + ' ' + d.unit : '—') + '</td>' +
-            '<td style="padding:5px 8px;text-align:right;color:var(--hint)">' + (i.price ? '$' + fN(i.price, 2) + '/' + d.unit : '—') + '</td>' +
-            '<td style="padding:5px 8px;text-align:right;color:#16a34a;font-weight:600">' + fC(i.inc) + '</td>' +
-            '<td style="padding:5px 8px;text-align:center"><button onclick="window._mgmtOpenInvoice(\'' + i.id + '\')" title="Open invoice" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;color:var(--blue);line-height:1.4">↗</button></td>' +
-            '</tr>').join('')}
+          ${d.invoices.map(i => {
+            const isFirstBatch  = i.batchIdx === 0;
+            const isLastBatch   = i.batchIdx === i.batchCount - 1;
+            const rowBorder     = isLastBatch ? 'border-bottom:1px solid var(--border)' : 'border-bottom:0.5px dashed var(--border-light)';
+            const dateStr       = i.date ? new Date(i.date).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+            const unitLabel     = i.unit || d.unit;
+            return '<tr style="' + rowBorder + (isFirstBatch && i.batchCount > 1 ? ';background:rgba(59,130,246,.03)' : '') + '">' +
+              '<td style="padding:5px 8px;color:var(--ink)">' + (isFirstBatch ? dateStr + (i.buyer ? ' · <span style="color:var(--hint)">' + i.buyer + '</span>' : '') : '<span style="color:var(--hint);padding-left:10px">↳</span>') + '</td>' +
+              '<td style="padding:5px 8px;color:var(--hint);font-size:10px">' + (i.crop_year || '—') + '</td>' +
+              '<td style="padding:5px 8px;text-align:right;color:var(--hint)">' + (i.qty ? fN(i.qty, 2) + ' ' + unitLabel : '—') + '</td>' +
+              '<td style="padding:5px 8px;text-align:right;color:var(--hint)">' + (i.price ? '$' + fN(i.price, 4) + '/' + unitLabel : '—') + '</td>' +
+              '<td style="padding:5px 8px;text-align:right;color:#16a34a;font-weight:600">' + (i.gross ? fC(i.gross) : '—') + '</td>' +
+              '<td style="padding:5px 8px;text-align:right;color:' + (i.qa < 0 ? 'var(--red)' : i.qa > 0 ? '#16a34a' : 'var(--hint)') + '">' + (i.qa ? (i.qa > 0 ? '+' : '') + fC(i.qa) : '—') + '</td>' +
+              '<td style="padding:5px 8px;text-align:center">' + (isFirstBatch ? '<button onclick="window._mgmtOpenInvoice(\'' + i.id + '\')" title="Open invoice" style="background:none;border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;color:var(--blue);line-height:1.4">↗</button>' : '') + '</td>' +
+              '</tr>';
+          }).join('')}
         </tbody>
       </table>
     </div>` : sectionHdr('Invoices') + '<div style="padding:12px 18px;font-size:11px;color:var(--hint);font-style:italic">No invoices this season</div>';

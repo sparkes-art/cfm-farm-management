@@ -1508,11 +1508,23 @@ export async function openInvoiceForm(container, existing = null) {
         toast('Invoice saved', 'success');
       }
       close();
-      await _loadData();
-      _renderTable(container);
+      try {
+        await _loadData();
+        _renderTable(container);
+      } catch(renderErr) {
+        console.error('Render after save failed:', renderErr);
+        // Force a full reload of the invoice list
+        const wrap = qs('#inv-table-wrap', container || document);
+        if (wrap) { wrap.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>'; }
+        await _loadData().catch(() => {});
+        _renderTable(container);
+      }
     } catch(err) {
-      toast(err.message || 'Save failed', 'error');
+      const msg = err.message || 'Save failed';
+      toast(msg, 'error');
       console.error('Save error:', err);
+      btn.disabled = false; btn.textContent = '✓ Save invoice';
+      return;
     }
     btn.disabled = false; btn.textContent = '✓ Save invoice';
   });
