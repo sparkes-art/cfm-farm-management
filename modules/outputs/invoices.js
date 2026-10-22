@@ -118,30 +118,16 @@ function _filtered() {
         ? !i.forward_contract_id
         : i.forward_contract_id === contract;
     if (!season) return commodityMatch && contractMatch && monthMatch;
-    // Season match: check invoice.season field, line_items, batch crop_year, OR linked contract's crop_year
-    const linkedContract = i.forward_contract_id ? _contracts.find(c => c.id === i.forward_contract_id) : null;
-    const batchSeasonMatch = (() => {
-      if (!i.batches) return false;
-      const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
-      return b.some(batch => batch.crop_year === season);
-    })();
-    // Prior-year-flagged invoices: show in the season their invoice_date falls in,
-    // not the season field (which holds the prior season they belong to).
-    const isPY = (() => { if (!i.batches) return false; const b = typeof i.batches==='string'?JSON.parse(i.batches):i.batches; return b.some(x=>x.prior_year_income); })();
-    if (isPY) {
-      // Find season date range from active contracts or fall back to July start
-      const [sy] = season.split('-').map(Number);
-      const startM = 7; // will refine if needed
-      const startDate = `${sy}-${String(startM).padStart(2,'0')}-01`;
-      const endDate   = `${sy+1}-${String(startM).padStart(2,'0')}-01`;
-      const d = i.invoice_date?.slice(0,10) || '';
-      const dateInSeason = d >= startDate && d < endDate;
-      return dateInSeason && commodityMatch && contractMatch && monthMatch;
-    }
-    const seasonMatch = i.season === season
-      || batchSeasonMatch
-      || (linkedContract && linkedContract.crop_year === season);
-    return seasonMatch && commodityMatch && contractMatch && monthMatch;
+    // Season match: invoice belongs in a season if its invoice_date falls within
+    // that season's financial year (1 Jul – 30 Jun). crop_year on batch lines is
+    // a label for the crop, not a filter gate — carryover income from a prior crop
+    // still flows into the season it was received in.
+    const [sy] = season.split('-').map(Number);
+    const seasonStart = `${sy}-07-01`;
+    const seasonEnd   = `${sy+1}-07-01`;
+    const d = i.invoice_date?.slice(0,10) || '';
+    const dateInSeason = d >= seasonStart && d < seasonEnd;
+    return dateInSeason && commodityMatch && contractMatch && monthMatch;
   });
 }
 
