@@ -949,8 +949,8 @@ export async function openInvoiceForm(container, existing = null) {
         </div>
 
         <!-- Line headers -->
-        <div style="display:grid;grid-template-columns:100px 1fr 70px 90px 100px 100px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
-          ${['Season','Crop','Unit','Qty','Gross ($)','Quality adj ($)',''].map(h =>
+        <div style="display:grid;grid-template-columns:100px 1fr 60px 80px 90px 110px 80px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
+          ${['Season','Crop','Unit','Qty','Price ($/u)','Gross ($)','Adj ($)',''].map(h =>
             `<div style="font-size:9px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${h}</div>`
           ).join('')}
         </div>
@@ -1238,12 +1238,15 @@ export async function openInvoiceForm(container, existing = null) {
 
   const buildCropLine = (data = {}) => {
     const lineDiv = document.createElement('div');
-    lineDiv.style.cssText = 'display:grid;grid-template-columns:100px 1fr 70px 90px 100px 100px 30px;gap:6px;margin-bottom:6px;align-items:center';
+    lineDiv.style.cssText = 'display:grid;grid-template-columns:100px 1fr 60px 80px 90px 110px 80px 30px;gap:6px;margin-bottom:6px;align-items:center';
 
     const selectedSeason = data.crop_year || activeSeason;
     const seasonOpts = allSeasons.map(s =>
       `<option value="${s}"${s===selectedSeason?' selected':''}>${s}</option>`
     ).join('');
+
+    // Derive initial price from gross/qty if not stored
+    const initPrice = data.gross && data.qty ? Math.round((data.gross / data.qty) * 10000) / 10000 : '';
 
     // Escape value for html attribute
     const esc = v => (v||'').replace(/"/g,'&quot;');
@@ -1255,6 +1258,7 @@ export async function openInvoiceForm(container, existing = null) {
       </select>
       <select class="form-select cl-unit" style="font-size:11px;padding:4px 6px">${['bale','t','kg','head','each'].map(u=>`<option value="${u}"${(data.unit||'bale')===u?' selected':''}>${u}</option>`).join('')}</select>
       <input class="form-input cl-qty" type="number" step="any" min="0" placeholder="0" value="${data.qty||''}" style="font-size:12px;padding:6px 8px">
+      <input class="form-input cl-price" type="number" step="0.0001" placeholder="0.0000" value="${initPrice||''}" style="font-size:12px;padding:6px 8px">
       <input class="form-input cl-gross" type="number" step="0.01" placeholder="0.00" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600">
       <input class="form-input cl-qa" type="number" step="0.01" placeholder="0.00" value="${data.qa||''}" style="font-size:12px;padding:6px 8px" title="Quality adjustment (negative = discount)">
       <button class="btn btn-ghost cl-remove" type="button" style="padding:4px;font-size:16px;color:var(--hint)">✕</button>
@@ -1269,9 +1273,41 @@ export async function openInvoiceForm(container, existing = null) {
       commoditySel.innerHTML = cropOptsForSeason(this.value, current);
     });
 
-    lineDiv.querySelector('.cl-gross').addEventListener('input', recalcTotals);
+    // Two-way price ↔ gross calculation
+    // Gross typed → recalc price; Price typed → recalc gross
+    const qtyEl   = lineDiv.querySelector('.cl-qty');
+    const priceEl = lineDiv.querySelector('.cl-price');
+    const grossEl = lineDiv.querySelector('.cl-gross');
+
+    const updatePriceFromGross = () => {
+      const qty = parseFloat(qtyEl.value);
+      const gross = parseFloat(grossEl.value);
+      if (qty && gross) priceEl.value = Math.round(gross / qty * 10000) / 10000;
+      recalcTotals();
+    };
+
+    const updateGrossFromPrice = () => {
+      const qty = parseFloat(qtyEl.value);
+      const price = parseFloat(priceEl.value);
+      if (qty && price) { grossEl.value = Math.round(qty * price * 100) / 100; }
+      recalcTotals();
+    };
+
+    const updateBothFromQty = () => {
+      const qty = parseFloat(qtyEl.value);
+      const price = parseFloat(priceEl.value);
+      const gross = parseFloat(grossEl.value);
+      // Qty changed: if price is set, recompute gross; else if gross is set, recompute price
+      if (qty && price) { grossEl.value = Math.round(qty * price * 100) / 100; }
+      else if (qty && gross) { priceEl.value = Math.round(gross / qty * 10000) / 10000; }
+      recalcTotals();
+    };
+
+    grossEl.addEventListener('input', updatePriceFromGross);
+    priceEl.addEventListener('input', updateGrossFromPrice);
+    qtyEl.addEventListener('input', updateBothFromQty);
+
     lineDiv.querySelector('.cl-qa').addEventListener('input', recalcTotals);
-    lineDiv.querySelector('.cl-qty').addEventListener('input', recalcTotals);
     lineDiv.querySelector('.cl-remove').addEventListener('click', () => { lineDiv.remove(); recalcTotals(); });
     return lineDiv;
   };
