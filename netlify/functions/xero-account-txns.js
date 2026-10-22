@@ -214,6 +214,10 @@ exports.handler = async (event) => {
         const contact = doc[contactField]?.Name || doc[contactField] || '';
         const ref     = doc.Reference || doc.InvoiceNumber || '';
 
+        // Skip bank transfers (no contact) — these are internal movements, not real expenses
+        // SPEND with no contact = bank-to-bank transfer that happens to touch this account
+        if (docType === 'SPEND' && !contact) return;
+
         for (const line of (doc.LineItems || [])) {
           // Match by AccountID (UUID) or AccountCode
           if (line.AccountID !== accountId && line.AccountCode !== accountCode) continue;
@@ -244,19 +248,7 @@ exports.handler = async (event) => {
       for (const inv of (invPayData?.Invoices || [])) extractLines(inv, 'ACCPAY', 'Date', 'Contact');
       console.log(`[xero-account-txns] ACCPAY invoices: ${invPayData?.Invoices?.length || 0}, matched lines so far: ${transactions.length}`);
 
-      // 2. Sales invoices (ACCREC) — revenue or adjustments that credit expense accounts
-      const invUrlRec = new URL('https://api.xero.com/api.xro/2.0/Invoices');
-      invUrlRec.searchParams.set('Type',     'ACCREC');
-      invUrlRec.searchParams.set('Statuses', 'AUTHORISED,PAID');
-      invUrlRec.searchParams.set('DateFrom', fromDate);
-      invUrlRec.searchParams.set('DateTo',   toDate);
-      invUrlRec.searchParams.set('unitdp',   '4');
-
-      const invRecData = await xeroGet(invUrlRec.toString(), accessToken, tenantId, 3, forceRefresh);
-      for (const inv of (invRecData?.Invoices || [])) extractLines(inv, 'ACCREC', 'Date', 'Contact');
-      console.log(`[xero-account-txns] ACCREC invoices: ${invRecData?.Invoices?.length || 0}, matched lines so far: ${transactions.length}`);
-
-      // 3. Spend Money + Receive Money bank transactions
+      // 3. Spend Money bank transactions
       // KEY FINDINGS from Xero API:
       //   - dateFrom/dateTo params are IGNORED — Xero returns all transactions regardless
       //   - Line items are NOT included in list response (LineItems is present but empty/undefined)
@@ -274,16 +266,6 @@ exports.handler = async (event) => {
       const btSpendData = await xeroGet(btUrlSpend.toString(), accessToken, tenantId, 3, forceRefresh);
       for (const bt of (btSpendData?.BankTransactions || [])) extractLines(bt, 'SPEND', 'Date', 'Contact');
       console.log(`[xero-account-txns] SPEND banktxns: ${btSpendData?.BankTransactions?.length || 0}, matched lines so far: ${transactions.length}`);
-
-      // 4. Receive Money bank transactions
-      const btUrlRecv = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
-      btUrlRecv.searchParams.set('Type',  'RECEIVE');
-      btUrlRecv.searchParams.set('where', whereDate);
-      btUrlRecv.searchParams.set('page',  '1');
-
-      const btRecvData = await xeroGet(btUrlRecv.toString(), accessToken, tenantId, 3, forceRefresh);
-      for (const bt of (btRecvData?.BankTransactions || [])) extractLines(bt, 'RECEIVE', 'Date', 'Contact');
-      console.log(`[xero-account-txns] RECEIVE banktxns: ${btRecvData?.BankTransactions?.length || 0}, matched lines so far: ${transactions.length}`);
 
       console.log(`[xero-account-txns] total matched lines: ${transactions.length}`);
 
