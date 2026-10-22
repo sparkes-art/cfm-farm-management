@@ -257,30 +257,29 @@ exports.handler = async (event) => {
       console.log(`[xero-account-txns] ACCREC invoices: ${invRecData?.Invoices?.length || 0}, matched lines so far: ${transactions.length}`);
 
       // 3. Spend Money + Receive Money bank transactions
-      // NOTE: BankTransactions endpoint uses 'dateFrom'/'dateTo' (not 'FromDate'/'ToDate' like Invoices)
-      // We fetch both types in one call by omitting Type and filtering client-side, to avoid two round trips.
-      // Alternatively pass Type=SPEND and Type=RECEIVE separately with correct param names.
+      // KEY FINDINGS from Xero API:
+      //   - dateFrom/dateTo params are IGNORED — Xero returns all transactions regardless
+      //   - Line items are NOT included in list response (LineItems is present but empty/undefined)
+      //   - Must use 'where' clause for date filtering AND fetch with page=1 to get line items
+      //   - where clause: Date >= DateTime(2026,10,1) && Date <= DateTime(2026,10,22)
+      const [fyFrom, fmFrom, fdFrom] = fromDate.split('-').map(Number);
+      const [fyTo,   fmTo,   fdTo  ] = toDate.split('-').map(Number);
+      const whereDate = `Date >= DateTime(${fyFrom},${fmFrom},${fdFrom}) && Date <= DateTime(${fyTo},${fmTo},${fdTo})`;
+
       const btUrlSpend = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
-      btUrlSpend.searchParams.set('Type',     'SPEND');
-      btUrlSpend.searchParams.set('dateFrom', fromDate);
-      btUrlSpend.searchParams.set('dateTo',   toDate);
+      btUrlSpend.searchParams.set('Type',  'SPEND');
+      btUrlSpend.searchParams.set('where', whereDate);
+      btUrlSpend.searchParams.set('page',  '1'); // page param forces line items to be included
 
       const btSpendData = await xeroGet(btUrlSpend.toString(), accessToken, tenantId, 3, forceRefresh);
-      // DEBUG: log first BankTransaction to inspect line item field names
-      if (btSpendData?.BankTransactions?.length > 0) {
-        const sample = btSpendData.BankTransactions[0];
-        console.log(`[xero-account-txns] SPEND sample keys: ${Object.keys(sample).join(', ')}`);
-        console.log(`[xero-account-txns] SPEND sample LineItems[0]: ${JSON.stringify(sample.LineItems?.[0])}`);
-        console.log(`[xero-account-txns] SPEND sample Date: ${sample.Date}, looking for accountId: ${accountId}`);
-      }
       for (const bt of (btSpendData?.BankTransactions || [])) extractLines(bt, 'SPEND', 'Date', 'Contact');
       console.log(`[xero-account-txns] SPEND banktxns: ${btSpendData?.BankTransactions?.length || 0}, matched lines so far: ${transactions.length}`);
 
-      // 4. Receive Money bank transactions — cash receipts that may hit expense accounts
+      // 4. Receive Money bank transactions
       const btUrlRecv = new URL('https://api.xero.com/api.xro/2.0/BankTransactions');
-      btUrlRecv.searchParams.set('Type',     'RECEIVE');
-      btUrlRecv.searchParams.set('dateFrom', fromDate);
-      btUrlRecv.searchParams.set('dateTo',   toDate);
+      btUrlRecv.searchParams.set('Type',  'RECEIVE');
+      btUrlRecv.searchParams.set('where', whereDate);
+      btUrlRecv.searchParams.set('page',  '1');
 
       const btRecvData = await xeroGet(btUrlRecv.toString(), accessToken, tenantId, 3, forceRefresh);
       for (const bt of (btRecvData?.BankTransactions || [])) extractLines(bt, 'RECEIVE', 'Date', 'Contact');
