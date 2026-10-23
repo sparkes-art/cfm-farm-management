@@ -478,9 +478,17 @@ async function _render(container) {
 
   const isCattle    = name => /cattle|livestock/i.test(name);
   const isOther     = name => !isCattle(name) && /agistment|interest received|rent|lease|royalt/i.test(name);
-  // A group is carry-over if: (a) it was seeded from a prior-year invoice (flag set above), OR
-  // (b) its name is mixed-case (legacy: budget-imported carry-over rows use mixed-case commodity names).
-  const isCarryOver = (name, g) => !isCattle(name) && !isOther(name) && (g?.fromPriorYear || name !== name.toUpperCase());
+  // A group is carry-over if:
+  //   (a) it was seeded from a prior-year invoice (fromPriorYear flag set during group creation), OR
+  //   (b) ALL of its budget rows are carry-over budget rows (notes='carryover' or area_ha is null),
+  //       indicating the budget itself was imported as a carry-over line.
+  // The old mixed-case name heuristic is removed — it caused false positives for crops like "Cotton".
+  const isCarryOver = (name, g) => {
+    if (isCattle(name) || isOther(name)) return false;
+    if (g?.fromPriorYear) return true;
+    if (!g?.budgets?.length) return false;
+    return g.budgets.every(b => b.notes === 'carryover' || b.area_ha == null);
+  };
 
   const buildCommRow = (g, opts = {}) => {
     const { bIncome, bYTD, bMonth, bArea, bYield, bProd, bPrice } = budgetForGroup(g, { carryOver: opts.carryOver });
