@@ -22,9 +22,9 @@
 //          ├─ Paddock 12      ← location
 //          └─ Shed 3
 
-import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1792733304226';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792733304226';
-import { toast, openModal, qs } from '../../js/ui.js?v=1792733304226';
+import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1792733506962';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792733506962';
+import { toast, openModal, qs } from '../../js/ui.js?v=1792733506962';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString();
@@ -388,42 +388,47 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
         btn.dataset.budgetId || null, period, allPeriods));
   });
 
-  // Allocate invoice line to a stock item
+  // Allocate all invoices in a commodity group
   wrap.querySelectorAll('.gr-alloc-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const sel = wrap.querySelector(`.gr-alloc-item[data-invoice-id="${btn.dataset.invoiceId}"]`);
+      const key    = btn.dataset.commodityKey;
+      const sel    = wrap.querySelector(`.gr-alloc-item[data-commodity-key="${key}"]`);
       const itemId = sel?.value;
-      if (!itemId) { toast('Select a commodity first', 'error'); return; }
-      const qty  = parseFloat(btn.dataset.qty);
-      const item = items.find(i => i.id === itemId);
-      if (!qty) { toast('Invoice has no quantity', 'error'); return; }
+      if (!itemId) { toast('Select a stock item first', 'error'); return; }
+      const item   = items.find(i => i.id === itemId);
+      const invIds = JSON.parse(btn.dataset.invoiceIds || '[]');
 
       btn.disabled = true; btn.textContent = 'Saving…';
       try {
-        await dbInsert('stock_movements', {
-          farm_id:       farm.id,
-          item_id:       itemId,
-          location_id:   null,
-          movement_type: 'sale',
-          qty,
-          unit:          item?.default_unit || btn.dataset.unit || 'bales',
-          occurred_on:   btn.dataset.date,
-          note:          `Sale to ${btn.dataset.buyer || 'buyer'} — from invoice`,
-          source_system: 'invoices',
-          source_ref:    btn.dataset.invoiceId,
-        });
-        toast('Sale recorded', 'success');
+        // Find the pending invoice objects from the DOM data embedded on detail rows
+        const detailRows = wrap.querySelectorAll(`.gr-inv-detail[data-commodity-key="${key}"]`);
+        for (const row of detailRows) {
+          const { invoiceId, qty, unit, date, buyer } = row.dataset;
+          await dbInsert('stock_movements', {
+            farm_id:       farm.id,
+            item_id:       itemId,
+            location_id:   null,
+            movement_type: 'sale',
+            qty:           parseFloat(qty),
+            unit:          item?.default_unit || unit || 'bales',
+            occurred_on:   date,
+            note:          `Sale to ${buyer || 'buyer'} — from invoice`,
+            source_system: 'invoices',
+            source_ref:    invoiceId,
+          });
+        }
+        toast(`${detailRows.length} sale${detailRows.length !== 1 ? 's' : ''} allocated`, 'success');
         await _render(container, farm, period, allPeriods);
       } catch(e) {
         toast('Failed: ' + e.message, 'error');
-        btn.disabled = false; btn.textContent = 'Allocate →';
+        btn.disabled = false; btn.textContent = 'Allocate All →';
       }
     });
   });
 
   // Enable/disable allocate button based on item select
   wrap.querySelectorAll('.gr-alloc-item').forEach(sel => {
-    const btn = wrap.querySelector(`.gr-alloc-btn[data-invoice-id="${sel.dataset.invoiceId}"]`);
+    const btn = wrap.querySelector(`.gr-alloc-btn[data-commodity-key="${sel.dataset.commodityKey}"]`);
     if (!btn) return;
     const update = () => {
       btn.style.opacity = sel.value ? '1' : '.4';
@@ -452,7 +457,7 @@ async function _getBudgetOpenings(farm, period) {
   } catch { return []; }
 }
 
-// ── Sales panel — invoice lines → stock movements (livestock-style) ──────────
+// ── Sales panel — invoice lines → stock movements (grouped by commodity) ─────
 function _buildSalesPanel(invoices, items, movements) {
   // Map already-allocated invoice IDs to their movement
   const allocatedByRef = {};
@@ -475,10 +480,12 @@ function _buildSalesPanel(invoices, items, movements) {
 
   if (!pending.length && !allocated.length) return '';
 
-  // Try to auto-match commodity_type → stock item
-  const autoMatch = (commodityType) => {
-    if (!commodityType) return null;
-    const ct = commodityType.toLowerCase();
+  const fmtAud = n => n != null ? '$' + parseFloat(n).toLocaleString('en-AU',{maximumFractionDigits:0}) : '';
+
+  // Auto-match commodity label → stock item
+  const autoMatch = (commodity) => {
+    if (!commodity) return null;
+    const ct = commodity.toLowerCase();
     return items.find(i =>
       ct.includes((i.subgroup||i.name).toLowerCase()) ||
       (i.subgroup||i.name).toLowerCase().includes(ct)
@@ -489,86 +496,149 @@ function _buildSalesPanel(invoices, items, movements) {
     `<option value="${i.id}"${i.id === preId ? ' selected' : ''}>${i.name}</option>`
   ).join('');
 
-  const fmtAud = n => n != null ? '$' + parseFloat(n).toLocaleString('en-AU',{maximumFractionDigits:0}) : '';
+  // ── Group pending by commodity ──
+  const pendingGroups = {};
+  pending.forEach(({ inv }) => {
+    const key = inv._commodity || '(unknown commodity)';
+    if (!pendingGroups[key]) pendingGroups[key] = [];
+    pendingGroups[key].push(inv);
+  });
 
-  // ── Pending rows ──
-  const pendingRows = pending.map(({ inv }) => {
-    const buyer   = (inv.buyer || '—').replace(/"/g, '&quot;');
-    const qty     = parseFloat(inv.total_qty) || 0;
-    const unit    = inv.master_unit || 'bales';
-    const matched = autoMatch(inv._commodity);
-    const priceStr = inv.gross_amount ? fmtAud(inv.gross_amount) : '';
-    return [
-      `<div style="display:grid;grid-template-columns:90px 1fr 90px 80px 1fr 120px;`,
-      `gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">`,
-      `<div style="color:var(--hint)">${inv.invoice_date}</div>`,
-      `<div><div style="font-weight:500;color:var(--ink)">${buyer}</div>`,
-      `<div style="font-size:10px;color:var(--hint)">${inv._commodity||'—'}</div></div>`,
-      `<div style="font-weight:600;color:var(--ink)">${fN(qty)} ${unit}</div>`,
-      `<div style="color:var(--hint)">${priceStr}</div>`,
-      `<div><select class="form-select gr-alloc-item" data-invoice-id="${inv.id}"`,
-      ` style="font-size:11px"><option value="">Select commodity…</option>${itemOpts(matched?.id||'')}</select></div>`,
-      `<div><button class="btn btn-sm btn-primary gr-alloc-btn"`,
-      ` data-invoice-id="${inv.id}" data-qty="${qty}" data-unit="${unit}"`,
-      ` data-date="${inv.invoice_date}" data-buyer="${buyer}"`,
-      ` style="font-size:11px;opacity:.4;pointer-events:none">Allocate →</button></div>`,
-      `</div>`,
-    ].join('');
+  const pendingGroupHtml = Object.entries(pendingGroups).map(([key, invs]) => {
+    const totalQty   = invs.reduce((s, i) => s + (parseFloat(i.total_qty)||0), 0);
+    const totalVal   = invs.reduce((s, i) => s + (parseFloat(i.gross_amount)||0), 0);
+    const unit       = invs[0].master_unit || 'bales';
+    const matched    = autoMatch(key);
+    const uid        = key.replace(/[^a-z0-9]/gi, '_');
+
+    // Individual invoice detail rows (hidden by default)
+    const detailRows = invs.map(inv => {
+      const buyer = (inv.buyer || '—').replace(/"/g, '&quot;');
+      const qty   = parseFloat(inv.total_qty) || 0;
+      return `<div class="gr-inv-detail" data-commodity-key="${uid}"
+        data-invoice-id="${inv.id}" data-qty="${qty}" data-unit="${inv.master_unit||unit}"
+        data-date="${inv.invoice_date}" data-buyer="${buyer}"
+        style="display:grid;grid-template-columns:90px 1fr 80px 70px;gap:8px;
+        padding:7px 14px 7px 32px;border-bottom:1px solid var(--border-light);
+        align-items:center;font-size:11px;color:var(--hint);background:#fafafa">
+        <div>${inv.invoice_date}</div>
+        <div>${buyer}</div>
+        <div>${fN(qty)} ${inv.master_unit||unit}</div>
+        <div>${inv.gross_amount ? fmtAud(inv.gross_amount) : ''}</div>
+      </div>`;
+    }).join('');
+
+    return `
+      <div style="border-bottom:1px solid var(--border-light)">
+        <div style="display:grid;grid-template-columns:1fr 110px 90px 1fr 130px;
+          gap:8px;padding:10px 14px;align-items:center;font-size:12px">
+          <div>
+            <span style="font-weight:600;color:var(--ink)">${key}</span>
+            <button onclick="var d=this.closest('[style]').nextElementSibling;d.style.display=d.style.display==='none'?'block':'none';this.textContent=d.style.display==='none'?'▸ ${invs.length} invoice${invs.length!==1?'s':''}':'▾ ${invs.length} invoice${invs.length!==1?'s':''}';"
+              style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--hint);margin-left:8px;padding:0">
+              ▸ ${invs.length} invoice${invs.length!==1?'s':''}
+            </button>
+          </div>
+          <div style="font-weight:600;color:var(--ink)">${fN(totalQty)} ${unit}</div>
+          <div style="color:var(--hint)">${totalVal ? fmtAud(totalVal) : ''}</div>
+          <div>
+            <select class="form-select gr-alloc-item" data-commodity-key="${uid}"
+              style="font-size:11px">
+              <option value="">Select stock item…</option>${itemOpts(matched?.id||'')}
+            </select>
+          </div>
+          <div>
+            <button class="btn btn-sm btn-primary gr-alloc-btn"
+              data-commodity-key="${uid}"
+              style="font-size:11px;opacity:.4;pointer-events:none;width:100%">
+              Allocate All →
+            </button>
+          </div>
+        </div>
+        <div style="display:none">${detailRows}</div>
+      </div>`;
   }).join('');
 
+  const totalPendingInvoices = pending.length;
   const pendingCard = pending.length ? [
     `<div class="card" style="margin-bottom:12px;overflow:hidden;border:2px solid var(--amber)">`,
     `<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:#fffbeb;`,
     `display:flex;align-items:center;justify-content:space-between">`,
     `<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#92400e">`,
-    `⚡ ${pending.length} sale invoice${pending.length!==1?'s':''} awaiting allocation to stock</span>`,
-    `<span style="font-size:11px;color:#92400e">Select a commodity then hit Allocate →</span>`,
+    `⚡ ${totalPendingInvoices} sale invoice${totalPendingInvoices!==1?'s':''} awaiting allocation — ${Object.keys(pendingGroups).length} commodity group${Object.keys(pendingGroups).length!==1?'s':''}</span>`,
+    `<span style="font-size:11px;color:#92400e">Select stock item then Allocate All →</span>`,
     `</div>`,
-    `<div style="display:grid;grid-template-columns:90px 1fr 90px 80px 1fr 120px;gap:8px;padding:6px 14px;`,
+    `<div style="display:grid;grid-template-columns:1fr 110px 90px 1fr 130px;gap:8px;padding:6px 14px;`,
     `background:#fafafa;border-bottom:1px solid var(--border-light)">`,
-    `${['Date','Buyer / Type','Qty','Value','Commodity',''].map((h,i) =>
+    `${['Commodity','Total Qty','Value','Stock Item',''].map(h =>
       `<div style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">${h}</div>`
     ).join('')}`,
     `</div>`,
-    pendingRows,
+    pendingGroupHtml,
     `</div>`,
   ].join('') : '';
 
-  // ── Allocated archive ──
-  const archiveRows = allocated.map(({ inv, movement }) => {
-    const buyer  = (inv.buyer || '—').replace(/"/g, '&quot;');
-    const qty    = parseFloat(inv.total_qty) || 0;
-    const unit   = inv.master_unit || 'bales';
-    const item   = items.find(i => i.id === movement.item_id);
-    const priceStr = inv.gross_amount ? fmtAud(inv.gross_amount) : '';
-    return [
-      `<div style="display:grid;grid-template-columns:90px 1fr 90px 80px 1fr 100px;`,
-      `gap:8px;padding:9px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">`,
-      `<div style="color:var(--hint)">${inv.invoice_date}</div>`,
-      `<div><span style="color:var(--ink)">${buyer}</span>`,
-      `<span style="color:var(--hint);font-size:11px;margin-left:6px">${inv._commodity||''}</span></div>`,
-      `<div style="font-weight:600">${fN(qty)} ${unit}</div>`,
-      `<div style="color:var(--hint)">${priceStr}</div>`,
-      `<div style="color:var(--green);font-weight:500">→ ${item?.name||'—'}</div>`,
-      `<div><button class="btn btn-ghost btn-sm gr-realloc-btn"`,
-      ` data-movement-id="${movement.id}" data-invoice-id="${inv.id}"`,
-      ` data-qty="${qty}" data-unit="${unit}" data-date="${inv.invoice_date}" data-buyer="${buyer}"`,
-      ` style="font-size:11px;color:var(--amber)">✎ Edit</button></div>`,
-      `</div>`,
-    ].join('');
+  // ── Group allocated by commodity + stock item ──
+  const allocGroups = {};
+  allocated.forEach(({ inv, movement }) => {
+    const item = items.find(i => i.id === movement.item_id);
+    const key  = item?.name || movement.item_id;
+    if (!allocGroups[key]) allocGroups[key] = { item, invs: [] };
+    allocGroups[key].invs.push({ inv, movement });
+  });
+
+  const archiveGroupHtml = Object.entries(allocGroups).map(([key, { item, invs: aInvs }]) => {
+    const totalQty = aInvs.reduce((s, { inv }) => s + (parseFloat(inv.total_qty)||0), 0);
+    const totalVal = aInvs.reduce((s, { inv }) => s + (parseFloat(inv.gross_amount)||0), 0);
+    const unit     = aInvs[0].inv.master_unit || 'bales';
+
+    const detailRows = aInvs.map(({ inv, movement }) => {
+      const buyer = (inv.buyer || '—').replace(/"/g, '&quot;');
+      const qty   = parseFloat(inv.total_qty) || 0;
+      return `<div style="display:grid;grid-template-columns:90px 1fr 80px 70px 100px;gap:8px;
+        padding:7px 14px 7px 32px;border-bottom:1px solid var(--border-light);
+        align-items:center;font-size:11px;color:var(--hint);background:#fafafa">
+        <div>${inv.invoice_date}</div>
+        <div>${buyer}</div>
+        <div>${fN(qty)} ${inv.master_unit||unit}</div>
+        <div>${inv.gross_amount ? fmtAud(inv.gross_amount) : ''}</div>
+        <div><button class="btn btn-ghost btn-sm gr-realloc-btn"
+          data-movement-id="${movement.id}" data-invoice-id="${inv.id}"
+          data-qty="${qty}" data-unit="${inv.master_unit||unit}"
+          data-date="${inv.invoice_date}" data-buyer="${buyer}"
+          style="font-size:10px;color:var(--amber);padding:2px 6px">✎ Edit</button></div>
+      </div>`;
+    }).join('');
+
+    return `
+      <div style="border-bottom:1px solid var(--border-light)">
+        <div style="display:grid;grid-template-columns:1fr 110px 90px;
+          gap:8px;padding:10px 14px;align-items:center;font-size:12px">
+          <div>
+            <span style="font-weight:600;color:var(--ink)">${key}</span>
+            <button onclick="var d=this.closest('[style]').nextElementSibling;d.style.display=d.style.display==='none'?'block':'none';this.textContent=d.style.display==='none'?'▸ ${aInvs.length} invoice${aInvs.length!==1?'s':''}':'▾ ${aInvs.length} invoice${aInvs.length!==1?'s':''}';"
+              style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--hint);margin-left:8px;padding:0">
+              ▸ ${aInvs.length} invoice${aInvs.length!==1?'s':''}
+            </button>
+          </div>
+          <div style="font-weight:600">${fN(totalQty)} ${unit}</div>
+          <div style="color:var(--hint)">${totalVal ? fmtAud(totalVal) : ''}</div>
+        </div>
+        <div style="display:none">${detailRows}</div>
+      </div>`;
   }).join('');
 
   const archiveCard = allocated.length ? [
     `<div class="card" style="margin-bottom:12px;overflow:hidden">`,
     `<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--page-bg);`,
     `display:flex;align-items:center;justify-content:space-between;cursor:pointer"`,
-    ` onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">`,
+    ` onclick="var b=this.nextElementSibling;b.style.display=b.style.display==='none'?'':'none'">`,
     `<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">`,
-    `✓ ${allocated.length} allocated sale${allocated.length!==1?'s':''}</span>`,
+    `✓ ${allocated.length} allocated sale${allocated.length!==1?'s':''} — ${Object.keys(allocGroups).length} commodity group${Object.keys(allocGroups).length!==1?'s':''}</span>`,
     `<span style="font-size:11px;color:var(--hint)">▾ show/hide</span>`,
     `</div>`,
     `<div style="display:none">`,
-    archiveRows,
+    archiveGroupHtml,
     `</div>`,
     `</div>`,
   ].join('') : '';
