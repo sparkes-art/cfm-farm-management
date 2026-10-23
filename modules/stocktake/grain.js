@@ -152,13 +152,31 @@ async function _render(container, farm, period, allPeriods = []) {
   // ── Budget carry-over openings ─────────────────────────────────────────
   const budgetOpen = await _getBudgetOpenings(farm, period);
 
-  // ── Group items by subgroup ────────────────────────────────────────────
+  // ── Group items by subgroup → season ──────────────────────────────────
+  // Season label from produced_year: "2026" → "2025/26" (harvested in
+  // the second calendar year of the season). Falls back to item name.
+  const seasonLabel = item => {
+    const yr = item.attributes?.produced_year;
+    if (!yr) return null; // no season label — won't show sub-header
+    const y = parseInt(yr, 10);
+    if (isNaN(y)) return String(yr);
+    return `${y - 1}/${String(y).slice(-2)}`;
+  };
+  const seasonSortKey = item => {
+    const yr = item.attributes?.produced_year;
+    return yr ? parseInt(yr, 10) : 9999;
+  };
+
   const subgroups = {};
   items.forEach(item => {
     const sg = item.subgroup || item.name;
     if (!subgroups[sg]) subgroups[sg] = [];
     subgroups[sg].push(item);
   });
+  // Sort items within each subgroup by season (oldest first)
+  Object.values(subgroups).forEach(arr =>
+    arr.sort((a, b) => seasonSortKey(a) - seasonSortKey(b))
+  );
 
   // ── Format helpers ─────────────────────────────────────────────────────
   // fN / fD are module-level helpers
@@ -166,7 +184,16 @@ async function _render(container, farm, period, allPeriods = []) {
   // ── Build subgroup sections ────────────────────────────────────────────
   const subgroupHtml = Object.entries(subgroups).map(([sgName, sgItems]) => {
 
-    const itemCards = sgItems.map(item => {
+    // Group by season — show season sub-headers when there are multiple seasons
+    const bySeasonMap = new Map(); // seasonLabel string | null → items[]
+    sgItems.forEach(item => {
+      const sl = seasonLabel(item);
+      if (!bySeasonMap.has(sl)) bySeasonMap.set(sl, []);
+      bySeasonMap.get(sl).push(item);
+    });
+    const multiSeason = bySeasonMap.size > 1;
+
+    const renderItemCard = item => {
       const attrs = item.attributes || {};
       const unit  = item.default_unit || 'bales';
       const kgPerBale = attrs.kg_per_bale || null;
@@ -282,7 +309,31 @@ async function _render(container, farm, period, allPeriods = []) {
             </table>
           </div>
         </div>`;
-    }).join('');
+    }; // end renderItemCard
+
+    // ── Season grouping ────────────────────────────────────────────────────
+    // When multiple seasons exist, wrap each group in a season sub-header.
+    // Season closing = sum of all items in that season group.
+    const itemCards = multiSeason
+      ? [...bySeasonMap.entries()].map(([sl, seasonItems]) => {
+          const slLabel = sl ? `${sgName} ${sl}` : sgName;
+          const seasonClosing = seasonItems.reduce((sum, item) => {
+            const ks = Object.keys(closingMap).filter(k => k.startsWith(item.id + '||'));
+            return sum + ks.reduce((s, k) => s + (closingMap[k] || 0), 0);
+          }, 0);
+          const sUnit    = seasonItems[0]?.default_unit || 'bales';
+          const sKgBale  = seasonItems[0]?.attributes?.kg_per_bale || null;
+          const sTonnes  = sKgBale && seasonClosing ? ` · ${fD(seasonClosing * sKgBale / 1000)} t` : '';
+          return `
+            <div style="margin-bottom:16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:#2d3f55;border-radius:6px;margin-bottom:6px">
+                <span style="font-size:13px;font-weight:600;color:white">${slLabel}</span>
+                <span style="font-size:11px;color:rgba(255,255,255,.65)">${fN(seasonClosing)} ${sUnit} on hand${sTonnes}</span>
+              </div>
+              ${seasonItems.map(renderItemCard).join('')}
+            </div>`;
+        }).join('')
+      : sgItems.map(renderItemCard).join('');
 
     // Subgroup total
     const sgClosing = sgItems.reduce((sum, item) => {
