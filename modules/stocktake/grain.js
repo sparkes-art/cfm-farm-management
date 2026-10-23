@@ -22,9 +22,9 @@
 //          ├─ Paddock 12      ← location
 //          └─ Shed 3
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1792732148104';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792732148104';
-import { toast, openModal, qs } from '../../js/ui.js?v=1792732148104';
+import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1792733150694';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792733150694';
+import { toast, openModal, qs } from '../../js/ui.js?v=1792733150694';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString();
@@ -63,13 +63,17 @@ export async function mountGrain(container, initialPeriod) {
 async function _render(container, farm, period, allPeriods = []) {
   const wrap = qs('#gr-wrap', container);
 
-  const [items, locations, movements] = await Promise.all([
+  const [items, locations, movements, periodInvoices] = await Promise.all([
     dbSelect('stock_items',
       `farm_id=eq.${farm.id}&category=eq.grain&active=eq.true&order=subgroup,name`),
     dbSelect('stock_locations',
       `farm_id=eq.${farm.id}&active=eq.true&order=route_order,name`),
     dbSelect('stock_movements',
       `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`),
+    // Crop/grain/hay sale invoices in this period (not livestock)
+    period ? dbSelect('invoices',
+      `farm_id=eq.${farm.id}&master_unit=neq.head&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&select=id,buyer,invoice_date,commodity_type,total_qty,master_unit,gross_amount`
+    ) : Promise.resolve([]),
   ]);
 
   const itemIds = new Set(items.map(i => i.id));
@@ -286,37 +290,8 @@ async function _render(container, farm, period, allPeriods = []) {
       </div>`;
   }).join('');
 
-  // ── Unlinked invoices panel ────────────────────────────────────────────
-  const unlinkedInvoices = period ? await _getUnlinkedGrainInvoices(farm, period, items) : [];
-  const fmtAud = n => n != null ? '$' + parseFloat(n).toLocaleString('en-AU', {minimumFractionDigits:0,maximumFractionDigits:0}) : '';
-  const unlinkedHtml = unlinkedInvoices.length ? `
-    <div style="background:#fff8e6;border:2px solid #f59e0b;border-radius:10px;padding:14px 18px;margin-bottom:20px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-size:13px;font-weight:600;color:#92400e">
-          💰 ${unlinkedInvoices.length} sale invoice${unlinkedInvoices.length !== 1 ? 's' : ''} not yet recorded as stock movements
-        </div>
-        ${canWrite() ? `<button class="btn btn-sm" id="gr-link-all-invoices"
-          style="font-size:11px;background:#f59e0b;color:white;border:none">Link all</button>` : ''}
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        ${unlinkedInvoices.map(inv => `
-          <div style="display:flex;align-items:center;justify-content:space-between;background:white;border-radius:6px;padding:8px 12px;gap:12px">
-            <div style="flex:1;min-width:0">
-              <span style="font-size:12px;font-weight:500;color:var(--ink)">${inv.buyer || 'Unknown buyer'}</span>
-              <span style="font-size:11px;color:var(--hint);margin-left:8px">${inv.invoice_date}</span>
-              <span style="font-size:11px;color:var(--hint);margin-left:4px">· ${inv.commodity || '—'}</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
-              <span style="font-size:12px;font-weight:600;color:var(--ink)">${fN(parseFloat(inv.qty)||0)} ${inv.unit || ''}</span>
-              ${inv.gross_amount ? `<span style="font-size:11px;color:var(--hint)">${fmtAud(inv.gross_amount)}</span>` : ''}
-              ${canWrite() ? `<button class="btn btn-sm btn-ghost gr-link-invoice" style="font-size:11px"
-                data-invoice-id="${inv.id}" data-invoice-date="${inv.invoice_date}"
-                data-commodity="${inv.commodity || ''}" data-qty="${inv.qty || ''}" data-unit="${inv.unit || ''}"
-                data-buyer="${inv.buyer || ''}">Link</button>` : ''}
-            </div>
-          </div>`).join('')}
-      </div>
-    </div>` : '';
+  // ── Sales panel (invoices → stock movements, livestock-style) ─────────────
+  const salesPanelHtml = _buildSalesPanel(periodInvoices, items, movements);
 
   // ── Period movements log ───────────────────────────────────────────────
   const logRows = periodMoves.slice(0, 30).map(m => {
@@ -356,7 +331,7 @@ async function _render(container, farm, period, allPeriods = []) {
       </div>
     </div>` : '';
 
-  wrap.innerHTML = timelineHtml + unlinkedHtml + seedBannerHtml + headerHtml + subgroupHtml + (periodMoves.length ? `
+  wrap.innerHTML = timelineHtml + salesPanelHtml + seedBannerHtml + headerHtml + subgroupHtml + (periodMoves.length ? `
     <div class="card" style="margin-top:16px;overflow:hidden">
       <div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--page-bg)">
         <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Period movements</span>
@@ -413,13 +388,56 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
         btn.dataset.budgetId || null, period, allPeriods));
   });
 
-  wrap.querySelectorAll('.gr-link-invoice').forEach(btn => {
-    btn.addEventListener('click', () =>
-      _linkInvoiceToStock(container, farm, items, locations, btn.dataset, period, allPeriods));
+  // Allocate invoice line to a stock item
+  wrap.querySelectorAll('.gr-alloc-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const sel = wrap.querySelector(`.gr-alloc-item[data-invoice-id="${btn.dataset.invoiceId}"]`);
+      const itemId = sel?.value;
+      if (!itemId) { toast('Select a commodity first', 'error'); return; }
+      const qty  = parseFloat(btn.dataset.qty);
+      const item = items.find(i => i.id === itemId);
+      if (!qty) { toast('Invoice has no quantity', 'error'); return; }
+
+      btn.disabled = true; btn.textContent = 'Saving…';
+      try {
+        await dbInsert('stock_movements', {
+          farm_id:       farm.id,
+          item_id:       itemId,
+          location_id:   null,
+          movement_type: 'sale',
+          qty,
+          unit:          item?.default_unit || btn.dataset.unit || 'bales',
+          occurred_on:   btn.dataset.date,
+          note:          `Sale to ${btn.dataset.buyer || 'buyer'} — from invoice`,
+          source_system: 'invoices',
+          source_ref:    btn.dataset.invoiceId,
+        });
+        toast('Sale recorded', 'success');
+        await _render(container, farm, period, allPeriods);
+      } catch(e) {
+        toast('Failed: ' + e.message, 'error');
+        btn.disabled = false; btn.textContent = 'Allocate →';
+      }
+    });
   });
 
-  wrap.querySelector('#gr-link-all-invoices')?.addEventListener('click', () =>
-    _linkAllInvoices(container, farm, items, locations, unlinkedInvoices, period, allPeriods));
+  // Enable/disable allocate button based on item select
+  wrap.querySelectorAll('.gr-alloc-item').forEach(sel => {
+    const btn = wrap.querySelector(`.gr-alloc-btn[data-invoice-id="${sel.dataset.invoiceId}"]`);
+    if (!btn) return;
+    const update = () => {
+      btn.style.opacity = sel.value ? '1' : '.4';
+      btn.style.pointerEvents = sel.value ? 'auto' : 'none';
+    };
+    sel.addEventListener('change', update);
+    update();
+  });
+
+  // Re-allocate (edit) button
+  wrap.querySelectorAll('.gr-realloc-btn').forEach(btn => {
+    btn.addEventListener('click', () =>
+      _reallocateSale(container, farm, items, btn.dataset, period, allPeriods));
+  });
 }
 
 // ── Fetch budget carry-over openings ──────────────────────────────────────
@@ -434,53 +452,169 @@ async function _getBudgetOpenings(farm, period) {
   } catch { return []; }
 }
 
-// ── Fetch grain sale invoice lines not yet linked to stock movements ───────
-// Known grain commodity types — mirrors invoices.js GRAIN_COMMODITIES list
-const GRAIN_COMMODITY_TYPES = ['barley','canola','wheat','oats','sorghum','corn','maize',
-  'chickpeas','lentils','lupins','faba beans','grain','cotton','hay','pasture','seed'];
+// ── Sales panel — invoice lines → stock movements (livestock-style) ──────────
+function _buildSalesPanel(invoices, items, movements) {
+  // Map already-allocated invoice IDs to their movement
+  const allocatedByRef = {};
+  movements.filter(m => m.source_system === 'invoices' && m.source_ref)
+    .forEach(m => { allocatedByRef[m.source_ref] = m; });
 
-async function _getUnlinkedGrainInvoices(farm, period, items) {
-  if (!period) return [];
+  const pending  = [];
+  const allocated = [];
+  invoices.forEach(inv => {
+    const qty = parseFloat(inv.total_qty) || 0;
+    if (!qty) return;
+    const movement = allocatedByRef[inv.id] || null;
+    if (movement) allocated.push({ inv, movement });
+    else          pending.push({ inv });
+  });
 
-  try {
-    // Fetch all non-livestock invoices in period
-    const invs = await dbSelect('invoices',
-      `farm_id=eq.${farm.id}&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&master_unit=neq.head&select=id,buyer,invoice_date,commodity_type,total_qty,master_unit,gross_amount`
-    );
+  if (!pending.length && !allocated.length) return '';
 
-    // Build set of invoice IDs already recorded as sale movements
-    const linkedRefs = new Set(
-      (await dbSelect('stock_movements',
-        `farm_id=eq.${farm.id}&movement_type=eq.sale&source_system=eq.invoices&select=source_ref`
-      )).map(m => m.source_ref)
-    );
+  // Try to auto-match commodity_type → stock item
+  const autoMatch = (commodityType) => {
+    if (!commodityType) return null;
+    const ct = commodityType.toLowerCase();
+    return items.find(i =>
+      ct.includes((i.subgroup||i.name).toLowerCase()) ||
+      (i.subgroup||i.name).toLowerCase().includes(ct)
+    ) || null;
+  };
 
-    // If we have stock items, also match against known subgroups
-    const subgroups = items.length
-      ? [...new Set(items.map(i => (i.subgroup || i.name).toLowerCase()))]
-      : [];
+  const itemOpts = (preId) => items.map(i =>
+    `<option value="${i.id}"${i.id === preId ? ' selected' : ''}>${i.name}</option>`
+  ).join('');
 
-    return invs.filter(inv => {
-      if (linkedRefs.has(inv.id)) return false;
-      const ct = (inv.commodity_type || '').toLowerCase();
-      // Match against known grain/hay commodity types
-      const isKnownType = GRAIN_COMMODITY_TYPES.some(g => ct.includes(g) || g.includes(ct));
-      // Or match against existing stock item subgroups
-      const matchesItem = subgroups.some(sg => ct.includes(sg) || sg.includes(ct));
-      return isKnownType || matchesItem;
-    }).map(inv => ({
-      id:           inv.id,
-      buyer:        inv.buyer,
-      invoice_date: inv.invoice_date,
-      commodity:    inv.commodity_type,
-      qty:          inv.total_qty,
-      unit:         inv.master_unit,
-      gross_amount: inv.gross_amount,
-    }));
-  } catch (e) {
-    console.error('_getUnlinkedGrainInvoices:', e);
-    return [];
-  }
+  const fmtAud = n => n != null ? '$' + parseFloat(n).toLocaleString('en-AU',{maximumFractionDigits:0}) : '';
+
+  // ── Pending rows ──
+  const pendingRows = pending.map(({ inv }) => {
+    const buyer   = (inv.buyer || '—').replace(/"/g, '&quot;');
+    const qty     = parseFloat(inv.total_qty) || 0;
+    const unit    = inv.master_unit || 'bales';
+    const matched = autoMatch(inv.commodity_type);
+    const priceStr = inv.gross_amount ? fmtAud(inv.gross_amount) : '';
+    return [
+      `<div style="display:grid;grid-template-columns:90px 1fr 90px 80px 1fr 120px;`,
+      `gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">`,
+      `<div style="color:var(--hint)">${inv.invoice_date}</div>`,
+      `<div><div style="font-weight:500;color:var(--ink)">${buyer}</div>`,
+      `<div style="font-size:10px;color:var(--hint)">${inv.commodity_type||'—'}</div></div>`,
+      `<div style="font-weight:600;color:var(--ink)">${fN(qty)} ${unit}</div>`,
+      `<div style="color:var(--hint)">${priceStr}</div>`,
+      `<div><select class="form-select gr-alloc-item" data-invoice-id="${inv.id}"`,
+      ` style="font-size:11px"><option value="">Select commodity…</option>${itemOpts(matched?.id||'')}</select></div>`,
+      `<div><button class="btn btn-sm btn-primary gr-alloc-btn"`,
+      ` data-invoice-id="${inv.id}" data-qty="${qty}" data-unit="${unit}"`,
+      ` data-date="${inv.invoice_date}" data-buyer="${buyer}"`,
+      ` style="font-size:11px;opacity:.4;pointer-events:none">Allocate →</button></div>`,
+      `</div>`,
+    ].join('');
+  }).join('');
+
+  const pendingCard = pending.length ? [
+    `<div class="card" style="margin-bottom:12px;overflow:hidden;border:2px solid var(--amber)">`,
+    `<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:#fffbeb;`,
+    `display:flex;align-items:center;justify-content:space-between">`,
+    `<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:#92400e">`,
+    `⚡ ${pending.length} sale invoice${pending.length!==1?'s':''} awaiting allocation to stock</span>`,
+    `<span style="font-size:11px;color:#92400e">Select a commodity then hit Allocate →</span>`,
+    `</div>`,
+    `<div style="display:grid;grid-template-columns:90px 1fr 90px 80px 1fr 120px;gap:8px;padding:6px 14px;`,
+    `background:#fafafa;border-bottom:1px solid var(--border-light)">`,
+    `${['Date','Buyer / Type','Qty','Value','Commodity',''].map((h,i) =>
+      `<div style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">${h}</div>`
+    ).join('')}`,
+    `</div>`,
+    pendingRows,
+    `</div>`,
+  ].join('') : '';
+
+  // ── Allocated archive ──
+  const archiveRows = allocated.map(({ inv, movement }) => {
+    const buyer  = (inv.buyer || '—').replace(/"/g, '&quot;');
+    const qty    = parseFloat(inv.total_qty) || 0;
+    const unit   = inv.master_unit || 'bales';
+    const item   = items.find(i => i.id === movement.item_id);
+    const priceStr = inv.gross_amount ? fmtAud(inv.gross_amount) : '';
+    return [
+      `<div style="display:grid;grid-template-columns:90px 1fr 90px 80px 1fr 100px;`,
+      `gap:8px;padding:9px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">`,
+      `<div style="color:var(--hint)">${inv.invoice_date}</div>`,
+      `<div><span style="color:var(--ink)">${buyer}</span>`,
+      `<span style="color:var(--hint);font-size:11px;margin-left:6px">${inv.commodity_type||''}</span></div>`,
+      `<div style="font-weight:600">${fN(qty)} ${unit}</div>`,
+      `<div style="color:var(--hint)">${priceStr}</div>`,
+      `<div style="color:var(--green);font-weight:500">→ ${item?.name||'—'}</div>`,
+      `<div><button class="btn btn-ghost btn-sm gr-realloc-btn"`,
+      ` data-movement-id="${movement.id}" data-invoice-id="${inv.id}"`,
+      ` data-qty="${qty}" data-unit="${unit}" data-date="${inv.invoice_date}" data-buyer="${buyer}"`,
+      ` style="font-size:11px;color:var(--amber)">✎ Edit</button></div>`,
+      `</div>`,
+    ].join('');
+  }).join('');
+
+  const archiveCard = allocated.length ? [
+    `<div class="card" style="margin-bottom:12px;overflow:hidden">`,
+    `<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--page-bg);`,
+    `display:flex;align-items:center;justify-content:space-between;cursor:pointer"`,
+    ` onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'">`,
+    `<span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">`,
+    `✓ ${allocated.length} allocated sale${allocated.length!==1?'s':''}</span>`,
+    `<span style="font-size:11px;color:var(--hint)">▾ show/hide</span>`,
+    `</div>`,
+    `<div style="display:none">`,
+    archiveRows,
+    `</div>`,
+    `</div>`,
+  ].join('') : '';
+
+  return pendingCard + archiveCard;
+}
+
+// ── Re-allocate (edit) a sale movement ────────────────────────────────────
+async function _reallocateSale(container, farm, items, data, period, allPeriods) {
+  const itemOpts = items.map(i =>
+    `<option value="${i.id}">${i.name}</option>`).join('');
+
+  openModal({
+    title: 'Edit sale allocation',
+    bodyHTML: `
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="background:var(--page-bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px">
+          <span style="font-weight:600">${data.buyer||'Sale'}</span>
+          <span style="color:var(--hint);margin-left:8px">${data.date} · ${fN(parseFloat(data.qty)||0)} ${data.unit||''}</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Commodity (stock item)</label>
+          <select class="form-select" id="ra-item">
+            <option value="">Select…</option>${itemOpts}
+          </select>
+        </div>
+      </div>`,
+    confirmLabel: 'Update',
+    onConfirm: async (modal) => {
+      const itemId = modal.querySelector('#ra-item')?.value;
+      if (!itemId) { toast('Select a commodity', 'error'); return false; }
+      const item = items.find(i => i.id === itemId);
+      // Delete old movement and insert new one
+      await dbDelete('stock_movements', `id=eq.${data.movementId}`);
+      await dbInsert('stock_movements', {
+        farm_id:       farm.id,
+        item_id:       itemId,
+        location_id:   null,
+        movement_type: 'sale',
+        qty:           parseFloat(data.qty),
+        unit:          item?.default_unit || data.unit || 'bales',
+        occurred_on:   data.date,
+        note:          `Sale to ${data.buyer||'buyer'} — from invoice`,
+        source_system: 'invoices',
+        source_ref:    data.invoiceId,
+      });
+      toast('Allocation updated', 'success');
+      await _render(container, farm, period, allPeriods);
+    },
+  });
 }
 
 // ── Seed opening balance from budget carry-over ────────────────────────────
