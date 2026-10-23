@@ -396,13 +396,18 @@ async function _render(container) {
   });
   priorYearInvoices.forEach(inv => {
     const batches  = inv.batches ? (typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches) : [];
-    const commName = inv.commodity_type
+    // Resolve commodity: check linked contract first (same logic as invTotals), then invoice fields, then batch lines
+    const linked   = contracts.find(c => c.id === inv.forward_contract_id);
+    const commName = linked?.commodity
+      || inv.commodity_type
       || batches.map(b => b.commodity).find(Boolean)
       || batches.flatMap(b => b.lines || []).find(l => l.type === 'income' && l.description)?.description
       || (inv.line_items || [])[0]?.commodity || null;
     if (!commName) return;
     const key = commName.trim().toUpperCase().replace(/\s+/g, ' ');
     if (!groups[key]) groups[key] = { name: commName.trim(), budgets: [] };
+    // Mark the group as seeded from a prior-year invoice so it always routes to carry-over
+    groups[key].fromPriorYear = true;
   });
 
   const bField = (b, plain, prefixed) => parseFloat(b[prefixed] ?? b[plain]) || 0;
@@ -473,7 +478,9 @@ async function _render(container) {
 
   const isCattle    = name => /cattle|livestock/i.test(name);
   const isOther     = name => !isCattle(name) && /agistment|interest received|rent|lease|royalt/i.test(name);
-  const isCarryOver = name => !isCattle(name) && !isOther(name) && name !== name.toUpperCase();
+  // A group is carry-over if: (a) it was seeded from a prior-year invoice (flag set above), OR
+  // (b) its name is mixed-case (legacy: budget-imported carry-over rows use mixed-case commodity names).
+  const isCarryOver = (name, g) => !isCattle(name) && !isOther(name) && (g?.fromPriorYear || name !== name.toUpperCase());
 
   const buildCommRow = (g, opts = {}) => {
     const { bIncome, bYTD, bMonth, bArea, bYield, bProd, bPrice } = budgetForGroup(g, { carryOver: opts.carryOver });
@@ -613,10 +620,10 @@ async function _render(container) {
   };
 
   const sortedGroups    = Object.values(groups).sort((a, b) => a.name.toUpperCase().localeCompare(b.name.toUpperCase()));
-  const farmingGroups   = sortedGroups.filter(g => !isCattle(g.name) && !isOther(g.name) && !isCarryOver(g.name));
+  const farmingGroups   = sortedGroups.filter(g => !isCattle(g.name) && !isOther(g.name) && !isCarryOver(g.name, g));
   const livestockGroups = sortedGroups.filter(g => isCattle(g.name));
   const otherGroups     = sortedGroups.filter(g => isOther(g.name));
-  const carryOverGroups = sortedGroups.filter(g => isCarryOver(g.name));
+  const carryOverGroups = sortedGroups.filter(g => isCarryOver(g.name, g));
 
   const incomeRows = [
     buildSection('Farming income',    [...farmingGroups, ...livestockGroups]),
