@@ -101,7 +101,7 @@ async function _render(container) {
     { id: 'chemical', label: 'Chemicals', icon: '🧪', done: periodCounts.filter(c=>items.find(i=>i.id===c.item_id)?.category==='chemical').length, total: chemItems.length, href: 'chemical' },
     { id: 'fertiliser', label: 'Fertiliser', icon: '🌱', done: periodCounts.filter(c=>items.find(i=>i.id===c.item_id)?.category==='fertiliser').length, total: fertItems.length, href: 'fertiliser' },
     { id: 'water', label: 'Bore meters', icon: '💧', done: new Set(recentReadings.filter(r=>r.reading_type==='water_meter').map(r=>r.location_id)).size, total: waterMeters.length, href: 'water' },
-    ...(lsItems.length ? [{ id: 'livestock', label: 'Livestock',    icon: '🐄', done: 0, total: lsItems.length, href: 'livestock' }] : []),
+    { id: 'livestock', label: 'Livestock', icon: '🐄', done: 0, total: lsItems.length, href: 'livestock' },
     { id: 'grain', label: 'Grain & Hay', icon: '🌾', done: 0, total: grainItems.length, href: 'grain' },
   ];
 
