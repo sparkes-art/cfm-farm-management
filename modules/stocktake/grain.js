@@ -22,9 +22,13 @@
 //          ├─ Paddock 12      ← location
 //          └─ Shed 3
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1792559266387';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792559266387';
-import { toast, openModal, qs } from '../../js/ui.js?v=1792559266387';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1792732148104';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792732148104';
+import { toast, openModal, qs } from '../../js/ui.js?v=1792732148104';
+
+// ── Formatters ────────────────────────────────────────────────────────────
+const fN = n => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString();
+const fD = n => (n == null || isNaN(n)) ? '—' : n.toFixed(1).replace(/\.0$/, '');
 
 // ── Movement type catalogue ────────────────────────────────────────────────
 const MOVE_TYPES = {
@@ -151,8 +155,7 @@ async function _render(container, farm, period, allPeriods = []) {
   });
 
   // ── Format helpers ─────────────────────────────────────────────────────
-  const fN = n => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString();
-  const fD = n => (n == null || isNaN(n)) ? '—' : n.toFixed(1).replace(/\.0$/, '');
+  // fN / fD are module-level helpers
 
   // ── Build subgroup sections ────────────────────────────────────────────
   const subgroupHtml = Object.entries(subgroups).map(([sgName, sgItems]) => {
@@ -285,24 +288,31 @@ async function _render(container, farm, period, allPeriods = []) {
 
   // ── Unlinked invoices panel ────────────────────────────────────────────
   const unlinkedInvoices = period ? await _getUnlinkedGrainInvoices(farm, period, items) : [];
+  const fmtAud = n => n != null ? '$' + parseFloat(n).toLocaleString('en-AU', {minimumFractionDigits:0,maximumFractionDigits:0}) : '';
   const unlinkedHtml = unlinkedInvoices.length ? `
     <div style="background:#fff8e6;border:2px solid #f59e0b;border-radius:10px;padding:14px 18px;margin-bottom:20px">
-      <div style="font-size:13px;font-weight:600;color:#92400e;margin-bottom:8px">
-        💰 ${unlinkedInvoices.length} invoice sale line${unlinkedInvoices.length !== 1 ? 's' : ''} not yet linked to stock
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600;color:#92400e">
+          💰 ${unlinkedInvoices.length} sale invoice${unlinkedInvoices.length !== 1 ? 's' : ''} not yet recorded as stock movements
+        </div>
+        ${canWrite() ? `<button class="btn btn-sm" id="gr-link-all-invoices"
+          style="font-size:11px;background:#f59e0b;color:white;border:none">Link all</button>` : ''}
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">
         ${unlinkedInvoices.map(inv => `
           <div style="display:flex;align-items:center;justify-content:space-between;background:white;border-radius:6px;padding:8px 12px;gap:12px">
-            <div>
+            <div style="flex:1;min-width:0">
               <span style="font-size:12px;font-weight:500;color:var(--ink)">${inv.buyer || 'Unknown buyer'}</span>
-              <span style="font-size:11px;color:var(--hint);margin-left:8px">${inv.invoice_date} · ${inv.commodity}</span>
+              <span style="font-size:11px;color:var(--hint);margin-left:8px">${inv.invoice_date}</span>
+              <span style="font-size:11px;color:var(--hint);margin-left:4px">· ${inv.commodity || '—'}</span>
             </div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:12px;font-weight:600;color:var(--ink)">${inv.qty} ${inv.unit}</span>
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+              <span style="font-size:12px;font-weight:600;color:var(--ink)">${fN(parseFloat(inv.qty)||0)} ${inv.unit || ''}</span>
+              ${inv.gross_amount ? `<span style="font-size:11px;color:var(--hint)">${fmtAud(inv.gross_amount)}</span>` : ''}
               ${canWrite() ? `<button class="btn btn-sm btn-ghost gr-link-invoice" style="font-size:11px"
                 data-invoice-id="${inv.id}" data-invoice-date="${inv.invoice_date}"
-                data-commodity="${inv.commodity}" data-qty="${inv.qty}" data-unit="${inv.unit}"
-                data-buyer="${inv.buyer || ''}">Link to stock</button>` : ''}
+                data-commodity="${inv.commodity || ''}" data-qty="${inv.qty || ''}" data-unit="${inv.unit || ''}"
+                data-buyer="${inv.buyer || ''}">Link</button>` : ''}
             </div>
           </div>`).join('')}
       </div>
@@ -407,6 +417,9 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
     btn.addEventListener('click', () =>
       _linkInvoiceToStock(container, farm, items, locations, btn.dataset, period, allPeriods));
   });
+
+  wrap.querySelector('#gr-link-all-invoices')?.addEventListener('click', () =>
+    _linkAllInvoices(container, farm, items, locations, unlinkedInvoices, period, allPeriods));
 }
 
 // ── Fetch budget carry-over openings ──────────────────────────────────────
@@ -422,29 +435,52 @@ async function _getBudgetOpenings(farm, period) {
 }
 
 // ── Fetch grain sale invoice lines not yet linked to stock movements ───────
+// Known grain commodity types — mirrors invoices.js GRAIN_COMMODITIES list
+const GRAIN_COMMODITY_TYPES = ['barley','canola','wheat','oats','sorghum','corn','maize',
+  'chickpeas','lentils','lupins','faba beans','grain','cotton','hay','pasture','seed'];
+
 async function _getUnlinkedGrainInvoices(farm, period, items) {
-  if (!period || !items.length) return [];
+  if (!period) return [];
+
   try {
-    // Grain invoices: filter by commodity matching any known grain subgroup
-    const subgroups = [...new Set(items.map(i => i.subgroup || i.name))];
+    // Fetch all non-livestock invoices in period
     const invs = await dbSelect('invoices',
-      `farm_id=eq.${farm.id}&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&select=id,buyer,invoice_date,commodity,net_qty,unit`
+      `farm_id=eq.${farm.id}&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&master_unit=neq.head&select=id,buyer,invoice_date,commodity_type,total_qty,master_unit,gross_amount`
     );
-    // Filter to grain commodities and exclude ones already referenced in movements
+
+    // Build set of invoice IDs already recorded as sale movements
     const linkedRefs = new Set(
       (await dbSelect('stock_movements',
         `farm_id=eq.${farm.id}&movement_type=eq.sale&source_system=eq.invoices&select=source_ref`
       )).map(m => m.source_ref)
     );
+
+    // If we have stock items, also match against known subgroups
+    const subgroups = items.length
+      ? [...new Set(items.map(i => (i.subgroup || i.name).toLowerCase()))]
+      : [];
+
     return invs.filter(inv => {
-      const comm = (inv.commodity || '').toUpperCase();
-      const isGrain = subgroups.some(sg => comm.includes(sg.toUpperCase()) || sg.toUpperCase().includes(comm));
-      return isGrain && !linkedRefs.has(inv.id);
+      if (linkedRefs.has(inv.id)) return false;
+      const ct = (inv.commodity_type || '').toLowerCase();
+      // Match against known grain/hay commodity types
+      const isKnownType = GRAIN_COMMODITY_TYPES.some(g => ct.includes(g) || g.includes(ct));
+      // Or match against existing stock item subgroups
+      const matchesItem = subgroups.some(sg => ct.includes(sg) || sg.includes(ct));
+      return isKnownType || matchesItem;
     }).map(inv => ({
-      id: inv.id, buyer: inv.buyer, invoice_date: inv.invoice_date,
-      commodity: inv.commodity, qty: inv.net_qty, unit: inv.unit,
+      id:           inv.id,
+      buyer:        inv.buyer,
+      invoice_date: inv.invoice_date,
+      commodity:    inv.commodity_type,
+      qty:          inv.total_qty,
+      unit:         inv.master_unit,
+      gross_amount: inv.gross_amount,
     }));
-  } catch { return []; }
+  } catch (e) {
+    console.error('_getUnlinkedGrainInvoices:', e);
+    return [];
+  }
 }
 
 // ── Seed opening balance from budget carry-over ────────────────────────────
@@ -586,6 +622,97 @@ async function _linkInvoiceToStock(container, farm, items, locations, data, peri
       toast('Sale movement recorded and linked to invoice', 'success');
       await _render(container, farm, period, allPeriods);
     }
+  });
+}
+
+// ── Link all unlinked invoices (batch) ────────────────────────────────────
+async function _linkAllInvoices(container, farm, items, locations, unlinkedInvoices, period, allPeriods) {
+  if (!unlinkedInvoices.length) return;
+
+  // Build option rows for each invoice, with auto-matching item preselected
+  const itemOpts = (preselect) => items.map(i => {
+    const sel = i.id === preselect ? ' selected' : '';
+    return `<option value="${i.id}"${sel}>${i.name}</option>`;
+  }).join('');
+
+  // Try to auto-match invoice commodity_type to a stock item subgroup
+  const autoMatch = (commodity) => {
+    if (!commodity) return '';
+    const ct = commodity.toLowerCase();
+    const match = items.find(i =>
+      ct.includes((i.subgroup||i.name).toLowerCase()) ||
+      (i.subgroup||i.name).toLowerCase().includes(ct)
+    );
+    return match?.id || '';
+  };
+
+  const rows = unlinkedInvoices.map((inv, idx) => {
+    const matchId = autoMatch(inv.commodity);
+    return `
+      <div style="background:var(--page-bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+          <div>
+            <span style="font-size:12px;font-weight:600;color:var(--ink)">${inv.buyer || 'Unknown buyer'}</span>
+            <span style="font-size:11px;color:var(--hint);margin-left:8px">${inv.invoice_date} · ${inv.commodity||'—'}</span>
+          </div>
+          <span style="font-size:12px;font-weight:600;color:var(--ink)">${fN(parseFloat(inv.qty)||0)} ${inv.unit||''}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;align-items:end">
+          <div>
+            <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:2px">Stock item</label>
+            <select class="form-select la-item" data-idx="${idx}" style="font-size:12px">
+              <option value="">— skip —</option>
+              ${itemOpts(matchId)}
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:2px">Qty</label>
+            <input class="form-input la-qty" data-idx="${idx}" type="number" min="0" step="1"
+              value="${parseFloat(inv.qty)||''}" style="font-size:12px">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:2px">Unit</label>
+            <input class="form-input la-unit" data-idx="${idx}" type="text"
+              value="${inv.unit||''}" style="font-size:12px">
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  openModal({
+    title: `Link ${unlinkedInvoices.length} invoice sale${unlinkedInvoices.length!==1?'s':''} to stock`,
+    bodyHTML: `
+      <div style="font-size:12px;color:var(--hint);margin-bottom:12px">
+        Review each invoice below. Select the matching stock item (or "skip" to leave unlinked). Items pre-matched where possible.
+      </div>
+      ${rows}`,
+    confirmLabel: 'Record all sale movements',
+    onConfirm: async (modal) => {
+      let count = 0;
+      for (let idx = 0; idx < unlinkedInvoices.length; idx++) {
+        const inv    = unlinkedInvoices[idx];
+        const itemId = modal.querySelector(`.la-item[data-idx="${idx}"]`)?.value;
+        const qty    = parseFloat(modal.querySelector(`.la-qty[data-idx="${idx}"]`)?.value);
+        const unit   = modal.querySelector(`.la-unit[data-idx="${idx}"]`)?.value?.trim();
+        if (!itemId || !qty) continue; // skip row
+        const item = items.find(i => i.id === itemId);
+        await dbInsert('stock_movements', {
+          farm_id:       farm.id,
+          item_id:       itemId,
+          location_id:   null,
+          movement_type: 'sale',
+          qty,
+          unit:          unit || item?.default_unit || 'bales',
+          occurred_on:   inv.invoice_date,
+          note:          `Sale — ${inv.buyer || 'invoice'} linked from Outputs`,
+          source_system: 'invoices',
+          source_ref:    inv.id,
+        });
+        count++;
+      }
+      toast(`${count} sale movement${count!==1?'s':''} recorded`, 'success');
+      await _render(container, farm, period, allPeriods);
+    },
   });
 }
 
