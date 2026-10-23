@@ -411,9 +411,18 @@ async function _render(container) {
       || (inv.line_items || [])[0]?.commodity || null;
     if (!commName) return;
     const key = commName.trim().toUpperCase().replace(/\s+/g, ' ');
-    if (!groups[key]) groups[key] = { name: commName.trim(), budgets: [] };
+    // Before creating a new group, check if an existing carry-over budget group
+    // commMatches this invoice commodity (e.g. budget has "Cotton", invoice has "Cotton Lint").
+    // If so, mark that group as fromPriorYear rather than creating a separate phantom group.
+    const existingMatchKey = Object.keys(groups).find(gk => {
+      const g = groups[gk];
+      const isCarryOverBudget = g.budgets.length && g.budgets.every(b => b.section === 'carry_over');
+      return isCarryOverBudget && (commMatches(key, gk) || commMatches(gk, key));
+    });
+    const targetKey = existingMatchKey || key;
+    if (!groups[targetKey]) groups[targetKey] = { name: commName.trim(), budgets: [] };
     // Mark the group as seeded from a prior-year invoice so it always routes to carry-over
-    groups[key].fromPriorYear = true;
+    groups[targetKey].fromPriorYear = true;
   });
 
   const bField = (b, plain, prefixed) => parseFloat(b[prefixed] ?? b[plain]) || 0;
