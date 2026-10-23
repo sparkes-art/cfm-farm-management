@@ -325,7 +325,13 @@ async function _render(container) {
   const commMatches = (iCommKey, targetKey) => {
     if (!iCommKey || !targetKey) return false;
     if (iCommKey === targetKey) return true;
-    return targetKey.includes(iCommKey) || iCommKey.includes(targetKey);
+    // Only allow substring match when the shorter string is a prefix/whole-word match of the longer,
+    // preventing "COTTON" matching "COTTON LINT" (different commodity) while still allowing
+    // "COTTON DL" to match a "COTTON" group or similar abbreviation patterns.
+    const shorter = iCommKey.length <= targetKey.length ? iCommKey : targetKey;
+    const longer  = iCommKey.length <= targetKey.length ? targetKey : iCommKey;
+    // Must be a prefix or followed by a space/non-alpha boundary — not a word embedded in another word
+    return longer.startsWith(shorter) && (longer.length === shorter.length || /[\s\-_]/.test(longer[shorter.length]));
   };
 
   const invTotals = (invList, commName) => {
@@ -479,15 +485,15 @@ async function _render(container) {
   const isCattle    = name => /cattle|livestock/i.test(name);
   const isOther     = name => !isCattle(name) && /agistment|interest received|rent|lease|royalt/i.test(name);
   // A group is carry-over if:
-  //   (a) it was seeded from a prior-year invoice (fromPriorYear flag set during group creation), OR
-  //   (b) ALL of its budget rows are carry-over budget rows (notes='carryover' or area_ha is null),
-  //       indicating the budget itself was imported as a carry-over line.
-  // The old mixed-case name heuristic is removed — it caused false positives for crops like "Cotton".
+  //   (a) it was seeded from a prior-year invoice (fromPriorYear flag), OR
+  //   (b) ALL of its budget rows have section='carry_over' (set by budget-import.js for carry-over income rows).
+  // Note: budget rows have section='carry_over' AND area_ha=null for carry-over lines; we use section
+  // as it is the explicit marker, avoiding false positives from mixed-case names or null area_ha.
   const isCarryOver = (name, g) => {
     if (isCattle(name) || isOther(name)) return false;
     if (g?.fromPriorYear) return true;
     if (!g?.budgets?.length) return false;
-    return g.budgets.every(b => b.notes === 'carryover' || b.area_ha == null);
+    return g.budgets.every(b => b.section === 'carry_over');
   };
 
   const buildCommRow = (g, opts = {}) => {
