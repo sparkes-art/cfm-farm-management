@@ -22,9 +22,9 @@
 //          ├─ Paddock 12      ← location
 //          └─ Shed 3
 
-import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1792733506962';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792733506962';
-import { toast, openModal, qs } from '../../js/ui.js?v=1792733506962';
+import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1792733687202';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792733687202';
+import { toast, openModal, qs } from '../../js/ui.js?v=1792733687202';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString();
@@ -400,10 +400,13 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
 
       btn.disabled = true; btn.textContent = 'Saving…';
       try {
-        // Find the pending invoice objects from the DOM data embedded on detail rows
+        // Find detail rows for this commodity group; deduplicate by invoice ID
         const detailRows = wrap.querySelectorAll(`.gr-inv-detail[data-commodity-key="${key}"]`);
+        const seen = new Set();
         for (const row of detailRows) {
           const { invoiceId, qty, unit, date, buyer } = row.dataset;
+          if (seen.has(invoiceId)) continue; // multi-commodity invoice already inserted
+          seen.add(invoiceId);
           await dbInsert('stock_movements', {
             farm_id:       farm.id,
             item_id:       itemId,
@@ -417,7 +420,7 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
             source_ref:    invoiceId,
           });
         }
-        toast(`${detailRows.length} sale${detailRows.length !== 1 ? 's' : ''} allocated`, 'success');
+        toast(`${seen.size} sale${seen.size !== 1 ? 's' : ''} allocated`, 'success');
         await _render(container, farm, period, allPeriods);
       } catch(e) {
         toast('Failed: ' + e.message, 'error');
@@ -469,13 +472,9 @@ function _buildSalesPanel(invoices, items, movements) {
   invoices.forEach(inv => {
     const qty = parseFloat(inv.total_qty) || 0;
     if (!qty) return;
-    // Derive commodity label from line_items (commodity_type is not a DB column)
-    const lines = inv.line_items || [];
-    const commodities = [...new Set(lines.map(l => l.commodity).filter(Boolean))];
-    inv._commodity = commodities.join(', ') || '';
     const movement = allocatedByRef[inv.id] || null;
     if (movement) allocated.push({ inv, movement });
-    else          pending.push({ inv });
+    else          pending.push(inv);
   });
 
   if (!pending.length && !allocated.length) return '';
@@ -496,47 +495,76 @@ function _buildSalesPanel(invoices, items, movements) {
     `<option value="${i.id}"${i.id === preId ? ' selected' : ''}>${i.name}</option>`
   ).join('');
 
-  // ── Group pending by commodity ──
-  const pendingGroups = {};
-  pending.forEach(({ inv }) => {
-    const key = inv._commodity || '(unknown commodity)';
-    if (!pendingGroups[key]) pendingGroups[key] = [];
-    pendingGroups[key].push(inv);
+  // ── Group pending by individual commodity (from line_items) ──
+  // Each line_item entry has: commodity, qty, gross, unit
+  // An invoice with lines [{commodity:'Cavalcade',qty:200},{commodity:'Jarrah',qty:88}]
+  // contributes to TWO groups, not one combined "Cavalcade, Jarrah" group.
+  // The movement uses total_qty/master_unit from the invoice (one movement per invoice).
+  const pendingGroups = {}; // commodity → { invs: [{inv, lineQty, lineGross}], unit }
+  pending.forEach(inv => {
+    const saleLines = (inv.line_items || []).filter(l => l.line_type === 'sale' || !l.line_type);
+    const unit = inv.master_unit || 'bales';
+    if (saleLines.length === 0) {
+      // No line_items — fall back to invoice-level total
+      const key = '(unknown commodity)';
+      if (!pendingGroups[key]) pendingGroups[key] = { invs: [], unit };
+      pendingGroups[key].invs.push({ inv, lineQty: parseFloat(inv.total_qty)||0, lineGross: parseFloat(inv.gross_amount)||0 });
+      return;
+    }
+    // When all lines are the same commodity, use total_qty for accuracy
+    const uniqueComms = [...new Set(saleLines.map(l => l.commodity).filter(Boolean))];
+    if (uniqueComms.length === 1) {
+      const key = uniqueComms[0];
+      if (!pendingGroups[key]) pendingGroups[key] = { invs: [], unit };
+      pendingGroups[key].invs.push({ inv, lineQty: parseFloat(inv.total_qty)||0, lineGross: parseFloat(inv.gross_amount)||0 });
+    } else {
+      // Multi-commodity invoice — split by line, apportion gross proportionally
+      const totalLineQty = saleLines.reduce((s, l) => s + (parseFloat(l.qty)||0), 0);
+      const totalInvGross = parseFloat(inv.gross_amount) || 0;
+      saleLines.forEach(l => {
+        const comm = l.commodity || '(unknown commodity)';
+        const lQty = parseFloat(l.qty) || 0;
+        const lGross = totalLineQty ? totalInvGross * (lQty / totalLineQty) : (parseFloat(l.gross)||0);
+        if (!pendingGroups[comm]) pendingGroups[comm] = { invs: [], unit };
+        // Store a synthetic entry: same invoice but only this line's qty/gross
+        pendingGroups[comm].invs.push({ inv, lineQty: lQty, lineGross: lGross, lineOnly: true });
+      });
+    }
   });
 
-  const pendingGroupHtml = Object.entries(pendingGroups).map(([key, invs]) => {
-    const totalQty   = invs.reduce((s, i) => s + (parseFloat(i.total_qty)||0), 0);
-    const totalVal   = invs.reduce((s, i) => s + (parseFloat(i.gross_amount)||0), 0);
-    const unit       = invs[0].master_unit || 'bales';
-    const matched    = autoMatch(key);
-    const uid        = key.replace(/[^a-z0-9]/gi, '_');
+  const pendingGroupHtml = Object.entries(pendingGroups).map(([key, { invs: grpInvs, unit }]) => {
+    const totalQty = grpInvs.reduce((s, e) => s + e.lineQty, 0);
+    const totalVal = grpInvs.reduce((s, e) => s + e.lineGross, 0);
+    const matched  = autoMatch(key);
+    const uid      = key.replace(/[^a-z0-9]/gi, '_');
 
-    // Individual invoice detail rows (hidden by default)
-    const detailRows = invs.map(inv => {
+    // Deduplicate invoices for display (multi-commodity invoices appear in multiple groups)
+    const seenInvIds = new Set();
+    const detailRows = grpInvs.map(({ inv, lineQty, lineGross }) => {
       const buyer = (inv.buyer || '—').replace(/"/g, '&quot;');
-      const qty   = parseFloat(inv.total_qty) || 0;
       return `<div class="gr-inv-detail" data-commodity-key="${uid}"
-        data-invoice-id="${inv.id}" data-qty="${qty}" data-unit="${inv.master_unit||unit}"
+        data-invoice-id="${inv.id}" data-qty="${parseFloat(inv.total_qty)||lineQty}" data-unit="${unit}"
         data-date="${inv.invoice_date}" data-buyer="${buyer}"
-        style="display:grid;grid-template-columns:90px 1fr 80px 70px;gap:8px;
+        style="display:grid;grid-template-columns:90px 1fr 80px 80px;gap:8px;
         padding:7px 14px 7px 32px;border-bottom:1px solid var(--border-light);
         align-items:center;font-size:11px;color:var(--hint);background:#fafafa">
         <div>${inv.invoice_date}</div>
         <div>${buyer}</div>
-        <div>${fN(qty)} ${inv.master_unit||unit}</div>
-        <div>${inv.gross_amount ? fmtAud(inv.gross_amount) : ''}</div>
+        <div>${fN(lineQty)} ${unit}</div>
+        <div>${lineGross ? fmtAud(lineGross) : ''}</div>
       </div>`;
     }).join('');
 
+    const invCount = grpInvs.length;
     return `
       <div style="border-bottom:1px solid var(--border-light)">
         <div style="display:grid;grid-template-columns:1fr 110px 90px 1fr 130px;
           gap:8px;padding:10px 14px;align-items:center;font-size:12px">
           <div>
             <span style="font-weight:600;color:var(--ink)">${key}</span>
-            <button onclick="var d=this.closest('[style]').nextElementSibling;d.style.display=d.style.display==='none'?'block':'none';this.textContent=d.style.display==='none'?'▸ ${invs.length} invoice${invs.length!==1?'s':''}':'▾ ${invs.length} invoice${invs.length!==1?'s':''}';"
+            <button onclick="var d=this.closest('div').nextElementSibling;d.style.display=d.style.display==='none'?'block':'none';this.textContent=d.style.display==='none'?'▸ ${invCount} invoice${invCount!==1?'s':''}':'▾ ${invCount} invoice${invCount!==1?'s':''}';"
               style="background:none;border:none;cursor:pointer;font-size:10px;color:var(--hint);margin-left:8px;padding:0">
-              ▸ ${invs.length} invoice${invs.length!==1?'s':''}
+              ▸ ${invCount} invoice${invCount!==1?'s':''}
             </button>
           </div>
           <div style="font-weight:600;color:var(--ink)">${fN(totalQty)} ${unit}</div>
@@ -559,7 +587,7 @@ function _buildSalesPanel(invoices, items, movements) {
       </div>`;
   }).join('');
 
-  const totalPendingInvoices = pending.length;
+  const totalPendingInvoices = pending.length; // unique invoice count
   const pendingCard = pending.length ? [
     `<div class="card" style="margin-bottom:12px;overflow:hidden;border:2px solid var(--amber)">`,
     `<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:#fffbeb;`,
