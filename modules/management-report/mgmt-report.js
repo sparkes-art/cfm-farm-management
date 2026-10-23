@@ -492,9 +492,23 @@ async function _render(container) {
 
   const buildCommRow = (g, opts = {}) => {
     const { bIncome, bYTD, bMonth, bArea, bYield, bProd, bPrice } = budgetForGroup(g, { carryOver: opts.carryOver });
-    // Route invoices: carryover rows get prior-crop-year invoices; farming rows get current-crop invoices
-    const invSource      = opts.carryOver ? carryOverCropInvoices : currentCropInvoices;
-    const invMonthSource = opts.carryOver ? carryOverCropMonthInvoices : currentCropMonthInvoices;
+    // Route invoices to the right pool:
+    // - fromPriorYear groups: use the flag-based priorYearInvoices (no date restriction)
+    // - other carry-over groups (budget-imported): use carryOverCropInvoices (date in season, crop_year mismatch)
+    // - farming rows: use currentCropInvoices
+    let invSource, invMonthSource;
+    if (opts.carryOver && g.fromPriorYear) {
+      invSource      = priorYearInvoices;
+      invMonthSource = _selectedMonth
+        ? priorYearInvoices.filter(inv => inv.invoice_date?.slice(0, 7) === _selectedMonth)
+        : [];
+    } else if (opts.carryOver) {
+      invSource      = carryOverCropInvoices;
+      invMonthSource = carryOverCropMonthInvoices;
+    } else {
+      invSource      = currentCropInvoices;
+      invMonthSource = currentCropMonthInvoices;
+    }
     const inv       = invTotals(invSource, g.name);
     const invMonth  = _selectedMonth ? invTotals(invMonthSource, g.name) : null;
     const unit      = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
