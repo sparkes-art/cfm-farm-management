@@ -12,6 +12,7 @@ import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui
 // Module-level state — persists across re-renders within a session
 let _selectedMonth = null;   // 'YYYY-MM' or null = full YTD
 let _lastContainer = null;   // last container passed to _render, for post-save re-render
+let _priceMode     = 'budget'; // 'budget' | 'market' — price basis for still-to-come calc
 
 export function unmountManagementReport() {
   _selectedMonth = null;
@@ -35,6 +36,9 @@ export async function mountManagementReport(container) {
               <option value="">Full YTD</option>
             </select>
           </div>
+          <button class="btn btn-ghost btn-sm" id="mgmt-price-mode-btn" title="Switch price basis for still-to-come calculation" style="font-size:11px">
+            Price basis: <span id="mgmt-price-mode-label">Budget</span>
+          </button>
           <button class="btn btn-ghost btn-sm" id="mgmt-xero-map-btn" title="Map budget cost lines to Xero accounts">⚙ Xero mapping</button>
           ${canWrite() ? '<button class="btn btn-ghost btn-sm" id="mgmt-comment-btn">+ Season note</button>' : ''}
         </div>
@@ -66,6 +70,12 @@ export async function mountManagementReport(container) {
   qs('#mgmt-comment-btn', container)?.addEventListener('click', () => _addSeasonComment(container));
   qs('#mgmt-xero-map-btn', container)?.addEventListener('click', () => {
     if (farm && season) window._mgmtXeroMapping(farm.id, season);
+  });
+  qs('#mgmt-price-mode-btn', container)?.addEventListener('click', () => {
+    _priceMode = _priceMode === 'budget' ? 'market' : 'budget';
+    const lbl = qs('#mgmt-price-mode-label', container);
+    if (lbl) lbl.textContent = _priceMode === 'budget' ? 'Budget' : 'Market';
+    _render(container);
   });
   try {
     await _render(container);
@@ -154,7 +164,12 @@ async function _render(container) {
 
   // ── Data fetch ─────────────────────────────────────────────────────────────
   const monthFilter = _selectedMonth ? '&month=eq.' + _selectedMonth : '&month=is.null';
-  const [contracts, allInvoices, budgets, budgetCosts, allComments, xeroMappings] = await Promise.all([
+  // Pre-compute season date window (same logic as below) so we can scope the stocktake fetch
+  const _ysm   = String(yearStartMonth).padStart(2, '0');
+  const _sStart = `${seasonYear}-${_ysm}-01`;
+  const _sEnd   = `${seasonYear + 1}-${_ysm}-01`;
+
+  const [contracts, allInvoices, budgets, budgetCosts, allComments, xeroMappings, grainItems, grainMoves] = await Promise.all([
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
     dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.asc'),
     dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
@@ -163,6 +178,16 @@ async function _render(container) {
     dbSelect('management_comments', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*,user_profiles(full_name)&order=created_at.desc').catch(() => []),
     // Xero account mappings for this farm + season (explicit cost-line → Xero account UUID)
     dbSelect('xero_account_mappings', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*').catch(() => []),
+    // Grain stocktake items for this farm
+    dbSelect('stock_items', 'farm_id=eq.' + farm.id + '&category=eq.grain&active=eq.true&select=id,name,subgroup,attributes,default_unit').catch(() => []),
+    // Grain stock movements with invoice links, within the season date window
+    dbSelect('stock_movements',
+      'farm_id=eq.' + farm.id +
+      '&movement_type=eq.sale' +
+      '&occurred_on=gte.' + _sStart +
+      '&occurred_on=lt.'  + _sEnd +
+      '&select=id,item_id,signed_qty,qty,unit,source_system,source_ref'
+    ).catch(() => []),
   ]);
 
   // Index mappings by cfm_description for O(1) lookup
@@ -171,6 +196,53 @@ async function _render(container) {
   (xeroMappings || []).forEach(m => {
     xeroMappingIndex[m.cfm_description] = { xero_account_id: m.xero_account_id, xero_account_name: m.xero_account_name };
   });
+
+  // ── Stocktake: sold qty by commodity (from grain stock movements) ─────────
+  // Build a map: commodity label (lowercase) → total qty already moved out as sales
+  // We match grain stock items by subgroup (e.g. "Hay") or attributes.variety (e.g. "Cavalcade")
+  // to management-report commodity names (e.g. "Cavalcade", "Cotton", "Sorghum").
+  // Only invoice-linked movements are counted (source_system='invoices') — they represent
+  // grain already allocated in the stocktake, i.e. the invoiced qty is confirmed gone.
+  const _itemById = {};
+  (grainItems || []).forEach(i => { _itemById[i.id] = i; });
+
+  // soldQtyByComm: commodity label (lowercase) → qty already sold (positive number)
+  const soldQtyByComm = {};
+  (grainMoves || []).forEach(m => {
+    if (m.source_system !== 'invoices') return;
+    const item = _itemById[m.item_id];
+    if (!item) return;
+    // The commodity label for matching: prefer attributes.variety, fall back to subgroup/name
+    const commLabel = (item.attributes?.variety || item.subgroup || item.name || '').toLowerCase();
+    const qty = Math.abs(parseFloat(m.signed_qty) || 0);
+    soldQtyByComm[commLabel] = (soldQtyByComm[commLabel] || 0) + qty;
+  });
+
+  // Market price by commodity: weighted average of forward contract price
+  // forward_contracts already fetched for this season — use contract_price as market rate
+  const marketPriceByComm = {};
+  (contracts || []).forEach(c => {
+    if (!c.commodity || !c.contract_price) return;
+    const key = c.commodity.toLowerCase();
+    if (!marketPriceByComm[key]) marketPriceByComm[key] = { totalValue: 0, totalQty: 0 };
+    const qty = parseFloat(c.qty) || 0;
+    const price = parseFloat(c.contract_price) || 0;
+    marketPriceByComm[key].totalValue += qty * price;
+    marketPriceByComm[key].totalQty   += qty;
+  });
+  // Resolve to weighted avg price (or null if no contracts)
+  const getMarketPrice = (commLabel) => {
+    const key = commLabel.toLowerCase();
+    // Try exact match first, then partial
+    let entry = marketPriceByComm[key];
+    if (!entry) {
+      const found = Object.entries(marketPriceByComm).find(([k]) =>
+        k.includes(key) || key.includes(k));
+      entry = found?.[1];
+    }
+    if (!entry || !entry.totalQty) return null;
+    return entry.totalValue / entry.totalQty;
+  };
 
   // Partition comments
   const seasonComments = allComments.filter(c => !c.row_key); // no row_key = season-level note
@@ -457,8 +529,8 @@ async function _render(container) {
     };
   };
 
-  // ── Table styles (7 columns) ───────────────────────────────────────────────
-  const COLS = _selectedMonth ? 7 : 5; // extra 2 cols when month selected
+  // ── Table styles (7 base columns + 2 stocktake cols + 2 optional month cols) ──
+  const COLS = _selectedMonth ? 9 : 7; // +2 for still-to-come + re-forecast; +2 more if month selected
   const th   = 'padding:7px 10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);border-bottom:2px solid var(--border);white-space:nowrap';
   const thR  = th + ';text-align:right';
   const td   = 'padding:6px 10px;font-size:12px;border-bottom:1px solid var(--border-light)';
@@ -490,6 +562,7 @@ async function _render(container) {
 
   // ── Commodity row builder ──────────────────────────────────────────────────
   let grandBudget = 0, grandBudgetYTD = 0, grandActual = 0, grandActualMonth = 0, grandBudgetMonth = 0;
+  let grandStillToCome = 0, grandReforecast = 0;
 
   const isCattle    = name => /cattle|livestock/i.test(name);
   const isOther     = name => !isCattle(name) && /agistment|interest received|rent|lease|royalt/i.test(name);
@@ -596,6 +669,49 @@ async function _render(container) {
     const actualYTD   = inv.totalIncome;
     const actualMonth = invMonth ? invMonth.totalIncome : null;
 
+    // ── Still-to-come & re-forecast ─────────────────────────────────────────
+    // Only applies to farming crop rows (not livestock, carry-over, or other income)
+    const isFarming = !opts.carryOver && !isLs && !isOther(g.name);
+    let stillToComeQty = null, stillToComeVal = null, reforecast = null;
+    if (isFarming && bProd != null && bProd > 0) {
+      // Match soldQtyByComm using the same fuzzy logic as commMatches
+      const gKey = g.name.trim().toLowerCase();
+      let soldQty = 0;
+      for (const [commKey, qty] of Object.entries(soldQtyByComm)) {
+        if (commKey === gKey || commKey.includes(gKey) || gKey.includes(commKey)) {
+          soldQty += qty;
+        }
+      }
+      stillToComeQty = Math.max(0, bProd - soldQty);
+      if (stillToComeQty > 0) {
+        let priceForCalc = null;
+        if (_priceMode === 'market') {
+          priceForCalc = getMarketPrice(gKey);
+        }
+        // Fall back to budget price if market not available or mode is 'budget'
+        if (priceForCalc == null) priceForCalc = bPrice;
+        if (priceForCalc != null) {
+          stillToComeVal = stillToComeQty * priceForCalc;
+        }
+      } else {
+        stillToComeVal = 0;
+      }
+      if (stillToComeVal != null) {
+        reforecast = actualYTD + stillToComeVal;
+      }
+    }
+
+    const fmtStc = stillToComeVal != null
+      ? `<span style="color:#92400e;font-weight:600">${fC(stillToComeVal)}</span>` +
+        (stillToComeQty != null && stillToComeQty > 0
+          ? `<br><span style="font-size:10px;color:var(--hint)">${Math.round(stillToComeQty).toLocaleString('en-AU')} ${unit}</span>`
+          : '')
+      : '<span style="color:var(--hint)">—</span>';
+
+    const fmtRf = reforecast != null
+      ? `<span style="color:#1e40af;font-weight:700">${fC(reforecast)}</span>`
+      : '<span style="color:var(--hint)">—</span>';
+
     const monthCols = _selectedMonth ? `
         <td style="${tdR};color:${actualMonth ? 'var(--green)' : 'var(--hint)'};font-weight:600">${actualMonth ? fC(actualMonth) : '—'}</td>
         <td style="${tdR}">${bMonth != null ? fC(bMonth) : '—'}</td>` : '';
@@ -614,16 +730,24 @@ async function _render(container) {
         <td style="${tdR}">${bYTD != null ? fC(bYTD) : '—'}</td>
         <td style="${tdR}">${actualYTD ? varCell(actualYTD, bYTD) : '<span style="color:var(--hint)">—</span>'}</td>
         <td style="${tdR}">${bIncome != null ? fC(bIncome) : '—'}</td>
+        <td style="${tdR};line-height:1.3">${fmtStc}</td>
+        <td style="${tdR}">${fmtRf}</td>
       </tr>
     `;
 
-    return { html, bIncome: bIncome || 0, bYTD: bYTD || 0, bMonth: bMonth || 0, actual: actualYTD, actualMonth: actualMonth || 0 };
+    return {
+      html,
+      bIncome: bIncome || 0, bYTD: bYTD || 0, bMonth: bMonth || 0,
+      actual: actualYTD, actualMonth: actualMonth || 0,
+      stillToComeVal: stillToComeVal || 0, reforecast: reforecast || 0,
+    };
   };
 
   // ── Section builder ────────────────────────────────────────────────────────
   const buildSection = (label, gList, opts = {}) => {
     if (!gList.length) return '';
     let secBudget = 0, secBudgetYTD = 0, secBudgetMonth = 0, secActual = 0, secActualMonth = 0;
+    let secStillToCome = 0, secReforecast = 0, secHasStc = false;
     const rowsHtml = gList.map(g => {
       const r = buildCommRow(g, { carryOver: opts.carryOver });
       secBudget       += r.bIncome;
@@ -631,13 +755,16 @@ async function _render(container) {
       secBudgetMonth  += r.bMonth;
       secActual       += r.actual;
       secActualMonth  += r.actualMonth;
+      if (r.reforecast) { secStillToCome += r.stillToComeVal; secReforecast += r.reforecast; secHasStc = true; }
       return r.html;
     }).join('');
-    grandBudget       += secBudget;
-    grandBudgetYTD    += secBudgetYTD;
-    grandBudgetMonth  += secBudgetMonth;
-    grandActual       += secActual;
-    grandActualMonth  += secActualMonth;
+    grandBudget          += secBudget;
+    grandBudgetYTD       += secBudgetYTD;
+    grandBudgetMonth     += secBudgetMonth;
+    grandActual          += secActual;
+    grandActualMonth     += secActualMonth;
+    grandStillToCome     += secStillToCome;
+    grandReforecast      += secHasStc ? secActual + secStillToCome : 0;
 
     const monthSubtotalCols = _selectedMonth ? `
         <td style="${tdR};color:var(--green);font-weight:600">${secActualMonth ? fC(secActualMonth) : '—'}</td>
@@ -651,6 +778,8 @@ async function _render(container) {
         <td style="${tdR};font-weight:600">${secBudgetYTD ? fC(secBudgetYTD) : '—'}</td>
         <td style="${tdR}">${secActual ? varCell(secActual, secBudgetYTD) : '<span style="color:var(--hint)">—</span>'}</td>
         <td style="${tdR};font-weight:600">${secBudget ? fC(secBudget) : '—'}</td>
+        <td style="${tdR};color:#92400e;font-weight:600">${secHasStc ? fC(secStillToCome) : '—'}</td>
+        <td style="${tdR};color:#1e40af;font-weight:700">${secHasStc ? fC(secActual + secStillToCome) : '—'}</td>
       </tr>`;
     return secRow(label) + rowsHtml + subtotal;
   };
@@ -749,6 +878,8 @@ async function _render(container) {
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amtYTD)}</td>
           <td style="${tdR};font-size:11px">${lineVar !== null ? '<span style="' + lineVarStyle + ';font-weight:600">' + lineVarLabel + '</span>' : '—'}</td>
           <td style="${tdR};font-size:11px;color:var(--red)">-${fC(amt)}</td>
+          <td style="${tdR};color:var(--hint);font-size:11px">—</td>
+          <td style="${tdR};color:var(--hint);font-size:11px">—</td>
         </tr>`;
     }).join('');
 
@@ -775,6 +906,8 @@ async function _render(container) {
         <td style="${tdR};color:var(--red);font-weight:600">-${fC(catYTD)}</td>
         <td style="${tdR};font-weight:600">${catVariance !== null ? '<span style="' + varStyle + ';font-weight:600">' + catVarLabel + '</span>' : '—'}</td>
         <td style="${tdR};color:var(--red);font-weight:600">-${fC(catTotal)}</td>
+        <td style="${tdR};color:var(--hint)">—</td>
+        <td style="${tdR};color:var(--hint)">—</td>
       </tr>`;
 
     return commRow(cat.label) + lineRowsHtml + catTotalRow;
@@ -854,6 +987,8 @@ async function _render(container) {
         <td style="${tdR};font-size:12px;color:${colColor}">
           ${isSale ? '+' : '-'}${fC(amt)}
         </td>
+        <td style="${tdR};color:var(--hint)">—</td>
+        <td style="${tdR};color:var(--hint)">—</td>
       </tr>`;
   }).join('');
 
@@ -880,6 +1015,8 @@ async function _render(container) {
       '<td style="' + tdR + ';color:var(--red);font-weight:700">-' + fC(totalFixedBudget * ytdFraction) + '</td>' +
       '<td style="' + tdR + ';font-weight:700">' + fvarHtml + '</td>' +
       '<td style="' + tdR + ';color:var(--red);font-weight:700">-' + fC(totalFixedBudget) + '</td>' +
+      '<td style="' + tdR + ';color:var(--hint)">—</td>' +
+      '<td style="' + tdR + ';color:var(--hint)">—</td>' +
       '</tr>';
     fixedCostsSectionHtml = secRow('Fixed costs') + fixedRows + totalFixed;
   }
@@ -898,6 +1035,8 @@ async function _render(container) {
       '<td style="' + tdR + ';color:var(--red);font-weight:700">-' + fC(Math.abs(totalCapexBudget) * ytdFraction) + '</td>' +
       '<td style="' + tdR + ';color:var(--hint)">—</td>' +
       '<td style="' + tdR + ';color:var(--red);font-weight:700">-' + fC(Math.abs(totalCapexBudget)) + '</td>' +
+      '<td style="' + tdR + ';color:var(--hint)">—</td>' +
+      '<td style="' + tdR + ';color:var(--hint)">—</td>' +
       '</tr>';
   }
 
@@ -929,6 +1068,8 @@ async function _render(container) {
     '<td style="' + tdR + ';font-weight:700;color:var(--blue)">' + fC(budgetNetYTD) + '</td>' +
     '<td style="' + tdR + ';font-weight:700">' + nvHtml + '</td>' +
     '<td style="' + tdR + ';font-weight:700;color:var(--blue)">' + fC(budgetNetFY) + '</td>' +
+    '<td style="' + tdR + ';color:var(--hint)">—</td>' +
+    '<td style="' + tdR + ';color:var(--hint)">—</td>' +
     '</tr>';
 
   const incomeOnlyMonthCols = _selectedMonth
@@ -942,6 +1083,8 @@ async function _render(container) {
     '<td style="' + tdR + ';font-weight:700">' + fC(grandBudgetYTD) + '</td>' +
     '<td style="' + tdR + '">' + varCell(grandActual, grandBudgetYTD) + '</td>' +
     '<td style="' + tdR + ';font-weight:700">' + fC(grandBudget) + '</td>' +
+    '<td style="' + tdR + ';color:var(--hint)">—</td>' +
+    '<td style="' + tdR + ';color:var(--hint)">—</td>' +
     '</tr>';
 
   const costsAndNetHtml = budgetCosts.length
@@ -962,6 +1105,7 @@ async function _render(container) {
         ['Actual YTD income',    fC(grandActual),       'var(--green)'],
         ['Budget YTD income',    fC(grandBudgetYTD),    'var(--ink)'],
         ['Full year budget',     fC(grandBudget),       'var(--blue)'],
+        ...(grandReforecast ? [['Re-forecast', fC(grandReforecast), '#1e40af']] : []),
         ['YTD variance', (() => {
           const v = grandActual - grandBudgetYTD;
           const pct = grandBudgetYTD ? v / grandBudgetYTD * 100 : null;
@@ -972,6 +1116,7 @@ async function _render(container) {
         ['Actual YTD income',  fC(grandActual),    'var(--green)'],
         ['Budget YTD income',  fC(grandBudgetYTD), 'var(--ink)'],
         ['Full year budget',   fC(grandBudget),    'var(--blue)'],
+        ...(grandReforecast ? [['Re-forecast', fC(grandReforecast), '#1e40af']] : []),
         ['YTD variance', (() => {
           const v = grandActual - grandBudgetYTD;
           const pct = grandBudgetYTD ? v / grandBudgetYTD * 100 : null;
@@ -986,13 +1131,19 @@ async function _render(container) {
     '</div>'
   ).join('');
 
-  const tileCols = _selectedMonth ? 'repeat(3,1fr)' : 'repeat(4,1fr)';
+  const tileCols = _selectedMonth
+    ? (grandReforecast ? 'repeat(4,1fr)' : 'repeat(3,1fr)')
+    : (grandReforecast ? 'repeat(5,1fr)' : 'repeat(4,1fr)');
 
   // ── Table headers ──────────────────────────────────────────────────────────
   const monthHeaders = _selectedMonth
     ? '<th style="' + thR + '">Actual ' + (selectedMonthLabel ? selectedMonthLabel.split(' ')[0] : 'Month') + '</th>' +
       '<th style="' + thR + '">Budget ' + (selectedMonthLabel ? selectedMonthLabel.split(' ')[0] : 'Month') + '</th>'
     : '';
+  const priceLabel = _priceMode === 'budget' ? 'bgt price' : 'mkt price';
+  const stocktakeHeaders =
+    '<th style="' + thR + ';color:#92400e" title="Budgeted production minus stock already sold — valued at ' + priceLabel + '">Still to come</th>' +
+    '<th style="' + thR + ';color:#1e40af" title="Actual YTD income + still-to-come value">Re-forecast</th>';
 
   // ── Season-level comment rows ──────────────────────────────────────────────
   const commentRows = seasonComments.length
@@ -1025,7 +1176,7 @@ async function _render(container) {
     <!-- Main table -->
     <div style="background:white;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px">
       <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;min-width:${_selectedMonth ? '1050px' : '800px'}">
+        <table style="width:100%;border-collapse:collapse;min-width:${_selectedMonth ? '1250px' : '1000px'}">
           <thead>
             <tr>
               <th style="${th};text-align:left;min-width:220px"></th>
@@ -1034,6 +1185,7 @@ async function _render(container) {
               <th style="${thR}">Budget YTD</th>
               <th style="${thR}">Variance YTD</th>
               <th style="${thR}">Full yr budget</th>
+              ${stocktakeHeaders}
             </tr>
           </thead>
           <tbody>
@@ -1047,6 +1199,8 @@ async function _render(container) {
               <td style="${tdR};font-weight:700">${fC(grandBudgetYTD)}</td>
               <td style="${tdR}">${varCell(grandActual, grandBudgetYTD)}</td>
               <td style="${tdR};font-weight:700">${fC(grandBudget)}</td>
+              <td style="${tdR};color:#92400e;font-weight:700">${grandStillToCome ? fC(grandStillToCome) : '—'}</td>
+              <td style="${tdR};color:#1e40af;font-weight:700">${grandReforecast ? fC(grandReforecast) : '—'}</td>
             </tr>
 
             ${costsAndNetHtml}
