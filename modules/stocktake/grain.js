@@ -28,6 +28,8 @@ import { toast, openModal, qs } from '../../js/ui.js?v=1792733687202';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString();
+// Escape a string for use inside an HTML attribute value (data-* etc.)
+const escJ = s => String(s ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
 const fD = n => (n == null || isNaN(n)) ? '—' : n.toFixed(1).replace(/\.0$/, '');
 
 // ── Movement type catalogue ────────────────────────────────────────────────
@@ -203,9 +205,14 @@ async function _render(container, farm, period, allPeriods = []) {
         const pIn  = periodMoves
           .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty)||0) > 0)
           .reduce((s, m) => s + (parseFloat(m.signed_qty)||0), 0);
-        const pOut = periodMoves
-          .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty)||0) < 0)
-          .reduce((s, m) => s + (parseFloat(m.signed_qty)||0), 0);
+        const outMoves = periodMoves
+          .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty)||0) < 0);
+        const pOut = outMoves.reduce((s, m) => s + (parseFloat(m.signed_qty)||0), 0);
+        const outMovesJson = JSON.stringify(outMoves.map(m => ({
+          id: m.id, movement_type: m.movement_type, occurred_on: m.occurred_on,
+          signed_qty: m.signed_qty, qty: m.qty, unit: m.unit,
+          note: m.note, source_system: m.source_system, source_ref: m.source_ref,
+        })));
         const closingTonnes = kgPerBale && closing
           ? `<span style="font-size:10px;color:var(--hint);margin-left:4px">${fD(closing * kgPerBale / 1000)} t</span>`
           : '';
@@ -214,7 +221,14 @@ async function _render(container, farm, period, allPeriods = []) {
           <td style="padding:9px 14px 9px 20px;font-size:13px;color:var(--ink)">${locName}</td>
           <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--hint)">${opening ? fN(opening) : '—'}</td>
           <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--green)">${pIn ? '+'+fN(pIn) : '—'}</td>
-          <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--red)">${pOut ? fN(pOut) : '—'}</td>
+          <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--red)">
+            ${pOut
+              ? `<button class="gr-out-link" style="background:none;border:none;padding:0;font-size:13px;color:var(--red);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px"
+                  data-item-id="${item.id}" data-item-name="${escJ(item.name)}"
+                  data-loc-id="${locId}" data-loc-name="${escJ(locName)}"
+                  data-out-moves="${escJ(outMovesJson)}">${fN(pOut)}</button>`
+              : '—'}
+          </td>
           <td style="padding:9px 14px;text-align:center">
             <span style="font-weight:700;color:var(--ink)">${fN(closing)}</span>${closingTonnes}
           </td>
@@ -446,6 +460,14 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
     btn.addEventListener('click', () =>
       _reallocateSale(container, farm, items, btn.dataset, period, allPeriods));
   });
+
+  // Out quantity → show movement detail modal
+  wrap.querySelectorAll('.gr-out-link').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const outMoves = JSON.parse(btn.dataset.outMoves || '[]');
+      _showOutMovementsModal(outMoves, btn.dataset.itemName, btn.dataset.locName, items);
+    });
+  });
 }
 
 // ── Fetch budget carry-over openings ──────────────────────────────────────
@@ -672,6 +694,61 @@ function _buildSalesPanel(invoices, items, movements) {
   ].join('') : '';
 
   return pendingCard + archiveCard;
+}
+
+// ── Show out movements detail modal ───────────────────────────────────────
+function _showOutMovementsModal(outMoves, itemName, locName, items) {
+  const MOVE_LABEL = {
+    sale: 'Sale', transfer_out: 'Transfer out', usage: 'Usage',
+    adjustment: 'Adjustment', harvest_inload: 'Inload',
+  };
+  const fmtDate = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' }) : '—';
+
+  const rows = outMoves.map(m => {
+    const qty   = Math.abs(parseFloat(m.signed_qty) || 0);
+    const unit  = m.unit || '';
+    const type  = MOVE_LABEL[m.movement_type] || m.movement_type || '—';
+    const note  = m.note || '—';
+    return `<tr style="border-bottom:1px solid var(--border-light)">
+      <td style="padding:8px 12px;font-size:13px;white-space:nowrap">${fmtDate(m.occurred_on)}</td>
+      <td style="padding:8px 12px;font-size:13px">${type}</td>
+      <td style="padding:8px 12px;font-size:13px;text-align:right;color:var(--red)">${fN(qty)} ${unit}</td>
+      <td style="padding:8px 12px;font-size:13px;color:var(--hint);max-width:240px">${note}</td>
+    </tr>`;
+  }).join('');
+
+  const locLabel = locName && locName !== '— unassigned' ? ` · ${locName}` : '';
+  const total = outMoves.reduce((s, m) => s + Math.abs(parseFloat(m.signed_qty)||0), 0);
+  const unit  = outMoves[0]?.unit || '';
+
+  openModal(`
+    <div style="padding:24px;min-width:480px;max-width:680px">
+      <h3 style="margin:0 0 4px;font-size:16px;font-weight:700;color:var(--ink)">Out movements</h3>
+      <p style="margin:0 0 16px;font-size:13px;color:var(--hint)">${itemName}${locLabel}</p>
+      ${outMoves.length ? `
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-family:inherit">
+            <thead>
+              <tr style="background:var(--page-bg);border-bottom:2px solid var(--border)">
+                <th style="padding:6px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Date</th>
+                <th style="padding:6px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Type</th>
+                <th style="padding:6px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:right">Qty</th>
+                <th style="padding:6px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Note</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+            <tfoot>
+              <tr style="background:var(--page-bg)">
+                <td colspan="2" style="padding:8px 12px;font-size:13px;font-weight:600;color:var(--ink)">Total</td>
+                <td style="padding:8px 12px;font-size:13px;font-weight:700;text-align:right;color:var(--red)">${fN(total)} ${unit}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      ` : '<p style="font-size:13px;color:var(--hint)">No out movements in this period.</p>'}
+    </div>
+  `);
 }
 
 // ── Re-allocate (edit) a sale movement ────────────────────────────────────
