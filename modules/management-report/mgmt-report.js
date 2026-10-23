@@ -169,7 +169,7 @@ async function _render(container) {
   const _sStart = `${seasonYear}-${_ysm}-01`;
   const _sEnd   = `${seasonYear + 1}-${_ysm}-01`;
 
-  const [contracts, allInvoices, budgets, budgetCosts, allComments, xeroMappings, grainItems, grainMoves] = await Promise.all([
+  const [contracts, allInvoices, budgets, budgetCosts, allComments, xeroMappings, grainItems, grainMoves, allGrainMoves] = await Promise.all([
     dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*'),
     dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.asc'),
     dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
@@ -187,6 +187,11 @@ async function _render(container) {
       '&occurred_on=gte.' + _sStart +
       '&occurred_on=lt.'  + _sEnd +
       '&select=id,item_id,signed_qty,qty,unit,source_system,source_ref'
+    ).catch(() => []),
+    // ALL grain movements (any type) for closing-stock-on-hand calc (carry-over still-to-come)
+    dbSelect('stock_movements',
+      'farm_id=eq.' + farm.id +
+      '&select=id,item_id,signed_qty,unit,movement_type'
     ).catch(() => []),
   ]);
 
@@ -216,6 +221,22 @@ async function _render(container) {
     const commLabel = (item.attributes?.variety || item.subgroup || item.name || '').toLowerCase();
     const qty = Math.abs(parseFloat(m.signed_qty) || 0);
     soldQtyByComm[commLabel] = (soldQtyByComm[commLabel] || 0) + qty;
+  });
+
+  // stockOnHandByComm: commodity label (lowercase) → net closing qty on hand
+  // Used for carry-over still-to-come: the grain not yet sold is the "still to come"
+  // Computed from ALL movements (signed_qty is negative for outflows, positive for inflows)
+  const stockOnHandByComm = {};
+  (allGrainMoves || []).forEach(m => {
+    const item = _itemById[m.item_id];
+    if (!item) return;
+    const commLabel = (item.attributes?.variety || item.subgroup || item.name || '').toLowerCase();
+    const netQty = parseFloat(m.signed_qty) || 0;
+    stockOnHandByComm[commLabel] = (stockOnHandByComm[commLabel] || 0) + netQty;
+  });
+  // Ensure non-negative (can't have negative on-hand)
+  Object.keys(stockOnHandByComm).forEach(k => {
+    if (stockOnHandByComm[k] < 0) stockOnHandByComm[k] = 0;
   });
 
   // Market price by commodity: weighted average of forward contract price
@@ -670,12 +691,16 @@ async function _render(container) {
     const actualMonth = invMonth ? invMonth.totalIncome : null;
 
     // ── Still-to-come & re-forecast ─────────────────────────────────────────
-    // Only applies to farming crop rows (not livestock, carry-over, or other income)
-    const isFarming = !opts.carryOver && !isLs && !isOther(g.name);
+    // Farming rows: (budgeted production - already sold) × price
+    // Carry-over rows: stocktake closing qty on hand × price (grain sitting in silo not yet sold)
+    // Livestock / other income: excluded
+    const isFarming   = !opts.carryOver && !isLs && !isOther(g.name);
+    const isCarryOverGrain = opts.carryOver && !isLs;
     let stillToComeQty = null, stillToComeVal = null, reforecast = null;
+    const gKey = g.name.trim().toLowerCase();
+
     if (isFarming && bProd != null && bProd > 0) {
       // Match soldQtyByComm using the same fuzzy logic as commMatches
-      const gKey = g.name.trim().toLowerCase();
       let soldQty = 0;
       for (const [commKey, qty] of Object.entries(soldQtyByComm)) {
         if (commKey === gKey || commKey.includes(gKey) || gKey.includes(commKey)) {
@@ -698,6 +723,33 @@ async function _render(container) {
       }
       if (stillToComeVal != null) {
         reforecast = actualYTD + stillToComeVal;
+      }
+    } else if (isCarryOverGrain) {
+      // Look up closing stock on hand for this commodity
+      let onHand = 0;
+      for (const [commKey, qty] of Object.entries(stockOnHandByComm)) {
+        if (commKey === gKey || commKey.includes(gKey) || gKey.includes(commKey)) {
+          onHand += qty;
+        }
+      }
+      onHand = Math.max(0, onHand);
+      if (onHand > 0) {
+        stillToComeQty = onHand;
+        let priceForCalc = null;
+        if (_priceMode === 'market') {
+          priceForCalc = getMarketPrice(gKey);
+        }
+        if (priceForCalc == null) priceForCalc = bPrice;
+        if (priceForCalc != null) {
+          stillToComeVal = stillToComeQty * priceForCalc;
+        }
+        if (stillToComeVal != null) {
+          reforecast = actualYTD + stillToComeVal;
+        }
+      } else {
+        // All carry-over grain sold — still-to-come is zero, re-forecast = actual
+        stillToComeVal = 0;
+        reforecast = actualYTD;
       }
     }
 
