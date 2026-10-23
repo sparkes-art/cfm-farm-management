@@ -486,14 +486,14 @@ async function _render(container) {
   const isOther     = name => !isCattle(name) && /agistment|interest received|rent|lease|royalt/i.test(name);
   // A group is carry-over if:
   //   (a) it was seeded from a prior-year invoice (fromPriorYear flag), OR
-  //   (b) ALL of its budget rows have section='carry_over' (set by budget-import.js for carry-over income rows).
-  // Note: budget rows have section='carry_over' AND area_ha=null for carry-over lines; we use section
-  // as it is the explicit marker, avoiding false positives from mixed-case names or null area_ha.
+  //   (b) it has budget rows AND all of them have area_ha=null — budget-import.js explicitly sets
+  //       area_ha=null for carry-over rows and only carry-over rows (farming rows get area from GM sheets).
+  // Note: 'section' from budget-import.js is UI-only and NOT stored in Supabase, so we cannot use it here.
   const isCarryOver = (name, g) => {
     if (isCattle(name) || isOther(name)) return false;
     if (g?.fromPriorYear) return true;
     if (!g?.budgets?.length) return false;
-    return g.budgets.every(b => b.section === 'carry_over');
+    return g.budgets.every(b => b.area_ha == null);
   };
 
   const buildCommRow = (g, opts = {}) => {
