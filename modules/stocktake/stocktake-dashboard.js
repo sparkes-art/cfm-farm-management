@@ -40,24 +40,24 @@ async function _render(container) {
   const yearStartMonth = (farm.settings?.yearStartMonth || 7) - 1; // 0-indexed
 
   // Current month period bounds
-  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
-  const currentMonthEnd   = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().slice(0,10);
+  // Build date strings in local time — toISOString() shifts to UTC which breaks dates in AEST (UTC+11)
+  const localDate = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+  const currentMonthStart = localDate(new Date(now.getFullYear(), now.getMonth(), 1));
+  const currentMonthEnd   = localDate(new Date(now.getFullYear(), now.getMonth()+1, 0));
   const hasCurrentPeriod  = periods.some(p => p.period_start === currentMonthStart);
 
   // The "next period to open" — if no periods exist at all, suggest the year-start month;
   // otherwise suggest the current calendar month (next in the run).
   const nextPeriodDate = (() => {
     if (periods.length === 0) {
-      // No periods yet — start at the farm's year-start month in the relevant year.
-      // If we're already past yearStartMonth this calendar year, use this year; otherwise last year.
       const yr = now.getMonth() >= yearStartMonth ? now.getFullYear() : now.getFullYear() - 1;
       return new Date(yr, yearStartMonth, 1);
     }
-    // Otherwise: suggest current calendar month
     return new Date(now.getFullYear(), now.getMonth(), 1);
   })();
-  const nextPeriodStart = nextPeriodDate.toISOString().slice(0,10);
-  const nextPeriodEnd   = new Date(nextPeriodDate.getFullYear(), nextPeriodDate.getMonth()+1, 0).toISOString().slice(0,10);
+  const nextPeriodStart = localDate(nextPeriodDate);
+  const nextPeriodEnd   = localDate(new Date(nextPeriodDate.getFullYear(), nextPeriodDate.getMonth()+1, 0));
   const nextPeriodLabel = nextPeriodDate.toLocaleDateString('en-AU', {month:'long', year:'numeric'});
 
   // Current year label based on farm's year convention
@@ -317,10 +317,14 @@ async function _openPeriod(container, farm) {
       })()
     : new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const start = useDate.toISOString().slice(0,10);
-  const end   = new Date(useDate.getFullYear(), useDate.getMonth()+1, 0).toISOString().slice(0,10);
+  // Build date strings in local time (avoid UTC conversion shifting dates for AEST/UTC+11)
+  const localDate = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const endDate   = new Date(useDate.getFullYear(), useDate.getMonth()+1, 0);
+  const openingD  = new Date(useDate.getFullYear(), useDate.getMonth(), 0); // last day of prev month
+  const start = localDate(useDate);
+  const end   = localDate(endDate);
   const label = useDate.toLocaleDateString('en-AU', {month:'long', year:'numeric'});
-  const openingDate = new Date(useDate.getTime() - 86400000).toISOString().slice(0,10);
+  const openingDate = localDate(openingD);
 
   // Fetch carry-over budget rows and matching stock items in parallel
   let carryOvers = [];
