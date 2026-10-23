@@ -22,9 +22,9 @@
 //          ├─ Paddock 12      ← location
 //          └─ Shed 3
 
-import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1792733150694';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792733150694';
-import { toast, openModal, qs } from '../../js/ui.js?v=1792733150694';
+import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1792733304226';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792733304226';
+import { toast, openModal, qs } from '../../js/ui.js?v=1792733304226';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString();
@@ -72,7 +72,7 @@ async function _render(container, farm, period, allPeriods = []) {
       `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`),
     // Crop/grain/hay sale invoices in this period (not livestock)
     period ? dbSelect('invoices',
-      `farm_id=eq.${farm.id}&master_unit=neq.head&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&select=id,buyer,invoice_date,commodity_type,total_qty,master_unit,gross_amount`
+      `farm_id=eq.${farm.id}&master_unit=neq.head&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&select=id,buyer,invoice_date,total_qty,master_unit,gross_amount,line_items`
     ) : Promise.resolve([]),
   ]);
 
@@ -464,6 +464,10 @@ function _buildSalesPanel(invoices, items, movements) {
   invoices.forEach(inv => {
     const qty = parseFloat(inv.total_qty) || 0;
     if (!qty) return;
+    // Derive commodity label from line_items (commodity_type is not a DB column)
+    const lines = inv.line_items || [];
+    const commodities = [...new Set(lines.map(l => l.commodity).filter(Boolean))];
+    inv._commodity = commodities.join(', ') || '';
     const movement = allocatedByRef[inv.id] || null;
     if (movement) allocated.push({ inv, movement });
     else          pending.push({ inv });
@@ -492,14 +496,14 @@ function _buildSalesPanel(invoices, items, movements) {
     const buyer   = (inv.buyer || '—').replace(/"/g, '&quot;');
     const qty     = parseFloat(inv.total_qty) || 0;
     const unit    = inv.master_unit || 'bales';
-    const matched = autoMatch(inv.commodity_type);
+    const matched = autoMatch(inv._commodity);
     const priceStr = inv.gross_amount ? fmtAud(inv.gross_amount) : '';
     return [
       `<div style="display:grid;grid-template-columns:90px 1fr 90px 80px 1fr 120px;`,
       `gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">`,
       `<div style="color:var(--hint)">${inv.invoice_date}</div>`,
       `<div><div style="font-weight:500;color:var(--ink)">${buyer}</div>`,
-      `<div style="font-size:10px;color:var(--hint)">${inv.commodity_type||'—'}</div></div>`,
+      `<div style="font-size:10px;color:var(--hint)">${inv._commodity||'—'}</div></div>`,
       `<div style="font-weight:600;color:var(--ink)">${fN(qty)} ${unit}</div>`,
       `<div style="color:var(--hint)">${priceStr}</div>`,
       `<div><select class="form-select gr-alloc-item" data-invoice-id="${inv.id}"`,
@@ -542,7 +546,7 @@ function _buildSalesPanel(invoices, items, movements) {
       `gap:8px;padding:9px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">`,
       `<div style="color:var(--hint)">${inv.invoice_date}</div>`,
       `<div><span style="color:var(--ink)">${buyer}</span>`,
-      `<span style="color:var(--hint);font-size:11px;margin-left:6px">${inv.commodity_type||''}</span></div>`,
+      `<span style="color:var(--hint);font-size:11px;margin-left:6px">${inv._commodity||''}</span></div>`,
       `<div style="font-weight:600">${fN(qty)} ${unit}</div>`,
       `<div style="color:var(--hint)">${priceStr}</div>`,
       `<div style="color:var(--green);font-weight:500">→ ${item?.name||'—'}</div>`,
@@ -692,163 +696,6 @@ async function _seedOpeningFromBudget(container, farm, itemId, itemName, qty, un
   }, 80);
 }
 
-// ── Link an invoice sale line to stock ────────────────────────────────────
-async function _linkInvoiceToStock(container, farm, items, locations, data, period, allPeriods) {
-  const itemOpts = items.map(i =>
-    `<option value="${i.id}">${i.name} (${i.subgroup || i.name})</option>`).join('');
-  const locOpts = locations.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
-
-  openModal({
-    title: 'Link invoice sale to stock',
-    bodyHTML: `
-      <div style="display:flex;flex-direction:column;gap:14px">
-        <div style="background:var(--page-bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px">
-          <div style="font-weight:600;color:var(--ink);margin-bottom:3px">${data.buyer || 'Sale'} · ${data.invoiceDate}</div>
-          <div style="color:var(--hint)">${data.commodity} · ${data.qty} ${data.unit}</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Commodity (stock item) <span style="color:var(--red)">*</span></label>
-          <select class="form-select" id="li-item">
-            <option value="">Select…</option>
-            ${itemOpts}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Location (where stock left from)</label>
-          <select class="form-select" id="li-loc">
-            <option value="">No specific location</option>
-            ${locOpts}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Quantity <span style="color:var(--red)">*</span></label>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input class="form-input" type="number" id="li-qty" min="0" step="1" value="${data.qty || ''}" style="max-width:150px">
-            <span style="font-size:13px;color:var(--hint)">${data.unit || ''}</span>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Note</label>
-          <input class="form-input" type="text" id="li-note" value="Sale — linked to invoice">
-        </div>
-      </div>`,
-    confirmLabel: 'Record sale movement',
-    onConfirm: async (modal) => {
-      const itemId = modal.querySelector('#li-item')?.value;
-      const locId  = modal.querySelector('#li-loc')?.value || null;
-      const qty    = parseFloat(modal.querySelector('#li-qty')?.value);
-      const note   = modal.querySelector('#li-note')?.value?.trim();
-      if (!itemId || !qty) { toast('Commodity and quantity are required', 'error'); return false; }
-
-      const item = items.find(i => i.id === itemId);
-      await dbInsert('stock_movements', {
-        farm_id:       farm.id,
-        item_id:       itemId,
-        location_id:   locId,
-        movement_type: 'sale',
-        qty,
-        unit:          item?.default_unit || data.unit || 'bales',
-        occurred_on:   data.invoiceDate,
-        note:          note || null,
-        source_system: 'invoices',
-        source_ref:    data.invoiceId,
-      });
-      toast('Sale movement recorded and linked to invoice', 'success');
-      await _render(container, farm, period, allPeriods);
-    }
-  });
-}
-
-// ── Link all unlinked invoices (batch) ────────────────────────────────────
-async function _linkAllInvoices(container, farm, items, locations, unlinkedInvoices, period, allPeriods) {
-  if (!unlinkedInvoices.length) return;
-
-  // Build option rows for each invoice, with auto-matching item preselected
-  const itemOpts = (preselect) => items.map(i => {
-    const sel = i.id === preselect ? ' selected' : '';
-    return `<option value="${i.id}"${sel}>${i.name}</option>`;
-  }).join('');
-
-  // Try to auto-match invoice commodity_type to a stock item subgroup
-  const autoMatch = (commodity) => {
-    if (!commodity) return '';
-    const ct = commodity.toLowerCase();
-    const match = items.find(i =>
-      ct.includes((i.subgroup||i.name).toLowerCase()) ||
-      (i.subgroup||i.name).toLowerCase().includes(ct)
-    );
-    return match?.id || '';
-  };
-
-  const rows = unlinkedInvoices.map((inv, idx) => {
-    const matchId = autoMatch(inv.commodity);
-    return `
-      <div style="background:var(--page-bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
-          <div>
-            <span style="font-size:12px;font-weight:600;color:var(--ink)">${inv.buyer || 'Unknown buyer'}</span>
-            <span style="font-size:11px;color:var(--hint);margin-left:8px">${inv.invoice_date} · ${inv.commodity||'—'}</span>
-          </div>
-          <span style="font-size:12px;font-weight:600;color:var(--ink)">${fN(parseFloat(inv.qty)||0)} ${inv.unit||''}</span>
-        </div>
-        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;align-items:end">
-          <div>
-            <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:2px">Stock item</label>
-            <select class="form-select la-item" data-idx="${idx}" style="font-size:12px">
-              <option value="">— skip —</option>
-              ${itemOpts(matchId)}
-            </select>
-          </div>
-          <div>
-            <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:2px">Qty</label>
-            <input class="form-input la-qty" data-idx="${idx}" type="number" min="0" step="1"
-              value="${parseFloat(inv.qty)||''}" style="font-size:12px">
-          </div>
-          <div>
-            <label style="font-size:11px;color:var(--hint);display:block;margin-bottom:2px">Unit</label>
-            <input class="form-input la-unit" data-idx="${idx}" type="text"
-              value="${inv.unit||''}" style="font-size:12px">
-          </div>
-        </div>
-      </div>`;
-  }).join('');
-
-  openModal({
-    title: `Link ${unlinkedInvoices.length} invoice sale${unlinkedInvoices.length!==1?'s':''} to stock`,
-    bodyHTML: `
-      <div style="font-size:12px;color:var(--hint);margin-bottom:12px">
-        Review each invoice below. Select the matching stock item (or "skip" to leave unlinked). Items pre-matched where possible.
-      </div>
-      ${rows}`,
-    confirmLabel: 'Record all sale movements',
-    onConfirm: async (modal) => {
-      let count = 0;
-      for (let idx = 0; idx < unlinkedInvoices.length; idx++) {
-        const inv    = unlinkedInvoices[idx];
-        const itemId = modal.querySelector(`.la-item[data-idx="${idx}"]`)?.value;
-        const qty    = parseFloat(modal.querySelector(`.la-qty[data-idx="${idx}"]`)?.value);
-        const unit   = modal.querySelector(`.la-unit[data-idx="${idx}"]`)?.value?.trim();
-        if (!itemId || !qty) continue; // skip row
-        const item = items.find(i => i.id === itemId);
-        await dbInsert('stock_movements', {
-          farm_id:       farm.id,
-          item_id:       itemId,
-          location_id:   null,
-          movement_type: 'sale',
-          qty,
-          unit:          unit || item?.default_unit || 'bales',
-          occurred_on:   inv.invoice_date,
-          note:          `Sale — ${inv.buyer || 'invoice'} linked from Outputs`,
-          source_system: 'invoices',
-          source_ref:    inv.id,
-        });
-        count++;
-      }
-      toast(`${count} sale movement${count!==1?'s':''} recorded`, 'success');
-      await _render(container, farm, period, allPeriods);
-    },
-  });
-}
 
 // ── Movement form ──────────────────────────────────────────────────────────
 async function _showMovementForm(container, farm, items, locations, preItemId, preItemName, preLocId, period, allPeriods) {
