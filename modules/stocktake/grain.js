@@ -1,23 +1,44 @@
 // modules/stocktake/grain.js
-// Grain / hay stocktake — balance per commodity × location, full movement ledger
-// Opening balance seeded from budget carry-over rows (budgeted_yield_per_ha)
+// Grain & hay stocktake
+//
+// Data model
+// ──────────
+// stock_items  (one row per commodity × season × quality grade)
+//   subgroup        = "Hay"           — groups items in the UI
+//   name            = "Hay 2026"      — displayed label (subgroup + year)
+//   attributes = {
+//     variety:       "Cavalcade",
+//     produced_year: "2026",
+//     bale_type:     "round" | "square",
+//     kg_per_bale:   500
+//   }
+//
+// stock_movements.source_ref  →  budget row id  (harvest_inload seeded from carry-over budget)
+// stock_movements.source_ref  →  invoice id     (sale linked to Outputs invoices)
+//
+// UI hierarchy:
+//   Hay                       ← subgroup header
+//     └─ Cavalcade 2026       ← stock_item
+//          ├─ Paddock 12      ← location
+//          └─ Shed 3
 
-import { dbSelect, dbInsert, dbUpdate } from '../../js/supabase-client.js?v=1792559266387';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1792559266387';
 import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1792559266387';
 import { toast, openModal, qs } from '../../js/ui.js?v=1792559266387';
 
 // ── Movement type catalogue ────────────────────────────────────────────────
 const MOVE_TYPES = {
-  harvest_inload: { label: 'Harvest inload',    dir: 1,  color: 'var(--green)',  icon: '🌾' },
-  delivery:       { label: 'Purchase / delivery', dir: 1,  color: 'var(--blue)',   icon: '🚛' },
-  transfer_in:    { label: 'Transfer in',        dir: 1,  color: 'var(--blue)',   icon: '→' },
-  transfer_out:   { label: 'Transfer out',       dir: -1, color: 'var(--hint)',   icon: '←' },
-  sale:           { label: 'Sale',               dir: -1, color: 'var(--amber)',  icon: '💰' },
-  usage:          { label: 'Fed out',            dir: -1, color: 'var(--ink-mid)', icon: '🐄' },
-  write_off:      { label: 'Waste / shrinkage',  dir: -1, color: 'var(--red)',    icon: '⚠' },
-  adjustment:     { label: 'Adjustment',         dir: 0,  color: 'var(--hint)',   icon: '±' },
+  harvest_inload: { label: 'Harvest inload',     dir: 1,  color: 'var(--green)',   icon: '🌾' },
+  delivery:       { label: 'Purchase / delivery', dir: 1,  color: 'var(--blue)',    icon: '🚛' },
+  transfer_in:    { label: 'Transfer in',         dir: 1,  color: 'var(--blue)',    icon: '→'  },
+  transfer_out:   { label: 'Transfer out',        dir: -1, color: 'var(--hint)',    icon: '←'  },
+  sale:           { label: 'Sale',                dir: -1, color: 'var(--amber)',   icon: '💰' },
+  usage:          { label: 'Fed out',             dir: -1, color: 'var(--ink-mid)', icon: '🐄' },
+  write_off:      { label: 'Waste / shrinkage',   dir: -1, color: 'var(--red)',     icon: '⚠'  },
+  adjustment:     { label: 'Adjustment',          dir: 0,  color: 'var(--hint)',    icon: '±'  },
 };
 
+// ── Entry point ────────────────────────────────────────────────────────────
 export async function mountGrain(container, initialPeriod) {
   const farm = getActiveFarm();
   container.innerHTML = `<div style="padding:20px 24px;max-width:1200px;margin:0 auto" id="gr-wrap">
@@ -25,9 +46,7 @@ export async function mountGrain(container, initialPeriod) {
   </div>`;
 
   const allPeriods = await dbSelect('stock_periods',
-    `farm_id=eq.${farm.id}&order=period_start.asc`
-  );
-
+    `farm_id=eq.${farm.id}&order=period_start.asc`);
   const defaultPeriod = initialPeriod
     || allPeriods.find(p => p.status === 'open')
     || allPeriods[allPeriods.length - 1]
@@ -36,6 +55,7 @@ export async function mountGrain(container, initialPeriod) {
   await _render(container, farm, defaultPeriod, allPeriods);
 }
 
+// ── Main render ────────────────────────────────────────────────────────────
 async function _render(container, farm, period, allPeriods = []) {
   const wrap = qs('#gr-wrap', container);
 
@@ -45,199 +65,254 @@ async function _render(container, farm, period, allPeriods = []) {
     dbSelect('stock_locations',
       `farm_id=eq.${farm.id}&active=eq.true&order=route_order,name`),
     dbSelect('stock_movements',
-      `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`).then(rows =>
-        // Only grain movements (filter by item_id membership)
-        rows // full filter happens after items load
-    ),
+      `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`),
   ]);
 
-  // Filter movements to only grain items
   const itemIds = new Set(items.map(i => i.id));
   const grainMovements = movements.filter(m => itemIds.has(m.item_id));
+  const locById = Object.fromEntries(locations.map(l => [l.id, l]));
 
-  // ── Period timeline ────────────────────────────────────────────
-  const timelineHtml = allPeriods.length > 1 ? (() => {
-    return `<div style="display:flex;align-items:center;gap:2px;overflow-x:auto;padding:4px 0;margin-bottom:16px;border-bottom:1px solid var(--border-light);padding-bottom:12px">
+  // ── Period timeline ────────────────────────────────────────────────────
+  const timelineHtml = allPeriods.length > 1 ? `
+    <div style="display:flex;align-items:center;gap:2px;overflow-x:auto;padding-bottom:12px;margin-bottom:16px;border-bottom:1px solid var(--border-light)">
       ${allPeriods.map(p => {
-        const d = new Date(p.period_start);
-        const label = d.toLocaleDateString('en-AU', {month:'short', year:'2-digit'});
         const isActive = period && p.id === period.id;
+        const label = new Date(p.period_start).toLocaleDateString('en-AU', {month:'short', year:'2-digit'});
+        const dot = p.status === 'locked' ? '🔒' : p.status === 'review' ? '🔶' : '●';
         const dotColor = p.status === 'locked' ? 'var(--hint)' : p.status === 'review' ? 'var(--amber)' : 'var(--green)';
-        const statusDot = p.status === 'locked' ? '🔒' : p.status === 'review' ? '🔶' : '●';
         return `<button class="gr-period-btn" data-period-id="${p.id}"
-          style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 14px;border:none;border-radius:8px;cursor:pointer;background:${isActive?'var(--blue)':'transparent'};transition:background .15s;flex-shrink:0">
-          <span style="font-size:11px;font-weight:${isActive?700:500};color:${isActive?'white':'var(--ink-mid)'}">${label}</span>
-          <span style="font-size:9px;color:${isActive?'rgba(255,255,255,.7)':dotColor}">${statusDot} ${p.status}</span>
+          style="flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 14px;border:none;border-radius:8px;cursor:pointer;background:${isActive ? 'var(--blue)' : 'transparent'}">
+          <span style="font-size:11px;font-weight:${isActive ? 700 : 500};color:${isActive ? 'white' : 'var(--ink-mid)'}">${label}</span>
+          <span style="font-size:9px;color:${isActive ? 'rgba(255,255,255,.7)' : dotColor}">${dot} ${p.status}</span>
         </button>`;
       }).join('')}
-    </div>`;
-  })() : '';
+    </div>` : '';
 
-  if (!items.length) {
-    wrap.innerHTML = timelineHtml + `
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
-        <div>
-          <h2 style="font-size:18px;font-weight:700;color:var(--ink)">Grain & Hay</h2>
-          <p style="font-size:13px;color:var(--hint);margin-top:4px">${farm.name}</p>
-        </div>
-        ${canWrite() ? `<button class="btn btn-primary btn-sm" id="gr-add-item">+ Add commodity</button>` : ''}
+  // ── Header ─────────────────────────────────────────────────────────────
+  const periodLabel = period
+    ? new Date(period.period_start).toLocaleDateString('en-AU', {month:'long', year:'numeric'})
+    : 'All time';
+
+  const headerHtml = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+      <div>
+        <h2 style="font-size:18px;font-weight:700;color:var(--ink)">Grain & Hay</h2>
+        <p style="font-size:13px;color:var(--hint);margin-top:4px">${farm.name} · ${periodLabel}</p>
       </div>
+      ${canWrite() ? `<button class="btn btn-secondary btn-sm" id="gr-add-item" style="white-space:nowrap">+ Add commodity / season</button>` : ''}
+    </div>`;
+
+  // ── Empty state ────────────────────────────────────────────────────────
+  if (!items.length) {
+    wrap.innerHTML = timelineHtml + headerHtml + `
       <div style="padding:40px;text-align:center;color:var(--hint);background:white;border-radius:10px;border:1px solid var(--border)">
         <div style="font-size:32px;margin-bottom:12px">🌾</div>
         <p style="font-size:15px;font-weight:500;color:var(--ink);margin-bottom:6px">No grain or hay commodities set up</p>
-        <p style="font-size:13px;margin-bottom:16px">Add a commodity to start tracking stock on hand.</p>
-        ${canWrite() ? `<button class="btn btn-primary" id="gr-add-item-empty">+ Add commodity</button>` : ''}
+        <p style="font-size:13px;margin-bottom:16px">Add a commodity and season to start tracking stock on hand.</p>
+        ${canWrite() ? `<button class="btn btn-primary" id="gr-add-item-empty">+ Add commodity / season</button>` : ''}
       </div>`;
-    wrap.querySelector('#gr-add-item')?.addEventListener('click',
-      () => _showAddItemForm(container, farm, period, allPeriods));
-    wrap.querySelector('#gr-add-item-empty')?.addEventListener('click',
-      () => _showAddItemForm(container, farm, period, allPeriods));
+    _wireButtons(container, wrap, farm, items, locations, period, allPeriods);
     return;
   }
 
-  // ── Build balances per item × location ────────────────────────
+  // ── Balances ───────────────────────────────────────────────────────────
   const periodStart = period?.period_start;
   const periodEnd   = period?.period_end;
 
-  const balanceKey = (itemId, locId) => `${itemId}||${locId || 'none'}`;
+  const bKey = (itemId, locId) => `${itemId}||${locId || 'none'}`;
 
-  // Opening balance = sum of all movements BEFORE this period
   const openingMap = {};
   grainMovements
     .filter(m => !periodStart || m.occurred_on < periodStart)
     .forEach(m => {
-      const k = balanceKey(m.item_id, m.location_id);
+      const k = bKey(m.item_id, m.location_id);
       openingMap[k] = (openingMap[k] || 0) + (parseFloat(m.signed_qty) || 0);
     });
 
-  // Period movements
   const periodMoves = periodStart
     ? grainMovements.filter(m => m.occurred_on >= periodStart && m.occurred_on <= periodEnd)
     : grainMovements;
 
-  // Closing balance = opening + period movements
   const closingMap = { ...openingMap };
   periodMoves.forEach(m => {
-    const k = balanceKey(m.item_id, m.location_id);
+    const k = bKey(m.item_id, m.location_id);
     closingMap[k] = (closingMap[k] || 0) + (parseFloat(m.signed_qty) || 0);
   });
 
-  // ── Check for unseeded opening balances from budget carry-over ─
+  // ── Budget carry-over openings ─────────────────────────────────────────
   const budgetOpen = await _getBudgetOpenings(farm, period);
-  const missingOpenings = budgetOpen.filter(b => {
-    // Find matching grain item by commodity name
-    const item = items.find(i => i.name.toUpperCase() === b.commodity.toUpperCase());
-    if (!item) return false;
-    // Check if this item has any movement at all (opening already set)
-    const hasAny = grainMovements.some(m => m.item_id === item.id);
-    return !hasAny;
+
+  // ── Group items by subgroup ────────────────────────────────────────────
+  const subgroups = {};
+  items.forEach(item => {
+    const sg = item.subgroup || item.name;
+    if (!subgroups[sg]) subgroups[sg] = [];
+    subgroups[sg].push(item);
   });
 
-  // ── Location lookup ────────────────────────────────────────────
-  const locById = {};
-  locations.forEach(l => { locById[l.id] = l; });
-
-  // ── Summary totals per item ────────────────────────────────────
+  // ── Format helpers ─────────────────────────────────────────────────────
   const fN = n => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString();
   const fD = n => (n == null || isNaN(n)) ? '—' : n.toFixed(1).replace(/\.0$/, '');
 
-  // Build per-item summary
-  const itemGroups = items.map(item => {
-    const attrs = item.attributes || {};
-    const unit = item.default_unit || 'bales';
-    const kgPerBale = attrs.kg_per_bale || null;
-    const baleType = attrs.bale_type || '';
+  // ── Build subgroup sections ────────────────────────────────────────────
+  const subgroupHtml = Object.entries(subgroups).map(([sgName, sgItems]) => {
 
-    // All location keys for this item
-    const locKeys = [...new Set([
-      ...Object.keys(openingMap).filter(k => k.startsWith(item.id + '||')),
-      ...Object.keys(closingMap).filter(k => k.startsWith(item.id + '||')),
-    ])];
+    const itemCards = sgItems.map(item => {
+      const attrs = item.attributes || {};
+      const unit  = item.default_unit || 'bales';
+      const kgPerBale = attrs.kg_per_bale || null;
 
-    const locationRows = locKeys.map(k => {
-      const locId = k.split('||')[1];
-      const locName = locId === 'none' ? '— no location' : (locById[locId]?.name || locId);
-      const opening = openingMap[k] || 0;
-      const closing = closingMap[k] || 0;
-      const periodIn  = periodMoves.filter(m => m.item_id === item.id && m.location_id === (locId === 'none' ? null : locId) && (parseFloat(m.signed_qty)||0) > 0)
-        .reduce((s,m) => s + (parseFloat(m.signed_qty)||0), 0);
-      const periodOut = periodMoves.filter(m => m.item_id === item.id && m.location_id === (locId === 'none' ? null : locId) && (parseFloat(m.signed_qty)||0) < 0)
-        .reduce((s,m) => s + (parseFloat(m.signed_qty)||0), 0);
+      // Metadata chips
+      const chips = [
+        attrs.variety       ? `<span class="gr-chip">${attrs.variety}</span>` : '',
+        attrs.produced_year ? `<span class="gr-chip">${attrs.produced_year}</span>` : '',
+        attrs.bale_type     ? `<span class="gr-chip">${attrs.bale_type} bales</span>` : '',
+        kgPerBale           ? `<span class="gr-chip">${kgPerBale} kg/bale</span>` : '',
+      ].filter(Boolean).join('');
 
-      const tonnesStr = kgPerBale && closing
-        ? `<span style="font-size:10px;color:var(--hint);margin-left:4px">${fD(closing * kgPerBale / 1000)} t</span>`
-        : '';
+      // All location keys for this item
+      const allKeys = [...new Set([
+        ...Object.keys(openingMap).filter(k => k.startsWith(item.id + '||')),
+        ...Object.keys(closingMap).filter(k => k.startsWith(item.id + '||')),
+      ])];
 
-      return `<tr style="border-bottom:1px solid var(--border-light)">
-        <td style="padding:10px 14px 10px 24px;font-size:13px;color:var(--ink)">${locName}</td>
-        <td style="padding:10px 14px;text-align:center;font-size:13px;color:var(--hint)">${opening ? fN(opening) : '—'}</td>
-        <td style="padding:10px 14px;text-align:center;font-size:13px;color:var(--green)">${periodIn ? '+'+fN(periodIn) : '—'}</td>
-        <td style="padding:10px 14px;text-align:center;font-size:13px;color:var(--red)">${periodOut ? fN(periodOut) : '—'}</td>
-        <td style="padding:10px 14px;text-align:center">
-          <span style="font-size:15px;font-weight:700;color:var(--ink)">${fN(closing)}</span>${tonnesStr}
-        </td>
-        <td style="padding:10px 14px;text-align:center">
-          ${canWrite() ? `<button class="btn btn-ghost btn-sm gr-add-move"
-            data-item-id="${item.id}" data-item-name="${item.name}"
-            data-loc-id="${locId === 'none' ? '' : locId}"
-            data-loc-name="${locName}"
-            style="font-size:11px">+ Movement</button>` : ''}
-        </td>
-      </tr>`;
+      const totalClosing = allKeys.reduce((s, k) => s + (closingMap[k] || 0), 0);
+      const totalTonnes  = kgPerBale && totalClosing ? ` · ${fD(totalClosing * kgPerBale / 1000)} t` : '';
+
+      const hasAnyMovement = grainMovements.some(m => m.item_id === item.id);
+      const budgetRow = budgetOpen.find(b =>
+        b.commodity.toUpperCase() === (attrs.variety || item.name).toUpperCase() ||
+        b.commodity.toUpperCase() === item.name.toUpperCase() ||
+        b.commodity.toUpperCase() === sgName.toUpperCase()
+      );
+      const showSeedBtn = !hasAnyMovement && budgetRow && canWrite();
+
+      // Location rows
+      const locRows = allKeys.length ? allKeys.map(k => {
+        const locId   = k.split('||')[1];
+        const locName = locId === 'none' ? '— unassigned' : (locById[locId]?.name || locId);
+        const opening = openingMap[k] || 0;
+        const closing = closingMap[k] || 0;
+        const pIn  = periodMoves
+          .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty)||0) > 0)
+          .reduce((s, m) => s + (parseFloat(m.signed_qty)||0), 0);
+        const pOut = periodMoves
+          .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty)||0) < 0)
+          .reduce((s, m) => s + (parseFloat(m.signed_qty)||0), 0);
+        const closingTonnes = kgPerBale && closing
+          ? `<span style="font-size:10px;color:var(--hint);margin-left:4px">${fD(closing * kgPerBale / 1000)} t</span>`
+          : '';
+
+        return `<tr style="border-bottom:1px solid var(--border-light)">
+          <td style="padding:9px 14px 9px 20px;font-size:13px;color:var(--ink)">${locName}</td>
+          <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--hint)">${opening ? fN(opening) : '—'}</td>
+          <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--green)">${pIn ? '+'+fN(pIn) : '—'}</td>
+          <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--red)">${pOut ? fN(pOut) : '—'}</td>
+          <td style="padding:9px 14px;text-align:center">
+            <span style="font-weight:700;color:var(--ink)">${fN(closing)}</span>${closingTonnes}
+          </td>
+          <td style="padding:9px 14px;text-align:right">
+            ${canWrite() ? `<button class="btn btn-ghost btn-sm gr-add-move" style="font-size:11px"
+              data-item-id="${item.id}" data-item-name="${item.name}"
+              data-loc-id="${locId === 'none' ? '' : locId}"
+              data-loc-name="${locName}">+ Movement</button>` : ''}
+          </td>
+        </tr>`;
+      }).join('') : `<tr><td colspan="6" style="padding:16px 20px;font-size:13px;color:var(--hint)">
+        No movements yet.
+        ${canWrite() ? `<button class="btn btn-ghost btn-sm gr-add-move" style="margin-left:6px;font-size:11px"
+          data-item-id="${item.id}" data-item-name="${item.name}">+ Add first movement</button>` : ''}
+      </td></tr>`;
+
+      return `
+        <!-- Item: ${item.name} -->
+        <div style="margin-bottom:12px">
+          <!-- Item header bar -->
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:var(--page-bg);border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;flex-wrap:wrap;gap:6px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:13px;font-weight:600;color:var(--ink)">${item.name}</span>
+              ${chips}
+              <span style="font-size:12px;color:var(--hint)">${fN(totalClosing)} ${unit} on hand${totalTonnes}</span>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              ${showSeedBtn ? `<button class="btn btn-sm gr-seed-opening" style="font-size:11px;background:#f59e0b;color:white;border:none"
+                data-item-id="${item.id}" data-item-name="${item.name}"
+                data-qty="${budgetRow.qty}" data-unit="${unit}"
+                data-budget-id="${budgetRow.id || ''}">
+                ⤵ Seed opening (${fN(budgetRow.qty)} ${unit} from budget)</button>` : ''}
+              ${canWrite() ? `<button class="btn btn-ghost btn-sm gr-add-move" style="font-size:11px"
+                data-item-id="${item.id}" data-item-name="${item.name}">+ Movement</button>` : ''}
+            </div>
+          </div>
+          <!-- Location table -->
+          <div style="border:1px solid var(--border);border-radius:0 0 8px 8px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse">
+              <thead>
+                <tr style="background:#f8f9fa;border-bottom:1px solid var(--border)">
+                  <th style="padding:6px 14px 6px 20px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Location</th>
+                  <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Opening</th>
+                  <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--green);text-align:center">In</th>
+                  <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--red);text-align:center">Out</th>
+                  <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Closing</th>
+                  <th style="width:130px"></th>
+                </tr>
+              </thead>
+              <tbody>${locRows}</tbody>
+            </table>
+          </div>
+        </div>`;
     }).join('');
 
-    // Totals row
-    const totalClosing = locKeys.reduce((s, k) => s + (closingMap[k] || 0), 0);
-    const totalTonnesStr = kgPerBale && totalClosing
-      ? ` · ${fD(totalClosing * kgPerBale / 1000)} t`
-      : '';
+    // Subgroup total
+    const sgClosing = sgItems.reduce((sum, item) => {
+      const allKeys = Object.keys(closingMap).filter(k => k.startsWith(item.id + '||'));
+      return sum + allKeys.reduce((s, k) => s + (closingMap[k] || 0), 0);
+    }, 0);
+    const sgUnit = sgItems[0]?.default_unit || 'bales';
+    const sgKgBale = sgItems[0]?.attributes?.kg_per_bale || null;
+    const sgTonnes = sgKgBale && sgClosing ? ` · ${fD(sgClosing * sgKgBale / 1000)} t` : '';
 
-    const hasOpening = grainMovements.some(m => m.item_id === item.id);
-    const budgetRow = budgetOpen.find(b => b.commodity.toUpperCase() === item.name.toUpperCase());
-
-    return `<div style="margin-bottom:16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#1a2535;border-radius:8px 8px 0 0">
-        <div>
-          <span style="font-size:13px;font-weight:600;color:white">${item.name}</span>
-          <span style="font-size:11px;color:rgba(255,255,255,.5);margin-left:8px">${baleType ? baleType + ' bales' : unit}${kgPerBale ? ' · ' + kgPerBale + ' kg/bale' : ''}</span>
+    return `
+      <!-- Subgroup: ${sgName} -->
+      <div style="margin-bottom:24px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#1a2535;border-radius:8px;margin-bottom:8px">
+          <span style="font-size:14px;font-weight:700;color:white">${sgName}</span>
+          <span style="font-size:12px;color:rgba(255,255,255,.6)">${fN(sgClosing)} ${sgUnit} total${sgTonnes}</span>
         </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:12px;color:rgba(255,255,255,.6)">${fN(totalClosing)} ${unit} on hand${totalTonnesStr}</span>
-          ${canWrite() ? `<button class="btn btn-sm gr-add-move-top" data-item-id="${item.id}" data-item-name="${item.name}"
-            style="font-size:11px;background:rgba(255,255,255,.12);color:white;border:1px solid rgba(255,255,255,.2)">+ Movement</button>` : ''}
-          ${!hasOpening && budgetRow && canWrite() ? `<button class="btn btn-sm gr-seed-opening"
-            data-item-id="${item.id}" data-item-name="${item.name}"
-            data-qty="${budgetRow.qty}" data-unit="${unit}"
-            style="font-size:11px;background:#f59e0b;color:white;border:none">
-            ⤵ Seed from budget (${fN(budgetRow.qty)} ${unit})</button>` : ''}
-        </div>
-      </div>
-      <div class="card" style="border-radius:0 0 8px 8px;overflow:hidden;padding:0">
-        ${locationRows ? `<table style="width:100%;border-collapse:collapse">
-          <thead>
-            <tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">
-              <th style="padding:8px 14px 8px 24px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Location</th>
-              <th style="padding:8px 14px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Opening</th>
-              <th style="padding:8px 14px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--green);font-weight:600">In</th>
-              <th style="padding:8px 14px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--red);font-weight:600">Out</th>
-              <th style="padding:8px 14px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600">Closing</th>
-              <th style="padding:8px 14px;text-align:center;width:120px"></th>
-            </tr>
-          </thead>
-          <tbody>${locationRows}</tbody>
-        </table>` : `<div style="padding:20px;text-align:center;color:var(--hint);font-size:13px">
-          No movements yet.
-          ${canWrite() ? `<button class="btn btn-ghost btn-sm gr-add-move-top" data-item-id="${item.id}" data-item-name="${item.name}" style="margin-left:8px;font-size:11px">+ Add movement</button>` : ''}
-        </div>`}
-      </div>
-    </div>`;
+        ${itemCards}
+      </div>`;
   }).join('');
 
-  // ── Period movements log ───────────────────────────────────────
-  const movementRows = periodMoves.slice(0, 30).map(m => {
-    const item = items.find(i => i.id === m.item_id);
-    const mt = MOVE_TYPES[m.movement_type] || { label: m.movement_type, color: 'var(--hint)', icon: '·' };
-    const qty = parseFloat(m.signed_qty) || 0;
+  // ── Unlinked invoices panel ────────────────────────────────────────────
+  const unlinkedInvoices = period ? await _getUnlinkedGrainInvoices(farm, period, items) : [];
+  const unlinkedHtml = unlinkedInvoices.length ? `
+    <div style="background:#fff8e6;border:2px solid #f59e0b;border-radius:10px;padding:14px 18px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:600;color:#92400e;margin-bottom:8px">
+        💰 ${unlinkedInvoices.length} invoice sale line${unlinkedInvoices.length !== 1 ? 's' : ''} not yet linked to stock
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${unlinkedInvoices.map(inv => `
+          <div style="display:flex;align-items:center;justify-content:space-between;background:white;border-radius:6px;padding:8px 12px;gap:12px">
+            <div>
+              <span style="font-size:12px;font-weight:500;color:var(--ink)">${inv.buyer || 'Unknown buyer'}</span>
+              <span style="font-size:11px;color:var(--hint);margin-left:8px">${inv.invoice_date} · ${inv.commodity}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:12px;font-weight:600;color:var(--ink)">${inv.qty} ${inv.unit}</span>
+              ${canWrite() ? `<button class="btn btn-sm btn-ghost gr-link-invoice" style="font-size:11px"
+                data-invoice-id="${inv.id}" data-invoice-date="${inv.invoice_date}"
+                data-commodity="${inv.commodity}" data-qty="${inv.qty}" data-unit="${inv.unit}"
+                data-buyer="${inv.buyer || ''}">Link to stock</button>` : ''}
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>` : '';
+
+  // ── Period movements log ───────────────────────────────────────────────
+  const logRows = periodMoves.slice(0, 30).map(m => {
+    const item  = items.find(i => i.id === m.item_id);
+    const mt    = MOVE_TYPES[m.movement_type] || { label: m.movement_type, color: 'var(--hint)', icon: '·' };
+    const qty   = parseFloat(m.signed_qty) || 0;
     const locName = m.location_id ? (locById[m.location_id]?.name || m.location_id) : '—';
     const kgPerBale = item?.attributes?.kg_per_bale;
     const tonnesStr = kgPerBale ? ` (${fD(Math.abs(qty) * kgPerBale / 1000)} t)` : '';
@@ -246,60 +321,61 @@ async function _render(container, farm, period, allPeriods = []) {
       <td style="padding:8px 14px;font-weight:500;color:var(--ink)">${item?.name || '—'}</td>
       <td style="padding:8px 14px;color:${mt.color}">${mt.icon} ${mt.label}</td>
       <td style="padding:8px 14px;color:var(--hint);font-size:11px">${locName}</td>
-      <td style="padding:8px 14px;text-align:right;font-weight:600;color:${qty > 0 ? 'var(--green)' : 'var(--red)'}">
-        ${qty > 0 ? '+' : ''}${fN(qty)} ${item?.default_unit||''}${tonnesStr}
+      <td style="padding:8px 14px;text-align:right;font-weight:600;color:${qty>0?'var(--green)':'var(--red)'}">
+        ${qty > 0 ? '+' : ''}${fN(qty)} ${item?.default_unit || ''}${tonnesStr}
       </td>
-      <td style="padding:8px 14px;color:var(--hint)">${m.note || ''}</td>
+      <td style="padding:8px 14px;color:var(--hint)">${m.note || (m.source_ref ? `ref: ${m.source_ref}` : '')}</td>
     </tr>`;
   }).join('');
 
-  // ── Unseed opening banner ──────────────────────────────────────
-  const openingBanner = missingOpenings.length ? `
-    <div style="background:#fffbeb;border:2px solid #f59e0b;border-radius:10px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-      <div>
-        <div style="font-size:13px;font-weight:600;color:#92400e">⤵ Budget carry-over opening available</div>
-        <div style="font-size:12px;color:#92400e;margin-top:2px">
-          ${missingOpenings.map(b => `${b.commodity}: ${fN(b.qty)} bales`).join(' · ')}
-          — click "Seed from budget" on each commodity to set the opening balance
-        </div>
+  // ── Budget carry-over banner ───────────────────────────────────────────
+  const seedable = budgetOpen.filter(b => {
+    const item = items.find(i =>
+      i.name.toUpperCase() === b.commodity.toUpperCase() ||
+      (i.subgroup || '').toUpperCase() === b.commodity.toUpperCase() ||
+      (i.attributes?.variety || '').toUpperCase() === b.commodity.toUpperCase()
+    );
+    return item && !grainMovements.some(m => m.item_id === item.id);
+  });
+  const seedBannerHtml = seedable.length ? `
+    <div style="background:#fffbeb;border:2px solid #f59e0b;border-radius:10px;padding:14px 18px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:600;color:#92400e">⤵ Budget carry-over opening available</div>
+      <div style="font-size:12px;color:#92400e;margin-top:4px">
+        ${seedable.map(b => `${b.commodity}: ${Math.round(b.qty).toLocaleString()} bales`).join(' · ')}
+        — click "Seed opening" on the matching commodity to set its opening balance from the budget
       </div>
     </div>` : '';
 
-  wrap.innerHTML = timelineHtml + openingBanner + `
-    <!-- Header -->
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
-      <div>
-        <h2 style="font-size:18px;font-weight:700;color:var(--ink)">Grain & Hay</h2>
-        <p style="font-size:13px;color:var(--hint);margin-top:4px">${farm.name} · ${period ? new Date(period.period_start).toLocaleDateString('en-AU',{month:'long',year:'numeric'}) : 'All time'}</p>
-      </div>
-      ${canWrite() ? `<button class="btn btn-secondary btn-sm" id="gr-add-item" style="white-space:nowrap">+ Add commodity</button>` : ''}
-    </div>
-
-    <!-- Commodity grids -->
-    ${itemGroups}
-
-    <!-- Period movements -->
-    ${periodMoves.length ? `
-    <div class="card" style="margin-top:24px;overflow:hidden">
+  wrap.innerHTML = timelineHtml + unlinkedHtml + seedBannerHtml + headerHtml + subgroupHtml + (periodMoves.length ? `
+    <div class="card" style="margin-top:16px;overflow:hidden">
       <div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--page-bg)">
         <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Period movements</span>
       </div>
       <table style="width:100%;border-collapse:collapse">
         <thead>
           <tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">
-            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Date</th>
-            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Commodity</th>
-            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Type</th>
-            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Location</th>
-            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:right">Qty</th>
-            <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Note</th>
+            ${['Date','Commodity','Type','Location','Qty','Note'].map(h =>
+              `<th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:${h==='Qty'?'right':'left'}">${h}</th>`
+            ).join('')}
           </tr>
         </thead>
-        <tbody>${movementRows}</tbody>
+        <tbody>${logRows}</tbody>
       </table>
-    </div>` : ''}`;
+    </div>` : '');
 
-  // ── Wire events ────────────────────────────────────────────────
+  // ── Wire chips CSS (injected once) ─────────────────────────────────────
+  if (!document.getElementById('gr-chip-style')) {
+    const s = document.createElement('style');
+    s.id = 'gr-chip-style';
+    s.textContent = `.gr-chip{display:inline-block;font-size:10px;padding:2px 7px;border-radius:10px;background:var(--border-light,#e8ecf0);color:var(--hint);margin-right:3px}`;
+    document.head.appendChild(s);
+  }
+
+  _wireButtons(container, wrap, farm, items, locations, period, allPeriods);
+}
+
+// ── Wire all event listeners ───────────────────────────────────────────────
+function _wireButtons(container, wrap, farm, items, locations, period, allPeriods) {
   wrap.querySelectorAll('.gr-period-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const p = allPeriods.find(x => x.id === btn.dataset.periodId);
@@ -308,49 +384,72 @@ async function _render(container, farm, period, allPeriods = []) {
   });
 
   wrap.querySelector('#gr-add-item')?.addEventListener('click',
-    () => _showAddItemForm(container, farm, period, allPeriods));
+    () => _showAddItemForm(container, farm, items, period, allPeriods));
+  wrap.querySelector('#gr-add-item-empty')?.addEventListener('click',
+    () => _showAddItemForm(container, farm, items, period, allPeriods));
 
-  wrap.querySelectorAll('.gr-add-move, .gr-add-move-top').forEach(btn => {
+  wrap.querySelectorAll('.gr-add-move').forEach(btn => {
     btn.addEventListener('click', () =>
-      _showMovementForm(container, farm, items, locations, btn.dataset.itemId, btn.dataset.itemName, btn.dataset.locId || null, period, allPeriods));
+      _showMovementForm(container, farm, items, locations,
+        btn.dataset.itemId, btn.dataset.itemName,
+        btn.dataset.locId || null, period, allPeriods));
   });
 
   wrap.querySelectorAll('.gr-seed-opening').forEach(btn => {
     btn.addEventListener('click', () =>
-      _seedOpeningFromBudget(container, farm, btn.dataset.itemId, btn.dataset.itemName,
-        parseFloat(btn.dataset.qty), btn.dataset.unit, period, allPeriods));
+      _seedOpeningFromBudget(container, farm,
+        btn.dataset.itemId, btn.dataset.itemName,
+        parseFloat(btn.dataset.qty), btn.dataset.unit,
+        btn.dataset.budgetId || null, period, allPeriods));
+  });
+
+  wrap.querySelectorAll('.gr-link-invoice').forEach(btn => {
+    btn.addEventListener('click', () =>
+      _linkInvoiceToStock(container, farm, items, locations, btn.dataset, period, allPeriods));
   });
 }
 
-// ── Fetch budget carry-over openings for this farm/season ──────────────────
+// ── Fetch budget carry-over openings ──────────────────────────────────────
 async function _getBudgetOpenings(farm, period) {
   if (!period) return [];
-  // Pull carry_over budget rows — budgeted_yield_per_ha holds the units qty
   try {
     const rows = await dbSelect('budgets',
-      `farm_id=eq.${farm.id}&section=eq.carry_over&select=commodity,budgeted_yield_per_ha,notes`
-    );
+      `farm_id=eq.${farm.id}&section=eq.carry_over&select=id,commodity,budgeted_yield_per_ha,notes`);
     return rows
       .filter(r => r.budgeted_yield_per_ha != null && r.budgeted_yield_per_ha > 0)
-      .map(r => ({
-        commodity: r.commodity,
-        qty: r.budgeted_yield_per_ha,
-        unit: _unitFromNotes(r.notes),
-      }));
+      .map(r => ({ id: r.id, commodity: r.commodity, qty: r.budgeted_yield_per_ha }));
   } catch { return []; }
 }
 
-function _unitFromNotes(notes) {
-  if (!notes) return 'bales';
-  const m = notes.match(/yield unit:\s*(\w+)/i);
-  return m ? m[1] : 'bales';
+// ── Fetch grain sale invoice lines not yet linked to stock movements ───────
+async function _getUnlinkedGrainInvoices(farm, period, items) {
+  if (!period || !items.length) return [];
+  try {
+    // Grain invoices: filter by commodity matching any known grain subgroup
+    const subgroups = [...new Set(items.map(i => i.subgroup || i.name))];
+    const invs = await dbSelect('invoices',
+      `farm_id=eq.${farm.id}&invoice_date=gte.${period.period_start}&invoice_date=lte.${period.period_end}&select=id,buyer,invoice_date,commodity,net_qty,unit`
+    );
+    // Filter to grain commodities and exclude ones already referenced in movements
+    const linkedRefs = new Set(
+      (await dbSelect('stock_movements',
+        `farm_id=eq.${farm.id}&movement_type=eq.sale&source_system=eq.invoices&select=source_ref`
+      )).map(m => m.source_ref)
+    );
+    return invs.filter(inv => {
+      const comm = (inv.commodity || '').toUpperCase();
+      const isGrain = subgroups.some(sg => comm.includes(sg.toUpperCase()) || sg.toUpperCase().includes(comm));
+      return isGrain && !linkedRefs.has(inv.id);
+    }).map(inv => ({
+      id: inv.id, buyer: inv.buyer, invoice_date: inv.invoice_date,
+      commodity: inv.commodity, qty: inv.net_qty, unit: inv.unit,
+    }));
+  } catch { return []; }
 }
 
 // ── Seed opening balance from budget carry-over ────────────────────────────
-async function _seedOpeningFromBudget(container, farm, itemId, itemName, qty, unit, period, allPeriods) {
+async function _seedOpeningFromBudget(container, farm, itemId, itemName, qty, unit, budgetId, period, allPeriods) {
   if (!period) { toast('No active period — open a period first', 'error'); return; }
-
-  // Date = day before period start
   const openingDate = new Date(new Date(period.period_start).getTime() - 86400000).toISOString().slice(0,10);
 
   openModal({
@@ -358,16 +457,21 @@ async function _seedOpeningFromBudget(container, farm, itemId, itemName, qty, un
     bodyHTML: `
       <div style="display:flex;flex-direction:column;gap:14px">
         <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:8px;padding:12px;font-size:13px;color:#92400e">
-          This opening balance comes from the budget carry-over row for <strong>${itemName}</strong>.
-          It represents the quantity on hand at the start of the season, before any harvest or sales this period.
+          This sets the quantity on hand at the start of the season, seeded from the budget carry-over entry for <strong>${itemName}</strong>.
         </div>
         <div class="form-group">
           <label class="form-label">Opening quantity</label>
           <div style="display:flex;gap:8px;align-items:center">
-            <input class="form-input" type="number" id="gs-qty" min="0" step="1" value="${Math.round(qty)}" style="font-size:18px;font-weight:600;max-width:150px">
+            <input class="form-input" type="number" id="gs-qty" min="0" step="1" value="${Math.round(qty)}" style="font-size:18px;font-weight:600;max-width:160px">
             <span style="font-size:14px;color:var(--hint)">${unit}</span>
           </div>
-          <div style="font-size:11px;color:var(--hint);margin-top:4px">From budget carry-over: ${Math.round(qty)} ${unit}</div>
+          <div style="font-size:11px;color:var(--hint);margin-top:3px">Budget carry-over: ${Math.round(qty).toLocaleString()} ${unit}</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Location (optional)</label>
+          <select class="form-select" id="gs-loc">
+            <option value="">No specific location</option>
+          </select>
         </div>
         <div class="form-group">
           <label class="form-label">Date</label>
@@ -382,23 +486,104 @@ async function _seedOpeningFromBudget(container, farm, itemId, itemName, qty, un
     onConfirm: async (modal) => {
       const q    = parseFloat(modal.querySelector('#gs-qty')?.value);
       const dt   = modal.querySelector('#gs-date')?.value;
+      const locId = modal.querySelector('#gs-loc')?.value || null;
       const note = modal.querySelector('#gs-note')?.value?.trim() || 'Opening balance';
       if (!q || !dt) { toast('Quantity and date are required', 'error'); return false; }
 
       await dbInsert('stock_movements', {
         farm_id:       farm.id,
         item_id:       itemId,
-        location_id:   null,
+        location_id:   locId || null,
         movement_type: 'adjustment',
         qty:           q,
         direction:     1,
-        unit:          unit,
+        unit,
         occurred_on:   dt,
         reason_code:   'opening_balance',
         note,
         source_system: 'budgets',
+        source_ref:    budgetId || null,
       });
-      toast(`Opening balance set — ${Math.round(q)} ${unit}`, 'success');
+      toast(`Opening balance set — ${Math.round(q).toLocaleString()} ${unit}`, 'success');
+      await _render(container, farm, period, allPeriods);
+    }
+  });
+
+  // Populate location select after modal is open
+  setTimeout(async () => {
+    const sel = document.getElementById('gs-loc');
+    if (!sel) return;
+    const locs = await dbSelect('stock_locations', `farm_id=eq.${farm.id}&active=eq.true&order=route_order,name`);
+    locs.forEach(l => {
+      const opt = document.createElement('option');
+      opt.value = l.id; opt.textContent = l.name;
+      sel.appendChild(opt);
+    });
+  }, 80);
+}
+
+// ── Link an invoice sale line to stock ────────────────────────────────────
+async function _linkInvoiceToStock(container, farm, items, locations, data, period, allPeriods) {
+  const itemOpts = items.map(i =>
+    `<option value="${i.id}">${i.name} (${i.subgroup || i.name})</option>`).join('');
+  const locOpts = locations.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
+
+  openModal({
+    title: 'Link invoice sale to stock',
+    bodyHTML: `
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="background:var(--page-bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px">
+          <div style="font-weight:600;color:var(--ink);margin-bottom:3px">${data.buyer || 'Sale'} · ${data.invoiceDate}</div>
+          <div style="color:var(--hint)">${data.commodity} · ${data.qty} ${data.unit}</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Commodity (stock item) <span style="color:var(--red)">*</span></label>
+          <select class="form-select" id="li-item">
+            <option value="">Select…</option>
+            ${itemOpts}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Location (where stock left from)</label>
+          <select class="form-select" id="li-loc">
+            <option value="">No specific location</option>
+            ${locOpts}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Quantity <span style="color:var(--red)">*</span></label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="form-input" type="number" id="li-qty" min="0" step="1" value="${data.qty || ''}" style="max-width:150px">
+            <span style="font-size:13px;color:var(--hint)">${data.unit || ''}</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Note</label>
+          <input class="form-input" type="text" id="li-note" value="Sale — linked to invoice">
+        </div>
+      </div>`,
+    confirmLabel: 'Record sale movement',
+    onConfirm: async (modal) => {
+      const itemId = modal.querySelector('#li-item')?.value;
+      const locId  = modal.querySelector('#li-loc')?.value || null;
+      const qty    = parseFloat(modal.querySelector('#li-qty')?.value);
+      const note   = modal.querySelector('#li-note')?.value?.trim();
+      if (!itemId || !qty) { toast('Commodity and quantity are required', 'error'); return false; }
+
+      const item = items.find(i => i.id === itemId);
+      await dbInsert('stock_movements', {
+        farm_id:       farm.id,
+        item_id:       itemId,
+        location_id:   locId,
+        movement_type: 'sale',
+        qty,
+        unit:          item?.default_unit || data.unit || 'bales',
+        occurred_on:   data.invoiceDate,
+        note:          note || null,
+        source_system: 'invoices',
+        source_ref:    data.invoiceId,
+      });
+      toast('Sale movement recorded and linked to invoice', 'success');
       await _render(container, farm, period, allPeriods);
     }
   });
@@ -408,11 +593,9 @@ async function _seedOpeningFromBudget(container, farm, itemId, itemName, qty, un
 async function _showMovementForm(container, farm, items, locations, preItemId, preItemName, preLocId, period, allPeriods) {
   const today = new Date().toISOString().slice(0,10);
   const locOpts = locations.map(l =>
-    `<option value="${l.id}"${l.id === preLocId ? ' selected' : ''}>${l.name}${l.sub_property ? ' · '+l.sub_property : ''}</option>`
-  ).join('');
+    `<option value="${l.id}"${l.id === preLocId ? ' selected' : ''}>${l.name}</option>`).join('');
   const itemOpts = items.map(i =>
-    `<option value="${i.id}"${i.id === preItemId ? ' selected' : ''}>${i.name}</option>`
-  ).join('');
+    `<option value="${i.id}"${i.id === preItemId ? ' selected' : ''}>${i.name} (${i.subgroup || i.name})</option>`).join('');
 
   openModal({
     title: 'Record grain / hay movement',
@@ -422,8 +605,7 @@ async function _showMovementForm(container, farm, items, locations, preItemId, p
           <label class="form-label">Movement type <span style="color:var(--red)">*</span></label>
           <select class="form-select" id="gm-type">
             ${Object.entries(MOVE_TYPES).map(([k, v]) =>
-              `<option value="${k}">${v.icon} ${v.label}</option>`
-            ).join('')}
+              `<option value="${k}">${v.icon} ${v.label}</option>`).join('')}
           </select>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -437,10 +619,17 @@ async function _showMovementForm(container, farm, items, locations, preItemId, p
           <div class="form-group" style="margin:0">
             <label class="form-label">Location</label>
             <select class="form-select" id="gm-location">
-              <option value="">No location / general</option>
+              <option value="">No location</option>
               ${locOpts}
             </select>
           </div>
+        </div>
+        <div id="gm-transfer-dest" style="display:none" class="form-group">
+          <label class="form-label">Destination location (transfer) <span style="color:var(--red)">*</span></label>
+          <select class="form-select" id="gm-dest-loc">
+            <option value="">Select destination…</option>
+            ${locOpts}
+          </select>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="form-group" style="margin:0">
@@ -455,59 +644,40 @@ async function _showMovementForm(container, farm, items, locations, preItemId, p
             <input class="form-input" type="date" id="gm-date" value="${today}">
           </div>
         </div>
-        <div id="gm-transfer-dest" style="display:none" class="form-group">
-          <label class="form-label">Destination location (transfer)</label>
-          <select class="form-select" id="gm-dest-loc">
-            <option value="">Select destination…</option>
-            ${locOpts}
-          </select>
-        </div>
         <div class="form-group">
           <label class="form-label">Note</label>
-          <input class="form-input" type="text" id="gm-note" placeholder="e.g. Baled paddock 12 — contractor pickup">
+          <input class="form-input" type="text" id="gm-note" placeholder="e.g. Baled paddock 12, contractor pickup">
         </div>
       </div>`,
     confirmLabel: 'Record movement',
     onConfirm: async (modal) => {
-      const type   = modal.querySelector('#gm-type')?.value;
-      const itemId = modal.querySelector('#gm-item')?.value;
-      const locId  = modal.querySelector('#gm-location')?.value || null;
+      const type    = modal.querySelector('#gm-type')?.value;
+      const itemId  = modal.querySelector('#gm-item')?.value;
+      const locId   = modal.querySelector('#gm-location')?.value || null;
       const destLocId = modal.querySelector('#gm-dest-loc')?.value || null;
-      const qty    = parseFloat(modal.querySelector('#gm-qty')?.value);
-      const date   = modal.querySelector('#gm-date')?.value;
-      const note   = modal.querySelector('#gm-note')?.value?.trim() || null;
+      const qty     = parseFloat(modal.querySelector('#gm-qty')?.value);
+      const date    = modal.querySelector('#gm-date')?.value;
+      const note    = modal.querySelector('#gm-note')?.value?.trim() || null;
 
       if (!itemId || !qty || !date) { toast('Commodity, quantity and date are required', 'error'); return false; }
       if (type === 'adjustment' && !note) { toast('A note is required for adjustments', 'error'); return false; }
+      if (type === 'transfer_out' && !destLocId) { toast('Select a destination location for the transfer', 'error'); return false; }
 
       const item = items.find(i => i.id === itemId);
       const unit = item?.default_unit || 'bales';
-      const mt = MOVE_TYPES[type];
 
       if (type === 'transfer_out' && destLocId) {
-        // Paired transfer — write both legs
+        // Paired transfer — both legs together
         const transferId = crypto.randomUUID();
-        await dbInsert('stock_movements', {
-          farm_id: farm.id, item_id: itemId, location_id: locId,
-          movement_type: 'transfer_out', qty, unit, occurred_on: date,
-          transfer_id: transferId, note: note || null,
-        });
-        await dbInsert('stock_movements', {
-          farm_id: farm.id, item_id: itemId, location_id: destLocId,
-          movement_type: 'transfer_in', qty, unit, occurred_on: date,
-          transfer_id: transferId, note: note || null,
-        });
+        await Promise.all([
+          dbInsert('stock_movements', { farm_id: farm.id, item_id: itemId, location_id: locId,     movement_type: 'transfer_out', qty, unit, occurred_on: date, transfer_id: transferId, note }),
+          dbInsert('stock_movements', { farm_id: farm.id, item_id: itemId, location_id: destLocId, movement_type: 'transfer_in',  qty, unit, occurred_on: date, transfer_id: transferId, note }),
+        ]);
       } else {
         await dbInsert('stock_movements', {
-          farm_id: farm.id,
-          item_id: itemId,
-          location_id: locId,
-          movement_type: type,
-          qty,
-          unit,
-          occurred_on: date,
-          note,
-          ...(type === 'adjustment' ? { reason_code: 'other', direction: qty >= 0 ? 1 : -1 } : {}),
+          farm_id: farm.id, item_id: itemId, location_id: locId,
+          movement_type: type, qty, unit, occurred_on: date, note,
+          ...(type === 'adjustment' ? { reason_code: 'other', direction: 1 } : {}),
         });
       }
 
@@ -516,13 +686,11 @@ async function _showMovementForm(container, farm, items, locations, preItemId, p
     }
   });
 
-  // Wire transfer dest toggle and unit label
   setTimeout(() => {
     const typeEl = document.getElementById('gm-type');
     const destWrap = document.getElementById('gm-transfer-dest');
     const itemEl  = document.getElementById('gm-item');
     const unitLbl = document.getElementById('gm-unit-label');
-
     typeEl?.addEventListener('change', () => {
       if (destWrap) destWrap.style.display = typeEl.value === 'transfer_out' ? '' : 'none';
     });
@@ -533,16 +701,40 @@ async function _showMovementForm(container, farm, items, locations, preItemId, p
   }, 50);
 }
 
-// ── Add commodity form ─────────────────────────────────────────────────────
-async function _showAddItemForm(container, farm, period, allPeriods) {
+// ── Add commodity / season form ────────────────────────────────────────────
+async function _showAddItemForm(container, farm, existingItems, period, allPeriods) {
+  // Suggest subgroups already in use
+  const knownSubgroups = [...new Set(existingItems.map(i => i.subgroup || i.name).filter(Boolean))];
+  const sgSuggestions = knownSubgroups.length
+    ? `<datalist id="sg-list">${knownSubgroups.map(s => `<option value="${s}">`).join('')}</datalist>`
+    : '';
+
+  const currentYear = new Date().getFullYear();
+
   openModal({
-    title: 'Add grain / hay commodity',
+    title: 'Add commodity / season',
     bodyHTML: `
       <div style="display:flex;flex-direction:column;gap:14px">
+        <p style="font-size:12px;color:var(--hint);margin:0">
+          Each row is one <strong>commodity × season × grade</strong>. For example:
+          <em>Hay</em> / Cavalcade / 2026 and <em>Hay</em> / Cavalcade / 2025 are tracked separately.
+        </p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="form-group" style="margin:0">
-            <label class="form-label">Commodity name <span style="color:var(--red)">*</span></label>
-            <input class="form-input" id="ai-name" type="text" placeholder="e.g. Hay, Wheat, Sorghum">
+            <label class="form-label">Commodity (type) <span style="color:var(--red)">*</span></label>
+            <input class="form-input" id="ai-subgroup" type="text" list="sg-list" placeholder="e.g. Hay, Wheat, Sorghum">
+            ${sgSuggestions}
+            <div style="font-size:10px;color:var(--hint);margin-top:2px">Groups items together in the grid</div>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Variety / description</label>
+            <input class="form-input" id="ai-variety" type="text" placeholder="e.g. Cavalcade, Grazing King">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Season / year <span style="color:var(--red)">*</span></label>
+            <input class="form-input" id="ai-year" type="number" min="2000" max="2099" value="${currentYear}" placeholder="${currentYear}">
           </div>
           <div class="form-group" style="margin:0">
             <label class="form-label">Unit <span style="color:var(--red)">*</span></label>
@@ -550,7 +742,6 @@ async function _showAddItemForm(container, farm, period, allPeriods) {
               <option value="bales">Bales</option>
               <option value="t">Tonnes</option>
               <option value="kg">Kilograms</option>
-              <option value="m3">Cubic metres (m³)</option>
             </select>
           </div>
         </div>
@@ -565,37 +756,43 @@ async function _showAddItemForm(container, farm, period, allPeriods) {
           <div class="form-group" style="margin:0">
             <label class="form-label">Est. kg per bale</label>
             <input class="form-input" id="ai-kg-bale" type="number" min="1" step="1" placeholder="e.g. 500">
-            <div style="font-size:11px;color:var(--hint);margin-top:3px">Used to show estimated tonnes</div>
+            <div style="font-size:10px;color:var(--hint);margin-top:2px">Converts bales → tonnes in the grid</div>
           </div>
         </div>
         <div class="form-group">
           <label class="form-label">Notes</label>
-          <input class="form-input" id="ai-notes" type="text" placeholder="Optional">
+          <input class="form-input" id="ai-notes" type="text" placeholder="Optional — quality grade, treatments, etc.">
         </div>
       </div>`,
     confirmLabel: 'Add commodity',
     onConfirm: async (modal) => {
-      const name    = modal.querySelector('#ai-name')?.value?.trim();
-      const unit    = modal.querySelector('#ai-unit')?.value;
+      const subgroup = modal.querySelector('#ai-subgroup')?.value?.trim();
+      const variety  = modal.querySelector('#ai-variety')?.value?.trim() || null;
+      const year     = modal.querySelector('#ai-year')?.value?.trim();
+      const unit     = modal.querySelector('#ai-unit')?.value;
       const baleType = modal.querySelector('#ai-bale-type')?.value;
-      const kgBale  = parseFloat(modal.querySelector('#ai-kg-bale')?.value) || null;
-      const notes   = modal.querySelector('#ai-notes')?.value?.trim() || null;
+      const kgBale   = parseFloat(modal.querySelector('#ai-kg-bale')?.value) || null;
+      const notes    = modal.querySelector('#ai-notes')?.value?.trim() || null;
 
-      if (!name) { toast('Commodity name is required', 'error'); return false; }
+      if (!subgroup || !year) { toast('Commodity type and season year are required', 'error'); return false; }
 
-      const attrs = {};
-      if (unit === 'bales') {
-        attrs.bale_type = baleType;
-        if (kgBale) attrs.kg_per_bale = kgBale;
-      }
+      // Name = "Variety Year" or "Subgroup Year"
+      const name = [variety || subgroup, year].join(' ');
+
+      const attrs = {
+        produced_year: year,
+        ...(variety    ? { variety }    : {}),
+        ...(unit === 'bales' && baleType ? { bale_type: baleType } : {}),
+        ...(unit === 'bales' && kgBale   ? { kg_per_bale: kgBale } : {}),
+      };
 
       await dbInsert('stock_items', {
         farm_id:      farm.id,
         category:     'grain',
         name,
-        subgroup:     name,
+        subgroup,
         default_unit: unit,
-        attributes:   Object.keys(attrs).length ? attrs : null,
+        attributes:   attrs,
         active:       true,
         notes,
       });
@@ -604,7 +801,6 @@ async function _showAddItemForm(container, farm, period, allPeriods) {
     }
   });
 
-  // Toggle bale section
   setTimeout(() => {
     const unitEl = document.getElementById('ai-unit');
     const baleSection = document.getElementById('ai-bale-section');
