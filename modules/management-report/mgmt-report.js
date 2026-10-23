@@ -486,32 +486,13 @@ async function _render(container) {
   const isOther     = name => !isCattle(name) && /agistment|interest received|rent|lease|royalt/i.test(name);
   // A group is carry-over if:
   //   (a) it was seeded from a prior-year invoice (fromPriorYear flag), OR
-  //   (b) it has budget rows AND either:
-  //       - all budget rows have area_ha=null (carry-over rows without a GM sheet), OR
-  //       - the commodity name is mixed-case (budget-import sorts: ALL CAPS = new-season, mixed-case = carry-over)
-  //         AND it has no current-season invoices (prevents a mixed-case budget commodity like "Cotton" from
-  //         being misclassified when it is also a current-season crop with actuals).
-  // Note: 'section' from budget-import.js is UI-only and NOT stored in Supabase.
+  //   (b) ALL of its budget rows have section='carry_over' — stored explicitly in the budgets table
+  //       by budget-import.js when it reads the "CARRY OVER INCOME" section of the cashflow sheet.
   const isCarryOver = (name, g) => {
     if (isCattle(name) || isOther(name)) return false;
     if (g?.fromPriorYear) return true;
     if (!g?.budgets?.length) return false;
-    if (g.budgets.every(b => b.area_ha == null)) return true;
-    // Mixed-case name = carry-over convention, but only if no current-season invoices exist for this group
-    // (guards against a mixed-case budget row for a genuine new-season crop like "Cotton")
-    if (name !== name.toUpperCase()) {
-      const hasCurrentInvoices = currentCropInvoices.some(inv => {
-        const b = inv.batches ? (typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches) : [];
-        const targetKey = name.trim().toUpperCase();
-        return b.some(batch => {
-          const saleLine = (batch.lines || []).find(l => l.type === 'income' && l.line_type !== 'qa');
-          const bComm = (inv.commodity_type || batch.commodity || saleLine?.description || '').trim().toUpperCase();
-          return bComm === targetKey;
-        });
-      });
-      return !hasCurrentInvoices;
-    }
-    return false;
+    return g.budgets.every(b => b.section === 'carry_over');
   };
 
   const buildCommRow = (g, opts = {}) => {

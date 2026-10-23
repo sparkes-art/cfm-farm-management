@@ -776,7 +776,6 @@ function _consolidateRevenue(items, financialYear, farmId, gmData) {
       budgeted_price:        gm?.price ?? null,
       budgeted_gross_revenue: item.total,
       notes:                 gm?.unit ? `Yield unit: ${gm.unit}` : null,
-      // section is a UI-only field for the preview — not stored in budgets table
       section:               item.section || 'farming',
     });
   }

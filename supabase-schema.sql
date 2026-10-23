@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS budgets (
   budgeted_inputs_per_ha NUMERIC(12,2),
   budgeted_gross_margin NUMERIC(14,2),
   notes TEXT,
+  section TEXT DEFAULT 'farming',  -- 'farming' | 'carry_over' | 'other' (set by budget-import.js)
   created_by UUID REFERENCES auth.users(id),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
