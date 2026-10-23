@@ -668,6 +668,108 @@ function _parseGmSheet(rows, sheetName) {
 }
 
 // ── Identify CFM sheet roles ───────────────────────────────────────────────
+// ── CFM Cashflow sheet parser (new standard format) ──────────────────────────
+//
+// Reads a sheet named exactly "CFM Cashflow" with this fixed column layout:
+//   Col A (0) — section: farming | carry_over | other | overhead | capex
+//   Col B (1) — commodity / item name
+//   Col C (2) — category (overhead/capex rows only; blank for revenue)
+//   Col D (3) — units qty (carry_over rows only; blank elsewhere)
+//   Col E–P   (4–15) — monthly values Jul through Jun (or farm's season months)
+//   Col Q     (16)   — annual total (authoritative)
+//
+// Row 1: headers — parser reads month names from cols E–P to determine season
+// Row 2+: data rows
+//
+// Returns same shape as _parseCashflowSheet:
+//   { revenueItems, costItems, capexItems, warnings }
+//   (priorYearCostItems, cattleCostItems, fallowCostItems are empty — not used in new format)
+//
+function _parseCfmCashflow(rows) {
+  const warnings       = [];
+  const revenueItems   = [];
+  const costItems      = [];
+  const capexItems     = [];
+
+  const num = v => (v !== null && v !== undefined && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+  const str = v => (v !== null && v !== undefined) ? String(v).trim() : '';
+
+  if (!rows.length) {
+    warnings.push('[CFM Cashflow] Sheet is empty');
+    return { revenueItems, costItems, capexItems, priorYearCostItems: [], cattleCostItems: [], fallowCostItems: [], warnings };
+  }
+
+  // Row 1 (index 0): headers — confirm month columns exist
+  const header = rows[0] || [];
+  const MONTH_RE = /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i;
+  const monthCols = [];
+  for (let c = 4; c <= 15; c++) {
+    const h = str(header[c]);
+    if (MONTH_RE.test(h)) monthCols.push(c);
+  }
+  if (!monthCols.length) {
+    warnings.push('[CFM Cashflow] No month columns found in row 1 (expected Jul–Jun in cols E–P)');
+  }
+  const totalCol = 16; // Col Q
+
+  const REVENUE_SECTIONS = new Set(['farming', 'carry_over', 'other']);
+  const COST_SECTIONS    = new Set(['overhead']);
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || !row.some(c => c != null)) continue;
+
+    const section  = str(row[0]).toLowerCase().replace(/[^a-z_]/g, '');
+    const commodity = str(row[1]);
+    const category  = str(row[2]);
+    const unitsQty  = num(row[3]);
+    const total     = num(row[totalCol]);
+
+    if (!section || !commodity) continue;
+
+    if (REVENUE_SECTIONS.has(section)) {
+      if (!total && total !== 0) continue; // skip rows with no total
+      const qty = section === 'carry_over' ? unitsQty : null;
+      revenueItems.push({ commodity, area_ha: null, total, qty, section });
+
+    } else if (COST_SECTIONS.has(section)) {
+      if (!total || total <= 0) continue;
+      const cat = category.toLowerCase();
+      // Map free-form category text to budget_costs category values
+      let mappedCat = 'overhead';
+      if (/repair|r\s*&\s*m|maintenance/.test(cat))  mappedCat = 'rm';
+      else if (/labour|labor|staff|wage|salary/.test(cat)) mappedCat = 'labour';
+      else if (/farm\s*mgmt|farm\s*management/.test(cat)) mappedCat = 'labour';
+      else if (/fund\s*mgmt|fund\s*management/.test(cat)) mappedCat = 'fund_mgmt';
+      else if (/finance|interest|loan/.test(cat))    mappedCat = 'finance';
+      costItems.push({ description: commodity, budget_amount: total, category: mappedCat });
+
+    } else if (section === 'capex') {
+      if (total == null || total === 0) continue;
+      capexItems.push({
+        budget_code:   commodity.toUpperCase().trim(),
+        description:   commodity,
+        budget_amount: total,   // positive = purchase, negative = disposal/sale
+        is_sale:       total < 0,
+      });
+    } else {
+      warnings.push(`[CFM Cashflow] Row ${i + 1}: unknown section "${row[0]}" — skipped`);
+    }
+  }
+
+  if (!revenueItems.length) warnings.push('[CFM Cashflow] No revenue rows found');
+
+  return {
+    revenueItems,
+    costItems,
+    capexItems,
+    priorYearCostItems: [],
+    cattleCostItems:    [],
+    fallowCostItems:    [],
+    warnings,
+  };
+}
+
 function _identifySheets(sheetNames) {
   const cashflowSheets = [];
   const gmSheets       = [];
@@ -700,8 +802,17 @@ function _identifySheets(sheetNames) {
     'kiwifruit',
   ];
 
+  let hasCfmCashflow = false;
+
   for (const name of sheetNames) {
     const n = name.toLowerCase();
+
+    // New standard CFM Cashflow sheet — fixed-column format, takes priority over legacy parsers
+    if (n === 'cfm cashflow') {
+      hasCfmCashflow = true;
+      cashflowSheets.push(name);
+      continue;
+    }
 
     // Cashflow sheets:
     //   Blackbull (trust):  "OT - Master Cashflow", "PT - Master Cashflow"
@@ -730,7 +841,7 @@ function _identifySheets(sheetNames) {
     }
   }
 
-  return { cashflowSheets, gmSheets, capexSheets, skipped };
+  return { cashflowSheets, gmSheets, capexSheets, skipped, hasCfmCashflow };
 }
 
 // ── Revenue income consolidation ───────────────────────────────────────────
@@ -1319,18 +1430,19 @@ export async function parseBudgetExcel(file) {
   }
 
   // Identify sheet roles
-  const { cashflowSheets, gmSheets, capexSheets, skipped } = _identifySheets(sheetNames);
+  const { cashflowSheets, gmSheets, capexSheets, skipped, hasCfmCashflow } = _identifySheets(sheetNames);
 
   if (skipped.length) {
     allWarnings.push(`Skipped ${skipped.length} non-budget sheets (formatting, pricing, etc.)`);
   }
 
   if (!cashflowSheets.length) {
-    allWarnings.push('No "Master Cashflow" sheet found — expected a sheet with "Master Cashflow" in its name');
+    allWarnings.push('No cashflow sheet found — expected a sheet named "CFM Cashflow" or one containing "Master Cashflow"');
     return { farm, financialYear, revenueRows: [], costRows: [], warnings: allWarnings, fileName: file.name, sheetNames };
   }
 
-  // ── Parse all cashflow sheets (OT + PT) ──
+  // ── Parse cashflow sheet(s) ──
+  // "CFM Cashflow" uses the new fixed-column parser; old "Master Cashflow" sheets use legacy parser.
   const allRevenueItems       = [];
   const allCostItems          = [];
   const allPriorYearCostItems = [];
@@ -1340,7 +1452,8 @@ export async function parseBudgetExcel(file) {
 
   for (const sheetName of cashflowSheets) {
     const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
-    const result = _parseCashflowSheet(rows, sheetName);
+    const isCfmSheet = sheetName.toLowerCase() === 'cfm cashflow';
+    const result = isCfmSheet ? _parseCfmCashflow(rows) : _parseCashflowSheet(rows, sheetName);
     allRevenueItems.push(...result.revenueItems);
     allCostItems.push(...result.costItems);
     allPriorYearCostItems.push(...(result.priorYearCostItems || []));
