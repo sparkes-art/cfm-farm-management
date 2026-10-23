@@ -767,13 +767,12 @@ function _consolidateRevenue(items, financialYear, farmId, gmData) {
 
   const rows = [];
   for (const [key, item] of byKey) {
-    // gmLookup uses commodity name only (not the section|COMMODITY key used for dedup)
-    const commodityOnly = item.commodity.toUpperCase().replace(/\s+/g,' ').trim();
-    const gm = gmLookup(commodityOnly);
-
-    // For carry-over rows: use the cashflow sheet's units qty (col E) as budgeted_yield_per_ha
-    // (total production quantity, not per-ha), since there's no GM sheet for prior-year crops.
     const isCarryOverRow = (item.section || 'farming') === 'carry_over';
+    // Carry-over rows are prior-year crops — never look up their GM sheet.
+    // They have their own cashflow-derived totals and units; a GM lookup would
+    // false-match the same crop's current-year GM sheet and produce bad data.
+    const gm = isCarryOverRow ? null : gmLookup(item.commodity.toUpperCase().replace(/\s+/g,' ').trim());
+
     rows.push({
       farm_id:               farmId,
       season:                financialYear,
@@ -2072,8 +2071,7 @@ export function showBudgetImportPreview(container, parsed) {
     }
     if (!fy) { toast('Financial year is required', 'error'); return; }
 
-    // Strip preview-only 'section' field before writing to budgets table
-    const revRows = revenueRows.map(({ section: _s, ...r }) => ({ ...r, season: fy }));
+    const revRows = revenueRows.map(r => ({ ...r, season: fy }));
     const cstRows = costRows.map(r => ({ ...r, financial_year: fy }));
     await _commitImport(container, farm, fy, revRows, cstRows, goBack);
   });
