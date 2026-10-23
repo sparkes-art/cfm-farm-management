@@ -44,6 +44,22 @@ async function _render(container) {
   const currentMonthEnd   = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().slice(0,10);
   const hasCurrentPeriod  = periods.some(p => p.period_start === currentMonthStart);
 
+  // The "next period to open" — if no periods exist at all, suggest the year-start month;
+  // otherwise suggest the current calendar month (next in the run).
+  const nextPeriodDate = (() => {
+    if (periods.length === 0) {
+      // No periods yet — start at the farm's year-start month in the relevant year.
+      // If we're already past yearStartMonth this calendar year, use this year; otherwise last year.
+      const yr = now.getMonth() >= yearStartMonth ? now.getFullYear() : now.getFullYear() - 1;
+      return new Date(yr, yearStartMonth, 1);
+    }
+    // Otherwise: suggest current calendar month
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  })();
+  const nextPeriodStart = nextPeriodDate.toISOString().slice(0,10);
+  const nextPeriodEnd   = new Date(nextPeriodDate.getFullYear(), nextPeriodDate.getMonth()+1, 0).toISOString().slice(0,10);
+  const nextPeriodLabel = nextPeriodDate.toLocaleDateString('en-AU', {month:'long', year:'numeric'});
+
   // Current year label based on farm's year convention
   const yearLabel = (() => {
     const m = now.getMonth(); // 0-indexed
@@ -55,7 +71,7 @@ async function _render(container) {
 
   const periodLabel = openPeriod
     ? new Date(openPeriod.period_start).toLocaleDateString('en-AU', {month:'long', year:'numeric'})
-    : now.toLocaleDateString('en-AU', {month:'long', year:'numeric'});
+    : nextPeriodLabel;
 
   // Stats
   const fuelTanks = locations.filter(l => l.has_fuel_tank);
@@ -85,21 +101,21 @@ async function _render(container) {
     { id: 'chemical', label: 'Chemicals', icon: '🧪', done: periodCounts.filter(c=>items.find(i=>i.id===c.item_id)?.category==='chemical').length, total: chemItems.length, href: 'chemical' },
     { id: 'fertiliser', label: 'Fertiliser', icon: '🌱', done: periodCounts.filter(c=>items.find(i=>i.id===c.item_id)?.category==='fertiliser').length, total: fertItems.length, href: 'fertiliser' },
     { id: 'water', label: 'Bore meters', icon: '💧', done: new Set(recentReadings.filter(r=>r.reading_type==='water_meter').map(r=>r.location_id)).size, total: waterMeters.length, href: 'water' },
-    ...(lsItems.length   ? [{ id: 'livestock', label: 'Livestock',    icon: '🐄', done: 0, total: lsItems.length,    href: 'livestock' }] : []),
-    ...(grainItems.length ? [{ id: 'grain',     label: 'Grain & Hay', icon: '🌾', done: 0, total: grainItems.length, href: 'grain'     }] : []),
+    ...(lsItems.length ? [{ id: 'livestock', label: 'Livestock',    icon: '🐄', done: 0, total: lsItems.length, href: 'livestock' }] : []),
+    { id: 'grain', label: 'Grain & Hay', icon: '🌾', done: 0, total: grainItems.length, href: 'grain' },
   ];
 
   const statusColor = openPeriod?.status === 'locked' ? 'var(--green)' : openPeriod?.status === 'review' ? 'var(--amber)' : 'var(--blue)';
   const statusLabel = openPeriod?.status === 'locked' ? 'Locked' : openPeriod?.status === 'review' ? 'Under review' : 'Open';
 
   dash.innerHTML = `
-    ${!openPeriod && !hasCurrentPeriod && canWrite() ? `
+    ${!openPeriod && canWrite() ? `
     <div style="background:#fff8e6;border:1px solid #fcd34d;border-radius:10px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div>
-        <div style="font-size:13px;font-weight:600;color:#92400e">No open period for ${now.toLocaleDateString('en-AU',{month:'long',year:'numeric'})}</div>
-        <div style="font-size:12px;color:#92400e;margin-top:2px;opacity:.8">Open a period to start recording stocktake entries for this month.</div>
+        <div style="font-size:13px;font-weight:600;color:#92400e">No open period — ${nextPeriodLabel}</div>
+        <div style="font-size:12px;color:#92400e;margin-top:2px;opacity:.8">Open a period to start recording stocktake entries.${periods.length === 0 ? ' This will be the first period for this farm.' : ''}</div>
       </div>
-      <button id="btn-open-period" class="btn btn-sm" style="background:#f59e0b;color:white;border:none;white-space:nowrap">Open ${now.toLocaleDateString('en-AU',{month:'long'})} period</button>
+      <button id="btn-open-period" class="btn btn-sm" style="background:#f59e0b;color:white;border:none;white-space:nowrap">Open ${nextPeriodLabel}</button>
     </div>` : ''}
     <!-- Header -->
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
@@ -272,11 +288,11 @@ async function _render(container) {
   qs('#btn-open-period', container)?.addEventListener('click', async () => {
     await dbInsert('stock_periods', {
       farm_id: farm.id,
-      period_start: currentMonthStart,
-      period_end: currentMonthEnd,
+      period_start: nextPeriodStart,
+      period_end: nextPeriodEnd,
       status: 'open',
     });
-    toast(`${now.toLocaleDateString('en-AU',{month:'long',year:'numeric'})} period opened`, 'success');
+    toast(`${nextPeriodLabel} period opened`, 'success');
     await _render(container);
   });
 
@@ -299,11 +315,24 @@ async function _render(container) {
 
 async function _openPeriod(container, farm) {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
-  const end = new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().slice(0,10);
+  const yearStartMonth = (farm.settings?.yearStartMonth || 7) - 1; // 0-indexed
+
+  // If no periods exist yet, start at the farm's year-start month; otherwise current calendar month
+  const existingPeriods = await dbSelect('stock_periods', `farm_id=eq.${farm.id}&limit=1`);
+  const useDate = existingPeriods.length === 0
+    ? (() => {
+        const yr = now.getMonth() >= yearStartMonth ? now.getFullYear() : now.getFullYear() - 1;
+        return new Date(yr, yearStartMonth, 1);
+      })()
+    : new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const start = useDate.toISOString().slice(0,10);
+  const end   = new Date(useDate.getFullYear(), useDate.getMonth()+1, 0).toISOString().slice(0,10);
+  const label = useDate.toLocaleDateString('en-AU', {month:'long', year:'numeric'});
+
   try {
     await dbInsert('stock_periods', { farm_id: farm.id, period_start: start, period_end: end, status: 'open' });
-    toast('Period opened', 'success');
+    toast(`${label} period opened`, 'success');
     _render(container);
   } catch(e) { toast('Could not open period: ' + e.message, 'error'); }
 }
