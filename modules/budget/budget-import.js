@@ -179,6 +179,7 @@ function _parseCashflowSheet(rows, sheetName) {
     // empty in this sheet so SheetJS skips it). Effective mapping:
     //   idx 0 = col B = tag (I / E / H / EXP)
     //   idx 2 = col D = description
+    //   idx 3 = col E = units qty (carry-over rows only)
     //   idx 4 = col F = current-year budget total
     //   idx 29 = col AE = budget area (ha)
     const tag  = str(row[0]);      // col B (SheetJS idx 0)
@@ -380,7 +381,9 @@ function _parseCashflowSheet(rows, sheetName) {
     if ((isTaggedIncome || isUntaggedIncome) && desc && total && total > 0) {
       // col AE (SheetJS idx 29) = Budget Area (ha) — not meaningful for carry-over
       const area_ha = incomeSection === 'carry_over' ? null : (num(row[29]) || null);
-      revenueItems.push({ commodity: desc, area_ha, total, section: incomeSection });
+      // col E (SheetJS idx 3) = units qty — only present on carry-over rows
+      const qty = incomeSection === 'carry_over' ? (num(row[3]) || null) : null;
+      revenueItems.push({ commodity: desc, area_ha, total, qty, section: incomeSection });
     }
   }
 
@@ -746,6 +749,7 @@ function _consolidateRevenue(items, financialYear, farmId, gmData) {
     const key = section + '|' + item.commodity.toUpperCase().replace(/\s+/g,' ').trim();
     if (byKey.has(key)) {
       byKey.get(key).total += (item.total || 0);
+      if (item.qty != null) byKey.get(key).qty = (byKey.get(key).qty || 0) + item.qty;
     } else {
       byKey.set(key, { ...item });
     }
@@ -767,12 +771,15 @@ function _consolidateRevenue(items, financialYear, farmId, gmData) {
     const commodityOnly = item.commodity.toUpperCase().replace(/\s+/g,' ').trim();
     const gm = gmLookup(commodityOnly);
 
+    // For carry-over rows: use the cashflow sheet's units qty (col E) as budgeted_yield_per_ha
+    // (total production quantity, not per-ha), since there's no GM sheet for prior-year crops.
+    const isCarryOverRow = (item.section || 'farming') === 'carry_over';
     rows.push({
       farm_id:               farmId,
       season:                financialYear,
       commodity:             item.commodity,
       area_ha:               gm?.area_ha ?? null,
-      budgeted_yield_per_ha: gm?.yieldPerHa ?? null,
+      budgeted_yield_per_ha: isCarryOverRow ? (item.qty ?? null) : (gm?.yieldPerHa ?? null),
       budgeted_price:        gm?.price ?? null,
       budgeted_gross_revenue: item.total,
       notes:                 gm?.unit ? `Yield unit: ${gm.unit}` : null,
