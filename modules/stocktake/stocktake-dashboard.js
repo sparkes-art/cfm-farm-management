@@ -326,56 +326,70 @@ async function _openPeriod(container, farm) {
   const label = useDate.toLocaleDateString('en-AU', {month:'long', year:'numeric'});
   const openingDate = localDate(openingD);
 
-  // Fetch carry-over budget rows and matching stock items in parallel
+  // Fetch carry-over budget rows and existing stock items
   let carryOvers = [];
   let stockItems = [];
   try {
     [carryOvers, stockItems] = await Promise.all([
-      dbSelect('budgets', `farm_id=eq.${farm.id}&section=eq.carry_over&select=id,commodity,budgeted_yield_per_ha,notes`),
+      dbSelect('budgets', `farm_id=eq.${farm.id}&section=eq.carry_over&select=id,commodity,budgeted_yield_per_ha,notes&order=commodity.asc`),
       dbSelect('stock_items', `farm_id=eq.${farm.id}&active=eq.true&select=id,name,subgroup,default_unit,category`),
     ]);
   } catch { /* budgets section column may not exist yet — silently skip */ }
 
-  // Match carry-over budget rows to stock items
-  const matches = carryOvers
+  // All carry-over rows with a quantity — show regardless of whether stock item exists
+  // Guess a sensible unit from the commodity name
+  const guessUnit = name => {
+    const n = name.toUpperCase();
+    if (n.includes('COTTON') || n.includes('LINT')) return 't';
+    if (n.includes('GRAIN') || n.includes('SORGHUM') || n.includes('CORN') || n.includes('WHEAT')) return 't';
+    return 'bales'; // hay default
+  };
+
+  const rows = carryOvers
     .filter(b => b.budgeted_yield_per_ha > 0)
-    .map(b => {
-      const item = stockItems.find(i =>
+    .map((b, idx) => {
+      const existingItem = stockItems.find(i =>
         (i.subgroup || '').toUpperCase() === b.commodity.toUpperCase() ||
         i.name.toUpperCase() === b.commodity.toUpperCase() ||
-        i.name.toUpperCase().startsWith(b.commodity.toUpperCase())
+        i.name.toUpperCase().startsWith(b.commodity.toUpperCase()) ||
+        b.commodity.toUpperCase().startsWith((i.subgroup || i.name).toUpperCase())
       );
-      return item ? { budget: b, item } : null;
-    })
-    .filter(Boolean);
+      const unit = existingItem?.default_unit || guessUnit(b.commodity);
+      const isNew = !existingItem;
+      return { budget: b, existingItem, unit, isNew, idx };
+    });
 
-  const matchRows = matches.length ? matches.map((m, idx) => `
-    <label style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:white;border-radius:6px;cursor:pointer">
-      <input type="checkbox" class="carry-chk" data-idx="${idx}" checked style="width:15px;height:15px;accent-color:var(--blue)">
-      <div style="flex:1;min-width:0">
-        <span style="font-size:13px;font-weight:500;color:var(--ink)">${m.item.name}</span>
-        <span style="font-size:11px;color:var(--hint);margin-left:6px">${m.budget.commodity}</span>
-      </div>
-      <input type="number" class="carry-qty form-input" data-idx="${idx}"
-        value="${Math.round(m.budget.budgeted_yield_per_ha)}"
-        min="0" step="1"
-        style="width:90px;text-align:right;padding:4px 8px;font-size:13px;font-weight:600">
-      <span style="font-size:12px;color:var(--hint);white-space:nowrap">${m.item.default_unit || 'units'}</span>
-    </label>`).join('') : '';
-
-  const carrySection = matches.length ? `
+  const carrySection = rows.length ? `
     <div style="margin-top:14px">
       <div style="font-size:12px;font-weight:600;color:var(--ink);margin-bottom:6px">
-        Carry in opening balances from budget
-        <span style="font-weight:400;color:var(--hint);margin-left:4px">(${matches.length} match${matches.length !== 1 ? 'es' : ''} found)</span>
+        Carry-over opening balances from budget
+        <span style="font-weight:400;color:var(--hint);margin-left:4px">(${rows.length} item${rows.length !== 1 ? 's' : ''})</span>
       </div>
       <div style="display:flex;flex-direction:column;gap:4px;background:var(--page-bg);border:1px solid var(--border);border-radius:8px;padding:8px">
-        ${matchRows}
+        ${rows.map(r => `
+          <label style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:white;border-radius:6px;cursor:pointer">
+            <input type="checkbox" class="carry-chk" data-idx="${r.idx}" checked style="width:15px;height:15px;flex-shrink:0;accent-color:var(--blue)">
+            <div style="flex:1;min-width:0">
+              <span style="font-size:13px;font-weight:500;color:var(--ink)">${r.budget.commodity}</span>
+              ${r.isNew ? `<span style="font-size:10px;background:#dbeafe;color:#1d4ed8;border-radius:4px;padding:1px 6px;margin-left:6px">new commodity</span>` : ''}
+            </div>
+            <input type="number" class="carry-qty form-input" data-idx="${r.idx}"
+              value="${Math.round(r.budget.budgeted_yield_per_ha)}"
+              min="0" step="1"
+              style="width:90px;text-align:right;padding:4px 8px;font-size:13px;font-weight:600;flex-shrink:0">
+            <select class="carry-unit form-select" data-idx="${r.idx}" style="width:80px;padding:4px 6px;font-size:12px;flex-shrink:0">
+              <option value="bales"${r.unit==='bales'?' selected':''}>bales</option>
+              <option value="t"${r.unit==='t'?' selected':''}>t</option>
+              <option value="kg"${r.unit==='kg'?' selected':''}>kg</option>
+            </select>
+          </label>`).join('')}
       </div>
-      <div style="font-size:11px;color:var(--hint);margin-top:5px">Edit quantities if the actual on-hand differs from the budget. Uncheck to skip an item.</div>
+      <div style="font-size:11px;color:var(--hint);margin-top:5px">
+        Edit quantities if actuals differ from budget. <strong>New commodity</strong> items will be created automatically. Uncheck to skip.
+      </div>
     </div>` : `
     <div style="margin-top:14px;padding:10px 12px;background:var(--page-bg);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--hint)">
-      No carry-over budget rows matched to existing stock items. You can seed opening balances manually from each commodity's stocktake screen.
+      No carry-over budget rows found. You can add opening balances manually from the Grain &amp; Hay screen after opening the period.
     </div>`;
 
   openModal({
@@ -388,42 +402,63 @@ async function _openPeriod(container, farm) {
         </div>
         ${carrySection}
       </div>`,
-    confirmLabel: matches.length ? `Open period & carry in balances` : `Open ${label}`,
+    confirmLabel: rows.length ? `Open period & carry in balances` : `Open ${label}`,
     onConfirm: async (modal) => {
       try {
         // 1. Create the period
-        const period = await dbInsert('stock_periods', {
+        await dbInsert('stock_periods', {
           farm_id: farm.id, period_start: start, period_end: end, status: 'open'
         });
 
-        // 2. Seed checked carry-over opening balances
-        if (matches.length) {
+        // 2. Process checked rows
+        if (rows.length) {
           const checked = [...modal.querySelectorAll('.carry-chk:checked')].map(chk => {
             const idx = parseInt(chk.dataset.idx);
-            const qtyEl = modal.querySelector(`.carry-qty[data-idx="${idx}"]`);
-            const qty = parseFloat(qtyEl?.value);
-            return qty > 0 ? { match: matches[idx], qty } : null;
+            const qty  = parseFloat(modal.querySelector(`.carry-qty[data-idx="${idx}"]`)?.value);
+            const unit = modal.querySelector(`.carry-unit[data-idx="${idx}"]`)?.value || 'bales';
+            return qty > 0 ? { row: rows[idx], qty, unit } : null;
           }).filter(Boolean);
 
-          await Promise.all(checked.map(({ match, qty }) =>
-            dbInsert('stock_movements', {
+          // Create missing stock items first, then seed opening balances
+          await Promise.all(checked.map(async ({ row, qty, unit }) => {
+            let itemId = row.existingItem?.id;
+
+            if (!itemId) {
+              // Auto-create the stock item from the budget commodity name
+              const newItem = await dbInsert('stock_items', {
+                farm_id:      farm.id,
+                category:     'grain',
+                name:         row.budget.commodity,
+                subgroup:     row.budget.commodity,
+                default_unit: unit,
+                active:       true,
+                attributes:   {},
+              });
+              itemId = newItem.id;
+            }
+
+            await dbInsert('stock_movements', {
               farm_id:       farm.id,
-              item_id:       match.item.id,
+              item_id:       itemId,
               location_id:   null,
               movement_type: 'adjustment',
               qty,
               direction:     1,
-              unit:          match.item.default_unit || 'units',
+              unit,
               occurred_on:   openingDate,
               reason_code:   'opening_balance',
-              note:          `Opening balance — carried from budget (${match.budget.commodity})`,
+              note:          `Opening balance — carried from budget`,
               source_system: 'budgets',
-              source_ref:    match.budget.id || null,
-            })
-          ));
+              source_ref:    row.budget.id || null,
+            });
+          }));
 
           const seeded = checked.length;
-          toast(`${label} opened · ${seeded} opening balance${seeded !== 1 ? 's' : ''} carried in`, 'success');
+          const newCount = checked.filter(c => !c.row.existingItem).length;
+          const msg = newCount
+            ? `${label} opened · ${seeded} opening balance${seeded!==1?'s':''} carried in · ${newCount} new commodity${newCount!==1?'ies':''} created`
+            : `${label} opened · ${seeded} opening balance${seeded!==1?'s':''} carried in`;
+          toast(msg, 'success');
         } else {
           toast(`${label} period opened`, 'success');
         }
