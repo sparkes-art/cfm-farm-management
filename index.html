@@ -29,6 +29,56 @@
     <button class="btn btn-primary btn-lg" id="btn-login" style="width:100%;justify-content:center">
       Sign in
     </button>
+    <div style="text-align:center;margin-top:14px">
+      <a href="#" id="btn-forgot-password" style="font-size:13px;color:rgba(255,255,255,.65);text-decoration:none" onmouseover="this.style.color='white'" onmouseout="this.style.color='rgba(255,255,255,.65)'">Forgot password?</a>
+    </div>
+  </div>
+</div>
+
+<!-- Password reset request panel (shown when ?reset not in URL) -->
+<div id="forgot-password-page" class="hidden">
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="/assets/logo-white.png" alt="CFM" onerror="this.style.display='none'">
+      <p class="subtitle">Reset your password</p>
+    </div>
+    <div id="forgot-error" class="hidden" style="background:#fef0ee;color:#a02020;padding:10px 14px;border-radius:6px;font-size:var(--text-sm);margin-bottom:14px;border:1px solid #fcd5d0"></div>
+    <div id="forgot-success" class="hidden" style="background:#f0fdf4;color:#166534;padding:10px 14px;border-radius:6px;font-size:var(--text-sm);margin-bottom:14px;border:1px solid #bbf7d0">
+      Reset link sent — check your email.
+    </div>
+    <p style="font-size:13px;color:rgba(255,255,255,.7);margin-bottom:16px">Enter your email address and we'll send you a reset link.</p>
+    <div class="form-group" style="margin-bottom:20px">
+      <label class="form-label" for="forgot-email">Email</label>
+      <input class="form-input" type="email" id="forgot-email" autocomplete="username" placeholder="you@station.com.au">
+    </div>
+    <button class="btn btn-primary btn-lg" id="btn-send-reset" style="width:100%;justify-content:center">
+      Send reset link
+    </button>
+    <div style="text-align:center;margin-top:14px">
+      <a href="#" id="btn-back-to-login" style="font-size:13px;color:rgba(255,255,255,.65);text-decoration:none" onmouseover="this.style.color='white'" onmouseout="this.style.color='rgba(255,255,255,.65)'">← Back to sign in</a>
+    </div>
+  </div>
+</div>
+
+<!-- New password panel (shown when Supabase redirects back with ?reset=1#access_token=...) -->
+<div id="set-password-page" class="hidden">
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="/assets/logo-white.png" alt="CFM" onerror="this.style.display='none'">
+      <p class="subtitle">Choose a new password</p>
+    </div>
+    <div id="set-pw-error" class="hidden" style="background:#fef0ee;color:#a02020;padding:10px 14px;border-radius:6px;font-size:var(--text-sm);margin-bottom:14px;border:1px solid #fcd5d0"></div>
+    <div class="form-group">
+      <label class="form-label" for="set-pw-new">New password</label>
+      <input class="form-input" type="password" id="set-pw-new" autocomplete="new-password" placeholder="Min 8 characters">
+    </div>
+    <div class="form-group" style="margin-bottom:20px">
+      <label class="form-label" for="set-pw-confirm">Confirm password</label>
+      <input class="form-input" type="password" id="set-pw-confirm" autocomplete="new-password">
+    </div>
+    <button class="btn btn-primary btn-lg" id="btn-set-password" style="width:100%;justify-content:center">
+      Set new password
+    </button>
   </div>
 </div>
 

@@ -81,6 +81,8 @@ const _main = () => document.getElementById('main');
 onSessionChange((session) => {
   if (session) {
     hide('#login-page');
+    hide('#forgot-password-page');
+    hide('#set-password-page');
     show('#app');
     const isLawd = session.profile?.role === 'lawd';
     if (isLawd) {
@@ -142,6 +144,129 @@ qs('#btn-login')?.addEventListener('click', async () => {
 // Allow Enter key on password field
 qs('#login-password')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') qs('#btn-login')?.click();
+});
+
+// ── Password reset flow ───────────────────────────────────────
+// Check on load if we're returning from a Supabase reset link
+// Supabase appends #access_token=...&type=recovery to the redirect URL
+(function _checkResetRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const hash   = new URLSearchParams(window.location.hash.slice(1));
+  const isReset = params.get('reset') === '1' && hash.get('type') === 'recovery';
+  if (!isReset) return;
+
+  // Hide login, show set-password panel
+  hide('#login-page');
+  show('#set-password-page');
+
+  const accessToken = hash.get('access_token');
+
+  qs('#btn-set-password')?.addEventListener('click', async () => {
+    const newPw  = qs('#set-pw-new')?.value;
+    const confPw = qs('#set-pw-confirm')?.value;
+    const errEl  = qs('#set-pw-error');
+    const btn    = qs('#btn-set-password');
+    errEl?.classList.add('hidden');
+
+    if (!newPw || newPw.length < 8) {
+      errEl.textContent = 'Password must be at least 8 characters.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    if (newPw !== confPw) {
+      errEl.textContent = 'Passwords do not match.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    try {
+      const res = await fetch('/.netlify/functions/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update', access_token: accessToken, new_password: newPw }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to set password');
+
+      // Success — clear hash and go back to login
+      window.history.replaceState({}, '', '/');
+      hide('#set-password-page');
+      show('#login-page');
+      const loginErr = qs('#login-error');
+      if (loginErr) {
+        loginErr.style.background = '#f0fdf4';
+        loginErr.style.color = '#166534';
+        loginErr.style.borderColor = '#bbf7d0';
+        loginErr.textContent = 'Password updated — sign in with your new password.';
+        loginErr.classList.remove('hidden');
+      }
+    } catch (err) {
+      errEl.textContent = err.message || 'Failed to set password. The link may have expired.';
+      errEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Set new password';
+    }
+  });
+})();
+
+// Forgot password link
+qs('#btn-forgot-password')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  hide('#login-page');
+  show('#forgot-password-page');
+  // Pre-fill email if already typed
+  const typed = qs('#login-email')?.value?.trim();
+  if (typed) {
+    const el = qs('#forgot-email');
+    if (el) el.value = typed;
+  }
+});
+
+qs('#btn-back-to-login')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  hide('#forgot-password-page');
+  show('#login-page');
+  qs('#forgot-error')?.classList.add('hidden');
+  qs('#forgot-success')?.classList.add('hidden');
+});
+
+qs('#btn-send-reset')?.addEventListener('click', async () => {
+  const email  = qs('#forgot-email')?.value?.trim();
+  const errEl  = qs('#forgot-error');
+  const succEl = qs('#forgot-success');
+  const btn    = qs('#btn-send-reset');
+
+  errEl?.classList.add('hidden');
+  succEl?.classList.add('hidden');
+
+  if (!email) {
+    errEl.textContent = 'Please enter your email address.';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+
+  try {
+    const res = await fetch('/.netlify/functions/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'request', email }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to send reset email');
+    succEl?.classList.remove('hidden');
+  } catch (err) {
+    errEl.textContent = err.message || 'Failed to send reset email. Please try again.';
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send reset link';
+  }
 });
 
 // ── Sign out ──────────────────────────────────────────────────
