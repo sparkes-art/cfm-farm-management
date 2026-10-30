@@ -605,11 +605,33 @@ window._updateXeroIndicator = async function _updateXeroIndicator() {
 };
 
 // ── Navigation ────────────────────────────────────────────────
-document.getElementById('sidebar')?.querySelectorAll('a[data-module]').forEach(link => {
-  link.addEventListener('click', (e) => {
-    e.preventDefault();
-    _navigateTo(link.dataset.module);
+// Wire up sidebar, mobile bottom nav, and mobile drawer
+function _wireNavLinks(selector) {
+  document.querySelectorAll(selector).forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      _navigateTo(link.dataset.module);
+      // Close drawer if open
+      document.getElementById('mobile-drawer')?.classList.remove('open');
+      document.getElementById('mobile-drawer-overlay')?.classList.remove('open');
+    });
   });
+}
+_wireNavLinks('#sidebar a[data-module]');
+_wireNavLinks('#mobile-nav a[data-module]');
+_wireNavLinks('#mobile-drawer a[data-module]');
+
+// Mobile "More" button toggles drawer
+document.getElementById('mobile-more-btn')?.addEventListener('click', () => {
+  const drawer  = document.getElementById('mobile-drawer');
+  const overlay = document.getElementById('mobile-drawer-overlay');
+  const isOpen  = drawer?.classList.contains('open');
+  drawer?.classList.toggle('open', !isOpen);
+  overlay?.classList.toggle('open', !isOpen);
+});
+document.getElementById('mobile-drawer-overlay')?.addEventListener('click', () => {
+  document.getElementById('mobile-drawer')?.classList.remove('open');
+  document.getElementById('mobile-drawer-overlay')?.classList.remove('open');
 });
 
 async function _waitForFarm(timeout = 5000) {
@@ -633,8 +655,8 @@ async function _navigateTo(moduleKey) {
     _activeModuleInstance = null;
   }
 
-  // Update nav active state
-  document.querySelectorAll('#sidebar a[data-module]').forEach(a => {
+  // Update nav active state — sidebar + mobile nav + drawer
+  document.querySelectorAll('#sidebar a[data-module], #mobile-nav a[data-module], #mobile-drawer a[data-module]').forEach(a => {
     a.classList.toggle('active', a.dataset.module === moduleKey);
   });
 
