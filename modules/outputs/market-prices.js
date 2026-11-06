@@ -351,7 +351,7 @@ async function _loadData() {
     // Try current season first, fall back to any season with a price for this commodity
     queries.push(
       dbSelect('budgets',
-        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&price=not.is.null&select=price,season&order=season.desc&limit=5'
+        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&or=(price.not.is.null,budgeted_price.not.is.null)&select=price,budgeted_price,season&order=season.desc&limit=5'
       ).catch(() => [])
     );
   }
@@ -360,9 +360,9 @@ async function _loadData() {
   _prices = results[0] || [];
   _contracts = results[1] || [];
   const budgets = results[2] || [];
-  const budgetsWithPrice = budgets.filter(b => b.price);
+  const budgetsWithPrice = budgets.filter(b => b.price || b.budgeted_price);
   _budgetPrice = budgetsWithPrice.length
-    ? budgetsWithPrice.reduce((s, b) => s + parseFloat(b.price), 0) / budgetsWithPrice.length
+    ? budgetsWithPrice.reduce((s, b) => s + parseFloat(b.price || b.budgeted_price), 0) / budgetsWithPrice.length
     : null;
 }
 
