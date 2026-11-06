@@ -360,10 +360,12 @@ async function _loadData() {
   _prices = results[0] || [];
   _contracts = results[1] || [];
   const budgets = results[2] || [];
+  console.log('[CFM] Budget rows fetched for commodity', _selectedCommodityId, ':', JSON.stringify(budgets));
   const budgetsWithPrice = budgets.filter(b => b.price || b.budgeted_price);
   _budgetPrice = budgetsWithPrice.length
     ? budgetsWithPrice.reduce((s, b) => s + parseFloat(b.price || b.budgeted_price), 0) / budgetsWithPrice.length
     : null;
+  console.log('[CFM] _budgetPrice resolved to:', _budgetPrice);
 }
 
 function _renderTable() {
