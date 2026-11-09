@@ -44,12 +44,11 @@ export async function mountMarketPrices(container) {
         return { commodity: c, hasData: false };
       }
 
-      const [prices, budgets] = await Promise.all([
-        farm ? dbSelect('market_prices', 'commodity_id=eq.' + c.id + '&or=(farm_id.eq.' + farm.id + ',farm_id.is.null)&select=id&limit=1').catch(() => []) : Promise.resolve([]),
-        farm ? dbSelect('budgets', 'farm_id=eq.' + farm.id + '&commodity_id=eq.' + c.id + '&season=eq.' + season + '&select=id&limit=1').catch(() => []) : Promise.resolve([]),
-      ]);
-      // Only show if this farm has a budget for this commodity this season
-      return { commodity: c, hasData: budgets.length > 0 || (prices.length > 0 && budgets.length > 0) };
+      const prices = await dbSelect('market_prices',
+        'commodity_id=eq.' + c.id + '&or=(farm_id.eq.' + (farm?.id || 'null') + ',farm_id.is.null)&select=id&limit=1'
+      ).catch(() => []);
+      // Show commodity if it has market prices (budget is optional — no budget = no budget line, but still show prices)
+      return { commodity: c, hasData: prices.length > 0 };
     } catch { return { commodity: c, hasData: false }; }
   }));
 
