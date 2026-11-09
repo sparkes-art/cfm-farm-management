@@ -1500,10 +1500,11 @@ async function _openPriceChart(farm, crop, region, resolvedGrade, commodityId, s
         `farm_id=eq.${farm.id}&season=eq.${season}&master_unit=neq.head&select=invoice_date,gross_amount,total_quality_adj,total_qty,forward_contract_id&order=invoice_date.asc`
       ).catch(() => []),
       isLivestock ? Promise.resolve([]) : dbSelect('budgets',
-        `farm_id=eq.${farm.id}&season=eq.${season}&commodity_id=eq.${commodityId}&select=price&limit=1`
+        `farm_id=eq.${farm.id}&season=eq.${season}&commodity_id=eq.${commodityId}&select=price,budgeted_price&limit=1`
       ).catch(() => []),
     ]);
-    const budgetPrice = budgets?.[0]?.price ? parseFloat(budgets[0].price) : null;
+    const budgetRow = budgets?.[0];
+    const budgetPrice = budgetRow ? parseFloat(budgetRow.price || budgetRow.budgeted_price) || null : null;
 
     loading.style.display = 'none';
     canvas.style.display = 'block';
