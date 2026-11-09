@@ -344,14 +344,13 @@ async function _loadData() {
   if (farm) {
     queries.push(
       dbSelect('forward_contracts',
-        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&select=*'
+        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&crop_year=eq.' + season + '&select=*'
       ).catch(() => [])
     );
-    // Fetch budget rows for this commodity — filter for price client-side
-    // (PostgREST OR with not.is.null can be unreliable; simpler to fetch all and filter)
+    // Fetch budget row for active season only
     queries.push(
       dbSelect('budgets',
-        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&select=price,budgeted_price,season&order=season.desc&limit=10'
+        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&season=eq.' + season + '&select=price,budgeted_price&limit=1'
       ).catch(() => [])
     );
   }
@@ -360,12 +359,8 @@ async function _loadData() {
   _prices = results[0] || [];
   _contracts = results[1] || [];
   const budgets = results[2] || [];
-  console.log('[CFM] Budget rows fetched for commodity', _selectedCommodityId, 'season', season, ':', JSON.stringify(budgets));
-  const budgetsWithPrice = budgets.filter(b => b.price || b.budgeted_price);
-  _budgetPrice = budgetsWithPrice.length
-    ? budgetsWithPrice.reduce((s, b) => s + parseFloat(b.price || b.budgeted_price), 0) / budgetsWithPrice.length
-    : null;
-  console.log('[CFM] _budgetPrice resolved to:', _budgetPrice);
+  const budgetRow = budgets[0];
+  _budgetPrice = budgetRow ? parseFloat(budgetRow.price || budgetRow.budgeted_price) || null : null;
 }
 
 function _renderTable() {
