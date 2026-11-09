@@ -348,10 +348,11 @@ async function _loadData() {
         'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&select=*'
       ).catch(() => [])
     );
-    // Try current season first, fall back to any season with a price for this commodity
+    // Fetch budget rows for this commodity — filter for price client-side
+    // (PostgREST OR with not.is.null can be unreliable; simpler to fetch all and filter)
     queries.push(
       dbSelect('budgets',
-        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&or=(price.not.is.null,budgeted_price.not.is.null)&select=price,budgeted_price,season&order=season.desc&limit=5'
+        'farm_id=eq.' + farm.id + '&commodity_id=eq.' + _selectedCommodityId + '&select=price,budgeted_price,season&order=season.desc&limit=10'
       ).catch(() => [])
     );
   }
@@ -360,7 +361,7 @@ async function _loadData() {
   _prices = results[0] || [];
   _contracts = results[1] || [];
   const budgets = results[2] || [];
-  console.log('[CFM] Budget rows fetched for commodity', _selectedCommodityId, ':', JSON.stringify(budgets));
+  console.log('[CFM] Budget rows fetched for commodity', _selectedCommodityId, 'season', season, ':', JSON.stringify(budgets));
   const budgetsWithPrice = budgets.filter(b => b.price || b.budgeted_price);
   _budgetPrice = budgetsWithPrice.length
     ? budgetsWithPrice.reduce((s, b) => s + parseFloat(b.price || b.budgeted_price), 0) / budgetsWithPrice.length
