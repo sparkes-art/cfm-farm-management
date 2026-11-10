@@ -236,33 +236,29 @@ async function _mountOverview(container) {
       // Track which region was actually used for the data
       const resolvedLsRegion = history.length && history[0].region ? history[0].region : name;
 
+      const lsChartData = window14.length > 1 ? window14.map(p=>({ d: p.price_date, v: parseFloat(p.price_per_unit) })).reverse() : [];
+      const lsChartId = 'lsc-' + name.replace(/[^a-z0-9]/gi,'');
+
       return [
-        '<div class="card" style="padding:12px 14px;margin-bottom:8px;cursor:pointer"',
-        ' data-expand-crop="' + name + '"',
-        ' data-expand-region="' + resolvedLsRegion + '"',
-        ' data-expand-grade=""',
-        ' data-expand-comid="' + (cattleComId || sheepComId || '') + '"',
-        ' data-expand-livestock="1">',
-        '<div style="display:flex;align-items:center;justify-content:space-between">',
-        '<div>',
-        '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px">',
-        '<div style="font-size:11px;font-weight:600;color:var(--ink)">'+name+'</div>',
-        '<div style="font-size:10px;color:var(--hint)">'+new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'})+' · '+sourceLabel+' · '+unit+'</div>',
+        '<div class="price-row-card" data-expand-crop="' + name + '" data-expand-region="' + resolvedLsRegion + '" data-expand-grade="" data-expand-comid="' + (cattleComId || sheepComId || '') + '" data-expand-livestock="1">',
+        '<div class="price-row-header" data-chart-id="' + lsChartId + '">',
+        '<div class="price-row-left">',
+        '<div class="price-row-name">' + name + '</div>',
+        '<div class="price-row-meta">' + new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) + ' · ' + sourceLabel + ' · ' + unit + '</div>',
         '</div>',
-        '<div style="display:flex;align-items:baseline;gap:5px">',
-        '<span style="font-size:22px;font-weight:700;color:var(--ink)">'+latest.toFixed(2)+'</span>',
-        '<span style="font-size:11px;color:var(--hint)">'+unit+'</span>',
-        '</div></div>',
-        '<div style="text-align:right;min-width:110px">',
-        '<div style="font-size:14px;color:var(--hint);margin-bottom:4px" title="View chart">⤢</div>',
+        '<div class="price-row-right">',
+        '<div class="price-row-value">' + latest.toFixed(2) + '<span class="price-row-unit">' + unit + '</span></div>',
         dayMove!=null
-          ? '<div style="font-size:12px;font-weight:600;color:'+moveColor+'">'+moveArrow+' '+Math.abs(dayMove).toFixed(2)+' <span style="font-size:10px;font-weight:400;color:'+moveColor+'">(24-hr '+fPct(dayMovePct)+')</span></div>'
-          : '<div style="font-size:11px;color:var(--hint)">—</div>',
-        avg14!=null
-          ? '<div style="font-size:10px;color:var(--hint);margin-top:3px">14-day avg: '+avg14.toFixed(2)+' <span style="color:'+avgColor+'">'+(vsAvg>=0?'▲':'▼')+fPct(vsAvgPct)+'</span></div>'
-          : '',
+          ? '<div class="price-row-move" style="color:'+moveColor+'">'+moveArrow+' '+Math.abs(dayMove).toFixed(2)+' <span class="price-row-move-pct">('+fPct(dayMovePct)+')</span></div>'
+          : '<div class="price-row-move" style="color:var(--hint)">—</div>',
         '</div>',
-        '</div></div>',
+        '<div class="price-row-chevron">›</div>',
+        '</div>',
+        '<div class="price-row-chart-panel" id="' + lsChartId + '" style="display:none">',
+        avg14!=null ? '<div class="price-chart-stats"><span>14-day avg <strong>'+avg14.toFixed(2)+'</strong></span><span style="color:'+avgColor+'">'+(vsAvg>=0?'▲':'▼')+fPct(vsAvgPct)+' vs avg</span></div>' : '',
+        lsChartData.length ? '<canvas class="price-chart-canvas" width="400" height="120"></canvas><script type="application/json" class="price-chart-data">' + JSON.stringify(lsChartData) + '</script>' : '',
+        '</div>',
+        '</div>',
       ].join('');
     }).join('');
 
@@ -337,34 +333,31 @@ async function _mountOverview(container) {
       const vsAvgPct = avg14 ? ((latest - avg14) / avg14 * 100) : null;
       const avgColor = vsAvg == null ? 'var(--hint)' : vsAvg >= 0 ? '#16a34a' : '#dc2626';
 
+      // Encode history for inline chart
+      const chartData = history.slice(0, 60).reverse().map(p => ({ d: p.price_date, v: parseFloat(p.price_per_unit) }));
+      const chartId = 'pgc-' + com.id + '-' + (resolvedGrade||'x').replace(/[^a-z0-9]/gi,'');
+
       return [
-        '<div class="card" style="padding:12px 14px;margin-bottom:8px;cursor:pointer"',
-        ' data-expand-crop="' + crop + '"',
-        ' data-expand-region="' + resolvedRegion + '"',
-        ' data-expand-grade="' + (resolvedGrade||'') + '"',
-        ' data-expand-comid="' + com.id + '">',
-        '<div style="display:flex;align-items:center;justify-content:space-between">',
-        // Left — name + price
-        '<div>',
-        '<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px">',
-        '<div style="font-size:11px;font-weight:600;color:var(--ink)">' + crop + '</div>',
-        '<div style="font-size:10px;color:var(--hint)">' + new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) + ' · ' + sourceLabel + (resolvedGrade ? ' · ' + resolvedGrade : '') + '</div>',
+        '<div class="price-row-card" data-expand-crop="' + crop + '" data-expand-region="' + resolvedRegion + '" data-expand-grade="' + (resolvedGrade||'') + '" data-expand-comid="' + com.id + '">',
+        // ── Collapsed header row ──
+        '<div class="price-row-header" data-chart-id="' + chartId + '">',
+        '<div class="price-row-left">',
+        '<div class="price-row-name">' + crop + (resolvedGrade ? '<span class="price-row-grade">' + resolvedGrade + '</span>' : '') + '</div>',
+        '<div class="price-row-meta">' + new Date(latestDate).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) + ' · ' + sourceLabel + '</div>',
         '</div>',
-        '<div style="display:flex;align-items:baseline;gap:5px">',
-        '<span style="font-size:22px;font-weight:700;color:var(--ink)">' + fC(latest) + '</span>',
-        '<span style="font-size:11px;color:var(--hint)">/' + displayUnit + '</span>',
-        '</div>',
-        '</div>',
-        // Right — expand icon + 24-hr + 14-day avg
-        '<div style="text-align:right;min-width:110px">',
-        '<div style="font-size:14px;color:var(--hint);margin-bottom:4px" title="View chart">⤢</div>',
+        '<div class="price-row-right">',
+        '<div class="price-row-value">' + fC(latest) + '<span class="price-row-unit">/' + displayUnit + '</span></div>',
         dayMove != null
-          ? '<div style="font-size:12px;font-weight:600;color:' + moveColor + '">' + moveArrow + ' ' + fC(Math.abs(dayMove)) + ' <span style="font-size:10px;font-weight:400;color:' + moveColor + '">(24-hr ' + fPct(dayMovePct) + ')</span></div>'
-          : '<div style="font-size:11px;color:var(--hint)">—</div>',
-        avg14 != null
-          ? '<div style="font-size:10px;color:var(--hint);margin-top:3px">14-day avg: ' + fC(avg14) + ' <span style="color:' + avgColor + '">' + (vsAvg >= 0 ? '▲' : '▼') + fPct(vsAvgPct) + '</span></div>'
-          : '',
+          ? '<div class="price-row-move" style="color:' + moveColor + '">' + moveArrow + ' ' + fC(Math.abs(dayMove)) + ' <span class="price-row-move-pct">(' + fPct(dayMovePct) + ')</span></div>'
+          : '<div class="price-row-move" style="color:var(--hint)">—</div>',
         '</div>',
+        '<div class="price-row-chevron">›</div>',
+        '</div>',
+        // ── Expandable chart panel ──
+        '<div class="price-row-chart-panel" id="' + chartId + '" style="display:none">',
+        avg14 != null ? '<div class="price-chart-stats"><span>14-day avg <strong>' + fC(avg14) + '</strong></span><span style="color:' + avgColor + '">' + (vsAvg>=0?'▲':'▼') + fPct(vsAvgPct) + ' vs avg</span></div>' : '',
+        '<canvas class="price-chart-canvas" width="400" height="120"></canvas>',
+        '<script type="application/json" class="price-chart-data">' + JSON.stringify(chartData) + '</script>',
         '</div>',
         '</div>',
       ].join('');
@@ -578,29 +571,50 @@ async function _mountOverview(container) {
         '</div>',
       ].join('');
     }).join('');
+    // ── Stat strip totals ─────────────────────────────────────
+    const totalBudRev = Object.values(comMap).reduce((s,c) => s + (c.budProd * c.budPrice), 0);
+    const totalContracted = Object.values(comMap).reduce((s,c) => s + c.contracts.reduce((cs,ct) => cs+(parseFloat(ct.quantity)||0)*(parseFloat(ct.price_per_unit)||0),0), 0);
+    const totalInvoiced = Object.values(comMap).reduce((s,c) => s + c.invoicedRev + c.invoicedQA, 0);
+    const totalUnsold = Object.values(comMap).filter(c=>!c.isLivestock).reduce((s,c) => {
+      const forecastTotal = c.isHarvestComplete ? c.harvestedProd : (c.fcstProd > 0 ? c.fcstProd : c.budProd);
+      const contractedQty = c.contracts.reduce((cs,ct)=>cs+(parseFloat(ct.quantity)||0),0);
+      return s + Math.max(0, forecastTotal - contractedQty);
+    }, 0);
+
     container.innerHTML = [
-      '<div style="display:grid;grid-template-columns:440px 1fr;gap:16px;align-items:start">',
+      // ── Stat strip ──
+      '<div class="dash-stat-strip">',
+      '<div class="dash-stat"><div class="dash-stat-label">Budget revenue</div><div class="dash-stat-value">' + fM(totalBudRev || null) + '</div></div>',
+      '<div class="dash-stat"><div class="dash-stat-label">Contracted value</div><div class="dash-stat-value blue">' + fM(totalContracted || null) + '</div></div>',
+      '<div class="dash-stat"><div class="dash-stat-label">Invoiced</div><div class="dash-stat-value green">' + fM(totalInvoiced || null) + '</div></div>',
+      '<div class="dash-stat"><div class="dash-stat-label">Season</div><div class="dash-stat-value">' + season + '</div></div>',
+      '</div>',
+
+      // ── Two-column body ──
+      '<div class="dash-body-grid">',
 
       // LEFT — Farm gate prices
-      '<div>',
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">',
-      '<h2 style="font-size:14px;font-weight:600;color:var(--ink)">Farm gate prices</h2>',
-      '<span style="font-size:11px;color:var(--hint)">' + farm.name + '</span>',
+      '<div class="dash-col">',
+      '<div class="dash-col-header">',
+      '<h2 class="dash-col-title">Farm gate prices</h2>',
+      '<span class="dash-col-meta">' + farm.name + '</span>',
       '</div>',
+      '<div class="price-rows">',
       (farmSites.length || lsIndicatorNames.length)
         ? (priceCards + lsCards)
-        : '<div class="card" style="padding:16px;color:var(--hint)">No prices configured — set up in Farm Settings.</div>',
+        : '<div class="card" style="padding:16px;color:var(--hint);font-size:13px">No prices configured — set up in Farm Settings.</div>',
+      '</div>',
       '</div>',
 
       // RIGHT — Commodity position
-      '<div>',
-      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">',
-      '<h2 style="font-size:14px;font-weight:600;color:var(--ink)">Commodity position</h2>',
-      '<span style="font-size:11px;color:var(--hint)">' + season + '</span>',
+      '<div class="dash-col">',
+      '<div class="dash-col-header">',
+      '<h2 class="dash-col-title">Commodity position</h2>',
+      '<span class="dash-col-meta">' + season + '</span>',
       '</div>',
       Object.keys(comMap).length
         ? comCards
-        : '<div class="card" style="padding:16px;color:var(--hint)">No budgets or contracts for this season.</div>',
+        : '<div class="card" style="padding:16px;color:var(--hint);font-size:13px">No budgets or contracts for this season.</div>',
       '</div>',
 
       '</div>',
@@ -615,11 +629,23 @@ async function _mountOverview(container) {
       });
     });
 
-    // Wire expand buttons on grain/cotton price cards
-    container.querySelectorAll('[data-expand-crop]').forEach(card => {
-      card.addEventListener('click', () => {
-        const { expandCrop: crop, expandRegion: region, expandGrade: grade, expandComid: comId, expandLivestock } = card.dataset;
-        if (region && comId) _openPriceChart(farm, crop, region, grade, comId, season, !!expandLivestock);
+    // Wire inline price chart expand/collapse
+    container.querySelectorAll('.price-row-header').forEach(header => {
+      header.addEventListener('click', () => {
+        const chartId = header.dataset.chartId;
+        const panel = document.getElementById(chartId);
+        if (!panel) return;
+        const isOpen = panel.style.display !== 'none';
+        // Close all others
+        container.querySelectorAll('.price-row-chart-panel').forEach(p => { p.style.display = 'none'; });
+        container.querySelectorAll('.price-row-card').forEach(c => c.classList.remove('expanded'));
+        container.querySelectorAll('.price-row-chevron').forEach(c => { c.textContent = '›'; });
+        if (!isOpen) {
+          panel.style.display = 'block';
+          header.closest('.price-row-card').classList.add('expanded');
+          header.querySelector('.price-row-chevron').textContent = '›';
+          _initInlineChart(panel);
+        }
       });
     });
 
@@ -629,7 +655,81 @@ async function _mountOverview(container) {
   }
 }
 
+// ── Inline price chart ────────────────────────────────────────
+function _initInlineChart(panel) {
+  const canvas = panel.querySelector('.price-chart-canvas');
+  const dataEl = panel.querySelector('.price-chart-data');
+  if (!canvas || !dataEl) return;
+  if (canvas._chartInstance) { canvas._chartInstance.destroy(); canvas._chartInstance = null; }
 
+  let data;
+  try { data = JSON.parse(dataEl.textContent); } catch(e) { return; }
+  if (!data || !data.length) return;
+
+  const labels = data.map(p => {
+    const d = new Date(p.d);
+    return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' });
+  });
+  const values = data.map(p => p.v);
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const pad = (maxV - minV) * 0.1 || 1;
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+    || (!document.documentElement.getAttribute('data-theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const lineColor = '#6a8faf';
+  const fillColor = isDark ? 'rgba(106,143,175,0.12)' : 'rgba(106,143,175,0.08)';
+  const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+  const textColor = isDark ? 'rgba(255,255,255,0.4)' : '#9aaabb';
+
+  const loadChart = () => {
+    if (!window.Chart) return;
+    canvas._chartInstance = new window.Chart(canvas, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          borderColor: lineColor,
+          borderWidth: 1.5,
+          backgroundColor: fillColor,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          pointHoverBackgroundColor: lineColor,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => ' $' + ctx.parsed.y.toFixed(2) },
+          backgroundColor: isDark ? '#1e2d3d' : '#fff',
+          borderColor: isDark ? '#28404f' : '#dce4eb',
+          borderWidth: 1,
+          titleColor: textColor,
+          bodyColor: isDark ? '#fff' : '#111820',
+          padding: 8,
+        }},
+        scales: {
+          x: { ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 6 }, grid: { color: gridColor }, border: { display: false } },
+          y: { min: minV - pad, max: maxV + pad, ticks: { color: textColor, font: { size: 10 }, callback: v => '$' + v.toFixed(0) }, grid: { color: gridColor }, border: { display: false } },
+        },
+        animation: { duration: 250 },
+      },
+    });
+  };
+
+  if (window.Chart) {
+    loadChart();
+  } else {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+    s.onload = loadChart;
+    document.head.appendChild(s);
+  }
+}
 
 
 

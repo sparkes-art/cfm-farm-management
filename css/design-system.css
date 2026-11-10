@@ -1,27 +1,27 @@
-/* CFM Farm Management System — Design System v2
-   Theme: Slate Professional
-   Palette: Dark navy topbar · light grey sidebar · white content · blue accent
+/* CFM Farm Management System — Design System v3
+   Theme: Fieldbook Carbon
+   Palette: Deep navy topbar · steel sidebar · white content · CFM blue-grey accent
 */
 
 /* ── Google Fonts ─────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&display=swap');
 
 /* ── Design tokens ───────────────────────────────────────────── */
 :root {
-  /* Navy — topbar */
-  --navy:          #1a2535;
-  --navy-border:   #253345;
+  /* Topbar — deep navy */
+  --navy:          #1e2d3d;
+  --navy-border:   #28404f;
 
-  /* Slate — sidebar */
-  --slate:         #f0f2f5;
-  --slate-border:  #e0e4e8;
-  --slate-hover:   #e8ebef;
+  /* Sidebar — mid steel */
+  --slate:         #f0f4f7;
+  --slate-border:  #dce4eb;
+  --slate-hover:   #e6edf3;
 
-  /* Blue — primary accent (matches CFM logo) */
-  --blue:          #1e6fa8;
-  --blue-light:    #e4f0fa;
-  --blue-mid:      #1a5f92;
-  --blue-text:     #1e5a8a;
+  /* Blue — CFM steel blue-grey accent */
+  --blue:          #6a8faf;
+  --blue-light:    #e8f0f7;
+  --blue-mid:      #5a7d9e;
+  --blue-text:     #4a6d8e;
 
   /* Green — positive / paid */
   --green:         #1a7a4a;
@@ -40,14 +40,14 @@
 
   /* Neutrals */
   --white:         #ffffff;
-  --page-bg:       #f5f6f8;
+  --page-bg:       #f0f4f7;
   --surface:       #ffffff;
-  --border:        #e4e8ec;
-  --border-light:  #f0f2f5;
-  --ink:           #111827;
-  --ink-mid:       #374151;
-  --muted:         #6b7280;
-  --hint:          #9ca3af;
+  --border:        #dce4eb;
+  --border-light:  #eaf0f5;
+  --ink:           #111820;
+  --ink-mid:       #2d3d4f;
+  --muted:         #6b7a87;
+  --hint:          #9aaabb;
 
   /* Status */
   --status-draft:    #9ca3af;
@@ -56,8 +56,9 @@
   --status-void:     #c0392b;
 
   /* Typography */
-  --font-ui:    'Inter', system-ui, -apple-system, sans-serif;
-  --font-data:  var(--font-ui);
+  --font-ui:    'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Instrument Serif', Georgia, serif;
+  --font-data:  'DM Mono', 'IBM Plex Mono', monospace;
   --font-data-features: 'tnum' 1, 'kern' 1;
 
   /* Type scale */
@@ -121,21 +122,24 @@ body {
 }
 
 #topbar .cfm-logo {
-  height: 32px;
+  height: 34px;
   width: auto;
   display: block;
   flex-shrink: 0;
+  /* Tint the icon to a light CFM blue-white */
+  filter: brightness(0) invert(1) opacity(0.85) sepia(1) saturate(1.6) hue-rotate(190deg) brightness(1.3);
 }
 #topbar .cfm-wordmark {
   font-size: var(--text-sm);
   font-weight: 600;
-  color: #ffffff;
+  color: rgba(255,255,255,0.9);
   white-space: nowrap;
   letter-spacing: 0.01em;
   flex-shrink: 0;
+  font-family: var(--font-ui);
 }
 #topbar .cfm-wordmark span {
-  color: rgba(255,255,255,0.45);
+  color: rgba(255,255,255,0.4);
   font-weight: 400;
 }
 
@@ -167,7 +171,7 @@ body {
   background-color: rgba(255,255,255,0.18);
 }
 #farm-selector select option {
-  background: #1a2535;
+  background: #1e2d3d;
   color: #ffffff;
   font-weight: 400;
 }
@@ -205,52 +209,53 @@ body {
 #sidebar {
   grid-column: 1;
   grid-row: 2;
-  background: var(--slate);
-  border-right: 1px solid var(--slate-border);
+  background: #2b3f52;
+  border-right: 1px solid #233347;
   overflow-y: auto;
-  padding: 12px 0;
+  padding: 14px 0;
 }
 
 #sidebar nav a {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   padding: 8px 16px;
-  color: var(--muted);
+  color: rgba(255,255,255,0.55);
   text-decoration: none;
   font-size: var(--text-sm);
-  font-weight: 400;
+  font-weight: 500;
   border-left: 2px solid transparent;
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   margin-right: 8px;
   transition: color var(--t-fast), background var(--t-fast), border-color var(--t-fast);
+  letter-spacing: 0.01em;
 }
 #sidebar nav a .nav-icon {
   width: 16px;
   text-align: center;
   flex-shrink: 0;
-  font-size: 15px;
-  opacity: 0.7;
+  font-size: 14px;
+  opacity: 0.65;
 }
 #sidebar nav a:hover {
-  color: var(--ink-mid);
-  background: var(--slate-hover);
+  color: rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.06);
 }
 #sidebar nav a.active {
-  color: var(--blue);
-  background: var(--blue-light);
+  color: #ffffff;
+  background: rgba(106,143,175,0.2);
   border-left-color: var(--blue);
-  font-weight: 500;
+  font-weight: 600;
 }
 #sidebar nav a.active .nav-icon { opacity: 1; }
 
 .nav-section-label {
   font-size: 10px;
-  color: var(--hint);
+  color: rgba(255,255,255,0.3);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 600;
-  padding: 10px 16px 3px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  padding: 12px 16px 4px;
 }
 
 /* ── Main content ────────────────────────────────────────────── */
@@ -762,7 +767,7 @@ body {
     right: 0;
     height: var(--mob-nav-h);
     padding-bottom: env(safe-area-inset-bottom, 0px);
-    background: #1a2535;
+    background: #1e2d3d;
     border-top: 1px solid rgba(255,255,255,0.1);
     z-index: 200;
     align-items: stretch;
@@ -817,7 +822,7 @@ body {
     bottom: var(--mob-nav-h);
     left: 0;
     right: 0;
-    background: #1e2f42;
+    background: #2b3f52;
     border-top: 1px solid rgba(255,255,255,0.12);
     border-radius: 12px 12px 0 0;
     z-index: 199;
@@ -1162,3 +1167,216 @@ body {
 tr.mob-row:hover,
 tr.data-row:hover,
 .hover-row:hover { background: var(--blue-light) !important; }
+
+/* ── Dashboard — Fieldbook Carbon layout ─────────────────── */
+
+.dash-stat-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.dash-stat {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+}
+
+.dash-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.dash-stat-value {
+  font-family: var(--font-data);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.dash-stat-value.blue  { color: var(--blue); }
+.dash-stat-value.green { color: #16a34a; }
+
+.dash-body-grid {
+  display: grid;
+  grid-template-columns: 400px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.dash-col-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.dash-col-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dash-col-meta {
+  font-size: 11px;
+  color: var(--hint);
+}
+
+/* ── Farm gate price rows ──────────────────────────────────── */
+
+.price-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.price-row-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 120ms ease;
+}
+
+.price-row-card.expanded {
+  border-color: var(--blue);
+}
+
+.price-row-header {
+  display: grid;
+  grid-template-columns: 1fr auto 20px;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.price-row-header:hover {
+  background: var(--slate-hover);
+}
+
+.price-row-left {
+  min-width: 0;
+}
+
+.price-row-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.price-row-grade {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--blue-text);
+  background: var(--blue-light);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+.price-row-meta {
+  font-size: 10px;
+  color: var(--hint);
+  margin-top: 2px;
+}
+
+.price-row-right {
+  text-align: right;
+}
+
+.price-row-value {
+  font-family: var(--font-data);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.price-row-unit {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--hint);
+  margin-left: 2px;
+}
+
+.price-row-move {
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.price-row-move-pct {
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.price-row-chevron {
+  font-size: 16px;
+  color: var(--hint);
+  transition: transform 150ms ease;
+  line-height: 1;
+}
+
+.price-row-card.expanded .price-row-chevron {
+  transform: rotate(90deg);
+}
+
+.price-row-chart-panel {
+  border-top: 1px solid var(--border-light);
+  padding: 12px 14px 14px;
+  background: var(--slate);
+}
+
+.price-chart-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--hint);
+  margin-bottom: 10px;
+}
+
+.price-chart-stats strong {
+  color: var(--ink-mid);
+}
+
+.price-chart-canvas {
+  width: 100% !important;
+  height: 110px !important;
+  display: block;
+}
+
+/* ── Responsive dashboard ──────────────────────────────────── */
+@media (max-width: 860px) {
+  .dash-stat-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .dash-body-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .dash-stat-strip {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .dash-stat {
+    padding: 10px 12px;
+  }
+  .dash-stat-value {
+    font-size: 16px;
+  }
+}
