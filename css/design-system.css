@@ -1380,3 +1380,138 @@ tr.data-row:hover,
     font-size: 16px;
   }
 }
+
+/* ── Commodity position cards ────────────────────────────── */
+
+.com-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.com-card:hover {
+  border-color: var(--blue);
+  box-shadow: 0 2px 8px rgba(106,143,175,0.12);
+}
+
+.com-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.com-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.com-card-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.com-card-stage {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.com-card-production {
+  font-family: var(--font-data);
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.com-card-unit {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--hint);
+}
+
+.com-card-metrics {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.com-metric {
+  min-width: 60px;
+}
+
+.com-metric-value {
+  font-family: var(--font-data);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.com-metric-label {
+  font-size: 10px;
+  color: var(--hint);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+.com-card-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.com-card-bar-track {
+  flex: 1;
+  height: 5px;
+  background: var(--border-light);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.com-card-bar-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 400ms ease;
+}
+
+.com-card-bar-harvest {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: rgba(217,119,6,0.3);
+  border-radius: 3px;
+}
+
+.com-card-bar-label {
+  font-size: 10px;
+  color: var(--hint);
+  white-space: nowrap;
+}
+
+.com-card-detail {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.com-card-detail span {
+  font-size: 10px;
+  color: var(--hint);
+}

@@ -496,76 +496,87 @@ async function _mountOverview(container) {
 
       const stageColor = stage === 'Complete' ? '#16a34a' : stage === 'In harvest' ? '#d97706' : 'var(--hint)';
 
+      // Progress bar: contracted vs forecast
+      const contractPct = forecastTotal ? Math.min(100, (contractedQty / forecastTotal) * 100) : 0;
+      const harvestBarPct = com.budProd ? Math.min(100, (com.harvestedProd / com.budProd) * 100) : 0;
+
       return [
-        '<div class="card" style="padding:10px 12px;margin-bottom:6px;cursor:pointer"',
-        ' data-pos-commodity="' + com.name + '"',
-        ' data-pos-comid="' + (com.commodity_id||'') + '">',
+        '<div class="com-card" data-pos-commodity="' + com.name + '" data-pos-comid="' + (com.commodity_id||'') + '">',
 
-        // Row 1: name + key metrics + expand
-        '<div style="display:flex;align-items:center;justify-content:space-between">',
-
-        // Left: name + stage + production (big)
-        '<div style="min-width:140px">',
-        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">',
-        '<span style="font-size:12px;font-weight:700;color:var(--ink)">' + com.name + '</span>',
-        '<span style="font-size:9px;color:' + stageColor + ';font-weight:600">' + stage + '</span>',
+        // ── Header row: name + stage badge + production ──
+        '<div class="com-card-top">',
+        '<div class="com-card-name-row">',
+        '<span class="com-card-name">' + com.name + '</span>',
+        '<span class="com-card-stage" style="color:' + stageColor + '">' + stage + '</span>',
         '</div>',
-        forecastTotal ? '<div style="font-size:20px;font-weight:700;color:var(--ink);line-height:1">' + fN(forecastTotal) + ' <span style="font-size:11px;font-weight:400;color:var(--hint)">' + com.unit + '</span></div>' : '',
+        forecastTotal ? '<div class="com-card-production">' + fN(forecastTotal) + '<span class="com-card-unit"> ' + com.unit + '</span></div>' : '',
         '</div>',
 
-        // Middle: key metrics
-        '<div style="display:flex;align-items:center;gap:16px;flex:1;justify-content:center">',
+        // ── Key metrics row ──
+        '<div class="com-card-metrics">',
 
         !com.isLivestock && soldPct != null ? [
-          '<div style="text-align:center">',
-          '<div style="font-size:16px;font-weight:700;color:' + soldColor + '">' + Math.round(soldPct) + '%</div>',
-          '<div style="font-size:9px;color:var(--hint)">fwd. sold</div>',
+          '<div class="com-metric">',
+          '<div class="com-metric-value" style="color:' + soldColor + '">' + Math.round(soldPct) + '%</div>',
+          '<div class="com-metric-label">fwd. sold</div>',
           '</div>',
         ].join('') : '',
 
         !com.isLivestock && avgContractPrice ? [
-          '<div style="text-align:center">',
-          '<div style="font-size:16px;font-weight:700;color:var(--ink)">' + fC(avgContractPrice) + '</div>',
-          '<div style="font-size:9px;color:var(--hint)">avg contract</div>',
+          '<div class="com-metric">',
+          '<div class="com-metric-value">' + fC(avgContractPrice) + '</div>',
+          '<div class="com-metric-label">avg contract</div>',
           '</div>',
         ].join('') : '',
 
         !com.isLivestock && priceVar != null ? [
-          '<div style="text-align:center">',
-          '<div style="font-size:16px;font-weight:700;color:' + priceVarColor + '">' + (priceVar>=0?'▲':'▼') + fC(Math.abs(priceVar)) + '</div>',
-          '<div style="font-size:9px;color:var(--hint)">vs budget</div>',
+          '<div class="com-metric">',
+          '<div class="com-metric-value" style="color:' + priceVarColor + '">' + (priceVar>=0?'▲':'▼') + fC(Math.abs(priceVar)) + '</div>',
+          '<div class="com-metric-label">vs budget</div>',
           '</div>',
         ].join('') : '',
 
         invoicedTotal ? [
-          '<div style="text-align:center">',
-          '<div style="font-size:16px;font-weight:700;color:#16a34a">' + fM(invoicedTotal) + '</div>',
-          '<div style="font-size:9px;color:var(--hint)">invoiced</div>',
+          '<div class="com-metric">',
+          '<div class="com-metric-value" style="color:#16a34a">' + fM(invoicedTotal) + '</div>',
+          '<div class="com-metric-label">invoiced</div>',
           '</div>',
         ].join('') : '',
 
-        // Unsold — key figure for managers
         !com.isLivestock && forecastTotal ? [
-          '<div style="text-align:center">',
-          '<div style="font-size:16px;font-weight:700;color:' + (forecastTotal - contractedQty > 0 ? '#d97706' : '#16a34a') + '">' + fN(Math.max(0, forecastTotal - contractedQty)) + ' ' + com.unit + '</div>',
-          '<div style="font-size:9px;color:var(--hint)">unsold</div>',
+          '<div class="com-metric">',
+          '<div class="com-metric-value" style="color:' + (forecastTotal - contractedQty > 0 ? '#d97706' : '#16a34a') + '">' + fN(Math.max(0, forecastTotal - contractedQty)) + ' ' + com.unit + '</div>',
+          '<div class="com-metric-label">unsold</div>',
+          '</div>',
+        ].join('') : '',
+
+        com.isLivestock && com.invoicedQty ? [
+          '<div class="com-metric">',
+          '<div class="com-metric-value">' + fN(com.invoicedQty) + ' head</div>',
+          '<div class="com-metric-label">' + (com.invoicedQty ? fC(invoicedTotal/com.invoicedQty) + '/head' : '') + '</div>',
           '</div>',
         ].join('') : '',
 
         '</div>',
 
-        // Right: expand
-        '<div style="font-size:14px;color:var(--hint);padding-left:8px" title="View detail">⤢</div>',
-        '</div>',
+        // ── Progress bar: contracted vs forecast ──
+        !com.isLivestock && forecastTotal ? [
+          '<div class="com-card-bar-wrap">',
+          '<div class="com-card-bar-track">',
+          '<div class="com-card-bar-fill" style="width:' + contractPct + '%;background:' + (soldPct >= 100 ? '#16a34a' : 'var(--blue)') + '"></div>',
+          harvestBarPct > 0 && !com.isHarvestComplete ? '<div class="com-card-bar-harvest" style="width:' + harvestBarPct + '%"></div>' : '',
+          '</div>',
+          '<span class="com-card-bar-label">' + Math.round(contractPct) + '% contracted</span>',
+          '</div>',
+        ].join('') : '',
 
-        // Row 2: secondary figures in muted smaller text
-        '<div style="display:flex;align-items:center;gap:16px;margin-top:6px;padding-top:6px;border-top:0.5px solid var(--border-light);flex-wrap:wrap">',
-        !com.isLivestock && com.budPrice ? '<span style="font-size:10px;color:var(--hint)">Budget ' + fC(com.budPrice) + '/' + com.unit + '</span>' : '',
-        !com.isLivestock && hasForecast && com.fcstProd !== com.budProd ? '<span style="font-size:10px;color:var(--hint)">Forecast ' + fN(com.fcstProd) + ' ' + com.unit + '</span>' : '',
-        com.harvestedProd > 0 && !com.isHarvestComplete ? '<span style="font-size:10px;color:var(--hint)">Harvested ' + fN(com.harvestedProd) + ' ' + com.unit + ' (' + Math.round(harvestPct) + '%)</span>' : '',
-        !com.isLivestock && contractedQty ? '<span style="font-size:10px;color:var(--hint)">Contracted ' + fN(contractedQty) + ' ' + com.unit + '</span>' : '',
-        com.invoicedQty ? '<span style="font-size:10px;color:var(--hint)">' + fN(com.invoicedQty) + ' ' + com.unit + ' paid' + (qaPerUnit ? ' · QA ' + (qaPerUnit>=0?'+':'') + fC(qaPerUnit) + '/' + com.unit : '') + '</span>' : '',
-        com.isLivestock && com.invoicedQty ? '<span style="font-size:10px;color:var(--hint)">' + fN(com.invoicedQty) + ' head · ' + (com.invoicedQty ? fC(invoicedTotal/com.invoicedQty) + '/head' : '') + '</span>' : '',
+        // ── Secondary detail row ──
+        '<div class="com-card-detail">',
+        !com.isLivestock && com.budPrice ? '<span>Bud ' + fC(com.budPrice) + '/' + com.unit + '</span>' : '',
+        !com.isLivestock && hasForecast && com.fcstProd !== com.budProd ? '<span>Fcst ' + fN(com.fcstProd) + ' ' + com.unit + '</span>' : '',
+        com.harvestedProd > 0 && !com.isHarvestComplete ? '<span>Hvst ' + fN(com.harvestedProd) + ' ' + com.unit + ' (' + Math.round(harvestPct) + '%)</span>' : '',
+        !com.isLivestock && contractedQty ? '<span>Ctd ' + fN(contractedQty) + ' ' + com.unit + '</span>' : '',
+        com.invoicedQty && !com.isLivestock ? '<span>' + fN(com.invoicedQty) + ' ' + com.unit + ' paid' + (qaPerUnit ? ' · QA ' + (qaPerUnit>=0?'+':'') + fC(qaPerUnit) + '/' + com.unit : '') + '</span>' : '',
         '</div>',
 
         '</div>',
@@ -582,14 +593,6 @@ async function _mountOverview(container) {
     }, 0);
 
     container.innerHTML = [
-      // ── Stat strip ──
-      '<div class="dash-stat-strip">',
-      '<div class="dash-stat"><div class="dash-stat-label">Budget revenue</div><div class="dash-stat-value">' + fM(totalBudRev || null) + '</div></div>',
-      '<div class="dash-stat"><div class="dash-stat-label">Contracted value</div><div class="dash-stat-value blue">' + fM(totalContracted || null) + '</div></div>',
-      '<div class="dash-stat"><div class="dash-stat-label">Invoiced</div><div class="dash-stat-value green">' + fM(totalInvoiced || null) + '</div></div>',
-      '<div class="dash-stat"><div class="dash-stat-label">Season</div><div class="dash-stat-value">' + season + '</div></div>',
-      '</div>',
-
       // ── Two-column body ──
       '<div class="dash-body-grid">',
 
