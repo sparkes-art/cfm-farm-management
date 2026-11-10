@@ -462,7 +462,16 @@ async function _mountOverview(container) {
       });
     }
 
-    const comCards = Object.values(comMap).map(com => {
+    const comCards = Object.values(comMap).filter(com => {
+      // Only show commodities with something real to display — contracts, invoices, or actual harvest
+      const hasContracts = com.contracts.length > 0;
+      const hasInvoices = com.invoicedQty > 0;
+      const hasHarvest = com.harvestedProd > 0;
+      const hasBudgetPrice = com.budPrice > 0;
+      const hasBudgetProd = com.budProd > 0;
+      // Must have at least: a price+production budget (actual crop), or contracts/invoices/harvest
+      return (hasBudgetProd && hasBudgetPrice) || hasContracts || hasInvoices || hasHarvest || com.isLivestock;
+    }).map(com => {
       const contractedQty = com.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0),0);
       const contractedVal = com.contracts.reduce((s,c)=>s+(parseFloat(c.quantity)||0)*(parseFloat(c.price_per_unit)||0),0);
       const avgContractPrice = contractedQty ? contractedVal/contractedQty : null;
