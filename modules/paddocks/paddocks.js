@@ -16,6 +16,22 @@ const PADDOCK_TYPES = [
   'Permanent Crop',
 ];
 
+// Colour palette for each type — used in summary tiles and row badges
+const TYPE_COLOURS = {
+  'Pasture':                    { bg: '#d1fae5', text: '#065f46', dot: '#10b981' },
+  'Grazing/Bush':               { bg: '#dcfce7', text: '#14532d', dot: '#22c55e' },
+  'Dryland':                    { bg: '#fef9c3', text: '#713f12', dot: '#eab308' },
+  'Irrigated - Overhead Pivot': { bg: '#dbeafe', text: '#1e3a8a', dot: '#3b82f6' },
+  'Irrigated - Overhead Lateral':{ bg: '#e0f2fe', text: '#0c4a6e', dot: '#0ea5e9' },
+  'Irrigated - Furrow':         { bg: '#ede9fe', text: '#3b0764', dot: '#8b5cf6' },
+  'Permanent Crop':             { bg: '#ffe4e6', text: '#881337', dot: '#f43f5e' },
+};
+const CUSTOM_COLOUR = { bg: '#f3f4f6', text: '#374151', dot: '#9ca3af' };
+
+function _typeColour(type) {
+  return TYPE_COLOURS[type] || CUSTOM_COLOUR;
+}
+
 let _container    = null;
 let _paddocks     = [];
 let _saving       = new Set();
@@ -73,16 +89,18 @@ function _areaSummaryHTML(types) {
   }).filter(x => x.ha > 0);
 
   return `
-    <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)">
+    <div id="pk-area-summary" style="display:flex;align-items:center;gap:0;flex-wrap:wrap;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)">
       <div style="padding:8px 14px;border-right:1px solid var(--border);flex-shrink:0">
         <div style="font-size:0.68rem;color:var(--hint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px">Total area</div>
         <div style="font-size:0.95rem;font-weight:600;color:var(--ink)">${fmt(totalHa)}</div>
       </div>
-      ${typeStats.map(({ t, ha }) => `
-        <div style="padding:8px 14px;border-right:1px solid var(--border);flex-shrink:0">
-          <div style="font-size:0.68rem;color:var(--hint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px">${_esc(t)}</div>
-          <div style="font-size:0.95rem;font-weight:600;color:var(--ink)">${fmt(ha)}</div>
-        </div>`).join('')}
+      ${typeStats.map(({ t, ha }) => {
+        const c = _typeColour(t);
+        return `<div style="padding:8px 14px;border-right:1px solid var(--border);flex-shrink:0;background:${c.bg}">
+          <div style="font-size:0.68rem;color:${c.text};text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px;opacity:0.75">${_esc(t)}</div>
+          <div style="font-size:0.95rem;font-weight:600;color:${c.text}">${fmt(ha)}</div>
+        </div>`;
+      }).join('')}
     </div>`;
 }
 
@@ -186,7 +204,8 @@ function _rowHTML(p) {
           data-field="map_area" data-id="${p.id}">
       </td>
       <td>
-        <div style="display:flex;gap:4px;align-items:center">
+        <div style="display:flex;gap:6px;align-items:center">
+          <span class="pk-type-dot" style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${_typeColour(p.type).dot}"></span>
           <select class="pk-cell-select pk-type-select" data-field="type" data-id="${p.id}" style="flex:1;min-width:0">
             ${typeOpts}
           </select>
@@ -316,8 +335,14 @@ async function _saveField(id, field, rawValue) {
       const btn = _container.querySelector(`.pk-delete-btn[data-id="${id}"]`);
       if (btn) btn.dataset.name = value;
     }
-    // If type changed to/from custom, refresh filter chips counts
-    if (field === 'type') _refreshFilterCounts();
+    // Update dot colour when type changes
+    if (field === 'type') {
+      const dot = _container.querySelector(`tr[data-id="${id}"] .pk-type-dot`);
+      if (dot) dot.style.background = _typeColour(value).dot;
+      _refreshFilterCounts(); // also calls _refreshSummary
+    }
+    // Refresh summary totals when area changes
+    if (field === 'map_area') _refreshSummary();
     _setIndicator(id, '✓', 1400);
   } catch (err) {
     toast('Save failed — ' + (err.message || 'error'), 'error');
@@ -336,14 +361,26 @@ function _setIndicator(id, text, clearAfterMs = 0) {
 }
 
 function _refreshFilterCounts() {
-  const types = _allTypes();
-  // Update existing chip counts; add missing chips; remove stale chips
   _container.querySelectorAll('.pk-filter-btn').forEach(btn => {
     const f     = btn.dataset.filter;
     const count = f === 'All' ? _paddocks.length : _paddocks.filter(p => p.type === f).length;
     const span  = btn.querySelector('.pk-filter-count');
     if (span) span.textContent = count;
   });
+  _refreshSummary();
+}
+
+function _refreshSummary() {
+  const el = _container.querySelector('#pk-area-summary');
+  if (!el) return;
+  const types   = _allTypes();
+  const newHTML = _areaSummaryHTML(types);
+  if (!newHTML) { el.style.display = 'none'; return; }
+  // Replace inner content by re-rendering into a temp element
+  const tmp = document.createElement('div');
+  tmp.innerHTML = newHTML;
+  const fresh = tmp.firstElementChild;
+  if (fresh) el.replaceWith(fresh);
 }
 
 // ── Add new row ──────────────────────────────────────────────────────────────
