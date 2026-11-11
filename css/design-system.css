@@ -1515,3 +1515,371 @@ tr.data-row:hover,
   font-size: 10px;
   color: var(--hint);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   AGRONOMY MODULE — Paddock board, detail, entry form
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Summary strip ─────────────────────────────────────────── */
+.agro-summary-strip {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.agro-summary-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 16px;
+  min-width: 110px;
+  text-align: center;
+}
+.agro-summary-val {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--fg);
+  font-family: 'DM Mono', monospace;
+  line-height: 1.1;
+}
+.agro-summary-val.text-danger { color: var(--danger, #dc2626); }
+.agro-summary-lbl {
+  font-size: 0.72rem;
+  color: var(--hint);
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Board grid ────────────────────────────────────────────── */
+.agro-board-section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--hint);
+  margin-bottom: 10px;
+}
+.agro-board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.agro-board-grid--fallow {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+/* ── Paddock cards ─────────────────────────────────────────── */
+.agro-paddock-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.agro-paddock-card:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+  border-color: var(--blue);
+}
+.agro-paddock-card--fallow {
+  opacity: 0.75;
+  background: var(--bg);
+}
+.agro-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.agro-card-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--fg);
+}
+.agro-card-commodity {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--blue);
+}
+.agro-card-variety {
+  font-size: 0.75rem;
+  color: var(--hint);
+  margin-top: 1px;
+}
+.agro-card-metrics {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 10px 0 8px;
+}
+.agro-card-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.agro-metric-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.1;
+}
+.agro-metric-lbl {
+  font-size: 0.65rem;
+  color: var(--hint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.agro-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.agro-card-visits {
+  font-size: 0.72rem;
+  color: var(--hint);
+}
+.agro-card-last {
+  font-size: 0.72rem;
+  color: var(--hint);
+  font-family: 'DM Mono', monospace;
+}
+
+/* ── Paddock detail ────────────────────────────────────────── */
+.agro-detail-header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.agro-detail-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--fg);
+  margin: 0;
+}
+.agro-detail-meta {
+  font-size: 0.85rem;
+  color: var(--hint);
+}
+.agro-detail-section-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--hint);
+  margin-bottom: 10px;
+}
+
+/* ── Progress sparkline strip ──────────────────────────────── */
+.agro-progress-strip {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+}
+.agro-progress-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.agro-progress-label {
+  font-size: 0.72rem;
+  color: var(--hint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.agro-progress-range {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--hint);
+}
+
+/* ── Visit timeline ────────────────────────────────────────── */
+.agro-visit-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.agro-timeline-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: 130px 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+.agro-timeline-card--latest {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(106,143,175,0.12);
+}
+.agro-timeline-date {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--fg);
+  font-weight: 600;
+}
+.agro-timeline-agronomist {
+  font-size: 0.75rem;
+  color: var(--hint);
+  margin-top: 3px;
+  font-family: inherit;
+  font-weight: normal;
+}
+.agro-timeline-metrics {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.agro-tl-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.agro-tl-val {
+  font-family: 'DM Mono', monospace;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--fg);
+}
+.agro-tl-lbl {
+  font-size: 0.65rem;
+  color: var(--hint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.agro-timeline-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+.agro-input-block {
+  font-size: 0.8rem;
+  color: var(--fg);
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.agro-input-label {
+  font-weight: 600;
+  min-width: 70px;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+}
+.agro-input-text { color: var(--hint); }
+.agro-timeline-comments {
+  font-size: 0.82rem;
+  color: var(--hint);
+  margin-top: 4px;
+  font-style: italic;
+}
+.agro-timeline-upcoming {
+  font-size: 0.82rem;
+  color: var(--fg);
+  margin-top: 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.agro-timeline-n {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+.agro-n-label {
+  color: var(--hint);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+.agro-n-val {
+  font-family: 'DM Mono', monospace;
+  font-weight: 600;
+  color: var(--fg);
+}
+.agro-timeline-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+}
+
+/* ── Log Visit entry form ──────────────────────────────────── */
+.agro-entry-paddock-block {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.agro-entry-paddock-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.agro-entry-crop-fields {
+  /* shown/hidden via JS based on commodity */
+}
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.form-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--fg);
+}
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--fg);
+}
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* responsive collapse on narrow screens */
+@media (max-width: 700px) {
+  .agro-timeline-card {
+    grid-template-columns: 1fr;
+  }
+  .form-grid-3, .form-grid-4 { grid-template-columns: 1fr 1fr; }
+  .agro-board-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 480px) {
+  .form-grid-3, .form-grid-4 { grid-template-columns: 1fr; }
+  .agro-board-grid { grid-template-columns: 1fr; }
+}

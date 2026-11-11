@@ -1,49 +1,36 @@
 // modules/agronomy/agronomy.js
-// CFM Agronomy Module — Paddocks, Map, Visits & Recommendations, Spray Records
+// CFM Agronomy Module — Paddock-based scouting visits
+// Rebuilt 2026-11-11: paddock board → paddock detail → bulk visit entry
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1792559266387';
-import { mountAgronomyVisits, unmountAgronomyVisits } from './agronomy-visits.js?v=1792559266387';
-import { getActiveFarm, getActiveSeason } from '../../js/app-state.js?v=1792559266387';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1792559266387';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js';
+import { toast, openModal, formatDate }            from '../../js/ui.js';
 
-// ── Constants ─────────────────────────────────────────────────
+// ── State ──────────────────────────────────────────────────────────────────
+let allReports  = [];   // agronomy_reports rows
+let allEntries  = [];   // agronomy_paddock_entries rows
+let activeTab   = 'board';
+let activePaddock = null;  // paddock name currently expanded in detail view
 
-const CROP_COLOURS = {
-  'Cotton Flood':   '#4A90D9',
-  'Cotton Lateral': '#7B68EE',
-  'Grain':          '#E6A817',
-  'Fallow':         '#A8B89A',
-  'Other':          '#9E9E9E',
-};
+// ── Constants ──────────────────────────────────────────────────────────────
+const COMMODITIES = [
+  'Cotton IRR', 'Cotton Dry', 'Corn IRR', 'Sorghum', 'Wheat',
+  'Chickpea', 'Pigeon Pea', 'Setaria Hay', 'Fallow', 'Other',
+];
+const SOIL_TYPES       = ['CL', 'MAP', 'Sandy Loam', 'Clay Loam', 'Heavy Clay', 'Sandy Clay Loam'];
+const PRIORITY_LABELS  = { none: '✓ On track', medium: '⚠ Upcoming', high: '🔴 Action needed' };
+const PRIORITY_CLASSES = { none: 'badge-success', medium: 'badge-warning', high: 'badge-danger' };
+const FALLOW_COMMODITIES = ['Fallow'];
 
-const IRRIGATION_TYPES = ['Flood', 'Lateral Move', 'Drip/Trickle', 'Centre Pivot', 'Dryland'];
-const SOIL_TYPES       = ['Heavy Clay', 'Clay Loam', 'Sandy Clay Loam', 'Sandy Loam', 'Loam', 'Sandy'];
-const APP_TYPES        = ['herbicide','insecticide','fungicide','fertiliser','pgr','other'];
-const COMMODITY_OPTIONS= ['Cotton','Grain','Sorghum','Wheat','Chickpea','Fallow','Other'];
-const CROP_TYPE_OPTIONS= ['Cotton Flood','Cotton Lateral','Winter Cereal','Summer Cereal','Pulse','Other'];
-
-// ── State ─────────────────────────────────────────────────────
-let map               = null;
-let paddockLayers     = {};
-let activeTab         = 'map';
-let allPaddocks       = [];
-let allVisits         = [];
-let allSprayRecords   = [];
-let allPaddockSeasons = [];
-
-// ── Mount ─────────────────────────────────────────────────────
-
+// ── Mount / unmount ────────────────────────────────────────────────────────
 export async function mountAgronomy(container) {
   container.innerHTML = buildShell();
-  await loadLeaflet();
+  bindTabNav(container);
   await refreshAll();
-  bindTabNav();
-  switchTab('map');
 }
 
 export function unmountAgronomy() {
-  if (map) { map.remove(); map = null; }
-  paddockLayers = {};
+  activePaddock = null;
 }
 
 function buildShell() {
@@ -51,958 +38,870 @@ function buildShell() {
     <div class="page-header">
       <div>
         <h1>Agronomy</h1>
-        <p class="page-subtitle">Paddock registry, farm map, visits &amp; spray records</p>
+        <p class="page-subtitle">Paddock scouting, crop metrics &amp; visit history</p>
       </div>
+      <button class="btn btn-primary" id="agro-log-visit-btn">+ Log Visit</button>
     </div>
     <div class="tab-nav" id="agronomy-tabs">
-      <button class="tab-btn active" data-tab="map">🗺 Map</button>
-      <button class="tab-btn" data-tab="paddocks">🟩 Paddocks</button>
-      <button class="tab-btn" data-tab="visits">📋 Visits &amp; Recs</button>
-      <button class="tab-btn" data-tab="spray">🧪 Spray Records</button>
-      <button class="tab-btn" data-tab="inspections">📋 Inspection Visits</button>
+      <button class="tab-btn active" data-tab="board">🟩 Paddock Board</button>
+      <button class="tab-btn" data-tab="reports">📋 Reports</button>
     </div>
-    <div id="agro-tab-map"      class="agro-tab"></div>
-    <div id="agro-tab-paddocks" class="agro-tab" style="display:none"></div>
-    <div id="agro-tab-visits"   class="agro-tab" style="display:none"></div>
-    <div id="agro-tab-spray"    class="agro-tab" style="display:none"></div>
-    <div id="agro-tab-inspections" class="agro-tab" style="display:none"></div>
+    <div id="agro-tab-board"   class="agro-tab"></div>
+    <div id="agro-tab-reports" class="agro-tab" style="display:none"></div>
+    <div id="agro-paddock-detail" style="display:none"></div>
   `;
 }
 
-// ── Data ──────────────────────────────────────────────────────
-
+// ── Data ───────────────────────────────────────────────────────────────────
 async function refreshAll() {
-  const farm   = getActiveFarm();
-  const farmId = farm?.id || farm;
-  const season = getActiveSeason();
+  const farm    = getActiveFarm();
+  const farmId  = farm?.id || farm;
+  const season  = getActiveSeason();
 
-  const [p, ps, v, s] = await Promise.all([
-    dbSelect('paddocks', 'farm_id=eq.' + farmId + '&active=eq.true&order=name'),
-    dbSelect('paddock_seasons', 'farm_id=eq.' + farmId + '&season=eq.' + season),
-    dbSelect('agronomy_visits', 'farm_id=eq.' + farmId + '&order=visit_date.desc'),
-    dbSelect('spray_records', 'farm_id=eq.' + farmId + '&order=application_date.desc&select=*,paddocks(name)'),
+  const [reports, entries] = await Promise.all([
+    dbSelect('agronomy_reports',
+      'farm_id=eq.' + farmId + '&season=eq.' + season + '&order=report_date.desc'),
+    dbSelect('agronomy_paddock_entries',
+      'farm_id=eq.' + farmId + '&order=paddock_name,created_at.desc'),
   ]);
 
-  allPaddocks       = p  || [];
-  allPaddockSeasons = ps || [];
-  allVisits         = v  || [];
-  allSprayRecords   = s  || [];
+  allReports = reports || [];
+  allEntries = entries || [];
+
+  // Filter entries to only those belonging to reports in this season
+  const reportIds = new Set(allReports.map(r => r.id));
+  allEntries = allEntries.filter(e => reportIds.has(e.report_id));
 
   renderActiveTab();
+  document.getElementById('agro-log-visit-btn')
+    ?.addEventListener('click', openLogVisitModal);
 }
 
-// ── Tabs ──────────────────────────────────────────────────────
-
-function bindTabNav() {
-  document.getElementById('agronomy-tabs')?.querySelectorAll('.tab-btn').forEach(btn => {
+// ── Tab nav ────────────────────────────────────────────────────────────────
+function bindTabNav(container) {
+  container.querySelector('#agronomy-tabs')?.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 }
 
 function switchTab(tab) {
-  if (tab === 'inspections') {
-    document.querySelectorAll('.agro-tab').forEach(t => t.style.display = 'none');
-    const el = document.getElementById('agro-tab-inspections');
-    if (el) { el.style.display = ''; mountAgronomyVisits(el); }
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-    activeTab = tab;
-    return;
-  }
-
   activeTab = tab;
-  document.querySelectorAll('#agronomy-tabs .tab-btn').forEach(b =>
-    b.classList.toggle('active', b.dataset.tab === tab));
-  document.querySelectorAll('.agro-tab').forEach(el =>
-    el.style.display = el.id === 'agro-tab-' + tab ? '' : 'none');
+  activePaddock = null;
+  document.querySelectorAll('#agronomy-tabs .tab-btn')
+    .forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('agro-paddock-detail').style.display = 'none';
+  document.getElementById('agro-tab-board').style.display   = tab === 'board'   ? '' : 'none';
+  document.getElementById('agro-tab-reports').style.display = tab === 'reports' ? '' : 'none';
   renderActiveTab();
 }
 
 function renderActiveTab() {
-  if (activeTab === 'map')      renderMap();
-  if (activeTab === 'paddocks') renderPaddocksTab();
-  if (activeTab === 'visits')   renderVisitsTab();
-  if (activeTab === 'spray')    renderSprayTab();
+  if (activeTab === 'board')   renderBoard();
+  if (activeTab === 'reports') renderReports();
 }
 
-// ══════════════════════════════════════════════════════════════
-// MAP TAB
-// ══════════════════════════════════════════════════════════════
+// ── BOARD VIEW ─────────────────────────────────────────────────────────────
+// Groups paddocks by name, shows latest entry data for each
 
-function renderMap() {
-  const container = document.getElementById('agro-tab-map');
-  if (!container) return;
+function renderBoard() {
+  const el = document.getElementById('agro-tab-board');
+  if (!el) return;
 
-  if (!container.querySelector('#farm-map')) {
-    container.innerHTML = `
-      <div class="agro-map-wrap">
-        <div id="farm-map"></div>
-        <div id="map-sidebar" class="map-sidebar map-sidebar--closed">
-          <div id="map-sidebar-content"></div>
+  // Build paddock map — latest entry per paddock name
+  const paddockMap = buildPaddockMap();
+  const paddocks   = Object.values(paddockMap);
+
+  if (paddocks.length === 0) {
+    el.innerHTML = `
+      <div class="empty-state">
+        <p>No scouting entries recorded this season.</p>
+        <button class="btn btn-primary" onclick="document.getElementById('agro-log-visit-btn').click()">Log First Visit</button>
+      </div>`;
+    return;
+  }
+
+  // Summary strip
+  const cottonPaddocks = paddocks.filter(p => !p.is_fallow && p.commodity);
+  const fallowPaddocks = paddocks.filter(p => p.is_fallow);
+  const highPri        = paddocks.filter(p => p.priority === 'high');
+  const medPri         = paddocks.filter(p => p.priority === 'medium');
+  const totalHaCotton  = cottonPaddocks.reduce((s, p) => s + (p.area_ha || 0), 0);
+  const totalHaFallow  = fallowPaddocks.reduce((s, p) => s + (p.area_ha || 0), 0);
+  const avgEst         = avgOf(cottonPaddocks, 'plant_est_pct');
+  const latestReport   = allReports[0];
+
+  el.innerHTML = `
+    <div class="agro-summary-strip">
+      <div class="agro-summary-item">
+        <div class="agro-summary-val">${fmtHa(totalHaCotton)}</div>
+        <div class="agro-summary-lbl">Crop ha</div>
+      </div>
+      <div class="agro-summary-item">
+        <div class="agro-summary-val">${fmtHa(totalHaFallow)}</div>
+        <div class="agro-summary-lbl">Fallow ha</div>
+      </div>
+      <div class="agro-summary-item">
+        <div class="agro-summary-val">${avgEst !== null ? avgEst.toFixed(1) + '%' : '—'}</div>
+        <div class="agro-summary-lbl">Avg establishment</div>
+      </div>
+      <div class="agro-summary-item">
+        <div class="agro-summary-val ${highPri.length ? 'text-danger' : ''}">${highPri.length}</div>
+        <div class="agro-summary-lbl">High priority</div>
+      </div>
+      <div class="agro-summary-item">
+        <div class="agro-summary-val">${medPri.length}</div>
+        <div class="agro-summary-lbl">Watch</div>
+      </div>
+      <div class="agro-summary-item">
+        <div class="agro-summary-val">${latestReport ? formatDate(latestReport.report_date) : '—'}</div>
+        <div class="agro-summary-lbl">Last report</div>
+      </div>
+    </div>
+
+    <div class="agro-board-section-label">Crop Paddocks</div>
+    <div class="agro-board-grid" id="agro-crop-grid">
+      ${cottonPaddocks.length
+        ? cottonPaddocks.map(p => paddockCardHTML(p)).join('')
+        : '<p class="text-muted small">No crop paddocks this season.</p>'}
+    </div>
+
+    ${fallowPaddocks.length ? `
+    <div class="agro-board-section-label" style="margin-top:24px">Fallow</div>
+    <div class="agro-board-grid agro-board-grid--fallow">
+      ${fallowPaddocks.map(p => paddockCardHTML(p)).join('')}
+    </div>` : ''}
+  `;
+
+  el.querySelectorAll('.agro-paddock-card').forEach(card => {
+    card.addEventListener('click', () => openPaddockDetail(card.dataset.paddock));
+  });
+}
+
+function paddockCardHTML(p) {
+  const priorityClass = PRIORITY_CLASSES[p.priority] || 'badge-success';
+  const priorityLabel = PRIORITY_LABELS[p.priority]  || '✓ On track';
+  const latestNodes   = p.nodes_3_count ?? p.nodes_2_count ?? p.nodes_1_count;
+  const latestHeight  = p.height_cm_2 ?? p.height_cm_1;
+  const isFallow      = p.is_fallow;
+  const entryCount    = allEntries.filter(e => e.paddock_name === p.paddock_name).length;
+
+  return `
+    <div class="agro-paddock-card${isFallow ? ' agro-paddock-card--fallow' : ''}"
+         data-paddock="${esc(p.paddock_name)}">
+      <div class="agro-card-top">
+        <div class="agro-card-name">${esc(p.paddock_name)}</div>
+        ${!isFallow ? `<span class="badge ${priorityClass}">${priorityLabel}</span>` : ''}
+      </div>
+      <div class="agro-card-commodity">${esc(p.commodity || '—')}</div>
+      ${p.variety ? `<div class="agro-card-variety">${esc(p.variety)}</div>` : ''}
+
+      ${!isFallow ? `
+      <div class="agro-card-metrics">
+        <div class="agro-card-metric">
+          <span class="agro-metric-val">${p.area_ha != null ? fmtHa(p.area_ha) : '—'}</span>
+          <span class="agro-metric-lbl">ha</span>
+        </div>
+        <div class="agro-card-metric">
+          <span class="agro-metric-val">${p.plant_est_pct != null ? p.plant_est_pct.toFixed(1) + '%' : '—'}</span>
+          <span class="agro-metric-lbl">est.</span>
+        </div>
+        <div class="agro-card-metric">
+          <span class="agro-metric-val">${latestNodes != null ? latestNodes : '—'}</span>
+          <span class="agro-metric-lbl">nodes</span>
+        </div>
+        <div class="agro-card-metric">
+          <span class="agro-metric-val">${latestHeight != null ? latestHeight + 'cm' : '—'}</span>
+          <span class="agro-metric-lbl">ht</span>
         </div>
       </div>
-      <div class="card mt-2">
-        <div class="card-body py-2" style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
-          ${Object.entries(CROP_COLOURS).map(([k,v]) =>
-            '<span class="legend-item"><span class="legend-dot" style="background:' + v + '"></span>' + k + '</span>'
-          ).join('')}
-          <span class="legend-item"><span class="legend-dot" style="background:#ef4444;border:2px dashed #ef4444"></span>Active withholding</span>
+      ` : `
+      <div class="agro-card-metrics">
+        <div class="agro-card-metric">
+          <span class="agro-metric-val">${p.area_ha != null ? fmtHa(p.area_ha) : '—'}</span>
+          <span class="agro-metric-lbl">ha</span>
         </div>
       </div>
-    `;
-  }
+      `}
 
-  initLeafletMap();
-  drawPaddockPolygons();
+      <div class="agro-card-footer">
+        <span class="agro-card-visits">${entryCount} visit${entryCount !== 1 ? 's' : ''}</span>
+        <span class="agro-card-last">${p.lastReportDate ? formatDate(p.lastReportDate) : 'No visits'}</span>
+      </div>
+    </div>
+  `;
 }
 
-function initLeafletMap() {
-  if (map) return;
-  if (!window.L) { console.error('Leaflet not loaded'); return; }
+// ── PADDOCK DETAIL ─────────────────────────────────────────────────────────
+function openPaddockDetail(paddockName) {
+  activePaddock = paddockName;
+  document.getElementById('agro-tab-board').style.display   = 'none';
+  document.getElementById('agro-tab-reports').style.display = 'none';
+  renderPaddockDetail(paddockName);
+  document.getElementById('agro-paddock-detail').style.display = '';
+  document.getElementById('agro-paddock-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
-  map = L.map('farm-map').setView([-14.1, 131.7], 12);
+function renderPaddockDetail(paddockName) {
+  const el = document.getElementById('agro-paddock-detail');
+  if (!el) return;
 
-  const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors', maxZoom: 20
+  // All entries for this paddock, sorted oldest→newest
+  const entries = allEntries
+    .filter(e => e.paddock_name === paddockName)
+    .sort((a, b) => {
+      const ra = allReports.find(r => r.id === a.report_id);
+      const rb = allReports.find(r => r.id === b.report_id);
+      return new Date(ra?.report_date || 0) - new Date(rb?.report_date || 0);
+    });
+
+  const latest  = entries[entries.length - 1];
+  const isFallow = latest?.is_fallow || false;
+
+  el.innerHTML = `
+    <div class="agro-detail-header">
+      <button class="btn btn-sm" id="agro-back-btn">← Back to board</button>
+      <h2 class="agro-detail-title">${esc(paddockName)}</h2>
+      <div class="agro-detail-meta">
+        ${latest ? esc(latest.commodity || '') + (latest.variety ? ' · ' + esc(latest.variety) : '') : ''}
+        ${latest?.area_ha ? ' · ' + fmtHa(latest.area_ha) + ' ha' : ''}
+      </div>
+    </div>
+
+    ${!isFallow && entries.length >= 2 ? renderProgressCharts(entries) : ''}
+
+    <div class="agro-detail-section-label">Visit History</div>
+    <div class="agro-visit-timeline">
+      ${entries.length === 0
+        ? '<p class="text-muted small">No visits recorded for this paddock.</p>'
+        : entries.map((e, i) => visitTimelineCard(e, i === entries.length - 1)).join('')}
+    </div>
+  `;
+
+  el.querySelector('#agro-back-btn')?.addEventListener('click', () => {
+    activePaddock = null;
+    el.style.display = 'none';
+    document.getElementById('agro-tab-board').style.display = '';
+    renderBoard();
   });
-  const satellite = L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    { attribution: 'Esri, Maxar', maxZoom: 20 }
-  );
-  osm.addTo(map);
-  L.control.layers({ 'Map': osm, 'Satellite': satellite }, {}, { position: 'topright' }).addTo(map);
 
-  // Draw control
-  if (window.L.Control && window.L.Control.Draw) {
-    const drawnItems = new L.FeatureGroup();
-    map.addLayer(drawnItems);
-    const drawControl = new L.Control.Draw({
-      draw: {
-        polygon: { shapeOptions: { color: '#22c55e' } },
-        polyline: false, rectangle: false, circle: false, marker: false, circlemarker: false
-      },
-      edit: { featureGroup: drawnItems }
+  // Wire edit/delete on visit cards
+  el.querySelectorAll('.agro-edit-entry-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const entry = allEntries.find(en => en.id === btn.dataset.id);
+      if (entry) openEditEntryModal(entry);
     });
-    map.addControl(drawControl);
-    map.on(L.Draw.Event.CREATED, e => {
-      drawnItems.addLayer(e.layer);
-      openNewPaddockModal(e.layer.toGeoJSON());
-    });
-  }
-}
-
-function drawPaddockPolygons() {
-  if (!map) return;
-  Object.values(paddockLayers).forEach(l => map.removeLayer(l));
-  paddockLayers = {};
-
-  const today = new Date().toISOString().slice(0, 10);
-
-  allPaddocks.forEach(p => {
-    if (!p.geometry) return;
-    const ps       = allPaddockSeasons.find(s => s.paddock_id === p.id);
-    const cropType = ps?.crop_type || 'Other';
-    const colour   = CROP_COLOURS[cropType] || CROP_COLOURS['Other'];
-    const hasWH    = allSprayRecords.some(s =>
-      s.paddock_id === p.id && s.withholding_expires_date >= today);
-
-    const geojson = typeof p.geometry === 'string' ? JSON.parse(p.geometry) : p.geometry;
-    const layer = L.geoJSON(geojson, {
-      style: {
-        color: hasWH ? '#ef4444' : colour,
-        fillColor: colour,
-        fillOpacity: 0.35,
-        weight: hasWH ? 3 : 2,
-        dashArray: hasWH ? '6,4' : null,
+  });
+  el.querySelectorAll('.agro-delete-entry-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      if (!confirm('Delete this visit entry?')) return;
+      await dbDelete('agronomy_paddock_entries', btn.dataset.id);
+      // If report has no other entries, delete report too
+      const orphanReport = allReports.find(r => r.id === btn.dataset.reportId);
+      if (orphanReport) {
+        const remaining = allEntries.filter(en =>
+          en.report_id === orphanReport.id && en.id !== btn.dataset.id);
+        if (remaining.length === 0) await dbDelete('agronomy_reports', orphanReport.id);
       }
-    });
-    layer.bindTooltip(p.name, { permanent: true, direction: 'center', className: 'paddock-label' });
-    layer.on('click', () => openMapSidebar(p));
-    layer.addTo(map);
-    paddockLayers[p.id] = layer;
-  });
-
-  const withGeo = allPaddocks.filter(p => p.geometry);
-  if (withGeo.length) {
-    const group = L.featureGroup(Object.values(paddockLayers));
-    if (group.getLayers().length) map.fitBounds(group.getBounds(), { padding: [40, 40] });
-  }
-}
-
-function openMapSidebar(paddock) {
-  const sidebar = document.getElementById('map-sidebar');
-  const content = document.getElementById('map-sidebar-content');
-  if (!sidebar || !content) return;
-  sidebar.classList.remove('map-sidebar--closed');
-
-  const ps      = allPaddockSeasons.find(s => s.paddock_id === paddock.id);
-  const lastVisit = allVisits.find(v => (v.paddock_ids || []).includes(paddock.id));
-  const today   = new Date().toISOString().slice(0, 10);
-  const activeWH = allSprayRecords.filter(s =>
-    s.paddock_id === paddock.id && s.withholding_expires_date && s.withholding_expires_date >= today);
-  const recent  = allSprayRecords.filter(s => s.paddock_id === paddock.id).slice(0, 5);
-
-  content.innerHTML =
-    '<div class="sidebar-header">' +
-      '<h3>' + esc(paddock.name) + '</h3>' +
-      '<button class="btn-icon" onclick="document.getElementById(\'map-sidebar\').classList.add(\'map-sidebar--closed\')">✕</button>' +
-    '</div>' +
-    '<div class="sidebar-section">' +
-      '<div class="detail-grid">' +
-        '<span class="detail-label">Area</span><span>' + (paddock.area_ha ? paddock.area_ha + ' ha' : '—') + '</span>' +
-        '<span class="detail-label">Soil</span><span>' + (paddock.soil_type || '—') + '</span>' +
-        '<span class="detail-label">Irrigation</span><span>' + (paddock.irrigation_type || '—') + '</span>' +
-      '</div>' +
-    '</div>' +
-    '<div class="sidebar-section">' +
-      '<div class="sidebar-section-title">Season — ' + getActiveSeason() + '</div>' +
-      (ps ?
-        '<div class="detail-grid">' +
-          '<span class="detail-label">Crop Type</span><span>' + (ps.crop_type || '—') + '</span>' +
-          '<span class="detail-label">Variety</span><span>' + (ps.variety || '—') + '</span>' +
-          '<span class="detail-label">Planted</span><span>' + (ps.planted_date ? formatDate(ps.planted_date) : '—') + '</span>' +
-        '</div>'
-        : '<p class="text-muted small">No crop recorded. <a href="#" onclick="window._cfmAgroEditSeason(\'' + paddock.id + '\');return false">Add →</a></p>') +
-    '</div>' +
-    (activeWH.length ?
-      '<div class="sidebar-section">' +
-        '<div class="sidebar-section-title" style="color:#ef4444">⚠ Active Withholding</div>' +
-        activeWH.map(s =>
-          '<div class="withholding-badge"><strong>' + esc(s.product_name) + '</strong><span>Exp. ' + formatDate(s.withholding_expires_date) + '</span></div>'
-        ).join('') +
-      '</div>' : '') +
-    (lastVisit ?
-      '<div class="sidebar-section">' +
-        '<div class="sidebar-section-title">Last Visit — ' + formatDate(lastVisit.visit_date) + '</div>' +
-        '<p class="small"><em>' + esc(lastVisit.agronomist_name) + '</em></p>' +
-        '<p class="small">' + esc((lastVisit.recommendations || lastVisit.observations || '').slice(0, 200)) + '</p>' +
-      '</div>' : '') +
-    (recent.length ?
-      '<div class="sidebar-section">' +
-        '<div class="sidebar-section-title">Recent Sprays</div>' +
-        '<table class="mini-table"><thead><tr><th>Date</th><th>Product</th><th>Rate</th></tr></thead><tbody>' +
-        recent.map(s =>
-          '<tr><td>' + formatDate(s.application_date) + '</td><td>' + esc(s.product_name) + '</td><td>' +
-          (s.rate_per_ha ? s.rate_per_ha + ' ' + (s.rate_unit || 'L/ha') : '—') + '</td></tr>'
-        ).join('') +
-        '</tbody></table>' +
-      '</div>' : '') +
-    '<div class="sidebar-actions">' +
-      '<button class="btn btn-sm btn-secondary" onclick="window._cfmAgroEditSeason(\'' + paddock.id + '\')">Edit Season</button>' +
-      '<button class="btn btn-sm btn-primary" onclick="window._cfmAgroNewVisit(\'' + paddock.id + '\')">Log Visit</button>' +
-      '<button class="btn btn-sm btn-secondary" onclick="window._cfmAgroNewSpray(\'' + paddock.id + '\')">Add Spray</button>' +
-    '</div>';
-}
-
-function openNewPaddockModal(geometry) {
-  openModal({
-    title: 'New Paddock',
-    bodyHTML: paddockFormHTML({}),
-    confirmLabel: 'Save Paddock',
-    onConfirm: async () => { await savePaddock(null, geometry); },
-  });
-}
-
-// ══════════════════════════════════════════════════════════════
-// PADDOCKS TAB
-// ══════════════════════════════════════════════════════════════
-
-function renderPaddocksTab() {
-  const container = document.getElementById('agro-tab-paddocks');
-  if (!container) return;
-  const season = getActiveSeason();
-
-  container.innerHTML =
-    '<div class="card">' +
-      '<div class="card-header">' +
-        '<span>Paddock Registry</span>' +
-        '<button class="btn btn-primary btn-sm" id="add-paddock-btn">+ Add Paddock</button>' +
-      '</div>' +
-      '<div class="table-responsive">' +
-        '<table class="data-table" id="paddocks-table">' +
-          '<thead><tr>' +
-            '<th>Paddock</th><th>Area (ha)</th><th>Soil</th><th>Irrigation</th>' +
-            '<th>' + season + ' Crop Type</th><th>' + season + ' Variety</th><th>' + season + ' Planted</th>' +
-            '<th>Notes</th><th></th>' +
-          '</tr></thead>' +
-          '<tbody id="paddocks-tbody">' +
-            (allPaddocks.length === 0
-              ? '<tr><td colspan="9" class="empty-cell">No paddocks yet. Click "+ Add Paddock" to begin.</td></tr>'
-              : allPaddocks.map(p => paddockRowHTML(p, false)).join('')) +
-          '</tbody>' +
-        '</table>' +
-      '</div>' +
-    '</div>';
-
-  document.getElementById('add-paddock-btn')?.addEventListener('click', () => {
-    openModal({
-      title: 'New Paddock',
-      bodyHTML: paddockFormHTML({}),
-      confirmLabel: 'Save Paddock',
-      onConfirm: async () => { await savePaddock(null, null); },
+      toast('Entry deleted', 'success');
+      await refreshAll();
+      if (activePaddock) renderPaddockDetail(activePaddock);
     });
   });
-
-  bindPaddockRowEvents();
 }
 
-function paddockRowHTML(p, editing) {
-  const ps = allPaddockSeasons.find(s => s.paddock_id === p.id);
-  if (editing) {
-    return '<tr data-id="' + p.id + '" class="editing-row">' +
-      '<td><input class="inline-input" name="name" value="' + esc(p.name) + '" required></td>' +
-      '<td><input class="inline-input" name="area_ha" type="number" step="0.01" value="' + (p.area_ha || '') + '"></td>' +
-      '<td><select class="inline-input" name="soil_type"><option value="">—</option>' +
-        SOIL_TYPES.map(s => '<option' + (p.soil_type === s ? ' selected' : '') + '>' + s + '</option>').join('') +
-      '</select></td>' +
-      '<td><select class="inline-input" name="irrigation_type"><option value="">—</option>' +
-        IRRIGATION_TYPES.map(s => '<option' + (p.irrigation_type === s ? ' selected' : '') + '>' + s + '</option>').join('') +
-      '</select></td>' +
-      '<td><select class="inline-input" name="ps_crop_type"><option value="">—</option>' +
-        CROP_TYPE_OPTIONS.map(s => '<option' + (ps?.crop_type === s ? ' selected' : '') + '>' + s + '</option>').join('') +
-      '</select></td>' +
-      '<td><input class="inline-input" name="ps_variety" value="' + esc(ps?.variety || '') + '"></td>' +
-      '<td><input class="inline-input" name="ps_planted_date" type="date" value="' + (ps?.planted_date || '') + '"></td>' +
-      '<td><input class="inline-input" name="notes" value="' + esc(p.notes || '') + '"></td>' +
-      '<td class="row-actions">' +
-        '<button class="btn-link save-paddock-btn" data-id="' + p.id + '">Save</button>' +
-        '<button class="btn-link cancel-paddock-btn" data-id="' + p.id + '">Cancel</button>' +
-      '</td>' +
-    '</tr>';
-  }
-  return '<tr data-id="' + p.id + '">' +
-    '<td>' + esc(p.name) + '</td>' +
-    '<td>' + (p.area_ha ? p.area_ha + ' ha' : '—') + '</td>' +
-    '<td>' + (p.soil_type || '—') + '</td>' +
-    '<td>' + (p.irrigation_type || '—') + '</td>' +
-    '<td>' + (ps?.crop_type || '—') + '</td>' +
-    '<td>' + (ps?.variety || '—') + '</td>' +
-    '<td>' + (ps?.planted_date ? formatDate(ps.planted_date) : '—') + '</td>' +
-    '<td class="notes-cell">' + esc(p.notes || '') + '</td>' +
-    '<td class="row-actions">' +
-      '<button class="btn-link edit-paddock-btn" data-id="' + p.id + '">Edit</button>' +
-      '<button class="btn-link danger delete-paddock-btn" data-id="' + p.id + '">Archive</button>' +
-    '</td>' +
-  '</tr>';
+function renderProgressCharts(entries) {
+  // Mini inline SVG sparkline for nodes and height progression
+  const nodesData  = entries.map(e => e.nodes_3_count ?? e.nodes_2_count ?? e.nodes_1_count).filter(v => v != null);
+  const heightData = entries.map(e => e.height_cm_2 ?? e.height_cm_1).filter(v => v != null);
+  const estData    = entries.map(e => e.plant_est_pct).filter(v => v != null);
+
+  if (nodesData.length < 2 && heightData.length < 2) return '';
+
+  return `
+    <div class="agro-progress-strip">
+      ${nodesData.length >= 2 ? `
+      <div class="agro-progress-item">
+        <div class="agro-progress-label">Nodes progression</div>
+        ${miniSparkline(nodesData, '#6a8faf')}
+        <div class="agro-progress-range">${Math.min(...nodesData)} → ${Math.max(...nodesData)}</div>
+      </div>` : ''}
+      ${heightData.length >= 2 ? `
+      <div class="agro-progress-item">
+        <div class="agro-progress-label">Height (cm)</div>
+        ${miniSparkline(heightData, '#7ba88c')}
+        <div class="agro-progress-range">${Math.min(...heightData)} → ${Math.max(...heightData)} cm</div>
+      </div>` : ''}
+      ${estData.length >= 1 ? `
+      <div class="agro-progress-item">
+        <div class="agro-progress-label">Establishment</div>
+        ${miniSparkline(estData, '#c08020')}
+        <div class="agro-progress-range">${estData[estData.length - 1].toFixed(1)}%</div>
+      </div>` : ''}
+    </div>
+  `;
 }
 
-function bindPaddockRowEvents() {
-  const tbody = document.getElementById('paddocks-tbody');
-  if (!tbody) return;
-  tbody.addEventListener('click', async e => {
-    const id = e.target.dataset.id;
-    if (!id) return;
-
-    if (e.target.classList.contains('edit-paddock-btn')) {
-      const p = allPaddocks.find(p => p.id === id);
-      const row = tbody.querySelector('tr[data-id="' + id + '"]');
-      if (row && p) { row.outerHTML = paddockRowHTML(p, true); bindPaddockRowEvents(); }
-    }
-    if (e.target.classList.contains('cancel-paddock-btn')) {
-      const p = allPaddocks.find(p => p.id === id);
-      const row = tbody.querySelector('tr[data-id="' + id + '"]');
-      if (row && p) { row.outerHTML = paddockRowHTML(p, false); bindPaddockRowEvents(); }
-    }
-    if (e.target.classList.contains('save-paddock-btn')) {
-      await saveInlinePaddock(id, tbody);
-    }
-    if (e.target.classList.contains('delete-paddock-btn')) {
-      const p = allPaddocks.find(p => p.id === id);
-      if (confirm('Archive paddock "' + (p?.name || '') + '"? Data is retained.')) {
-        await dbUpdate('paddocks', id, { active: false });
-        toast('Paddock archived', 'success');
-        await refreshAll();
-      }
-    }
+function miniSparkline(data, colour) {
+  const w = 120, h = 36, pad = 4;
+  const mn = Math.min(...data), mx = Math.max(...data);
+  const range = mx - mn || 1;
+  const pts = data.map((v, i) => {
+    const x = pad + (i / Math.max(data.length - 1, 1)) * (w - pad * 2);
+    const y = h - pad - ((v - mn) / range) * (h - pad * 2);
+    return x.toFixed(1) + ',' + y.toFixed(1);
   });
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block">
+    <polyline points="${pts.join(' ')}" fill="none" stroke="${colour}" stroke-width="1.5" stroke-linejoin="round"/>
+    <circle cx="${pts[pts.length-1].split(',')[0]}" cy="${pts[pts.length-1].split(',')[1]}"
+      r="3" fill="${colour}"/>
+  </svg>`;
 }
 
-async function saveInlinePaddock(id, tbody) {
-  const row = tbody.querySelector('tr[data-id="' + id + '"]');
-  if (!row) return;
-  const g = n => { const el = row.querySelector('[name="' + n + '"]'); return el ? el.value.trim() || null : null; };
-  const farm   = getActiveFarm();
-  const farmId = farm?.id || farm;
-  const season = getActiveSeason();
+function visitTimelineCard(entry, isLatest) {
+  const report = allReports.find(r => r.id === entry.report_id);
+  const latestNodes  = entry.nodes_3_count ?? entry.nodes_2_count ?? entry.nodes_1_count;
+  const latestHeight = entry.height_cm_2 ?? entry.height_cm_1;
 
-  const paddockData = {
-    name:            g('name'),
-    area_ha:         g('area_ha') ? parseFloat(g('area_ha')) : null,
-    soil_type:       g('soil_type'),
-    irrigation_type: g('irrigation_type'),
-    notes:           g('notes'),
-    updated_at:      new Date().toISOString(),
-  };
-  if (!paddockData.name) { toast('Paddock name is required', 'error'); return; }
+  return `
+    <div class="agro-timeline-card${isLatest ? ' agro-timeline-card--latest' : ''}">
+      <div class="agro-timeline-date">
+        ${report ? formatDate(report.report_date) : '—'}
+        ${isLatest ? '<span class="badge badge-primary ml-1">Latest</span>' : ''}
+        <div class="agro-timeline-agronomist">${report ? esc(report.agronomist_name) : ''}</div>
+      </div>
+      <div class="agro-timeline-body">
+        ${!entry.is_fallow ? `
+        <div class="agro-timeline-metrics">
+          ${metricCell('Est.', entry.plant_est_pct != null ? entry.plant_est_pct.toFixed(1) + '%' : null)}
+          ${metricCell('Plants/m²', entry.plants_per_m2)}
+          ${metricCell('Height', latestHeight != null ? latestHeight + ' cm' : null)}
+          ${metricCell('Nodes', latestNodes)}
+          ${metricCell('Yield target', entry.yield_target_t != null ? entry.yield_target_t + ' t' : null)}
+        </div>
 
-  await dbUpdate('paddocks', id, paddockData);
+        ${entry.incrop_sprays_notes || entry.incrop_fert_notes ? `
+        <div class="agro-timeline-inputs">
+          ${entry.incrop_sprays_notes ? `
+          <div class="agro-input-block">
+            <span class="agro-input-label">🧪 Sprays</span>
+            <span class="agro-input-text">${esc(entry.incrop_sprays_notes)}</span>
+          </div>` : ''}
+          ${entry.incrop_fert_notes ? `
+          <div class="agro-input-block">
+            <span class="agro-input-label">💧 Fert/Irr</span>
+            <span class="agro-input-text">${esc(entry.incrop_fert_notes)}</span>
+          </div>` : ''}
+        </div>` : ''}
 
-  const cropType = g('ps_crop_type');
-  const variety  = g('ps_variety');
-  const planted  = g('ps_planted_date');
-  const existing = allPaddockSeasons.find(ps => ps.paddock_id === id);
+        ${entry.comments ? `
+        <div class="agro-timeline-comments">${esc(entry.comments)}</div>` : ''}
 
-  if (cropType || variety || planted) {
-    const psData = {
-      paddock_id: id, farm_id: farmId, season,
-      commodity:  resolveCommodity(cropType),
-      crop_type:  cropType, variety, planted_date: planted,
-      updated_at: new Date().toISOString(),
-    };
-    if (existing) {
-      await dbUpdate('paddock_seasons', existing.id, psData);
-    } else {
-      await dbInsert('paddock_seasons', psData);
-    }
-  }
+        ${entry.upcoming_jobs ? `
+        <div class="agro-timeline-upcoming">
+          <span class="badge ${PRIORITY_CLASSES[entry.priority] || 'badge-success'}">Upcoming</span>
+          ${esc(entry.upcoming_jobs)}
+        </div>` : ''}
 
-  toast('Paddock saved', 'success');
-  await refreshAll();
+        ${entry.n_deficit != null || entry.seasonal_urea_req != null ? `
+        <div class="agro-timeline-n">
+          <span class="agro-n-label">N deficit</span>
+          <span class="agro-n-val">${entry.n_deficit != null ? entry.n_deficit + ' kg/ha' : '—'}</span>
+          <span class="agro-n-label" style="margin-left:12px">Seasonal urea req</span>
+          <span class="agro-n-val">${entry.seasonal_urea_req != null ? entry.seasonal_urea_req + ' kg/ha' : '—'}</span>
+        </div>` : ''}
+        ` : `<div class="text-muted small">Fallow paddock</div>`}
+      </div>
+      <div class="agro-timeline-actions">
+        <button class="btn-link agro-edit-entry-btn" data-id="${entry.id}">Edit</button>
+        <button class="btn-link danger agro-delete-entry-btn"
+          data-id="${entry.id}" data-report-id="${entry.report_id}">Del</button>
+      </div>
+    </div>
+  `;
 }
 
-function paddockFormHTML(d) {
-  return '<div class="form-grid form-grid-2">' +
-    '<div class="form-group"><label>Paddock Name *</label>' +
-      '<input class="form-control" id="pf-name" value="' + esc(d.name || '') + '"></div>' +
-    '<div class="form-group"><label>Area (ha)</label>' +
-      '<input class="form-control" id="pf-area" type="number" step="0.01" value="' + (d.area_ha || '') + '"></div>' +
-    '<div class="form-group"><label>Soil Type</label>' +
-      '<select class="form-control" id="pf-soil"><option value="">—</option>' +
-      SOIL_TYPES.map(s => '<option>' + s + '</option>').join('') + '</select></div>' +
-    '<div class="form-group"><label>Irrigation</label>' +
-      '<select class="form-control" id="pf-irrigation"><option value="">—</option>' +
-      IRRIGATION_TYPES.map(s => '<option>' + s + '</option>').join('') + '</select></div>' +
-    '<div class="form-group form-group--full"><label>Notes</label>' +
-      '<textarea class="form-control" id="pf-notes" rows="2">' + esc(d.notes || '') + '</textarea></div>' +
-  '</div>';
+function metricCell(label, value) {
+  if (value == null) return '';
+  return `<div class="agro-tl-metric"><span class="agro-tl-val">${value}</span><span class="agro-tl-lbl">${label}</span></div>`;
 }
 
-async function savePaddock(existingId, geometry) {
-  const farm   = getActiveFarm();
-  const farmId = farm?.id || farm;
-  const data = {
-    farm_id:         farmId,
-    name:            document.getElementById('pf-name')?.value?.trim(),
-    area_ha:         parseFloat(document.getElementById('pf-area')?.value) || null,
-    soil_type:       document.getElementById('pf-soil')?.value || null,
-    irrigation_type: document.getElementById('pf-irrigation')?.value || null,
-    notes:           document.getElementById('pf-notes')?.value?.trim() || null,
-    geometry:        geometry || null,
-  };
-  if (!data.name) throw new Error('Paddock name is required');
-  if (existingId) {
-    await dbUpdate('paddocks', existingId, data);
-  } else {
-    await dbInsert('paddocks', data);
-  }
-  toast('Paddock saved', 'success');
-  await refreshAll();
-}
+// ── REPORTS LIST ───────────────────────────────────────────────────────────
+function renderReports() {
+  const el = document.getElementById('agro-tab-reports');
+  if (!el) return;
 
-// ══════════════════════════════════════════════════════════════
-// VISITS TAB
-// ══════════════════════════════════════════════════════════════
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <span>Scouting Reports — ${getActiveSeason()}</span>
+      </div>
+      <div class="table-responsive">
+        <table class="data-table">
+          <thead><tr>
+            <th>Date</th><th>Agronomist</th><th>Company</th>
+            <th>Paddocks covered</th><th>High priority</th><th></th>
+          </tr></thead>
+          <tbody>
+            ${allReports.length === 0
+              ? '<tr><td colspan="6" class="empty-cell">No reports this season.</td></tr>'
+              : allReports.map(r => reportRowHTML(r)).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 
-function renderVisitsTab() {
-  const container = document.getElementById('agro-tab-visits');
-  if (!container) return;
+  el.querySelectorAll('.agro-delete-report-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this report and all its paddock entries?')) return;
+      await dbDelete('agronomy_reports', btn.dataset.id);
+      toast('Report deleted', 'success');
+      await refreshAll();
+    });
+  });
 
-  const today   = new Date().toISOString().slice(0, 10);
-  const overdue = allVisits.filter(v =>
-    v.follow_up_required && !v.follow_up_completed && v.follow_up_date < today);
-
-  container.innerHTML =
-    (overdue.length ?
-      '<div class="alert alert-warning mb-3">⚠ ' + overdue.length + ' follow-up' +
-      (overdue.length > 1 ? 's' : '') + ' overdue</div>' : '') +
-    '<div class="card">' +
-      '<div class="card-header">' +
-        '<span>Agronomist Visits &amp; Recommendations</span>' +
-        '<button class="btn btn-primary btn-sm" id="add-visit-btn">+ Log Visit</button>' +
-      '</div>' +
-      '<div class="table-responsive">' +
-        '<table class="data-table">' +
-          '<thead><tr>' +
-            '<th>Date</th><th>Agronomist</th><th>Type</th><th>Paddocks</th>' +
-            '<th>Observations</th><th>Recommendations</th><th>Follow-up</th><th></th>' +
-          '</tr></thead>' +
-          '<tbody>' +
-            (allVisits.length === 0
-              ? '<tr><td colspan="8" class="empty-cell">No visits recorded.</td></tr>'
-              : allVisits.map(v => visitRowHTML(v)).join('')) +
-          '</tbody>' +
-        '</table>' +
-      '</div>' +
-    '</div>';
-
-  document.getElementById('add-visit-btn')?.addEventListener('click', () => openVisitModal(null, null));
-
-  container.querySelectorAll('.edit-visit-btn').forEach(btn =>
+  el.querySelectorAll('.agro-view-report-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      const v = allVisits.find(v => v.id === btn.dataset.id);
-      if (v) openVisitModal(v, null);
-    })
-  );
-  container.querySelectorAll('.delete-visit-btn').forEach(btn =>
-    btn.addEventListener('click', async () => {
-      if (confirm('Delete this visit record?')) {
-        await dbDelete('agronomy_visits', btn.dataset.id);
-        toast('Visit deleted', 'success');
-        await refreshAll();
-      }
-    })
-  );
-  container.querySelectorAll('.complete-followup-btn').forEach(btn =>
-    btn.addEventListener('click', async () => {
-      await dbUpdate('agronomy_visits', btn.dataset.id, { follow_up_completed: true });
-      toast('Follow-up marked complete', 'success');
-      await refreshAll();
-    })
-  );
+      switchTab('board');
+      // Could jump to a specific paddock — for now just goes to board
+    });
+  });
 }
 
-function visitRowHTML(v) {
-  const names = (v.paddock_ids || [])
-    .map(id => allPaddocks.find(p => p.id === id)?.name || '?').join(', ');
-  const today = new Date().toISOString().slice(0, 10);
-  const overdue = v.follow_up_required && !v.follow_up_completed && v.follow_up_date < today;
-
-  return '<tr>' +
-    '<td>' + formatDate(v.visit_date) + '</td>' +
-    '<td><strong>' + esc(v.agronomist_name) + '</strong>' +
-      (v.agronomist_company ? '<br><small class="text-muted">' + esc(v.agronomist_company) + '</small>' : '') +
-    '</td>' +
-    '<td><span class="badge badge-' + v.agronomist_type + '">' + v.agronomist_type + '</span></td>' +
-    '<td class="small">' + (names || '—') + '</td>' +
-    '<td class="notes-cell small">' + esc((v.observations || '').slice(0, 100)) + '</td>' +
-    '<td class="notes-cell small">' + esc((v.recommendations || '').slice(0, 100)) + '</td>' +
-    '<td>' +
-      (v.follow_up_required && !v.follow_up_completed
-        ? '<span class="badge badge-' + (overdue ? 'danger' : 'warning') + '">' +
-          (overdue ? '⚠ Overdue' : 'Due ' + formatDate(v.follow_up_date)) + '</span> ' +
-          '<button class="btn-link small complete-followup-btn" data-id="' + v.id + '">Done</button>'
-        : v.follow_up_completed ? '<span class="badge badge-success">Complete</span>' : '—') +
-    '</td>' +
-    '<td class="row-actions">' +
-      '<button class="btn-link edit-visit-btn" data-id="' + v.id + '">Edit</button>' +
-      '<button class="btn-link danger delete-visit-btn" data-id="' + v.id + '">Del</button>' +
-    '</td>' +
-  '</tr>';
+function reportRowHTML(r) {
+  const entries  = allEntries.filter(e => e.report_id === r.id);
+  const highPri  = entries.filter(e => e.priority === 'high').length;
+  return `<tr>
+    <td>${formatDate(r.report_date)}</td>
+    <td><strong>${esc(r.agronomist_name)}</strong></td>
+    <td>${esc(r.agronomist_company || '—')}</td>
+    <td>${entries.length} paddock${entries.length !== 1 ? 's' : ''}</td>
+    <td>${highPri ? '<span class="badge badge-danger">' + highPri + ' high</span>' : '—'}</td>
+    <td class="row-actions">
+      <button class="btn-link agro-view-report-btn" data-id="${r.id}">View</button>
+      <button class="btn-link danger agro-delete-report-btn" data-id="${r.id}">Del</button>
+    </td>
+  </tr>`;
 }
 
-function openVisitModal(existing, defaultPaddockId) {
-  const v = existing || {};
-  const preselect = defaultPaddockId || '';
+// ── LOG VISIT MODAL ────────────────────────────────────────────────────────
+// Step 1: pick date + agronomist
+// Step 2: paddock entry table with copy-across functionality
 
-  const bodyHTML =
-    '<div class="form-grid form-grid-2">' +
-    '<div class="form-group"><label>Visit Date *</label>' +
-      '<input class="form-control" id="vf-date" type="date" value="' + (v.visit_date || todayStr()) + '"></div>' +
-    '<div class="form-group"><label>Type *</label>' +
-      '<select class="form-control" id="vf-type">' +
-        '<option value="external"' + (v.agronomist_type === 'external' ? ' selected' : '') + '>External</option>' +
-        '<option value="internal"' + (v.agronomist_type === 'internal' ? ' selected' : '') + '>Internal</option>' +
-      '</select></div>' +
-    '<div class="form-group"><label>Agronomist Name *</label>' +
-      '<input class="form-control" id="vf-name" value="' + esc(v.agronomist_name || '') + '"></div>' +
-    '<div class="form-group"><label>Company</label>' +
-      '<input class="form-control" id="vf-company" value="' + esc(v.agronomist_company || '') + '"></div>' +
-    '<div class="form-group form-group--full"><label>Paddocks Visited</label>' +
-      '<div class="checkbox-group">' +
-      allPaddocks.map(p =>
-        '<label class="checkbox-label"><input type="checkbox" class="visit-paddock-cb" value="' + p.id + '"' +
-        ((v.paddock_ids || []).includes(p.id) || preselect === p.id ? ' checked' : '') + '> ' + esc(p.name) + '</label>'
-      ).join('') +
-      '</div></div>' +
-    '<div class="form-group form-group--full"><label>Observations</label>' +
-      '<textarea class="form-control" id="vf-observations" rows="3">' + esc(v.observations || '') + '</textarea></div>' +
-    '<div class="form-group form-group--full"><label>Recommendations</label>' +
-      '<textarea class="form-control" id="vf-recommendations" rows="3">' + esc(v.recommendations || '') + '</textarea></div>' +
-    '<div class="form-group"><label class="checkbox-label">' +
-      '<input type="checkbox" id="vf-followup-req"' + (v.follow_up_required ? ' checked' : '') +
-      ' onchange="document.getElementById(\'vf-followup-wrap\').style.display=this.checked?\'\':\' none\'"> Follow-up required</label></div>' +
-    '<div class="form-group" id="vf-followup-wrap" style="' + (v.follow_up_required ? '' : 'display:none') + '">' +
-      '<label>Follow-up Date</label>' +
-      '<input class="form-control" id="vf-followup-date" type="date" value="' + (v.follow_up_date || '') + '"></div>' +
-    '</div>';
+function openLogVisitModal() {
+  const today = todayStr();
+
+  const bodyHTML = `
+    <div class="form-grid form-grid-2">
+      <div class="form-group">
+        <label>Visit Date *</label>
+        <input class="form-control" id="lv-date" type="date" value="${today}">
+      </div>
+      <div class="form-group">
+        <label>Type</label>
+        <select class="form-control" id="lv-type">
+          <option value="external">External agronomist</option>
+          <option value="internal">Internal</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Agronomist Name *</label>
+        <input class="form-control" id="lv-agronomist" placeholder="e.g. John Smith">
+      </div>
+      <div class="form-group">
+        <label>Company</label>
+        <input class="form-control" id="lv-company" placeholder="e.g. Delta Agri">
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <strong style="font-size:0.85rem">Paddock Entries</strong>
+        <button type="button" class="btn btn-sm" id="lv-add-paddock-btn">+ Add Paddock</button>
+      </div>
+      <div id="lv-paddock-list"></div>
+    </div>
+  `;
 
   openModal({
-    title: existing ? 'Edit Visit' : 'Log Agronomist Visit',
+    title: 'Log Scouting Visit',
     bodyHTML,
-    confirmLabel: 'Save',
+    confirmLabel: 'Save Visit',
+    wide: true,
+    onOpen: () => {
+      document.getElementById('lv-add-paddock-btn')
+        ?.addEventListener('click', () => addPaddockEntryRow());
+      addPaddockEntryRow(); // start with one row
+    },
     onConfirm: async () => {
-      const farm   = getActiveFarm();
-      const farmId = farm?.id || farm;
-      const paddockIds = [...document.querySelectorAll('.visit-paddock-cb:checked')].map(el => el.value);
-      const data = {
-        farm_id:            farmId,
-        visit_date:         document.getElementById('vf-date')?.value,
-        agronomist_name:    document.getElementById('vf-name')?.value?.trim(),
-        agronomist_type:    document.getElementById('vf-type')?.value,
-        agronomist_company: document.getElementById('vf-company')?.value?.trim() || null,
-        paddock_ids:        paddockIds,
-        observations:       document.getElementById('vf-observations')?.value?.trim() || null,
-        recommendations:    document.getElementById('vf-recommendations')?.value?.trim() || null,
-        follow_up_required: document.getElementById('vf-followup-req')?.checked || false,
-        follow_up_date:     document.getElementById('vf-followup-date')?.value || null,
-        updated_at:         new Date().toISOString(),
-      };
-      if (!data.visit_date || !data.agronomist_name) throw new Error('Date and agronomist name are required');
-      if (existing) {
-        await dbUpdate('agronomy_visits', existing.id, data);
-      } else {
-        await dbInsert('agronomy_visits', data);
-      }
-      toast('Visit saved', 'success');
+      const farmId  = (() => { const f = getActiveFarm(); return f?.id || f; })();
+      const season  = getActiveSeason();
+      const date    = document.getElementById('lv-date')?.value;
+      const name    = document.getElementById('lv-agronomist')?.value?.trim();
+      const company = document.getElementById('lv-company')?.value?.trim() || null;
+      const type    = document.getElementById('lv-type')?.value;
+
+      if (!date || !name) throw new Error('Date and agronomist name are required');
+
+      const rows = collectPaddockRows();
+      if (rows.length === 0) throw new Error('Add at least one paddock entry');
+      rows.forEach(r => { if (!r.paddock_name) throw new Error('Each paddock entry needs a paddock name'); });
+
+      // Create report
+      const [report] = await dbInsert('agronomy_reports', {
+        farm_id: farmId, season, report_date: date,
+        agronomist_name: name, agronomist_company: company,
+        agronomist_type: type, updated_at: new Date().toISOString(),
+      });
+
+      // Insert all paddock entries
+      await Promise.all(rows.map(row =>
+        dbInsert('agronomy_paddock_entries', {
+          ...row,
+          report_id: report.id,
+          farm_id:   farmId,
+          updated_at: new Date().toISOString(),
+        })
+      ));
+
+      toast('Visit saved — ' + rows.length + ' paddock' + (rows.length > 1 ? 's' : ''), 'success');
       await refreshAll();
+      if (activePaddock) renderPaddockDetail(activePaddock);
     },
   });
 }
 
-// ══════════════════════════════════════════════════════════════
-// SPRAY TAB
-// ══════════════════════════════════════════════════════════════
+let paddockRowCount = 0;
+function addPaddockEntryRow(copyFrom = null) {
+  paddockRowCount++;
+  const id = 'pr-' + paddockRowCount;
+  const list = document.getElementById('lv-paddock-list');
+  if (!list) return;
 
-function renderSprayTab() {
-  const container = document.getElementById('agro-tab-spray');
-  if (!container) return;
+  const div = document.createElement('div');
+  div.className = 'agro-entry-paddock-block';
+  div.id = id;
 
-  const today    = new Date().toISOString().slice(0, 10);
-  const activeWH = allSprayRecords.filter(s =>
-    s.withholding_expires_date && s.withholding_expires_date >= today);
+  // Determine if commodity makes it fallow
+  const isFallow = copyFrom?.is_fallow || false;
 
-  container.innerHTML =
-    (activeWH.length ?
-      '<div class="alert alert-warning mb-3">⚠ <strong>' + activeWH.length +
-      ' active withholding period' + (activeWH.length > 1 ? 's' : '') + '</strong> — ' +
-      activeWH.map(s =>
-        (allPaddocks.find(p => p.id === s.paddock_id)?.name || '?') +
-        ': ' + esc(s.product_name) + ' (exp. ' + formatDate(s.withholding_expires_date) + ')'
-      ).join(' | ') + '</div>' : '') +
-    '<div class="card">' +
-      '<div class="card-header">' +
-        '<span>Spray Records</span>' +
-        '<button class="btn btn-primary btn-sm" id="add-spray-btn">+ Add Record</button>' +
-      '</div>' +
-      '<div class="table-responsive">' +
-        '<table class="data-table" id="spray-table">' +
-          '<thead><tr>' +
-            '<th>Date</th><th>Paddock</th><th>Product</th><th>Type</th>' +
-            '<th>Rate</th><th>Area (ha)</th><th>Total Qty</th><th>Operator</th>' +
-            '<th>WHP Expires</th><th></th>' +
-          '</tr></thead>' +
-          '<tbody id="spray-tbody">' +
-            (allSprayRecords.length === 0
-              ? '<tr><td colspan="10" class="empty-cell">No spray records.</td></tr>'
-              : allSprayRecords.map(r => sprayRowHTML(r, false)).join('')) +
-          '</tbody>' +
-        '</table>' +
-      '</div>' +
-    '</div>';
+  div.innerHTML = `
+    <div class="agro-entry-paddock-header">
+      <input class="form-control agro-ep-name" placeholder="Paddock name *"
+        value="${esc(copyFrom?.paddock_name || '')}">
+      <select class="form-control agro-ep-commodity" style="max-width:160px">
+        ${COMMODITIES.map(c =>
+          `<option value="${c}"${(copyFrom?.commodity || 'Cotton IRR') === c ? ' selected' : ''}>${c}</option>`
+        ).join('')}
+      </select>
+      <input class="form-control agro-ep-variety" placeholder="Variety"
+        style="max-width:120px" value="${esc(copyFrom?.variety || '')}">
+      <input class="form-control agro-ep-area" type="number" step="0.01" placeholder="ha"
+        style="max-width:80px" value="${copyFrom?.area_ha != null ? copyFrom.area_ha : ''}">
+      <button type="button" class="btn-link danger agro-ep-remove" style="margin-left:4px">✕</button>
+    </div>
 
-  document.getElementById('add-spray-btn')?.addEventListener('click', () => openSprayModal(null, null));
-  bindSprayRowEvents();
+    <div class="agro-entry-crop-fields" style="${isFallow ? 'display:none' : ''}">
+      <div class="form-grid form-grid-3" style="margin-top:8px">
+        <div class="form-group">
+          <label>Seed/Wet Date</label>
+          <input class="form-control agro-ep-wet-date" type="date"
+            value="${copyFrom?.seed_wet_date || ''}">
+        </div>
+        <div class="form-group">
+          <label>Yield Target (t)</label>
+          <input class="form-control agro-ep-yield" type="number" step="0.1"
+            placeholder="Total tonnes" value="${copyFrom?.yield_target_t != null ? copyFrom.yield_target_t : ''}">
+        </div>
+        <div class="form-group">
+          <label>Soil Type</label>
+          <select class="form-control agro-ep-soil">
+            <option value="">—</option>
+            ${SOIL_TYPES.map(s =>
+              `<option value="${s}"${copyFrom?.soil_type === s ? ' selected' : ''}>${s}</option>`
+            ).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-grid form-grid-4" style="margin-top:0">
+        <div class="form-group">
+          <label>Plant Est. %</label>
+          <input class="form-control agro-ep-est" type="number" step="0.1"
+            placeholder="%" value="${copyFrom?.plant_est_pct != null ? copyFrom.plant_est_pct : ''}">
+        </div>
+        <div class="form-group">
+          <label>Plants/m²</label>
+          <input class="form-control agro-ep-plants" type="number" step="0.1"
+            value="${copyFrom?.plants_per_m2 != null ? copyFrom.plants_per_m2 : ''}">
+        </div>
+        <div class="form-group">
+          <label>Height (cm)</label>
+          <input class="form-control agro-ep-height" type="number" step="0.5"
+            value="${copyFrom?.height_cm_2 ?? copyFrom?.height_cm_1 ?? ''}">
+        </div>
+        <div class="form-group">
+          <label>Nodes</label>
+          <input class="form-control agro-ep-nodes" type="number" step="0.25"
+            value="${copyFrom?.nodes_3_count ?? copyFrom?.nodes_2_count ?? copyFrom?.nodes_1_count ?? ''}">
+        </div>
+      </div>
+
+      <div class="form-grid form-grid-3" style="margin-top:0">
+        <div class="form-group">
+          <label>N Deficit (kg/ha)</label>
+          <input class="form-control agro-ep-ndeficit" type="number" step="1"
+            value="${copyFrom?.n_deficit != null ? copyFrom.n_deficit : ''}">
+        </div>
+        <div class="form-group">
+          <label>Seasonal Urea Req (kg/ha)</label>
+          <input class="form-control agro-ep-urea-req" type="number" step="1"
+            value="${copyFrom?.seasonal_urea_req != null ? copyFrom.seasonal_urea_req : ''}">
+        </div>
+        <div class="form-group">
+          <label>1st In-Crop IRR Date</label>
+          <input class="form-control agro-ep-irr-date" type="date"
+            value="${copyFrom?.first_incrop_irr_date || ''}">
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:0">
+        <label>In-Crop Sprays (products, rates, dates)</label>
+        <textarea class="form-control agro-ep-sprays" rows="2"
+          placeholder="e.g. 2.2L DST 180g Butroxydim 21-10-26 · 3.75L Biffo 6-11-26">${esc(copyFrom?.incrop_sprays_notes || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label>Fertiliser / Irrigation Notes</label>
+        <textarea class="form-control agro-ep-fert" rows="2"
+          placeholder="e.g. 100kg urea 22-10-26, water 75kg 6-11-26">${esc(copyFrom?.incrop_fert_notes || '')}</textarea>
+      </div>
+    </div>
+
+    <div class="form-grid form-grid-2" style="margin-top:4px">
+      <div class="form-group">
+        <label>Comments</label>
+        <textarea class="form-control agro-ep-comments" rows="2"
+          placeholder="Observations from this visit">${esc(copyFrom?.comments || '')}</textarea>
+      </div>
+      <div class="form-group">
+        <label>Upcoming Jobs</label>
+        <textarea class="form-control agro-ep-jobs" rows="2"
+          placeholder="Actions required before next visit">${esc(copyFrom?.upcoming_jobs || '')}</textarea>
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:0;display:flex;align-items:center;gap:12px">
+      <label style="margin:0;font-size:0.8rem">Priority:</label>
+      <label class="radio-label"><input type="radio" name="pri-${id}" class="agro-ep-priority" value="none"${!copyFrom?.priority || copyFrom?.priority === 'none' ? ' checked' : ''}> On track</label>
+      <label class="radio-label"><input type="radio" name="pri-${id}" class="agro-ep-priority" value="medium"${copyFrom?.priority === 'medium' ? ' checked' : ''}> Watch</label>
+      <label class="radio-label"><input type="radio" name="pri-${id}" class="agro-ep-priority" value="high"${copyFrom?.priority === 'high' ? ' checked' : ''}> High priority</label>
+      <button type="button" class="btn btn-sm agro-ep-copy-btn" style="margin-left:auto">
+        Copy to other paddocks →
+      </button>
+    </div>
+  `;
+
+  list.appendChild(div);
+
+  // Hide crop fields for fallow
+  div.querySelector('.agro-ep-commodity')?.addEventListener('change', function() {
+    const fallow = FALLOW_COMMODITIES.includes(this.value);
+    div.querySelector('.agro-entry-crop-fields').style.display = fallow ? 'none' : '';
+  });
+
+  div.querySelector('.agro-ep-remove')?.addEventListener('click', () => div.remove());
+
+  div.querySelector('.agro-ep-copy-btn')?.addEventListener('click', () => {
+    openCopyModal(id);
+  });
 }
 
-function sprayRowHTML(r, editing) {
-  const paddockName = allPaddocks.find(p => p.id === r.paddock_id)?.name || r.paddocks?.name || '—';
-  const today       = new Date().toISOString().slice(0, 10);
-  const whActive    = r.withholding_expires_date && r.withholding_expires_date >= today;
+function openCopyModal(sourceId) {
+  const sourceBlock = document.getElementById(sourceId);
+  if (!sourceBlock) return;
 
-  if (editing) {
-    return '<tr data-id="' + r.id + '" class="editing-row">' +
-      '<td><input class="inline-input" name="application_date" type="date" value="' + (r.application_date || '') + '"></td>' +
-      '<td><select class="inline-input" name="paddock_id">' +
-        allPaddocks.map(p => '<option value="' + p.id + '"' + (r.paddock_id === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') +
-      '</select></td>' +
-      '<td><input class="inline-input" name="product_name" value="' + esc(r.product_name || '') + '"></td>' +
-      '<td><select class="inline-input" name="application_type">' +
-        APP_TYPES.map(t => '<option value="' + t + '"' + (r.application_type === t ? ' selected' : '') + '>' + cap(t) + '</option>').join('') +
-      '</select></td>' +
-      '<td><input class="inline-input" style="width:70px" name="rate_per_ha" type="number" step="0.001" value="' + (r.rate_per_ha || '') + '"></td>' +
-      '<td><input class="inline-input" name="total_area_ha" type="number" step="0.01" value="' + (r.total_area_ha || '') + '"></td>' +
-      '<td><input class="inline-input" name="total_qty" type="number" step="0.001" value="' + (r.total_qty || '') + '"></td>' +
-      '<td><input class="inline-input" name="operator" value="' + esc(r.operator || '') + '"></td>' +
-      '<td><input class="inline-input" name="withholding_period_days" type="number" min="0" value="' + (r.withholding_period_days || '') + '"> days</td>' +
-      '<td class="row-actions">' +
-        '<button class="btn-link save-spray-btn" data-id="' + r.id + '">Save</button>' +
-        '<button class="btn-link cancel-spray-btn" data-id="' + r.id + '">Cancel</button>' +
-      '</td>' +
-    '</tr>';
+  // Collect all existing paddock row blocks
+  const allBlocks = [...document.querySelectorAll('.agro-entry-paddock-block')];
+  const otherBlocks = allBlocks.filter(b => b.id !== sourceId);
+
+  if (otherBlocks.length === 0) {
+    toast('No other paddock rows to copy to — add more paddocks first', 'warning');
+    return;
   }
 
-  return '<tr data-id="' + r.id + '">' +
-    '<td>' + formatDate(r.application_date) + '</td>' +
-    '<td>' + esc(paddockName) + '</td>' +
-    '<td><strong>' + esc(r.product_name) + '</strong>' +
-      (r.active_ingredient ? '<br><small class="text-muted">' + esc(r.active_ingredient) + '</small>' : '') +
-    '</td>' +
-    '<td><span class="badge badge-' + (r.application_type || 'other') + '">' + cap(r.application_type || '') + '</span></td>' +
-    '<td>' + (r.rate_per_ha ? r.rate_per_ha + ' ' + (r.rate_unit || 'L/ha') : '—') + '</td>' +
-    '<td>' + (r.total_area_ha ? r.total_area_ha + ' ha' : '—') + '</td>' +
-    '<td>' + (r.total_qty ? r.total_qty + ' ' + (r.qty_unit || 'L') : '—') + '</td>' +
-    '<td>' + esc(r.operator || '—') + '</td>' +
-    '<td>' + (r.withholding_expires_date
-      ? '<span class="badge badge-' + (whActive ? 'danger' : 'muted') + '">' +
-        (whActive ? '⚠ ' : '') + formatDate(r.withholding_expires_date) + '</span>'
-      : '—') + '</td>' +
-    '<td class="row-actions">' +
-      '<button class="btn-link edit-spray-btn" data-id="' + r.id + '">Edit</button>' +
-      '<button class="btn-link danger delete-spray-btn" data-id="' + r.id + '">Del</button>' +
-    '</td>' +
-  '</tr>';
-}
+  // Which fields can be copied
+  const fields = [
+    { key: 'sprays',   label: 'Spray records',         cls: '.agro-ep-sprays' },
+    { key: 'fert',     label: 'Fert/irrigation notes',  cls: '.agro-ep-fert' },
+    { key: 'height',   label: 'Height',                 cls: '.agro-ep-height' },
+    { key: 'nodes',    label: 'Nodes',                  cls: '.agro-ep-nodes' },
+    { key: 'ndeficit', label: 'N deficit',              cls: '.agro-ep-ndeficit' },
+    { key: 'urearq',   label: 'Seasonal urea req',      cls: '.agro-ep-urea-req' },
+    { key: 'irrdate',  label: 'IRR date',               cls: '.agro-ep-irr-date' },
+    { key: 'jobs',     label: 'Upcoming jobs',          cls: '.agro-ep-jobs' },
+    { key: 'priority', label: 'Priority',               cls: '.agro-ep-priority' },
+  ];
 
-function bindSprayRowEvents() {
-  const tbody = document.getElementById('spray-tbody');
-  if (!tbody) return;
-  tbody.addEventListener('click', async e => {
-    const id = e.target.dataset.id;
-    if (!id) return;
-    if (e.target.classList.contains('edit-spray-btn')) {
-      const r = allSprayRecords.find(r => r.id === id);
-      const row = tbody.querySelector('tr[data-id="' + id + '"]');
-      if (row && r) { row.outerHTML = sprayRowHTML(r, true); bindSprayRowEvents(); }
-    }
-    if (e.target.classList.contains('cancel-spray-btn')) {
-      const r = allSprayRecords.find(r => r.id === id);
-      const row = tbody.querySelector('tr[data-id="' + id + '"]');
-      if (row && r) { row.outerHTML = sprayRowHTML(r, false); bindSprayRowEvents(); }
-    }
-    if (e.target.classList.contains('save-spray-btn')) {
-      await saveInlineSpray(id, tbody);
-    }
-    if (e.target.classList.contains('delete-spray-btn')) {
-      if (confirm('Delete this spray record?')) {
-        await dbDelete('spray_records', id);
-        toast('Record deleted', 'success');
-        await refreshAll();
-      }
-    }
+  const bodyHTML = `
+    <p class="small text-muted" style="margin-bottom:12px">
+      Choose which fields to copy from <strong>${sourceBlock.querySelector('.agro-ep-name')?.value || 'this paddock'}</strong>
+      to the paddocks you select below.
+    </p>
+    <div style="margin-bottom:14px">
+      <strong style="font-size:0.8rem">Fields to copy:</strong>
+      <div class="checkbox-group" style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
+        ${fields.map(f => `
+          <label class="checkbox-label">
+            <input type="checkbox" class="copy-field-cb" value="${f.key}" checked> ${f.label}
+          </label>`).join('')}
+      </div>
+    </div>
+    <div>
+      <strong style="font-size:0.8rem">Copy to:</strong>
+      <div class="checkbox-group" style="margin-top:6px">
+        ${otherBlocks.map(b => {
+          const pName = b.querySelector('.agro-ep-name')?.value || b.id;
+          return `<label class="checkbox-label">
+            <input type="checkbox" class="copy-target-cb" value="${b.id}" checked> ${esc(pName)}
+          </label>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+
+  openModal({
+    title: 'Copy fields to other paddocks',
+    bodyHTML,
+    confirmLabel: 'Copy',
+    onConfirm: async () => {
+      const selectedFields  = [...document.querySelectorAll('.copy-field-cb:checked')].map(el => el.value);
+      const selectedTargets = [...document.querySelectorAll('.copy-target-cb:checked')].map(el => el.value);
+
+      selectedTargets.forEach(targetId => {
+        const target = document.getElementById(targetId);
+        if (!target) return;
+        fields
+          .filter(f => selectedFields.includes(f.key))
+          .forEach(f => {
+            if (f.key === 'priority') {
+              const srcVal = sourceBlock.querySelector('.agro-ep-priority:checked')?.value;
+              const tgtRadio = target.querySelector(`.agro-ep-priority[value="${srcVal}"]`);
+              if (tgtRadio) tgtRadio.checked = true;
+            } else {
+              const srcEl = sourceBlock.querySelector(f.cls);
+              const tgtEl = target.querySelector(f.cls);
+              if (srcEl && tgtEl) tgtEl.value = srcEl.value;
+            }
+          });
+      });
+
+      toast('Copied to ' + selectedTargets.length + ' paddock' + (selectedTargets.length !== 1 ? 's' : ''), 'success');
+    },
   });
 }
 
-async function saveInlineSpray(id, tbody) {
-  const row = tbody.querySelector('tr[data-id="' + id + '"]');
-  if (!row) return;
-  const g = n => { const el = row.querySelector('[name="' + n + '"]'); return el ? el.value.trim() || null : null; };
-  const data = {
-    application_date:        g('application_date'),
-    paddock_id:              g('paddock_id'),
-    product_name:            g('product_name'),
-    application_type:        g('application_type'),
-    rate_per_ha:             g('rate_per_ha') ? parseFloat(g('rate_per_ha')) : null,
-    total_area_ha:           g('total_area_ha') ? parseFloat(g('total_area_ha')) : null,
-    total_qty:               g('total_qty') ? parseFloat(g('total_qty')) : null,
-    operator:                g('operator'),
-    withholding_period_days: g('withholding_period_days') ? parseInt(g('withholding_period_days')) : null,
-    updated_at:              new Date().toISOString(),
-  };
-  if (!data.application_date || !data.product_name) { toast('Date and product required', 'error'); return; }
-  await dbUpdate('spray_records', id, data);
-  toast('Spray record saved', 'success');
-  await refreshAll();
+function collectPaddockRows() {
+  return [...document.querySelectorAll('.agro-entry-paddock-block')].map(block => {
+    const commodity = block.querySelector('.agro-ep-commodity')?.value || '';
+    const isFallow  = FALLOW_COMMODITIES.includes(commodity);
+    const priority  = block.querySelector('.agro-ep-priority:checked')?.value || 'none';
+
+    const row = {
+      paddock_name: block.querySelector('.agro-ep-name')?.value?.trim() || '',
+      commodity,
+      variety:      block.querySelector('.agro-ep-variety')?.value?.trim() || null,
+      area_ha:      numOrNull(block.querySelector('.agro-ep-area')?.value),
+      is_fallow:    isFallow,
+      comments:     block.querySelector('.agro-ep-comments')?.value?.trim() || null,
+      upcoming_jobs:block.querySelector('.agro-ep-jobs')?.value?.trim() || null,
+      priority,
+    };
+
+    if (!isFallow) {
+      Object.assign(row, {
+        seed_wet_date:       block.querySelector('.agro-ep-wet-date')?.value || null,
+        yield_target_t:      numOrNull(block.querySelector('.agro-ep-yield')?.value),
+        soil_type:           block.querySelector('.agro-ep-soil')?.value || null,
+        plant_est_pct:       numOrNull(block.querySelector('.agro-ep-est')?.value),
+        plants_per_m2:       numOrNull(block.querySelector('.agro-ep-plants')?.value),
+        height_cm_2:         numOrNull(block.querySelector('.agro-ep-height')?.value),
+        nodes_3_count:       numOrNull(block.querySelector('.agro-ep-nodes')?.value),
+        n_deficit:           numOrNull(block.querySelector('.agro-ep-ndeficit')?.value),
+        seasonal_urea_req:   numOrNull(block.querySelector('.agro-ep-urea-req')?.value),
+        first_incrop_irr_date: block.querySelector('.agro-ep-irr-date')?.value || null,
+        incrop_sprays_notes: block.querySelector('.agro-ep-sprays')?.value?.trim() || null,
+        incrop_fert_notes:   block.querySelector('.agro-ep-fert')?.value?.trim() || null,
+      });
+    }
+
+    return row;
+  });
 }
 
-function openSprayModal(existingId, defaultPaddockId) {
-  const r = existingId ? allSprayRecords.find(s => s.id === existingId) : {};
-  const pid = defaultPaddockId || r?.paddock_id || '';
-
-  const bodyHTML =
-    '<div class="form-grid form-grid-2">' +
-    '<div class="form-group"><label>Date *</label>' +
-      '<input class="form-control" id="sf-date" type="date" value="' + (r?.application_date || todayStr()) + '"></div>' +
-    '<div class="form-group"><label>Paddock *</label>' +
-      '<select class="form-control" id="sf-paddock"><option value="">— Select —</option>' +
-      allPaddocks.map(p => '<option value="' + p.id + '"' + (pid === p.id ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') +
-      '</select></div>' +
-    '<div class="form-group"><label>Product Name *</label>' +
-      '<input class="form-control" id="sf-product" value="' + esc(r?.product_name || '') + '"></div>' +
-    '<div class="form-group"><label>Active Ingredient</label>' +
-      '<input class="form-control" id="sf-ai" value="' + esc(r?.active_ingredient || '') + '"></div>' +
-    '<div class="form-group"><label>Application Type</label>' +
-      '<select class="form-control" id="sf-type"><option value="">—</option>' +
-      APP_TYPES.map(t => '<option value="' + t + '"' + (r?.application_type === t ? ' selected' : '') + '>' + cap(t) + '</option>').join('') +
-      '</select></div>' +
-    '<div class="form-group"><label>Operator</label>' +
-      '<input class="form-control" id="sf-operator" value="' + esc(r?.operator || '') + '"></div>' +
-    '<div class="form-group"><label>Rate per Ha</label>' +
-      '<div style="display:flex;gap:6px">' +
-        '<input class="form-control" id="sf-rate" type="number" step="0.001" value="' + (r?.rate_per_ha || '') + '">' +
-        '<input class="form-control" id="sf-rate-unit" value="' + esc(r?.rate_unit || 'L/ha') + '" style="max-width:70px">' +
-      '</div></div>' +
-    '<div class="form-group"><label>Total Area (ha)</label>' +
-      '<input class="form-control" id="sf-area" type="number" step="0.01" value="' + (r?.total_area_ha || '') + '"></div>' +
-    '<div class="form-group"><label>Total Quantity</label>' +
-      '<div style="display:flex;gap:6px">' +
-        '<input class="form-control" id="sf-qty" type="number" step="0.001" value="' + (r?.total_qty || '') + '">' +
-        '<input class="form-control" id="sf-qty-unit" value="' + esc(r?.qty_unit || 'L') + '" style="max-width:60px">' +
-      '</div></div>' +
-    '<div class="form-group"><label>Withholding Period (days)</label>' +
-      '<input class="form-control" id="sf-whp" type="number" min="0" value="' + (r?.withholding_period_days || '') + '"></div>' +
-    '<div class="form-group"><label>Temp (°C)</label>' +
-      '<input class="form-control" id="sf-temp" type="number" step="0.1" value="' + (r?.weather_temp_c || '') + '"></div>' +
-    '<div class="form-group"><label>Wind (km/h)</label>' +
-      '<input class="form-control" id="sf-wind" type="number" step="0.1" value="' + (r?.weather_wind_kmh || '') + '"></div>' +
-    '<div class="form-group form-group--full"><label>Weather / Conditions</label>' +
-      '<input class="form-control" id="sf-weather" value="' + esc(r?.weather_conditions || '') + '"></div>' +
-    '<div class="form-group"><label>Application Method</label>' +
-      '<input class="form-control" id="sf-method" value="' + esc(r?.application_method || '') + '"></div>' +
-    '<div class="form-group form-group--full"><label>Notes</label>' +
-      '<textarea class="form-control" id="sf-notes" rows="2">' + esc(r?.notes || '') + '</textarea></div>' +
-    '</div>';
+// ── EDIT ENTRY MODAL ───────────────────────────────────────────────────────
+function openEditEntryModal(entry) {
+  const bodyHTML = `<div id="lv-paddock-list"></div>`;
 
   openModal({
-    title: existingId ? 'Edit Spray Record' : 'Add Spray Record',
+    title: 'Edit Paddock Entry — ' + esc(entry.paddock_name),
     bodyHTML,
     confirmLabel: 'Save',
+    wide: true,
+    onOpen: () => {
+      paddockRowCount = 0;
+      addPaddockEntryRow(entry);
+      // Hide the remove and copy buttons in edit mode
+      document.querySelector('.agro-ep-remove')?.remove();
+      document.querySelector('.agro-ep-copy-btn')
+        && (document.querySelector('.agro-ep-copy-btn').style.display = 'none');
+    },
     onConfirm: async () => {
-      const farm   = getActiveFarm();
-      const farmId = farm?.id || farm;
-      const season = getActiveSeason();
-      const paddockId = document.getElementById('sf-paddock')?.value;
-      const psRow = allPaddockSeasons.find(ps => ps.paddock_id === paddockId && ps.season === season);
-
-      const data = {
-        farm_id:                farmId,
-        paddock_id:             paddockId,
-        paddock_season_id:      psRow?.id || null,
-        application_date:       document.getElementById('sf-date')?.value,
-        product_name:           document.getElementById('sf-product')?.value?.trim(),
-        active_ingredient:      document.getElementById('sf-ai')?.value?.trim() || null,
-        application_type:       document.getElementById('sf-type')?.value || null,
-        operator:               document.getElementById('sf-operator')?.value?.trim() || null,
-        rate_per_ha:            parseFloat(document.getElementById('sf-rate')?.value) || null,
-        rate_unit:              document.getElementById('sf-rate-unit')?.value || 'L/ha',
-        total_area_ha:          parseFloat(document.getElementById('sf-area')?.value) || null,
-        total_qty:              parseFloat(document.getElementById('sf-qty')?.value) || null,
-        qty_unit:               document.getElementById('sf-qty-unit')?.value || 'L',
-        withholding_period_days:parseInt(document.getElementById('sf-whp')?.value) || null,
-        weather_temp_c:         parseFloat(document.getElementById('sf-temp')?.value) || null,
-        weather_wind_kmh:       parseFloat(document.getElementById('sf-wind')?.value) || null,
-        weather_conditions:     document.getElementById('sf-weather')?.value?.trim() || null,
-        application_method:     document.getElementById('sf-method')?.value?.trim() || null,
-        notes:                  document.getElementById('sf-notes')?.value?.trim() || null,
-        updated_at:             new Date().toISOString(),
-      };
-      if (!data.application_date || !data.paddock_id || !data.product_name) {
-        throw new Error('Date, paddock, and product name are required');
-      }
-      if (existingId) {
-        await dbUpdate('spray_records', existingId, data);
-      } else {
-        await dbInsert('spray_records', data);
-      }
-      toast('Spray record saved', 'success');
+      const rows = collectPaddockRows();
+      if (!rows[0]) return;
+      await dbUpdate('agronomy_paddock_entries', entry.id, {
+        ...rows[0],
+        updated_at: new Date().toISOString(),
+      });
+      toast('Entry updated', 'success');
       await refreshAll();
+      if (activePaddock) renderPaddockDetail(activePaddock);
     },
   });
 }
 
-// ── Season Modal ──────────────────────────────────────────────
-
-function openSeasonModal(paddockId) {
-  const paddock = allPaddocks.find(p => p.id === paddockId);
-  const season  = getActiveSeason();
-  const ps      = allPaddockSeasons.find(s => s.paddock_id === paddockId);
-  if (!paddock) return;
-
-  openModal({
-    title: esc(paddock.name) + ' — ' + season,
-    bodyHTML:
-      '<div class="form-grid form-grid-2">' +
-      '<div class="form-group"><label>Commodity</label>' +
-        '<select class="form-control" id="psf-commodity"><option value="">—</option>' +
-        COMMODITY_OPTIONS.map(c => '<option' + (ps?.commodity === c ? ' selected' : '') + '>' + c + '</option>').join('') +
-        '</select></div>' +
-      '<div class="form-group"><label>Crop Type</label>' +
-        '<select class="form-control" id="psf-crop-type"><option value="">—</option>' +
-        CROP_TYPE_OPTIONS.map(c => '<option' + (ps?.crop_type === c ? ' selected' : '') + '>' + c + '</option>').join('') +
-        '</select></div>' +
-      '<div class="form-group"><label>Variety</label>' +
-        '<input class="form-control" id="psf-variety" value="' + esc(ps?.variety || '') + '"></div>' +
-      '<div class="form-group"><label>Planted Date</label>' +
-        '<input class="form-control" id="psf-planted" type="date" value="' + (ps?.planted_date || '') + '"></div>' +
-      '<div class="form-group"><label>Area Planted (ha)</label>' +
-        '<input class="form-control" id="psf-area" type="number" step="0.01" value="' + (ps?.area_planted_ha || '') + '"></div>' +
-      '<div class="form-group form-group--full"><label>Notes</label>' +
-        '<textarea class="form-control" id="psf-notes" rows="2">' + esc(ps?.notes || '') + '</textarea></div>' +
-      '</div>',
-    confirmLabel: 'Save',
-    onConfirm: async () => {
-      const farm   = getActiveFarm();
-      const farmId = farm?.id || farm;
-      const data = {
-        paddock_id:      paddockId,
-        farm_id:         farmId,
-        season,
-        commodity:       document.getElementById('psf-commodity')?.value || null,
-        crop_type:       document.getElementById('psf-crop-type')?.value || null,
-        variety:         document.getElementById('psf-variety')?.value?.trim() || null,
-        planted_date:    document.getElementById('psf-planted')?.value || null,
-        area_planted_ha: parseFloat(document.getElementById('psf-area')?.value) || null,
-        notes:           document.getElementById('psf-notes')?.value?.trim() || null,
-        updated_at:      new Date().toISOString(),
-      };
-      if (ps) {
-        await dbUpdate('paddock_seasons', ps.id, data);
-      } else {
-        await dbInsert('paddock_seasons', data);
-      }
-      toast('Season crop saved', 'success');
-      await refreshAll();
-    },
+// ── Helpers ────────────────────────────────────────────────────────────────
+function buildPaddockMap() {
+  // For each paddock name, aggregate the latest entry data
+  const map = {};
+  // Sort entries by report date asc so latest wins
+  const sorted = [...allEntries].sort((a, b) => {
+    const ra = allReports.find(r => r.id === a.report_id)?.report_date || '';
+    const rb = allReports.find(r => r.id === b.report_id)?.report_date || '';
+    return ra < rb ? -1 : ra > rb ? 1 : 0;
   });
-}
 
-// ── Leaflet loader ────────────────────────────────────────────
-
-async function loadLeaflet() {
-  if (window.L) return;
-  await Promise.all([
-    loadCSS('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'),
-    loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'),
-  ]);
-  await Promise.all([
-    loadCSS('https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css'),
-    loadScript('https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js'),
-  ]);
-}
-
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    if (document.querySelector('script[src="' + src + '"]')) { resolve(); return; }
-    const s = document.createElement('script');
-    s.src = src; s.onload = resolve; s.onerror = reject;
-    document.head.appendChild(s);
+  sorted.forEach(e => {
+    const report = allReports.find(r => r.id === e.report_id);
+    map[e.paddock_name] = {
+      ...e,
+      lastReportDate: report?.report_date,
+    };
   });
+  return map;
 }
 
-function loadCSS(href) {
-  return new Promise(resolve => {
-    if (document.querySelector('link[href="' + href + '"]')) { resolve(); return; }
-    const l = document.createElement('link');
-    l.rel = 'stylesheet'; l.href = href; l.onload = resolve;
-    document.head.appendChild(l);
-    setTimeout(resolve, 2000);
-  });
+function avgOf(arr, key) {
+  const vals = arr.map(o => o[key]).filter(v => v != null);
+  if (!vals.length) return null;
+  return vals.reduce((s, v) => s + v, 0) / vals.length;
 }
 
-// ── Global hooks ──────────────────────────────────────────────
-window._cfmAgroEditSeason = (id) => openSeasonModal(id);
-window._cfmAgroNewVisit   = (id) => openVisitModal(null, id);
-window._cfmAgroNewSpray   = (id) => openSprayModal(null, id);
-
-// ── Helpers ───────────────────────────────────────────────────
+function fmtHa(v) { return v != null ? parseFloat(v).toFixed(1) + ' ha' : '—'; }
+function numOrNull(v) { const n = parseFloat(v); return isNaN(n) ? null : n; }
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 function esc(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
-function resolveCommodity(cropType) {
-  if (!cropType) return null;
-  if (cropType.toLowerCase().includes('cotton')) return 'Cotton';
-  if (['Winter Cereal','Summer Cereal'].includes(cropType)) return 'Grain';
-  if (cropType === 'Pulse') return 'Chickpea';
-  return cropType;
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }

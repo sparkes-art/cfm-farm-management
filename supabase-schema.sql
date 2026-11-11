@@ -289,3 +289,104 @@ ALTER TABLE management_comments ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "mgmt_comments_read"  ON management_comments FOR SELECT USING (can_read(farm_id));
 CREATE POLICY "mgmt_comments_write" ON management_comments FOR ALL    USING (can_write(farm_id));
+
+-- ============================================================
+-- AGRONOMY — reports + per-paddock entries
+-- Added: 2026-11-11
+-- ============================================================
+
+-- One row per agronomist visit/report (covers whole farm or subset)
+CREATE TABLE IF NOT EXISTS agronomy_reports (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  farm_id          TEXT NOT NULL REFERENCES farms(id),
+  report_date      DATE NOT NULL,
+  agronomist_name  TEXT NOT NULL,
+  agronomist_company TEXT,
+  agronomist_type  TEXT DEFAULT 'external',  -- 'external' | 'internal'
+  season           TEXT NOT NULL,
+  notes            TEXT,
+  created_by       UUID REFERENCES auth.users(id),
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- One row per paddock per report — the main data
+CREATE TABLE IF NOT EXISTS agronomy_paddock_entries (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  report_id        UUID NOT NULL REFERENCES agronomy_reports(id) ON DELETE CASCADE,
+  farm_id          TEXT NOT NULL REFERENCES farms(id),
+  paddock_name     TEXT NOT NULL,
+  area_ha          NUMERIC(10,2),
+  commodity        TEXT,                -- 'Cotton IRR', 'Cotton Dry', 'Corn', 'Sorghum', 'Fallow', etc.
+  variety          TEXT,
+  is_fallow        BOOLEAN DEFAULT false,
+
+  -- Planting & nutrition
+  liquid_n_planting    NUMERIC(8,2),   -- L/ha @ planting
+  starting_n           NUMERIC(8,2),   -- kg/ha (green = actual soil test)
+  fertiliser_type      TEXT,           -- 'MAP' | 'CL' (clay)
+  map_rate_kg          NUMERIC(8,2),   -- kg/ha if MAP
+  cl_rate_m3           NUMERIC(8,2),   -- m3/ha if clay
+  applied_upfront      BOOLEAN,
+  urea_rate_kg         NUMERIC(8,2),   -- kg/ha upfront urea
+  urea_applied_upfront BOOLEAN,
+  soil_type            TEXT,
+  total_n_upfront      NUMERIC(8,2),   -- kg/ha total N at planting
+  total_n_required     NUMERIC(8,2),   -- kg/ha for yield potential
+  n_deficit            NUMERIC(8,2),   -- required minus upfront
+  seasonal_urea_req    NUMERIC(8,2),   -- ongoing urea needed kg/ha
+
+  -- Production targets
+  yield_target_t       NUMERIC(8,2),   -- tonnes total for paddock
+  seed_wet_date        DATE,
+  days_post_wu         INTEGER,
+
+  -- Irrigation
+  first_incrop_irr_date DATE,
+  days_post_irr         INTEGER,
+
+  -- In-crop inputs (free text — links to spray/input module later)
+  incrop_sprays_notes  TEXT,
+  incrop_fert_notes    TEXT,
+
+  -- Crop metrics (cotton)
+  plants_per_m2        NUMERIC(6,2),
+  plant_est_pct        NUMERIC(5,2),   -- % of target population
+  height_cm_1          NUMERIC(6,2),
+  height_date_1        DATE,
+  height_cm_2          NUMERIC(6,2),
+  height_date_2        DATE,
+  nodes_1_count        NUMERIC(5,2),
+  nodes_1_date         DATE,
+  nodes_2_count        NUMERIC(5,2),
+  nodes_2_date         DATE,
+  nodes_3_count        NUMERIC(5,2),
+  nodes_3_date         DATE,
+
+  -- Status & actions
+  comments             TEXT,
+  upcoming_jobs        TEXT,
+  priority             TEXT DEFAULT 'none',  -- 'none' | 'medium' | 'high'
+
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER PUBLICATION supabase_realtime ADD TABLE agronomy_reports;
+ALTER PUBLICATION supabase_realtime ADD TABLE agronomy_paddock_entries;
+
+ALTER TABLE agronomy_reports         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agronomy_paddock_entries ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "agro_reports_read"  ON agronomy_reports FOR SELECT USING (can_read(farm_id));
+CREATE POLICY "agro_reports_write" ON agronomy_reports FOR ALL    USING (can_write(farm_id));
+CREATE POLICY "agro_entries_read"  ON agronomy_paddock_entries FOR SELECT USING (can_read(farm_id));
+CREATE POLICY "agro_entries_write" ON agronomy_paddock_entries FOR ALL    USING (can_write(farm_id));
+
+CREATE TRIGGER agro_reports_updated_at
+  BEFORE UPDATE ON agronomy_reports
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER agro_entries_updated_at
+  BEFORE UPDATE ON agronomy_paddock_entries
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
