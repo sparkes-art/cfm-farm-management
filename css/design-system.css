@@ -1883,3 +1883,24 @@ tr.data-row:hover,
   .form-grid-3, .form-grid-4 { grid-template-columns: 1fr; }
   .agro-board-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Agronomy helpers (v2) ─────────────────────────────────── */
+.stat-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.section-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--hint);
+}
+.agro-paddock-row {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
