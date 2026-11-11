@@ -75,32 +75,42 @@ function _allTypes() {
   return [...standard, ...custom];
 }
 
-// ── Area summary strip ────────────────────────────────────────────────────────
+// ── Combined filter + summary sidebar panel ───────────────────────────────────
 
-function _areaSummaryHTML(types) {
-  const fmt = ha => ha == null ? '—' : Number(ha).toLocaleString('en-AU', { maximumFractionDigits: 1 }) + ' ha';
+function _sidePanelHTML(types) {
+  const fmt    = ha => ha > 0 ? Number(ha).toLocaleString('en-AU', { maximumFractionDigits: 1 }) + ' ha' : '—';
   const totalHa = _paddocks.reduce((s, p) => s + (parseFloat(p.map_area) || 0), 0);
-  const hasArea = _paddocks.some(p => p.map_area != null);
-  if (!hasArea) return '';
+  const totalCount = _paddocks.length;
 
-  const typeStats = types.map(t => {
-    const ha = _paddocks.filter(p => p.type === t).reduce((s, p) => s + (parseFloat(p.map_area) || 0), 0);
-    return { t, ha };
-  }).filter(x => x.ha > 0);
+  const allActive = _activeFilter === 'All';
+
+  const typeRows = types.map(t => {
+    const count  = _paddocks.filter(p => p.type === t).length;
+    const ha     = _paddocks.filter(p => p.type === t).reduce((s, p) => s + (parseFloat(p.map_area) || 0), 0);
+    const active = _activeFilter === t;
+    const c      = _typeColour(t);
+    return `
+      <button class="pk-filter-btn${active ? ' pk-filter-active' : ''}" data-filter="${_esc(t)}"
+        style="width:100%;display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;text-align:left;border:none;background:${active ? c.bg : 'transparent'};cursor:pointer;transition:background 100ms">
+        <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${c.dot}"></span>
+        <span style="flex:1;font-size:0.78rem;font-weight:500;color:${active ? c.text : 'var(--ink)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(t)}</span>
+        <span style="font-size:0.72rem;color:${active ? c.text : 'var(--hint)'};flex-shrink:0">${count}</span>
+        <span style="font-size:0.72rem;color:${active ? c.text : 'var(--hint)'};flex-shrink:0;min-width:46px;text-align:right">${fmt(ha)}</span>
+      </button>`;
+  }).join('');
 
   return `
-    <div id="pk-area-summary" style="display:flex;align-items:center;gap:0;flex-wrap:wrap;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)">
-      <div style="padding:8px 14px;border-right:1px solid var(--border);flex-shrink:0">
-        <div style="font-size:0.68rem;color:var(--hint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px">Total area</div>
-        <div style="font-size:0.95rem;font-weight:600;color:var(--ink)">${fmt(totalHa)}</div>
-      </div>
-      ${typeStats.map(({ t, ha }) => {
-        const c = _typeColour(t);
-        return `<div style="padding:8px 14px;border-right:1px solid var(--border);flex-shrink:0;background:${c.bg}">
-          <div style="font-size:0.68rem;color:${c.text};text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px;opacity:0.75">${_esc(t)}</div>
-          <div style="font-size:0.95rem;font-weight:600;color:${c.text}">${fmt(ha)}</div>
-        </div>`;
-      }).join('')}
+    <div id="pk-side-panel" style="width:200px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:8px;display:flex;flex-direction:column;gap:1px;align-self:flex-start">
+      <button class="pk-filter-btn${allActive ? ' pk-filter-active' : ''}" data-filter="All"
+        style="width:100%;display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;text-align:left;border:none;background:${allActive ? 'var(--blue-light)' : 'transparent'};cursor:pointer;margin-bottom:4px;transition:background 100ms">
+        <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--blue)"></span>
+        <span style="flex:1;font-size:0.78rem;font-weight:600;color:var(--ink)">All paddocks</span>
+        <span style="font-size:0.72rem;color:var(--hint);flex-shrink:0">${totalCount}</span>
+        <span style="font-size:0.72rem;color:var(--hint);flex-shrink:0;min-width:46px;text-align:right">${fmt(totalHa)}</span>
+      </button>
+      <div style="height:1px;background:var(--border);margin:2px 0 4px"></div>
+      ${typeRows}
+      <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:0.68rem;color:var(--hint);text-align:center">Changes save automatically</div>
     </div>`;
 }
 
@@ -123,36 +133,24 @@ function _render() {
       </div>
     </div>
 
-    ${_areaSummaryHTML(types)}
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      ${_sidePanelHTML(types)}
 
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-      <button class="pk-filter-btn${_activeFilter === 'All' ? ' pk-filter-active' : ''}" data-filter="All">
-        All <span class="pk-filter-count">${_paddocks.length}</span>
-      </button>
-      ${types.map(t => {
-        const count  = _paddocks.filter(p => p.type === t).length;
-        const active = _activeFilter === t;
-        return `<button class="pk-filter-btn${active ? ' pk-filter-active' : ''}" data-filter="${_esc(t)}">
-          ${_esc(t)} <span class="pk-filter-count">${count}</span>
-        </button>`;
-      }).join('')}
-      <span style="margin-left:auto;font-size:0.75rem;color:var(--hint)">Changes save automatically</span>
-    </div>
-
-    <div class="pk-table-wrap">
-      <table class="data-table pk-table">
-        <thead>
-          <tr>
-            <th style="width:38%">Name</th>
-            <th style="width:14%">Map area (ha)</th>
-            <th style="width:34%">Type</th>
-            <th style="width:14%"></th>
-          </tr>
-        </thead>
-        <tbody id="pk-tbody">
-          ${_filteredRows()}
-        </tbody>
-      </table>
+      <div class="pk-table-wrap" style="flex:1;min-width:0">
+        <table class="data-table pk-table">
+          <thead>
+            <tr>
+              <th style="width:38%">Name</th>
+              <th style="width:14%">Map area (ha)</th>
+              <th style="width:34%">Type</th>
+              <th style="width:14%"></th>
+            </tr>
+          </thead>
+          <tbody id="pk-tbody">
+            ${_filteredRows()}
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <input type="file" id="pk-file-input" accept=".csv" style="display:none">
@@ -224,18 +222,21 @@ function _rowHTML(p) {
 
 // ── Event wiring ─────────────────────────────────────────────────────────────
 
-function _bindEvents() {
-  // Filter chips
+function _bindFilterClicks() {
   _container.querySelectorAll('.pk-filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       _activeFilter = btn.dataset.filter;
-      _container.querySelectorAll('.pk-filter-btn').forEach(b =>
-        b.classList.toggle('pk-filter-active', b.dataset.filter === _activeFilter));
+      // Re-render side panel to show new active state
+      _refreshSidePanel();
+      // Re-render table rows
       _container.querySelector('#pk-tbody').innerHTML = _filteredRows();
       _bindTableEvents();
     });
   });
+}
 
+function _bindEvents() {
+  _bindFilterClicks();
   _bindTableEvents();
 
   _container.querySelector('#pk-add-btn').addEventListener('click', _addNewRow);
@@ -361,26 +362,25 @@ function _setIndicator(id, text, clearAfterMs = 0) {
 }
 
 function _refreshFilterCounts() {
-  _container.querySelectorAll('.pk-filter-btn').forEach(btn => {
-    const f     = btn.dataset.filter;
-    const count = f === 'All' ? _paddocks.length : _paddocks.filter(p => p.type === f).length;
-    const span  = btn.querySelector('.pk-filter-count');
-    if (span) span.textContent = count;
-  });
-  _refreshSummary();
+  _refreshSidePanel();
 }
 
 function _refreshSummary() {
-  const el = _container.querySelector('#pk-area-summary');
+  _refreshSidePanel();
+}
+
+function _refreshSidePanel() {
+  const el = _container.querySelector('#pk-side-panel');
   if (!el) return;
-  const types   = _allTypes();
-  const newHTML = _areaSummaryHTML(types);
-  if (!newHTML) { el.style.display = 'none'; return; }
-  // Replace inner content by re-rendering into a temp element
-  const tmp = document.createElement('div');
-  tmp.innerHTML = newHTML;
+  const types = _allTypes();
+  const tmp   = document.createElement('div');
+  tmp.innerHTML = _sidePanelHTML(types);
   const fresh = tmp.firstElementChild;
-  if (fresh) el.replaceWith(fresh);
+  if (fresh) {
+    el.replaceWith(fresh);
+    // Re-bind filter clicks on the fresh panel
+    _bindFilterClicks();
+  }
 }
 
 // ── Add new row ──────────────────────────────────────────────────────────────
