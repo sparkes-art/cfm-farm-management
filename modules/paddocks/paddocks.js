@@ -8,9 +8,10 @@ import { toast, openModal } from '../../js/ui.js';
 
 const PADDOCK_TYPES = ['Crop', 'Fallow', 'Pasture', 'Headland', 'Other'];
 
-let _container = null;
-let _paddocks   = [];
-let _saving     = new Set(); // ids currently being saved (debounce guard)
+let _container    = null;
+let _paddocks     = [];
+let _saving       = new Set(); // ids currently being saved (debounce guard)
+let _activeFilter = 'All';    // 'All' | one of PADDOCK_TYPES
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
@@ -20,8 +21,9 @@ export async function mountPaddocks(container) {
 }
 
 export function unmountPaddocks() {
-  _container = null;
-  _paddocks  = [];
+  _container    = null;
+  _paddocks     = [];
+  _activeFilter = 'All';
   _saving.clear();
 }
 
@@ -58,9 +60,15 @@ function _render() {
       </div>
     </div>
 
-    <div style="font-size:0.82rem;color:var(--hint);margin-bottom:10px">
-      ${_paddocks.length} paddock${_paddocks.length !== 1 ? 's' : ''}
-      &nbsp;·&nbsp; Changes save automatically
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      ${['All', ...PADDOCK_TYPES].map(t => {
+        const count = t === 'All' ? _paddocks.length : _paddocks.filter(p => p.type === t).length;
+        const active = _activeFilter === t;
+        return `<button class="pk-filter-btn${active ? ' pk-filter-active' : ''}" data-filter="${t}">
+          ${t} <span class="pk-filter-count">${count}</span>
+        </button>`;
+      }).join('')}
+      <span style="margin-left:auto;font-size:0.78rem;color:var(--hint)">Changes save automatically</span>
     </div>
 
     <div class="card" style="overflow:hidden;padding:0">
@@ -80,12 +88,7 @@ function _render() {
           </tr>
         </thead>
         <tbody id="pk-tbody">
-          ${_paddocks.length === 0
-            ? `<tr><td colspan="4" style="color:var(--hint);text-align:center;padding:32px">
-                No paddocks yet — add one or import a CSV.<br>
-                <small>CSV format: Name, Map Area (ha), Type</small>
-               </td></tr>`
-            : _paddocks.map(p => _rowHTML(p)).join('')}
+          ${_filteredRows()}
         </tbody>
       </table>
     </div>
@@ -95,11 +98,34 @@ function _render() {
 
   _bindTableEvents();
 
+  _container.querySelectorAll('.pk-filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _activeFilter = btn.dataset.filter;
+      _container.querySelectorAll('.pk-filter-btn').forEach(b =>
+        b.classList.toggle('pk-filter-active', b.dataset.filter === _activeFilter));
+      _container.querySelector('#pk-tbody').innerHTML = _filteredRows();
+      _bindTableEvents();
+    });
+  });
+
   _container.querySelector('#pk-add-btn').addEventListener('click', _addNewRow);
   _container.querySelector('#pk-export-btn').addEventListener('click', _exportCSV);
   _container.querySelector('#pk-import-btn').addEventListener('click', () =>
     _container.querySelector('#pk-file-input').click());
   _container.querySelector('#pk-file-input').addEventListener('change', _handleImport);
+}
+
+function _filteredRows() {
+  const visible = _activeFilter === 'All'
+    ? _paddocks
+    : _paddocks.filter(p => p.type === _activeFilter);
+  if (visible.length === 0) {
+    const msg = _paddocks.length === 0
+      ? 'No paddocks yet — add one or import a CSV.<br><small>CSV format: Name, Map Area (ha), Type</small>'
+      : `No paddocks with type <strong>${_esc(_activeFilter)}</strong>.`;
+    return `<tr><td colspan="4" style="color:var(--hint);text-align:center;padding:32px">${msg}</td></tr>`;
+  }
+  return visible.map(p => _rowHTML(p)).join('');
 }
 
 // Each row has inline inputs — name (text), map_area (number), type (select)

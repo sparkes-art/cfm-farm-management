@@ -1933,3 +1933,31 @@ tr.data-row:hover,
 .pk-cell-select:hover  { border-color: var(--border); }
 .pk-cell-select:focus  { border-color: var(--blue); background: var(--surface); outline: none; }
 .pk-row:hover { background: var(--bg); }
+
+/* ── Paddock filter chips ───────────────────────────────────────────────────── */
+.pk-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+.pk-filter-btn:hover { background: var(--bg); border-color: var(--blue); }
+.pk-filter-btn.pk-filter-active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #fff;
+}
+.pk-filter-btn.pk-filter-active .pk-filter-count { opacity: 0.8; }
+.pk-filter-count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  opacity: 0.6;
+}
