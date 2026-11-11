@@ -100,7 +100,7 @@ function _sidePanelHTML(types) {
   }).join('');
 
   return `
-    <div id="pk-side-panel" style="width:200px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:8px;display:flex;flex-direction:column;gap:1px;align-self:flex-start">
+    <div id="pk-side-panel" style="width:260px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:8px;display:flex;flex-direction:column;gap:1px;align-self:flex-start">
       <button class="pk-filter-btn${allActive ? ' pk-filter-active' : ''}" data-filter="All"
         style="width:100%;display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;text-align:left;border:none;background:${allActive ? 'var(--blue-light)' : 'transparent'};cursor:pointer;margin-bottom:4px;transition:background 100ms">
         <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--blue)"></span>
