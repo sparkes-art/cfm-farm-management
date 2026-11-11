@@ -2,7 +2,7 @@
 // Paddock list — inline-editable table, saves on blur/change.
 // Fields: name, map_area (ha), type (select + custom)
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js';
 import { getActiveFarm } from '../../js/app-state.js';
 import { toast, openModal } from '../../js/ui.js';
 
@@ -36,6 +36,8 @@ let _container    = null;
 let _paddocks     = [];
 let _saving       = new Set();
 let _activeFilter = 'All';
+let _history      = {};   // keyed by paddock_id → array of history entries
+let _historyOpen  = new Set(); // paddock IDs with expanded history panel
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
@@ -49,6 +51,8 @@ export function unmountPaddocks() {
   _paddocks     = [];
   _activeFilter = 'All';
   _saving.clear();
+  _history      = {};
+  _historyOpen.clear();
 }
 
 // ── Data ────────────────────────────────────────────────────────────────────
@@ -62,8 +66,23 @@ async function _refresh() {
       <p style="color:var(--hint);padding:20px">Select a farm to manage paddocks.</p>`;
     return;
   }
-  _paddocks = await dbSelect('paddocks', { farm_id: farm.id }, 'name') || [];
+  _paddocks = await dbSelect('paddocks', 'farm_id=eq.' + farm.id + '&select=*&order=name.asc') || [];
+  await _loadHistory(farm.id);
   _render();
+}
+
+async function _loadHistory(farmId) {
+  try {
+    const rows = await dbSelect('paddock_history', 'farm_id=eq.' + farmId + '&select=*&order=changed_at.desc') || [];
+    _history = {};
+    for (const row of rows) {
+      if (!_history[row.paddock_id]) _history[row.paddock_id] = [];
+      _history[row.paddock_id].push(row);
+    }
+  } catch (_) {
+    // History table may not exist yet — degrade gracefully
+    _history = {};
+  }
 }
 
 // ── All distinct types in the data (for filter chips) ───────────────────────
@@ -180,6 +199,8 @@ function _rowHTML(p) {
   const isCustom   = p.type && !PADDOCK_TYPES.includes(p.type);
   const selectVal  = isCustom ? '__custom__' : (p.type || '');
   const customVal  = isCustom ? p.type : '';
+  const histCount  = (_history[p.id] || []).length;
+  const isOpen     = _historyOpen.has(p.id);
 
   const typeOpts = [
     `<option value="">— select type —</option>`,
@@ -187,6 +208,8 @@ function _rowHTML(p) {
       `<option value="${_esc(t)}"${selectVal === t ? ' selected' : ''}>${_esc(t)}</option>`),
     `<option value="__custom__"${isCustom ? ' selected' : ''}>Custom…</option>`,
   ].join('');
+
+  const histPanel = isOpen ? _historyPanelHTML(p) : '';
 
   return `
     <tr data-id="${p.id}" class="pk-row">
@@ -212,10 +235,67 @@ function _rowHTML(p) {
       </td>
       <td style="text-align:right;white-space:nowrap">
         <span class="pk-save-indicator" id="pk-ind-${p.id}" style="font-size:0.72rem;color:var(--hint);margin-right:4px"></span>
+        <button class="btn btn-xs pk-history-btn" data-id="${p.id}"
+          title="Paddock history"
+          style="margin-right:4px;opacity:${histCount > 0 ? 1 : 0.4}">
+          ${isOpen ? '▾' : '▸'} ${histCount > 0 ? histCount : ''}
+        </button>
         <button class="btn btn-xs btn-danger pk-delete-btn" data-id="${p.id}" data-name="${_esc(p.name)}">✕</button>
       </td>
     </tr>
+    ${histPanel}
   `;
+}
+
+// ── History panel HTML ───────────────────────────────────────────────────────
+
+function _historyPanelHTML(p) {
+  const entries = _history[p.id] || [];
+  const farm = getActiveFarm();
+
+  const timelineRows = entries.length === 0
+    ? `<p style="color:var(--hint);font-size:0.8rem;margin:0">No history recorded yet.</p>`
+    : entries.map(e => {
+        const dt  = new Date(e.changed_at);
+        const dateStr = dt.toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' });
+        const timeStr = dt.toLocaleTimeString('en-AU', { hour:'2-digit', minute:'2-digit' });
+        const who = e.changed_by ? e.changed_by.replace(/@.*$/, '') : '—';
+        let change = '';
+        if (e.field) {
+          const label = e.field === 'map_area' ? 'Area' : e.field === 'type' ? 'Type' : _esc(e.field);
+          const oldV  = e.old_value != null ? _esc(String(e.old_value)) : '<em style="color:var(--hint)">—</em>';
+          const newV  = e.new_value != null ? _esc(String(e.new_value)) : '<em style="color:var(--hint)">—</em>';
+          change = `<span style="font-size:0.78rem"><strong>${label}:</strong> ${oldV} → ${newV}</span>`;
+        }
+        const note = e.notes ? `<span style="font-size:0.78rem;color:var(--ink);font-style:italic">${_esc(e.notes)}</span>` : '';
+        return `
+          <div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <div style="flex-shrink:0;text-align:right;min-width:88px">
+              <div style="font-size:0.72rem;color:var(--hint)">${dateStr}</div>
+              <div style="font-size:0.68rem;color:var(--hint)">${timeStr}</div>
+              <div style="font-size:0.68rem;color:var(--hint);margin-top:1px">${_esc(who)}</div>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:3px;padding-top:1px">
+              ${change}
+              ${note}
+            </div>
+          </div>`;
+      }).join('');
+
+  return `
+    <tr class="pk-history-row" data-history-for="${p.id}">
+      <td colspan="4" style="padding:0;border-top:none">
+        <div style="background:var(--bg,#f9fafb);border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;padding:10px 12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <span style="font-size:0.75rem;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:0.04em">History — ${_esc(p.name)}</span>
+            <button class="btn btn-xs pk-add-note-btn" data-id="${p.id}" data-name="${_esc(p.name)}">+ Add note</button>
+          </div>
+          <div style="max-height:240px;overflow-y:auto">
+            ${timelineRows}
+          </div>
+        </div>
+      </td>
+    </tr>`;
 }
 
 // ── Event wiring ─────────────────────────────────────────────────────────────
@@ -288,6 +368,41 @@ function _bindTableEvents() {
     }
   });
 
+  // History toggle
+  tb.addEventListener('click', (e) => {
+    const btn = e.target.closest('.pk-history-btn');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const p  = _paddocks.find(x => x.id === id);
+    if (!p) return;
+    if (_historyOpen.has(id)) {
+      _historyOpen.delete(id);
+      // Remove the history row
+      _container.querySelector(`tr.pk-history-row[data-history-for="${id}"]`)?.remove();
+      btn.textContent = `▸ ${(_history[id] || []).length || ''}`;
+    } else {
+      _historyOpen.add(id);
+      // Insert history row after the paddock row
+      const paddockRow = _container.querySelector(`tr[data-id="${id}"]`);
+      if (paddockRow) {
+        const tmp = document.createElement('tbody');
+        tmp.innerHTML = _historyPanelHTML(p);
+        paddockRow.after(tmp.firstElementChild);
+        // Bind add-note button
+        _container.querySelector(`.pk-add-note-btn[data-id="${id}"]`)
+          ?.addEventListener('click', () => _promptAddNote(id, p.name));
+      }
+      btn.textContent = `▾ ${(_history[id] || []).length || ''}`;
+    }
+  });
+
+  // Add note (re-bind after any re-render)
+  tb.addEventListener('click', (e) => {
+    const btn = e.target.closest('.pk-add-note-btn');
+    if (!btn) return;
+    _promptAddNote(btn.dataset.id, btn.dataset.name);
+  });
+
   // Delete
   tb.addEventListener('click', (e) => {
     const btn = e.target.closest('.pk-delete-btn');
@@ -328,6 +443,7 @@ async function _saveField(id, field, rawValue) {
   _setIndicator(id, '…');
 
   try {
+    const oldValue = paddock[field];
     await dbUpdate('paddocks', id, { [field]: value });
     paddock[field] = value;
     if (field === 'name') {
@@ -343,6 +459,9 @@ async function _saveField(id, field, rawValue) {
     // Refresh summary totals when area changes
     if (field === 'map_area') _refreshSummary();
     _setIndicator(id, '✓', 1400);
+
+    // Log to history (best-effort — don't fail save if history write fails)
+    _logHistory(id, field, oldValue, value).catch(() => {});
   } catch (err) {
     toast('Save failed — ' + (err.message || 'error'), 'error');
     _setIndicator(id, '!');
@@ -357,6 +476,53 @@ function _setIndicator(id, text, clearAfterMs = 0) {
   el.textContent = text;
   el.style.color = text === '✓' ? 'var(--green,#16a34a)' : text === '!' ? 'var(--red,#dc2626)' : 'var(--hint)';
   if (clearAfterMs) setTimeout(() => { if (el.textContent === text) el.textContent = ''; }, clearAfterMs);
+}
+
+async function _logHistory(paddockId, field, oldValue, newValue, notes = null) {
+  const farm = getActiveFarm();
+  if (!farm) return;
+  const user = getSession()?.user?.email || null;
+  const entry = {
+    paddock_id: paddockId,
+    farm_id:    farm.id,
+    field,
+    old_value:  oldValue != null ? String(oldValue) : null,
+    new_value:  newValue != null ? String(newValue) : null,
+    changed_by: user,
+    notes,
+  };
+  const result = await dbInsert('paddock_history', entry);
+  const saved  = Array.isArray(result) ? result[0] : result;
+  if (saved) {
+    if (!_history[paddockId]) _history[paddockId] = [];
+    _history[paddockId].unshift(saved);
+    // If history panel is open, refresh it
+    if (_historyOpen.has(paddockId)) {
+      _refreshHistoryPanel(paddockId);
+    } else {
+      // Update the count badge on the toggle button
+      const btn = _container.querySelector(`.pk-history-btn[data-id="${paddockId}"]`);
+      if (btn) {
+        const count = _history[paddockId].length;
+        btn.style.opacity = '1';
+        btn.textContent = `▸ ${count}`;
+      }
+    }
+  }
+}
+
+function _refreshHistoryPanel(paddockId) {
+  const p = _paddocks.find(x => x.id === paddockId);
+  if (!p) return;
+  const existing = _container.querySelector(`tr.pk-history-row[data-history-for="${paddockId}"]`);
+  if (existing) {
+    const tmp = document.createElement('tbody');
+    tmp.innerHTML = _historyPanelHTML(p);
+    existing.replaceWith(tmp.firstElementChild);
+    // Re-bind the add-note button on the fresh panel
+    _container.querySelector(`.pk-add-note-btn[data-id="${paddockId}"]`)
+      ?.addEventListener('click', () => _promptAddNote(paddockId, p.name));
+  }
 }
 
 function _refreshFilterCounts() {
@@ -433,6 +599,38 @@ function _confirmDelete(id, name) {
       }
       _refreshFilterCounts();
       toast(`"${name}" deleted`);
+    },
+  });
+}
+
+// ── Add standalone note ──────────────────────────────────────────────────────
+
+function _promptAddNote(paddockId, paddockName) {
+  const noteId = `pk-note-input-${paddockId}`;
+  openModal({
+    title: `Add note — ${paddockName}`,
+    bodyHTML: `
+      <p style="font-size:0.85rem;color:var(--hint);margin-bottom:10px">
+        Record an event or change for this paddock (e.g. pivot installation, boundary change, fencing).
+      </p>
+      <textarea id="${noteId}" rows="4" placeholder="Describe the change or event…"
+        style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);
+        border-radius:6px;font-size:0.88rem;font-family:inherit;resize:vertical;
+        background:var(--bg);color:var(--ink)"></textarea>`,
+    confirmLabel: 'Save note',
+    onMounted: (overlay) => {
+      overlay.querySelector(`#${noteId}`)?.focus();
+    },
+    onConfirm: async () => {
+      const textarea = document.getElementById(noteId);
+      const note = textarea?.value?.trim();
+      if (!note) { toast('Note cannot be empty', 'warning'); return; }
+      try {
+        await _logHistory(paddockId, null, null, null, note);
+        toast('Note saved');
+      } catch (err) {
+        toast('Could not save note', 'error');
+      }
     },
   });
 }
