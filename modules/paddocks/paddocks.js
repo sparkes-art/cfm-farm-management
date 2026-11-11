@@ -1,17 +1,25 @@
 // modules/paddocks/paddocks.js
 // Paddock list — inline-editable table, saves on blur/change.
-// Fields: name, map_area (ha), type (select)
+// Fields: name, map_area (ha), type (select + custom)
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
 import { getActiveFarm } from '../../js/app-state.js';
 import { toast, openModal } from '../../js/ui.js';
 
-const PADDOCK_TYPES = ['Crop', 'Fallow', 'Pasture', 'Headland', 'Other'];
+const PADDOCK_TYPES = [
+  'Pasture',
+  'Grazing/Bush',
+  'Dryland',
+  'Irrigated - Overhead Pivot',
+  'Irrigated - Overhead Lateral',
+  'Irrigated - Furrow',
+  'Permanent Crop',
+];
 
 let _container    = null;
 let _paddocks     = [];
-let _saving       = new Set(); // ids currently being saved (debounce guard)
-let _activeFilter = 'All';    // 'All' | one of PADDOCK_TYPES
+let _saving       = new Set();
+let _activeFilter = 'All';
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
@@ -42,49 +50,56 @@ async function _refresh() {
   _render();
 }
 
+// ── All distinct types in the data (for filter chips) ───────────────────────
+function _allTypes() {
+  const set = new Set(_paddocks.map(p => p.type).filter(Boolean));
+  // Show standard types first (in order), then any custom ones alphabetically
+  const standard = PADDOCK_TYPES.filter(t => set.has(t));
+  const custom   = [...set].filter(t => !PADDOCK_TYPES.includes(t)).sort();
+  return [...standard, ...custom];
+}
+
 // ── Render ───────────────────────────────────────────────────────────────────
 
 function _render() {
-  const farm = getActiveFarm();
+  const farm  = getActiveFarm();
+  const types = _allTypes();
 
   _container.innerHTML = `
-    <div class="page-header">
+    <div class="page-header" style="margin-bottom:10px">
       <div>
         <h1>Paddocks</h1>
         <p class="page-subtitle">${_esc(farm?.name || '')} — click any cell to edit</p>
       </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;flex-shrink:0">
         <button class="btn btn-sm" id="pk-import-btn">⬆ Import CSV</button>
         <button class="btn btn-sm" id="pk-export-btn">⬇ Export CSV</button>
         <button class="btn btn-primary" id="pk-add-btn">+ Add paddock</button>
       </div>
     </div>
 
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-      ${['All', ...PADDOCK_TYPES].map(t => {
-        const count = t === 'All' ? _paddocks.length : _paddocks.filter(p => p.type === t).length;
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="pk-filter-btn${_activeFilter === 'All' ? ' pk-filter-active' : ''}" data-filter="All">
+        All <span class="pk-filter-count">${_paddocks.length}</span>
+      </button>
+      ${types.map(t => {
+        const count  = _paddocks.filter(p => p.type === t).length;
         const active = _activeFilter === t;
-        return `<button class="pk-filter-btn${active ? ' pk-filter-active' : ''}" data-filter="${t}">
-          ${t} <span class="pk-filter-count">${count}</span>
+        return `<button class="pk-filter-btn${active ? ' pk-filter-active' : ''}" data-filter="${_esc(t)}">
+          ${_esc(t)} <span class="pk-filter-count">${count}</span>
         </button>`;
       }).join('')}
-      <span style="margin-left:auto;font-size:0.78rem;color:var(--hint)">Changes save automatically</span>
+      <span style="margin-left:auto;font-size:0.75rem;color:var(--hint)">Changes save automatically</span>
     </div>
 
-    <div class="card" style="overflow:hidden;padding:0">
-      <table class="data-table pk-table" style="width:100%;table-layout:fixed">
-        <colgroup>
-          <col style="width:40%">
-          <col style="width:18%">
-          <col style="width:22%">
-          <col style="width:20%">
-        </colgroup>
+    <div class="pk-table-wrap">
+      <table class="data-table pk-table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Map area (ha)</th>
-            <th>Type</th>
-            <th></th>
+            <th style="width:38%">Name</th>
+            <th style="width:14%">Map area (ha)</th>
+            <th style="width:34%">Type</th>
+            <th style="width:14%"></th>
           </tr>
         </thead>
         <tbody id="pk-tbody">
@@ -96,8 +111,73 @@ function _render() {
     <input type="file" id="pk-file-input" accept=".csv" style="display:none">
   `;
 
-  _bindTableEvents();
+  _bindEvents();
+}
 
+// ── Filtered rows HTML ───────────────────────────────────────────────────────
+
+function _filteredRows() {
+  const visible = _activeFilter === 'All'
+    ? _paddocks
+    : _paddocks.filter(p => p.type === _activeFilter);
+  if (visible.length === 0) {
+    const msg = _paddocks.length === 0
+      ? 'No paddocks yet — add one or import a CSV.<br><small>CSV columns: Name, Map Area (ha), Type</small>'
+      : `No paddocks with type <strong>${_esc(_activeFilter)}</strong>.`;
+    return `<tr><td colspan="4" style="color:var(--hint);text-align:center;padding:32px">${msg}</td></tr>`;
+  }
+  return visible.map(p => _rowHTML(p)).join('');
+}
+
+// ── Row HTML ─────────────────────────────────────────────────────────────────
+// Type cell: <select> with standard options + "Custom…" trigger,
+// plus a hidden text input that appears when a custom value is active.
+
+function _rowHTML(p) {
+  const isCustom   = p.type && !PADDOCK_TYPES.includes(p.type);
+  const selectVal  = isCustom ? '__custom__' : (p.type || '');
+  const customVal  = isCustom ? p.type : '';
+
+  const typeOpts = [
+    `<option value="">— select type —</option>`,
+    ...PADDOCK_TYPES.map(t =>
+      `<option value="${_esc(t)}"${selectVal === t ? ' selected' : ''}>${_esc(t)}</option>`),
+    `<option value="__custom__"${isCustom ? ' selected' : ''}>Custom…</option>`,
+  ].join('');
+
+  return `
+    <tr data-id="${p.id}" class="pk-row">
+      <td>
+        <input class="pk-cell-input" value="${_esc(p.name)}"
+          placeholder="Paddock name" data-field="name" data-id="${p.id}">
+      </td>
+      <td>
+        <input class="pk-cell-input" type="number" step="0.1" min="0"
+          value="${p.map_area ?? ''}" placeholder="—"
+          data-field="map_area" data-id="${p.id}">
+      </td>
+      <td>
+        <div style="display:flex;gap:4px;align-items:center">
+          <select class="pk-cell-select pk-type-select" data-field="type" data-id="${p.id}" style="flex:1;min-width:0">
+            ${typeOpts}
+          </select>
+          <input class="pk-cell-input pk-type-custom" data-field="type" data-id="${p.id}"
+            placeholder="Custom type" value="${_esc(customVal)}"
+            style="flex:1;min-width:0;${isCustom ? '' : 'display:none'}">
+        </div>
+      </td>
+      <td style="text-align:right;white-space:nowrap">
+        <span class="pk-save-indicator" id="pk-ind-${p.id}" style="font-size:0.72rem;color:var(--hint);margin-right:4px"></span>
+        <button class="btn btn-xs btn-danger pk-delete-btn" data-id="${p.id}" data-name="${_esc(p.name)}">✕</button>
+      </td>
+    </tr>
+  `;
+}
+
+// ── Event wiring ─────────────────────────────────────────────────────────────
+
+function _bindEvents() {
+  // Filter chips
   _container.querySelectorAll('.pk-filter-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       _activeFilter = btn.dataset.filter;
@@ -108,6 +188,8 @@ function _render() {
     });
   });
 
+  _bindTableEvents();
+
   _container.querySelector('#pk-add-btn').addEventListener('click', _addNewRow);
   _container.querySelector('#pk-export-btn').addEventListener('click', _exportCSV);
   _container.querySelector('#pk-import-btn').addEventListener('click', () =>
@@ -115,127 +197,105 @@ function _render() {
   _container.querySelector('#pk-file-input').addEventListener('change', _handleImport);
 }
 
-function _filteredRows() {
-  const visible = _activeFilter === 'All'
-    ? _paddocks
-    : _paddocks.filter(p => p.type === _activeFilter);
-  if (visible.length === 0) {
-    const msg = _paddocks.length === 0
-      ? 'No paddocks yet — add one or import a CSV.<br><small>CSV format: Name, Map Area (ha), Type</small>'
-      : `No paddocks with type <strong>${_esc(_activeFilter)}</strong>.`;
-    return `<tr><td colspan="4" style="color:var(--hint);text-align:center;padding:32px">${msg}</td></tr>`;
-  }
-  return visible.map(p => _rowHTML(p)).join('');
-}
-
-// Each row has inline inputs — name (text), map_area (number), type (select)
-function _rowHTML(p) {
-  const typeOpts = PADDOCK_TYPES.map(t =>
-    `<option value="${t}"${p.type === t ? ' selected' : ''}>${t}</option>`
-  ).join('');
-
-  return `
-    <tr data-id="${p.id}" class="pk-row">
-      <td>
-        <input class="pk-cell-input pk-name" value="${_esc(p.name)}"
-          placeholder="Paddock name" data-field="name" data-id="${p.id}">
-      </td>
-      <td>
-        <input class="pk-cell-input pk-area" type="number" step="0.1" min="0"
-          value="${p.map_area ?? ''}" placeholder="—"
-          data-field="map_area" data-id="${p.id}">
-      </td>
-      <td>
-        <select class="pk-cell-select pk-type" data-field="type" data-id="${p.id}">
-          <option value="">—</option>
-          ${typeOpts}
-        </select>
-      </td>
-      <td style="text-align:right">
-        <span class="pk-save-indicator" id="pk-ind-${p.id}" style="font-size:0.75rem;color:var(--hint);margin-right:6px"></span>
-        <button class="btn btn-xs btn-danger pk-delete-btn" data-id="${p.id}" data-name="${_esc(p.name)}">✕</button>
-      </td>
-    </tr>
-  `;
-}
-
-// ── Inline edit events ───────────────────────────────────────────────────────
-
 function _bindTableEvents() {
   const tbody = _container.querySelector('#pk-tbody');
   if (!tbody) return;
 
-  // Text / number inputs — save on blur
-  tbody.addEventListener('blur', async (e) => {
-    const el = e.target.closest('.pk-cell-input');
-    if (!el) return;
-    await _saveField(el.dataset.id, el.dataset.field, el.value.trim());
-  }, true); // capture so blur fires on inputs
+  // Clone to remove old listeners
+  const fresh = tbody.cloneNode(true);
+  tbody.parentNode.replaceChild(fresh, tbody);
+  const tb = _container.querySelector('#pk-tbody');
 
-  // Select — save immediately on change
-  tbody.addEventListener('change', async (e) => {
-    const el = e.target.closest('.pk-cell-select');
+  // Text/number inputs — save on blur
+  tb.addEventListener('blur', async (e) => {
+    const el = e.target.closest('.pk-cell-input');
+    if (!el || el.classList.contains('pk-type-custom')) return;
+    await _saveField(el.dataset.id, el.dataset.field, el.value.trim());
+  }, true);
+
+  // Custom type input — save on blur
+  tb.addEventListener('blur', async (e) => {
+    const el = e.target.closest('.pk-type-custom');
     if (!el) return;
-    await _saveField(el.dataset.id, el.dataset.field, el.value || null);
+    const val = el.value.trim();
+    if (val) await _saveField(el.dataset.id, 'type', val);
+  }, true);
+
+  // Type select — handle Custom… specially, save otherwise
+  tb.addEventListener('change', async (e) => {
+    const sel = e.target.closest('.pk-type-select');
+    if (!sel) return;
+    const row     = sel.closest('tr');
+    const customInput = row?.querySelector('.pk-type-custom');
+    if (sel.value === '__custom__') {
+      // Show custom text field
+      if (customInput) {
+        customInput.style.display = '';
+        customInput.value = '';
+        customInput.focus();
+      }
+    } else {
+      // Hide custom field, save selected value
+      if (customInput) customInput.style.display = 'none';
+      await _saveField(sel.dataset.id, 'type', sel.value || null);
+    }
   });
 
-  // Delete buttons
-  tbody.addEventListener('click', (e) => {
+  // Delete
+  tb.addEventListener('click', (e) => {
     const btn = e.target.closest('.pk-delete-btn');
     if (!btn) return;
     _confirmDelete(btn.dataset.id, btn.dataset.name);
   });
 }
 
+// ── Save field ───────────────────────────────────────────────────────────────
+
 async function _saveField(id, field, rawValue) {
-  if (_saving.has(id + field)) return;
-  _saving.add(id + field);
+  const key = id + field;
+  if (_saving.has(key)) return;
+  _saving.add(key);
 
   const paddock = _paddocks.find(p => p.id === id);
-  if (!paddock) { _saving.delete(id + field); return; }
+  if (!paddock) { _saving.delete(key); return; }
 
-  // Parse value
   let value;
   if (field === 'map_area') {
-    value = rawValue === '' ? null : parseFloat(rawValue);
+    value = rawValue === '' || rawValue == null ? null : parseFloat(rawValue);
     if (isNaN(value)) value = null;
   } else {
-    value = rawValue === '' ? null : rawValue;
+    value = rawValue === '' || rawValue == null ? null : rawValue;
   }
 
-  // Skip if unchanged
   if (paddock[field] === value || (paddock[field] == null && value == null)) {
-    _saving.delete(id + field);
-    return;
+    _saving.delete(key); return;
   }
 
-  // Validate name
   if (field === 'name' && !value) {
     toast('Paddock name cannot be empty', 'error');
-    // Reset input to previous value
-    const input = _container.querySelector(`[data-id="${id}"][data-field="name"]`);
-    if (input) input.value = paddock.name;
-    _saving.delete(id + field);
-    return;
+    const inp = _container.querySelector(`[data-id="${id}"][data-field="name"].pk-cell-input`);
+    if (inp) inp.value = paddock.name;
+    _saving.delete(key); return;
   }
 
   _setIndicator(id, '…');
 
   try {
     await dbUpdate('paddocks', id, { [field]: value });
-    paddock[field] = value; // update local cache
-    // Update delete button name if name changed
+    paddock[field] = value;
     if (field === 'name') {
       const btn = _container.querySelector(`.pk-delete-btn[data-id="${id}"]`);
       if (btn) btn.dataset.name = value;
     }
-    _setIndicator(id, '✓', 1200);
+    // If type changed to/from custom, refresh filter chips counts
+    if (field === 'type') _refreshFilterCounts();
+    _setIndicator(id, '✓', 1400);
   } catch (err) {
-    toast('Save failed — ' + (err.message || 'unknown error'), 'error');
+    toast('Save failed — ' + (err.message || 'error'), 'error');
     _setIndicator(id, '!');
   }
 
-  _saving.delete(id + field);
+  _saving.delete(key);
 }
 
 function _setIndicator(id, text, clearAfterMs = 0) {
@@ -246,53 +306,48 @@ function _setIndicator(id, text, clearAfterMs = 0) {
   if (clearAfterMs) setTimeout(() => { if (el.textContent === text) el.textContent = ''; }, clearAfterMs);
 }
 
+function _refreshFilterCounts() {
+  const types = _allTypes();
+  // Update existing chip counts; add missing chips; remove stale chips
+  _container.querySelectorAll('.pk-filter-btn').forEach(btn => {
+    const f     = btn.dataset.filter;
+    const count = f === 'All' ? _paddocks.length : _paddocks.filter(p => p.type === f).length;
+    const span  = btn.querySelector('.pk-filter-count');
+    if (span) span.textContent = count;
+  });
+}
+
 // ── Add new row ──────────────────────────────────────────────────────────────
 
 async function _addNewRow() {
   const farm = getActiveFarm();
   if (!farm) return;
-
   try {
-    const result = await dbInsert('paddocks', {
-      farm_id: farm.id,
-      name: 'New paddock',
-      map_area: null,
-      type: 'Crop',
-    });
-    // Insert returns the new row — add to local list and re-render
+    const result     = await dbInsert('paddocks', { farm_id: farm.id, name: 'New paddock', map_area: null, type: null });
     const newPaddock = Array.isArray(result) ? result[0] : result;
-    if (newPaddock) {
-      _paddocks.push(newPaddock);
-      // Append row to table instead of full re-render
-      const tbody = _container.querySelector('#pk-tbody');
-      // Clear empty state row if present
-      if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
-      const tr = document.createElement('tr');
-      tr.outerHTML; // ignored — append via innerHTML trick
-      tbody.insertAdjacentHTML('beforeend', _rowHTML(newPaddock));
-      _bindTableEvents(); // rebind after DOM change
-      // Update count
-      const countEl = _container.querySelector('.page-subtitle + div, div[style*="paddock"]');
-      // Focus the name field of the new row
-      const nameInput = tbody.querySelector(`[data-id="${newPaddock.id}"][data-field="name"]`);
-      if (nameInput) {
-        nameInput.select();
-        nameInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-      // Update subtitle count
-      _updateCount();
+    if (!newPaddock) return;
+    _paddocks.push(newPaddock);
+
+    // Reset filter to All so the new row is visible
+    _activeFilter = 'All';
+    _container.querySelectorAll('.pk-filter-btn').forEach(b =>
+      b.classList.toggle('pk-filter-active', b.dataset.filter === 'All'));
+
+    const tbody = _container.querySelector('#pk-tbody');
+    if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
+    tbody.insertAdjacentHTML('beforeend', _rowHTML(newPaddock));
+    _bindTableEvents();
+    _refreshFilterCounts();
+
+    // Scroll to new row and select name
+    const nameInput = tbody.querySelector(`[data-id="${newPaddock.id}"][data-field="name"]`);
+    if (nameInput) {
+      nameInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      nameInput.select();
     }
   } catch (err) {
     toast('Could not add paddock', 'error');
   }
-}
-
-function _updateCount() {
-  const sub = _container.querySelector('.page-subtitle');
-  if (sub) return; // leave page-subtitle as farm name
-  const countEl = _container.querySelector('[style*="paddock"]');
-  if (countEl) countEl.textContent =
-    `${_paddocks.length} paddock${_paddocks.length !== 1 ? 's' : ''} · Changes save automatically`;
 }
 
 // ── Delete ───────────────────────────────────────────────────────────────────
@@ -308,13 +363,11 @@ function _confirmDelete(id, name) {
       _paddocks = _paddocks.filter(p => p.id !== id);
       const row = _container.querySelector(`tr[data-id="${id}"]`);
       if (row) row.remove();
-      // Show empty state if none left
       if (_paddocks.length === 0) {
         _container.querySelector('#pk-tbody').innerHTML =
-          `<tr><td colspan="4" style="color:var(--hint);text-align:center;padding:32px">
-            No paddocks yet — add one or import a CSV.
-           </td></tr>`;
+          `<tr><td colspan="4" style="color:var(--hint);text-align:center;padding:32px">No paddocks yet.</td></tr>`;
       }
+      _refreshFilterCounts();
       toast(`"${name}" deleted`);
     },
   });
@@ -379,7 +432,7 @@ async function _handleImport(e) {
       </div>`,
     confirmLabel: `Import ${rows.length} paddock${rows.length !== 1 ? 's' : ''}`,
     onConfirm: async () => {
-      const farm = getActiveFarm();
+      const farm     = getActiveFarm();
       const existing = new Set(_paddocks.map(p => p.name.toLowerCase()));
       let added = 0, skipped = 0;
       for (const r of rows) {
@@ -388,11 +441,7 @@ async function _handleImport(e) {
         if (existing.has(name.toLowerCase())) { skipped++; continue; }
         const area = areaIdx !== -1 ? parseFloat(r[areaIdx]) : null;
         const type = typeIdx !== -1 ? (r[typeIdx]?.trim() || null) : null;
-        await dbInsert('paddocks', {
-          farm_id: farm.id, name,
-          map_area: isNaN(area) ? null : area,
-          type,
-        });
+        await dbInsert('paddocks', { farm_id: farm.id, name, map_area: isNaN(area) ? null : area, type });
         added++;
       }
       toast(`Imported ${added}${skipped ? ` (${skipped} skipped)` : ''}`);
