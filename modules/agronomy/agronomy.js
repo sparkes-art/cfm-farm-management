@@ -9,6 +9,7 @@ import { toast, openModal, formatDate }            from '../../js/ui.js';
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
 let allEntries    = [];
+let allPaddocks   = [];   // from paddocks table
 let activeTab     = 'board';
 let activePaddock = null;
 
@@ -59,12 +60,14 @@ async function refreshAll() {
   const farmId = farm?.id || farm;
   const season = getActiveSeason();
 
-  const [reports, entries] = await Promise.all([
+  const [reports, entries, paddocks] = await Promise.all([
     dbSelect('agronomy_reports',
       'farm_id=eq.' + farmId + '&season=eq.' + season + '&order=report_date.desc'),
     dbSelect('agronomy_paddock_entries',
       'farm_id=eq.' + farmId + '&order=paddock_name,created_at.desc'),
+    dbSelect('paddocks', { farm_id: farmId }, 'name'),
   ]);
+  allPaddocks = paddocks || [];
 
   allReports = reports || [];
   allEntries = (entries || []).filter(e =>
@@ -459,6 +462,23 @@ function openLogVisitModal() {
 // ── Paddock row builder ────────────────────────────────────────────────────
 let _rowCounter = 0;
 
+// Build paddock name field — select if paddocks configured, else free text
+function _paddockNameField(currentValue) {
+  if (allPaddocks.length === 0) {
+    // No paddocks configured yet — free text with hint
+    return `<input class="form-input agro-ep-name" placeholder="Paddock name *"
+      style="max-width:200px" value="${esc(currentValue)}"
+      title="Add paddocks in Settings → Paddocks for a dropdown here">`;
+  }
+  const opts = allPaddocks.map(p =>
+    `<option value="${esc(p.name)}"${p.name === currentValue ? ' selected' : ''}>${esc(p.name)}</option>`
+  ).join('');
+  return `<select class="form-select agro-ep-name" style="max-width:200px">
+    <option value="">— Select paddock —</option>
+    ${opts}
+  </select>`;
+}
+
 function addPaddockRow(overlay, copyFrom = null) {
   _rowCounter++;
   const rid  = 'pr-' + _rowCounter;
@@ -475,8 +495,7 @@ function addPaddockRow(overlay, copyFrom = null) {
   div.id = rid;
   div.innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      <input class="form-input agro-ep-name" placeholder="Paddock name *"
-        style="max-width:180px" value="${esc(copyFrom?.paddock_name || '')}">
+      ${_paddockNameField(copyFrom?.paddock_name || '')}
       <select class="form-select agro-ep-commodity" style="max-width:160px">
         ${COMMODITIES.map(c =>
           `<option value="${c}"${commodity === c ? ' selected' : ''}>${c}</option>`

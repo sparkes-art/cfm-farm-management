@@ -390,3 +390,37 @@ CREATE TRIGGER agro_reports_updated_at
 CREATE TRIGGER agro_entries_updated_at
   BEFORE UPDATE ON agronomy_paddock_entries
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ── Paddocks ─────────────────────────────────────────────────────────────────
+-- Farm-level paddock list. Used across Agronomy, Inputs, and other modules.
+
+create table if not exists public.paddocks (
+  id         uuid primary key default gen_random_uuid(),
+  farm_id    text not null,
+  name       text not null,
+  map_area   numeric(8,2),          -- hectares
+  type       text,                  -- Crop | Fallow | Pasture | Headland | Other
+  sort_order integer default 0,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now(),
+  constraint paddocks_farm_name_unique unique (farm_id, name)
+);
+
+-- RLS
+alter table public.paddocks enable row level security;
+
+create policy "paddocks_read"
+  on public.paddocks for select
+  using (can_read(farm_id));
+
+create policy "paddocks_write"
+  on public.paddocks for all
+  using (can_write(farm_id));
+
+-- Realtime
+alter publication supabase_realtime add table public.paddocks;
+
+-- updated_at trigger
+create trigger paddocks_updated_at
+  before update on public.paddocks
+  for each row execute function update_updated_at_column();
