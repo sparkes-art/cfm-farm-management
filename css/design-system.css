@@ -1904,3 +1904,32 @@ tr.data-row:hover,
   padding: 14px;
   margin-bottom: 10px;
 }
+
+/* ── Paddocks inline-edit table ────────────────────────────────────────────── */
+.pk-table td { padding: 4px 8px; vertical-align: middle; }
+.pk-cell-input {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 5px 7px;
+  font-size: var(--text-sm);
+  color: var(--ink);
+  transition: border-color 100ms, background 100ms;
+}
+.pk-cell-input:hover  { border-color: var(--border); }
+.pk-cell-input:focus  { border-color: var(--blue); background: var(--surface); outline: none; }
+.pk-cell-select {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 5px 7px;
+  font-size: var(--text-sm);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 100ms, background 100ms;
+}
+.pk-cell-select:hover  { border-color: var(--border); }
+.pk-cell-select:focus  { border-color: var(--blue); background: var(--surface); outline: none; }
+.pk-row:hover { background: var(--bg); }
