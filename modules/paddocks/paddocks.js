@@ -414,10 +414,17 @@ async function _handleImport(e) {
   const rows = lines.slice(1).map(l => _parseCSVRow(l)).filter(r => r[nameIdx]?.trim());
   if (rows.length === 0) { toast('No data rows found', 'error'); return; }
 
+  const existingCount = _paddocks.length;
+
   openModal({
     title: 'Import paddocks',
     bodyHTML: `
-      <p style="margin-bottom:12px">Found <strong>${rows.length} paddock${rows.length !== 1 ? 's' : ''}</strong>. Duplicates by name will be skipped.</p>
+      <p style="margin-bottom:8px">Found <strong>${rows.length} paddock${rows.length !== 1 ? 's' : ''}</strong> in the CSV.</p>
+      ${existingCount > 0
+        ? `<p style="margin-bottom:12px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:0.85rem;color:var(--ink)">
+            ⚠️ This will <strong>replace all ${existingCount} existing paddock${existingCount !== 1 ? 's' : ''}</strong> for this farm with the CSV contents.
+           </p>`
+        : ''}
       <div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
         <table class="data-table" style="width:100%;font-size:0.8rem">
           <thead><tr><th>Name</th><th>Area</th><th>Type</th></tr></thead>
@@ -430,21 +437,29 @@ async function _handleImport(e) {
           </tbody>
         </table>
       </div>`,
-    confirmLabel: `Import ${rows.length} paddock${rows.length !== 1 ? 's' : ''}`,
+    confirmLabel: existingCount > 0
+      ? `Replace all & import ${rows.length} paddock${rows.length !== 1 ? 's' : ''}`
+      : `Import ${rows.length} paddock${rows.length !== 1 ? 's' : ''}`,
+    confirmClass: existingCount > 0 ? 'btn-danger' : '',
     onConfirm: async () => {
-      const farm     = getActiveFarm();
-      const existing = new Set(_paddocks.map(p => p.name.toLowerCase()));
-      let added = 0, skipped = 0;
+      const farm = getActiveFarm();
+
+      // Delete all existing paddocks for this farm first
+      for (const p of _paddocks) {
+        await dbDelete('paddocks', p.id);
+      }
+
+      // Insert all rows from CSV
+      let added = 0;
       for (const r of rows) {
         const name = r[nameIdx]?.trim();
         if (!name) continue;
-        if (existing.has(name.toLowerCase())) { skipped++; continue; }
         const area = areaIdx !== -1 ? parseFloat(r[areaIdx]) : null;
         const type = typeIdx !== -1 ? (r[typeIdx]?.trim() || null) : null;
         await dbInsert('paddocks', { farm_id: farm.id, name, map_area: isNaN(area) ? null : area, type });
         added++;
       }
-      toast(`Imported ${added}${skipped ? ` (${skipped} skipped)` : ''}`);
+      toast(`Imported ${added} paddock${added !== 1 ? 's' : ''}`);
       await _refresh();
     },
   });
