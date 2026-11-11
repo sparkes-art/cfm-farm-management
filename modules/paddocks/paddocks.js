@@ -124,7 +124,7 @@ function _render() {
     <div class="page-header" style="margin-bottom:10px">
       <div>
         <h1>Paddocks</h1>
-        <p class="page-subtitle">${_esc(farm?.name || '')} — click any cell to edit</p>
+        <p class="page-subtitle">${_esc(farm?.name || '')} — Paddock names are fixed reference data. Season records store the name at time of entry and are not affected if paddocks change.</p>
       </div>
       <div style="display:flex;gap:8px;flex-shrink:0">
         <button class="btn btn-sm" id="pk-import-btn">⬆ Import CSV</button>
