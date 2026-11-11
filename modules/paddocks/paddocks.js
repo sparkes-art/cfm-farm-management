@@ -59,6 +59,33 @@ function _allTypes() {
   return [...standard, ...custom];
 }
 
+// ── Area summary strip ────────────────────────────────────────────────────────
+
+function _areaSummaryHTML(types) {
+  const fmt = ha => ha == null ? '—' : Number(ha).toLocaleString('en-AU', { maximumFractionDigits: 1 }) + ' ha';
+  const totalHa = _paddocks.reduce((s, p) => s + (parseFloat(p.map_area) || 0), 0);
+  const hasArea = _paddocks.some(p => p.map_area != null);
+  if (!hasArea) return '';
+
+  const typeStats = types.map(t => {
+    const ha = _paddocks.filter(p => p.type === t).reduce((s, p) => s + (parseFloat(p.map_area) || 0), 0);
+    return { t, ha };
+  }).filter(x => x.ha > 0);
+
+  return `
+    <div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)">
+      <div style="padding:8px 14px;border-right:1px solid var(--border);flex-shrink:0">
+        <div style="font-size:0.68rem;color:var(--hint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px">Total area</div>
+        <div style="font-size:0.95rem;font-weight:600;color:var(--ink)">${fmt(totalHa)}</div>
+      </div>
+      ${typeStats.map(({ t, ha }) => `
+        <div style="padding:8px 14px;border-right:1px solid var(--border);flex-shrink:0">
+          <div style="font-size:0.68rem;color:var(--hint);text-transform:uppercase;letter-spacing:.04em;margin-bottom:1px">${_esc(t)}</div>
+          <div style="font-size:0.95rem;font-weight:600;color:var(--ink)">${fmt(ha)}</div>
+        </div>`).join('')}
+    </div>`;
+}
+
 // ── Render ───────────────────────────────────────────────────────────────────
 
 function _render() {
@@ -77,6 +104,8 @@ function _render() {
         <button class="btn btn-primary" id="pk-add-btn">+ Add paddock</button>
       </div>
     </div>
+
+    ${_areaSummaryHTML(types)}
 
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
       <button class="pk-filter-btn${_activeFilter === 'All' ? ' pk-filter-active' : ''}" data-filter="All">
