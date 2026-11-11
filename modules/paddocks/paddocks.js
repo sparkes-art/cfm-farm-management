@@ -94,7 +94,6 @@ function _sidePanelHTML(types) {
         style="width:100%;display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;text-align:left;border:none;background:${active ? c.bg : 'transparent'};cursor:pointer;transition:background 100ms">
         <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:${c.dot}"></span>
         <span style="flex:1;font-size:0.78rem;font-weight:500;color:${active ? c.text : 'var(--ink)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(t)}</span>
-        <span style="font-size:0.72rem;color:${active ? c.text : 'var(--hint)'};flex-shrink:0">${count}</span>
         <span style="font-size:0.72rem;color:${active ? c.text : 'var(--hint)'};flex-shrink:0;min-width:46px;text-align:right">${fmt(ha)}</span>
       </button>`;
   }).join('');
@@ -105,7 +104,6 @@ function _sidePanelHTML(types) {
         style="width:100%;display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;text-align:left;border:none;background:${allActive ? 'var(--blue-light)' : 'transparent'};cursor:pointer;margin-bottom:4px;transition:background 100ms">
         <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--blue)"></span>
         <span style="flex:1;font-size:0.78rem;font-weight:600;color:var(--ink)">All paddocks</span>
-        <span style="font-size:0.72rem;color:var(--hint);flex-shrink:0">${totalCount}</span>
         <span style="font-size:0.72rem;color:var(--hint);flex-shrink:0;min-width:46px;text-align:right">${fmt(totalHa)}</span>
       </button>
       <div style="height:1px;background:var(--border);margin:2px 0 4px"></div>
