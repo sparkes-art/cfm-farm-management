@@ -431,6 +431,19 @@ function inlineMetric(lbl, val) {
 // Inline-edit state
 let _cpEditCell   = null;   // { td, entryId, field, originalValue }
 let _cpSaving     = false;
+let _cpTypeFilter = null;   // null = show all; string = filter by water_type (crop type)
+
+// Inject chip styles once
+if (!document.getElementById('cp-chip-styles')) {
+  const s = document.createElement('style');
+  s.id = 'cp-chip-styles';
+  s.textContent = `
+    .cp-type-chip { display:inline-flex;align-items:center;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;border:1px solid var(--border);background:var(--surface);color:var(--hint);cursor:pointer;transition:all 0.12s;white-space:nowrap }
+    .cp-type-chip:hover { border-color:var(--blue);color:var(--blue) }
+    .cp-type-chip--active { background:var(--blue);border-color:var(--blue);color:#fff }
+  `;
+  document.head.appendChild(s);
+}
 
 // Column definitions for the spreadsheet
 const CP_COLUMNS = [
@@ -528,15 +541,28 @@ function renderCropPlan() {
   // Columns: paddock name | sub-block | ...one column per season...
   // Each season cell shows: commodity (small, coloured) / planned ha / planted ha
 
+  // All unique crop types in use (for filter chips)
+  const usedCropTypes = [...new Set(allCropPlan.map(c => c.water_type).filter(Boolean))].sort();
+
   // Collect all paddock keys (paddock_name + sub_block) in name order
+  // If a type filter is active, only include paddocks that have at least one entry matching that type
   const paddockKeys = [];
   const seen = new Set();
+  const filteredPlan = _cpTypeFilter
+    ? allCropPlan.filter(c => c.water_type === _cpTypeFilter)
+    : allCropPlan;
+  const filteredPaddockNames = _cpTypeFilter
+    ? new Set(filteredPlan.map(c => c.paddock_name + '|' + (c.sub_block || '')))
+    : null;
   [...allCropPlan]
     .sort((a, b) => a.paddock_name.localeCompare(b.paddock_name) ||
                     (a.sub_block || '').localeCompare(b.sub_block || ''))
     .forEach(c => {
       const key = c.paddock_name + '|' + (c.sub_block || '');
-      if (!seen.has(key)) { seen.add(key); paddockKeys.push({ paddock_name: c.paddock_name, sub_block: c.sub_block || null }); }
+      if (!seen.has(key) && (!filteredPaddockNames || filteredPaddockNames.has(key))) {
+        seen.add(key);
+        paddockKeys.push({ paddock_name: c.paddock_name, sub_block: c.sub_block || null });
+      }
     });
 
   // Index entries: paddockKey → seasonLabel → entry
@@ -560,7 +586,7 @@ function renderCropPlan() {
   const hasData = paddockKeys.length > 0;
 
   el.innerHTML = `
-    <div class="page-header" style="margin-bottom:16px">
+    <div class="page-header" style="margin-bottom:12px">
       <div>
         <h2 style="font-size:var(--text-md);font-weight:600;margin:0">Crop Plan</h2>
       </div>
@@ -569,6 +595,13 @@ function renderCropPlan() {
         <button class="btn btn-secondary" id="cp-add-paddock-btn">+ Add paddock</button>
       </div>
     </div>
+    ${usedCropTypes.length > 0 ? `
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);margin-right:2px">Crop type:</span>
+      <button class="cp-type-chip${!_cpTypeFilter ? ' cp-type-chip--active' : ''}" data-type="">All</button>
+      ${usedCropTypes.map(t => `<button class="cp-type-chip${_cpTypeFilter === t ? ' cp-type-chip--active' : ''}" data-type="${esc(t)}">${esc(t)}</button>`).join('')}
+    </div>
+    ` : ''}
 
     ${!hasData ? `
       <div class="empty-state" style="padding:48px 20px">
@@ -582,7 +615,7 @@ function renderCropPlan() {
       <!-- Matrix table -->
       <div class="card" style="padding:0;overflow:hidden">
         <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${200 + allSeasons.length * 160}px">
+          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${140 + allSeasons.length * 200}px">
             <!-- Header row 1: season labels spanning 2 sub-columns each -->
             <thead>
               <tr style="background:var(--surface)">
@@ -597,7 +630,7 @@ function renderCropPlan() {
                       border-left:2px solid var(--border);border-bottom:1px solid var(--border);
                       background:${isCurrentSeason ? 'color-mix(in srgb,var(--blue) 8%,var(--surface))' : 'var(--surface)'};
                       color:${isCurrentSeason ? 'var(--blue)' : 'var(--fg)'};
-                      white-space:nowrap;min-width:160px">
+                      white-space:nowrap;min-width:200px">
                     ${esc(s)}
                     ${tot.planned > 0 ? `<span style="display:block;font-size:10px;font-weight:400;color:var(--hint);margin-top:1px">${tot.planned.toFixed(0)} ha planned${tot.planted > 0 ? ' · ' + tot.planted.toFixed(0) + ' planted' : ''}</span>` : ''}
                   </th>`;
@@ -610,8 +643,8 @@ function renderCropPlan() {
                   Sub-block
                 </th>
                 ${allSeasons.map(s => `
-                  <th style="padding:5px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);border-left:2px solid var(--border);text-align:right;width:80px">Planned</th>
-                  <th style="padding:5px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);text-align:right;width:80px">Planted</th>
+                  <th style="padding:5px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);border-left:2px solid var(--border);text-align:right;width:100px">Planned</th>
+                  <th style="padding:5px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);text-align:right;width:100px">Planted</th>
                 `).join('')}
                 <th style="background:var(--surface)"></th>
               </tr>
@@ -646,6 +679,14 @@ function renderCropPlan() {
       </div>
     `}
   `;
+
+  // ── Wire filter chips ────────────────────────────────────────────────────
+  el.querySelectorAll('.cp-type-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _cpTypeFilter = btn.dataset.type || null;
+      renderCropPlan();
+    });
+  });
 
   // ── Wire buttons ─────────────────────────────────────────────────────────
   const addPaddock = () => openAddPaddockModal(allSeasons, currentSeason);
@@ -686,14 +727,14 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
   const rowBg    = isSubRow ? 'background:color-mix(in srgb,var(--surface) 60%,var(--bg));' : '';
 
   const paddockCell = `
-    <td style="${TH_FIXED}${rowBg}padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:middle;cursor:default">
-      <div style="display:flex;align-items:center;gap:8px">
-        <div style="font-weight:${isSubRow ? '400' : '600'};font-size:0.88rem;${isSubRow ? 'padding-left:16px;color:var(--hint)' : ''}">
+    <td style="${TH_FIXED}${rowBg}padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle;cursor:default;min-width:120px;max-width:160px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div style="font-weight:${isSubRow ? '400' : '600'};font-size:0.85rem;${isSubRow ? 'padding-left:12px;color:var(--hint)' : ''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px" title="${esc(isSubRow ? sub_block : paddock_name)}">
           ${isSubRow ? '↳ ' + esc(sub_block) : esc(paddock_name)}
         </div>
         ${!isSubRow ? `<button class="cp-add-subblock-btn btn-link" data-paddock="${esc(paddock_name)}"
-          style="opacity:0;font-size:0.7rem;color:var(--hint);padding:1px 5px;border:1px dashed var(--border);border-radius:3px;white-space:nowrap;transition:opacity 0.1s"
-          title="Add sub-block">+ sub-block</button>` : ''}
+          style="opacity:0;font-size:0.7rem;color:var(--hint);padding:1px 5px;border:1px dashed var(--border);border-radius:3px;white-space:nowrap;flex-shrink:0;transition:opacity 0.1s"
+          title="Add sub-block">+ sub</button>` : ''}
       </div>
     </td>`;
 
@@ -730,7 +771,7 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel) {
   }
 
   const id = entry.id;
-  const commodity = entry.commodity ? `<div style="font-size:10px;color:var(--blue);font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:72px;margin:0 auto 2px">${esc(entry.commodity)}${entry.water_type ? ' ' + esc(entry.water_type) : ''}</div>` : '';
+  const commodity = entry.commodity ? `<div style="font-size:10px;color:var(--blue);font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;margin:0 auto 2px" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>` : '';
   const statusDot = _statusDot(entry.status);
 
   const plannedN = parseFloat(entry.planned_ha);
