@@ -2,12 +2,12 @@
 // Inputs module — fertiliser, chemical, seed, fuel, labour, other
 // Fertiliser is a featured section within this module.
 
-import { dbSelect, dbInsert, dbUpdate, subscribeTable } from '../../js/supabase-client.js?v=1794521129617';
-import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js?v=1794521129617';
+import { dbSelect, dbInsert, dbUpdate, subscribeTable } from '../../js/supabase-client.js?v=1794523141775';
+import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js?v=1794523141775';
 import {
   toast, openModal, formatCurrency, formatDate,
   qs, setContent, currentSeason
-} from '../../js/ui.js?v=1794521129617';
+} from '../../js/ui.js?v=1794523141775';
 
 let _inputs = [];
 let _unsub = null;
