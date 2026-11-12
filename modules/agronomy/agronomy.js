@@ -50,6 +50,22 @@ const CP_CROP_TYPES = [
   'Permanent Crop',
 ];
 
+// Commodity colour map — distinct colours per crop so cells are distinguishable at a glance
+const CP_COMMODITY_COLORS = {
+  'Cotton':          { bg: '#dbeafe', text: '#1e3a8a', dot: '#3b82f6' },
+  'Corn':            { bg: '#fef9c3', text: '#713f12', dot: '#eab308' },
+  'Corn Hay':        { bg: '#fef3c7', text: '#78350f', dot: '#f59e0b' },
+  'Sorghum':         { bg: '#ffedd5', text: '#7c2d12', dot: '#f97316' },
+  'Wheat':           { bg: '#fce7f3', text: '#831843', dot: '#ec4899' },
+  'Chickpea':        { bg: '#ede9fe', text: '#3b0764', dot: '#8b5cf6' },
+  'Pigeon Pea':      { bg: '#f3e8ff', text: '#581c87', dot: '#a855f7' },
+  'Rhodes Hay':      { bg: '#d1fae5', text: '#065f46', dot: '#10b981' },
+  'Jarrah Hay':      { bg: '#dcfce7', text: '#14532d', dot: '#22c55e' },
+  'Cavalcade Hay':   { bg: '#ecfccb', text: '#365314', dot: '#84cc16' },
+  'Setaria Hay':     { bg: '#d1fae5', text: '#064e3b', dot: '#059669' },
+  'Fallow':          { bg: '#f1f5f9', text: '#64748b', dot: '#94a3b8' },
+};
+
 // ── Mount / unmount ────────────────────────────────────────────────────────
 export async function mountAgronomy(container) {
   container.innerHTML = buildShell();
@@ -431,8 +447,9 @@ function inlineMetric(lbl, val) {
 // Inline-edit state
 let _cpEditCell   = null;   // { td, entryId, field, originalValue }
 let _cpSaving     = false;
-let _cpTypeFilter    = null;   // null = show all; string = filter by water_type (crop type)
+let _cpTypeFilter    = null;   // null = show all; string = filter by commodity
 let _cpPaddockFilter = null;   // null = show all; string = filter by paddock type
+let _cpSearch        = '';     // paddock name search string
 
 // Paddock type colour palette — mirrors paddocks.js
 const PADDOCK_TYPE_COLORS = {
@@ -593,7 +610,9 @@ function renderCropPlan() {
       const key = c.paddock_name + '|' + (c.sub_block || '');
       const passesCropType    = !cropTypeFilteredKeys || cropTypeFilteredKeys.has(key);
       const passesPaddockType = !filteredPaddockSet   || filteredPaddockSet.has(c.paddock_name);
-      if (!seen.has(key) && passesCropType && passesPaddockType) {
+      const searchLower = _cpSearch.trim().toLowerCase();
+      const passesSearch = !searchLower || c.paddock_name.toLowerCase().includes(searchLower);
+      if (!seen.has(key) && passesCropType && passesPaddockType && passesSearch) {
         seen.add(key);
         paddockKeys.push({ paddock_name: c.paddock_name, sub_block: c.sub_block || null });
       }
@@ -644,6 +663,12 @@ function renderCropPlan() {
         <button class="btn btn-secondary" id="cp-add-paddock-btn">+ Add paddock</button>
       </div>
     </div>
+    <div style="margin-bottom:10px">
+      <input type="search" id="cp-search" class="form-input" placeholder="Search paddocks…"
+        value="${esc(_cpSearch)}"
+        style="max-width:260px;font-size:0.82rem;padding:5px 10px">
+    </div>
+
     ${(usedCropTypes.length > 0 || usedPaddockTypes.length > 0) ? `
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
       ${usedPaddockTypes.length > 0 ? `
@@ -802,6 +827,12 @@ function renderCropPlan() {
     });
   });
 
+  // Search input
+  el.querySelector('#cp-search')?.addEventListener('input', e => {
+    _cpSearch = e.target.value;
+    renderCropPlan();
+  });
+
   // ── Wire buttons ─────────────────────────────────────────────────────────
   const addPaddock = () => openAddPaddockModal(allSeasons, currentSeason);
   el.querySelector('#cp-add-paddock-btn')?.addEventListener('click', addPaddock);
@@ -870,7 +901,7 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
               ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:8px;background:${c.bg};color:${c.text};font-weight:600"><span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${c.dot};flex-shrink:0"></span>${esc(paddockType)}</span>`
               : paddockType ? `<span style="color:var(--hint)">${esc(paddockType)}</span>` : '';
             const areaTag = paddockArea != null
-              ? `<span style="color:var(--hint);font-family:'DM Mono',monospace">${paddockArea.toFixed(0)} ha</span>`
+              ? `<span style="color:var(--hint);font-family:'DM Mono',monospace;font-size:0.68rem">${paddockArea.toFixed(1)} ha</span>`
               : '';
             return (typeBadge || areaTag)
               ? `<div style="font-size:0.72rem;margin-top:3px;display:flex;align-items:center;gap:5px;flex-wrap:wrap">${typeBadge}${areaTag}</div>`
@@ -935,8 +966,9 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel) {
   // Commodity + status header (no variety in main view — it's in the expand row)
   const statusDot   = _statusDot(entry.status);
   const statusLabel = entry.status ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--hint)">${CP_STATUS_LABELS[entry.status] || entry.status}</span>` : '';
+  const commColor = entry.commodity ? (CP_COMMODITY_COLORS[entry.commodity] || { bg: '#e0f2fe', text: '#0c4a6e' }) : null;
   const commodityLine = entry.commodity
-    ? `<div style="font-size:10px;color:var(--blue);font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
+    ? `<div style="font-size:10px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:1px 4px;border-radius:4px;background:${commColor.bg};color:${commColor.text}" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
     : '';
   const topInfo = `<div style="margin-bottom:4px">${commodityLine}<div style="display:flex;align-items:center;justify-content:center;gap:3px">${statusDot}${statusLabel}</div></div>`;
 
@@ -1093,20 +1125,64 @@ function _closeCellPopover() {
 function _openCellPopover(td, entry) {
   _closeCellPopover();
 
+  // Paddock metadata
+  const paddockMeta = allPaddocks.find(p => p.name === entry.paddock_name);
+  const mapArea = paddockMeta?.area_ha ? parseFloat(paddockMeta.area_ha) : null;
+
+  // History: all OTHER seasons for this paddock/subblock, sorted newest first
+  const history = allCropPlan
+    .filter(c => c.paddock_name === entry.paddock_name &&
+                 (c.sub_block || '') === (entry.sub_block || '') &&
+                 c.id !== entry.id)
+    .sort((a, b) => {
+      const pa = _parseSeason(a.season_label), pb = _parseSeason(b.season_label);
+      if (pa.year !== pb.year) return pb.year - pa.year;
+      return (pa.type === 'Summer' ? 0 : pa.type === 'Annual' ? 1 : 2) -
+             (pb.type === 'Summer' ? 0 : pb.type === 'Annual' ? 1 : 2);
+    });
+
+  const historyHTML = history.length > 0 ? `
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);margin-bottom:6px">Prior seasons</div>
+      <table style="border-collapse:collapse;width:100%;font-size:0.72rem">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:3px 4px;color:var(--hint);font-weight:600">Season</th>
+            <th style="text-align:left;padding:3px 4px;color:var(--hint);font-weight:600">Crop</th>
+            <th style="text-align:right;padding:3px 4px;color:var(--hint);font-weight:600">Planned</th>
+            <th style="text-align:right;padding:3px 4px;color:var(--hint);font-weight:600">Planted</th>
+            <th style="text-align:left;padding:3px 4px;color:var(--hint);font-weight:600">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${history.map(h => `
+            <tr style="border-bottom:1px solid color-mix(in srgb,var(--border) 50%,transparent)">
+              <td style="padding:3px 4px;white-space:nowrap;color:var(--hint)">${esc(h.season_label)}</td>
+              <td style="padding:3px 4px;font-weight:600;color:var(--fg)">${esc(h.commodity || '—')}</td>
+              <td style="padding:3px 4px;text-align:right;font-family:'DM Mono',monospace;color:var(--fg)">${h.planned_ha != null ? parseFloat(h.planned_ha).toFixed(1) : '—'}</td>
+              <td style="padding:3px 4px;text-align:right;font-family:'DM Mono',monospace;color:${h.planted_ha != null ? 'var(--green,#22c55e)' : 'var(--hint)'}">${h.planted_ha != null ? parseFloat(h.planted_ha).toFixed(1) : '—'}</td>
+              <td style="padding:3px 4px;color:var(--hint)">${h.status ? (CP_STATUS_LABELS[h.status] || h.status) : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : '';
+
   const pop = document.createElement('div');
   pop.className = 'cp-cell-popover';
   pop.style.cssText = `
     position:fixed;z-index:200;
     background:var(--surface);border:1px solid var(--border);
     border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.18);
-    padding:14px 16px;min-width:260px;max-width:320px;
+    padding:14px 16px;min-width:300px;max-width:380px;
+    max-height:85vh;overflow-y:auto;
   `;
 
   pop.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">
       <div style="font-size:0.82rem;font-weight:700;color:var(--fg)">${esc(entry.paddock_name)}${entry.sub_block ? ' · ' + esc(entry.sub_block) : ''}</div>
       <div style="font-size:0.75rem;color:var(--hint)">${esc(entry.season_label)}</div>
     </div>
+    ${mapArea != null ? `<div style="font-size:0.72rem;color:var(--hint);margin-bottom:12px">Map area: <span style="font-family:'DM Mono',monospace;color:var(--fg);font-weight:600">${mapArea.toFixed(1)} ha</span></div>` : '<div style="margin-bottom:12px"></div>'}
 
     <div class="form-group" style="margin-bottom:10px">
       <label class="form-label" style="font-size:0.72rem">Commodity</label>
@@ -1131,7 +1207,7 @@ function _openCellPopover(td, entry) {
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label" style="font-size:0.72rem">Planned ha</label>
+        <label class="form-label" style="font-size:0.72rem">Planned ha${mapArea != null ? ` <span style="color:var(--hint);font-weight:400">(map: ${mapArea.toFixed(1)})</span>` : ''}</label>
         <input class="form-input" id="cpop-planned" type="number" step="0.1" min="0"
           value="${entry.planned_ha ?? ''}" style="font-size:0.82rem;padding:5px 8px;text-align:right;font-family:'DM Mono',monospace">
       </div>
@@ -1152,17 +1228,19 @@ function _openCellPopover(td, entry) {
       <button class="btn btn-secondary" id="cpop-cancel" style="font-size:0.8rem;padding:5px 12px">Cancel</button>
       <button class="btn btn-primary"   id="cpop-save"   style="font-size:0.8rem;padding:5px 12px">Save</button>
     </div>
+
+    ${historyHTML}
   `;
 
   document.body.appendChild(pop);
   _activePopover = pop;
 
-  // Position anchored to the td
+  // Position anchored to the td — allow taller popover for history
   const rect = td.getBoundingClientRect();
-  const popW = 320, popH = 300;
+  const popW = 380, popH = Math.min(600, window.innerHeight * 0.85);
   let top  = rect.bottom + 4;
   let left = rect.left;
-  if (top + popH > window.innerHeight - 8) top = rect.top - popH - 4;
+  if (top + popH > window.innerHeight - 8) top = Math.max(8, rect.top - popH - 4);
   if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
   pop.style.top  = top  + 'px';
   pop.style.left = left + 'px';
