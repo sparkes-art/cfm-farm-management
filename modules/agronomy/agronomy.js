@@ -65,22 +65,18 @@ export function unmountAgronomy() {
 }
 
 function buildShell() {
+  const farm = getActiveFarm();
   return `
     <div class="page-header">
       <div>
         <h1>Agronomy</h1>
-        <p class="page-subtitle">Crop planning, scouting &amp; visit history</p>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <a href="#" data-module="paddocks" class="btn btn-secondary">🗺 Manage Paddocks</a>
-        <button class="btn btn-primary" id="agro-log-visit-btn" style="display:none">+ Log Visit</button>
-        <button class="btn btn-primary" id="agro-new-plan-btn" style="display:none">+ Add Crop</button>
+        <p class="page-subtitle">${farm?.name || ''}</p>
       </div>
     </div>
-    <nav class="tab-nav" id="agronomy-tabs">
+    <div class="tab-strip" id="agronomy-tabs">
       <button class="tab-btn active" data-tab="scouting">Scouting</button>
       <button class="tab-btn" data-tab="cropplan">Crop Plan</button>
-    </nav>
+    </div>
     <div id="agro-tab-scouting"></div>
     <div id="agro-tab-cropplan" style="display:none"></div>
     <div id="agro-paddock-detail" style="display:none"></div>
@@ -110,24 +106,7 @@ async function refreshAll() {
     allReports.some(r => r.id === e.report_id)
   );
 
-  _syncHeaderBtns();
   renderActiveTab();
-}
-
-function _syncHeaderBtns() {
-  const logBtn  = document.getElementById('agro-log-visit-btn');
-  const planBtn = document.getElementById('agro-new-plan-btn');
-  if (logBtn)  logBtn.style.display  = activeTab === 'scouting'  ? '' : 'none';
-  if (planBtn) planBtn.style.display = activeTab === 'cropplan'  ? '' : 'none';
-
-  if (logBtn && !logBtn._wired) {
-    logBtn._wired = true;
-    logBtn.addEventListener('click', openLogVisitModal);
-  }
-  if (planBtn && !planBtn._wired) {
-    planBtn._wired = true;
-    planBtn.addEventListener('click', () => openCropPlanModal());
-  }
 }
 
 // ── Tab nav ────────────────────────────────────────────────────────────────
@@ -142,10 +121,9 @@ function switchTab(tab) {
   activePaddock = null;
   document.querySelectorAll('#agronomy-tabs .tab-btn')
     .forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  document.getElementById('agro-paddock-detail').style.display  = 'none';
-  document.getElementById('agro-tab-scouting').style.display  = tab === 'scouting'  ? '' : 'none';
-  document.getElementById('agro-tab-cropplan').style.display  = tab === 'cropplan'  ? '' : 'none';
-  _syncHeaderBtns();
+  document.getElementById('agro-paddock-detail').style.display = 'none';
+  document.getElementById('agro-tab-scouting').style.display   = tab === 'scouting'  ? '' : 'none';
+  document.getElementById('agro-tab-cropplan').style.display   = tab === 'cropplan'  ? '' : 'none';
   renderActiveTab();
 }
 
@@ -164,13 +142,21 @@ function renderBoard() {
 
   if (paddocks.length === 0) {
     el.innerHTML = `
+      <div class="page-header" style="margin-bottom:12px">
+        <div>
+          <h2 style="font-size:var(--text-md);font-weight:600;margin:0">Scouting visits</h2>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <a href="#" data-module="paddocks" class="btn btn-secondary">🗺 Paddocks</a>
+          <button class="btn btn-primary" id="agro-empty-log-btn">+ Log Visit</button>
+        </div>
+      </div>
       <div class="empty-state">
         <div class="empty-icon">🌱</div>
         <p>No scouting visits recorded this season.</p>
         <p style="font-size:0.82rem;color:var(--hint);margin-top:-8px">
           <a href="#" data-module="paddocks" style="color:var(--blue)">Set up paddocks</a> first to get a dropdown when logging visits.
         </p>
-        <button class="btn btn-primary" id="agro-empty-log-btn">Log First Visit</button>
       </div>`;
     document.getElementById('agro-empty-log-btn')
       ?.addEventListener('click', openLogVisitModal);
@@ -187,6 +173,15 @@ function renderBoard() {
   const latestReport   = allReports[0];
 
   el.innerHTML = `
+    <div class="page-header" style="margin-bottom:12px">
+      <div>
+        <h2 style="font-size:var(--text-md);font-weight:600;margin:0">Scouting visits</h2>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <a href="#" data-module="paddocks" class="btn btn-secondary">🗺 Paddocks</a>
+        <button class="btn btn-primary" id="agro-log-visit-btn">+ Log Visit</button>
+      </div>
+    </div>
     <div class="stat-row" style="margin-bottom:20px">
       <div class="stat-card"><div class="stat-label">Crop ha</div><div class="stat-value">${totalHaCrop > 0 ? totalHaCrop.toFixed(1) : '—'}</div></div>
       <div class="stat-card"><div class="stat-label">Fallow ha</div><div class="stat-value">${totalHaFallow > 0 ? totalHaFallow.toFixed(1) : '—'}</div></div>
@@ -208,6 +203,9 @@ function renderBoard() {
       ${fallowPaddocks.map(paddockCardHTML).join('')}
     </div>` : ''}
   `;
+
+  el.querySelector('#agro-log-visit-btn')
+    ?.addEventListener('click', openLogVisitModal);
 
   el.querySelectorAll('.agro-paddock-card').forEach(card => {
     card.addEventListener('click', () => openPaddockDetail(card.dataset.paddock));
@@ -437,6 +435,14 @@ function renderCropPlan() {
   })).filter(x => x.count > 0);
 
   el.innerHTML = `
+    <div class="page-header" style="margin-bottom:12px">
+      <div>
+        <h2 style="font-size:var(--text-md);font-weight:600;margin:0">Crop Plan</h2>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary" id="agro-new-plan-btn">+ Add Crop</button>
+      </div>
+    </div>
     <div style="display:flex;gap:12px;align-items:flex-start">
 
       <!-- Left filter panel -->
@@ -520,6 +526,10 @@ function renderCropPlan() {
       </div>
     </div>
   `;
+
+  // Header button
+  el.querySelector('#agro-new-plan-btn')
+    ?.addEventListener('click', () => openCropPlanModal());
 
   // Season btn wiring
   el.querySelectorAll('.cp-season-btn').forEach(btn => {
