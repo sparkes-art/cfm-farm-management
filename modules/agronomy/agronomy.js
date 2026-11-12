@@ -2,9 +2,9 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794520714747';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794520714747';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794520714747';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794521129617';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794521129617';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794521129617';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -791,7 +791,7 @@ function renderCropPlan() {
       <!-- Matrix table -->
       <div class="card" style="padding:0;overflow:hidden">
         <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${160 + allSeasons.reduce((w, s) => w + (isCurSeason(s) ? 200 : 95), 0)}px">
+          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${160 + allSeasons.reduce((w, s) => w + (isCurSeason(s) ? 300 : 143), 0)}px">
             <thead>
               <!-- Row 1: season labels -->
               <tr style="background:var(--surface)">
@@ -820,7 +820,7 @@ function renderCropPlan() {
                       border-left:2px solid var(--border);border-bottom:2px solid var(--border);
                       background:${isCur ? 'color-mix(in srgb,var(--blue) 8%,var(--surface))' : 'var(--surface)'};
                       color:${isCur ? 'var(--blue)' : 'var(--fg)'};
-                      ${isCur ? 'white-space:nowrap;' : 'width:95px;max-width:95px;'}min-width:${isCur ? '200' : '95'}px">
+                      ${isCur ? 'white-space:nowrap;' : 'width:143px;max-width:143px;'}min-width:${isCur ? '300' : '143'}px">
                     ${esc(s)}
                     ${tot > 0 ? `<span style="display:block;font-size:10px;font-weight:400;color:var(--hint);margin-top:1px">${tot.toFixed(0)} ha</span>` : ''}
                     ${filterDrop}
@@ -833,8 +833,8 @@ function renderCropPlan() {
                 ${allSeasons.map(s => {
                   if (!isCurSeason(s)) return '';
                   return `
-                    <th style="padding:4px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);border-left:2px solid var(--border);text-align:right;width:95px;background:color-mix(in srgb,var(--blue) 8%,var(--surface))">Planned</th>
-                    <th style="padding:4px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);text-align:right;width:95px;background:color-mix(in srgb,var(--blue) 8%,var(--surface))">Planted</th>`;
+                    <th style="padding:4px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);border-left:2px solid var(--border);text-align:right;width:143px;background:color-mix(in srgb,var(--blue) 8%,var(--surface))">Planned</th>
+                    <th style="padding:4px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);text-align:right;width:143px;background:color-mix(in srgb,var(--blue) 8%,var(--surface))">Planted</th>`;
                 }).join('')}
               </tr>
             </thead>
@@ -1042,10 +1042,10 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
       return `
         <td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
           data-season="${esc(seasonLabel)}" data-field="planned_ha"
-          style="${baseStyle}${borderL}min-width:95px;color:var(--border);font-size:0.78rem" title="Click to add planned ha">—</td>
+          style="${baseStyle}${borderL}min-width:143px;color:var(--border);font-size:0.78rem" title="Click to add planned ha">—</td>
         <td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
           data-season="${esc(seasonLabel)}" data-field="planted_ha"
-          style="${baseStyle}min-width:95px;color:var(--border);font-size:0.78rem" title="Click to add planted ha">—</td>`;
+          style="${baseStyle}min-width:143px;color:var(--border);font-size:0.78rem" title="Click to add planted ha">—</td>`;
     }
     const id = entry.id;
     const plannedN = parseFloat(entry.planned_ha);
@@ -1063,13 +1063,13 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
         : `<span style="color:var(--hint)">—</span>`;
     return `
       <td class="cp-matrix-cell" data-id="${id}" data-field="planned_ha" data-type="number"
-        style="${baseStyle}${borderL}min-width:95px;text-align:right" title="Planned ha — click to edit">
+        style="${baseStyle}${borderL}min-width:143px;text-align:right" title="Planned ha — click to edit">
         ${commodityLine}
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:3px;margin-bottom:2px">${statusDot}${statusLabel}</div>
         ${plannedDisp}
       </td>
       <td class="cp-matrix-cell" data-id="${id}" data-field="${entry.status === 'harvested' ? 'area_loss_ha' : 'planted_ha'}" data-type="number"
-        style="${baseStyle}min-width:95px;text-align:right;border-left:1px dashed var(--border)" title="${entry.status === 'harvested' ? 'Loss ha — click to edit (harvested = planted − loss)' : 'Planted ha — click to edit'}">
+        style="${baseStyle}min-width:143px;text-align:right;border-left:1px dashed var(--border)" title="${entry.status === 'harvested' ? 'Loss ha — click to edit (harvested = planted − loss)' : 'Planted ha — click to edit'}">
         ${plantedDisp}
       </td>`;
   }
@@ -1078,7 +1078,7 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
   if (!entry) {
     return `<td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
         data-season="${esc(seasonLabel)}" data-field="planned_ha"
-        style="${baseStyle}${borderL}min-width:95px;color:var(--border);font-size:0.78rem" title="Click to add">—</td>`;
+        style="${baseStyle}${borderL}min-width:143px;color:var(--border);font-size:0.78rem" title="Click to add">—</td>`;
   }
 
   const id = entry.id;
@@ -1095,7 +1095,7 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
 
   return `
     <td class="cp-matrix-cell" data-id="${id}" data-field="${editField}" data-type="number"
-      style="${baseStyle}${borderL}min-width:95px" title="Click to edit — ${haLabel || 'planned'} ha">
+      style="${baseStyle}${borderL}min-width:143px" title="Click to edit — ${haLabel || 'planned'} ha">
       ${topInfo}${haDisp}
     </td>`;
 }
