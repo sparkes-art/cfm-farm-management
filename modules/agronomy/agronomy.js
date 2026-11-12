@@ -679,10 +679,14 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
 
   const paddockCell = `
     <td style="${TH_FIXED}${rowBg}padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:middle;cursor:default">
-      <div style="font-weight:${isSubRow ? '400' : '600'};font-size:0.88rem;${isSubRow ? 'padding-left:16px;color:var(--hint)' : ''}">
-        ${isSubRow ? '↳ ' + esc(sub_block) : esc(paddock_name)}
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="font-weight:${isSubRow ? '400' : '600'};font-size:0.88rem;${isSubRow ? 'padding-left:16px;color:var(--hint)' : ''}">
+          ${isSubRow ? '↳ ' + esc(sub_block) : esc(paddock_name)}
+        </div>
+        ${!isSubRow ? `<button class="cp-add-subblock-btn btn-link" data-paddock="${esc(paddock_name)}"
+          style="opacity:0;font-size:0.7rem;color:var(--hint);padding:1px 5px;border:1px dashed var(--border);border-radius:3px;white-space:nowrap;transition:opacity 0.1s"
+          title="Add sub-block">+ sub-block</button>` : ''}
       </div>
-      ${isSubRow ? '' : sub_block ? `<div style="font-size:0.72rem;color:var(--hint)">${esc(sub_block)}</div>` : ''}
     </td>`;
 
   const seasonCells = seasons.map(s => {
@@ -752,18 +756,30 @@ function bindMatrixEdit(container) {
   const table = container.querySelector('#cp-matrix');
   if (!table) return;
 
-  // Hover: show del button, highlight row
+  // Hover: show del + sub-block buttons, highlight row
   table.addEventListener('mouseover', e => {
     const row = e.target.closest('tr.cp-matrix-row');
     if (!row) return;
     row.style.background = 'color-mix(in srgb, var(--blue) 4%, transparent)';
     row.querySelector('.cp-del-row-btn')?.style && (row.querySelector('.cp-del-row-btn').style.opacity = '1');
+    row.querySelector('.cp-add-subblock-btn')?.style && (row.querySelector('.cp-add-subblock-btn').style.opacity = '1');
   });
   table.addEventListener('mouseout', e => {
     const row = e.target.closest('tr.cp-matrix-row');
     if (!row) return;
     row.style.background = '';
     row.querySelector('.cp-del-row-btn')?.style && (row.querySelector('.cp-del-row-btn').style.opacity = '0');
+    row.querySelector('.cp-add-subblock-btn')?.style && (row.querySelector('.cp-add-subblock-btn').style.opacity = '0');
+  });
+
+  // Add sub-block
+  table.addEventListener('click', e => {
+    const btn = e.target.closest('.cp-add-subblock-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const paddockName = btn.dataset.paddock;
+    const allSeasons  = sortSeasons([...new Set(allCropPlan.map(c => c.season_label).filter(Boolean))]);
+    _openAddSubBlockModal(paddockName, allSeasons);
   });
 
   // Click a cell
@@ -781,6 +797,88 @@ function bindMatrixEdit(container) {
     }
 
     _startEdit(td);
+  });
+}
+
+function _openAddSubBlockModal(paddockName, allSeasons) {
+  const farm    = getActiveFarm();
+  const farmId  = farm?.id || farm;
+  const seasonOpts = allSeasons.map(s =>
+    `<option value="${esc(s)}">${esc(s)}</option>`
+  ).join('');
+
+  openModal({
+    title: `Add sub-block — ${paddockName}`,
+    wide: true,
+    bodyHTML: `
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Sub-block name *</label>
+          <input class="form-input" id="sb-name" placeholder="e.g. North, A, Irrigated">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Commodity</label>
+          <select class="form-select" id="sb-commodity">
+            <option value="">—</option>
+            ${CP_COMMODITY_OPTIONS.map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Water type</label>
+          <select class="form-select" id="sb-water">
+            <option value="">—</option>
+            <option value="IRR">IRR</option>
+            <option value="DL">DL</option>
+            <option value="Dryland">Dryland</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Planned ha</label>
+          <input class="form-input" id="sb-planned" type="number" step="0.1" min="0" placeholder="ha">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Add to seasons</label>
+          <select class="form-select" id="sb-seasons" multiple size="4" style="height:auto">
+            ${seasonOpts}
+          </select>
+          <p style="font-size:0.75rem;color:var(--hint);margin-top:4px">Hold Ctrl/Cmd to select multiple</p>
+        </div>
+      </div>`,
+    confirmLabel: 'Add sub-block',
+    onMounted: overlay => {
+      // Pre-select all seasons by default
+      overlay.querySelectorAll('#sb-seasons option').forEach(o => o.selected = true);
+    },
+    onConfirm: async () => {
+      const subBlock  = document.getElementById('sb-name')?.value?.trim();
+      if (!subBlock) throw new Error('Sub-block name required');
+      const commodity = document.getElementById('sb-commodity')?.value || null;
+      const waterType = document.getElementById('sb-water')?.value || null;
+      const plannedHa = numOrNull(document.getElementById('sb-planned')?.value);
+      const seasons   = [...document.getElementById('sb-seasons').selectedOptions].map(o => o.value);
+      if (!seasons.length) throw new Error('Select at least one season');
+
+      const rows = seasons.map(s => ({
+        farm_id:      farmId,
+        paddock_name: paddockName,
+        sub_block:    subBlock,
+        season_label: s,
+        season_type:  s.startsWith('Summer') ? 'Summer' : s.startsWith('Winter') ? 'Winter' : 'Annual',
+        status:       'intent',
+        commodity,
+        water_type:   waterType,
+        planned_ha:   plannedHa,
+        planted_ha:   null,
+        area_loss_ha: null,
+        updated_at:   new Date().toISOString(),
+      }));
+
+      await dbInsert('crop_plan_entries', rows.length === 1 ? rows[0] : rows);
+      toast(`Sub-block "${subBlock}" added to ${seasons.length} season${seasons.length > 1 ? 's' : ''}`, 'success');
+      await refreshAll();
+    },
   });
 }
 
