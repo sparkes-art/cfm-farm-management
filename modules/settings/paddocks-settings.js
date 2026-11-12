@@ -2,9 +2,9 @@
 // Paddock list management — per farm, stored in Supabase paddocks table.
 // Fields: name, map_area (ha), type (Crop / Fallow / Pasture / Other)
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794519829423';
-import { getActiveFarm } from '../../js/app-state.js?v=1794519829423';
-import { toast, openModal } from '../../js/ui.js?v=1794519829423';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794520070385';
+import { getActiveFarm } from '../../js/app-state.js?v=1794520070385';
+import { toast, openModal } from '../../js/ui.js?v=1794520070385';
 
 const PADDOCK_TYPES = ['Crop', 'Fallow', 'Pasture', 'Headland', 'Other'];
 

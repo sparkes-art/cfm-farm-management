@@ -2,9 +2,9 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794519829423';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794519829423';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794519829423';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794520070385';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794520070385';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794520070385';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -663,9 +663,9 @@ function renderCropPlan() {
     seasonTotals[s] = rows.reduce((t, c) => t + (_bestHa(c).ha || 0), 0);
   });
 
-  // Summary by commodity + variety — planned ha and planted/actual ha separately
+  // Summary by commodity + variety — current season only, planned ha and planted/actual ha separately
   const commoditySummary = {};
-  allCropPlan.forEach(c => {
+  allCropPlan.filter(c => c.season_label === latestSeason).forEach(c => {
     if (!c.commodity) return;
     if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { planned: 0, actual: 0, varieties: {} };
     const plannedN = parseFloat(c.planned_ha) || 0;
@@ -779,7 +779,7 @@ function renderCropPlan() {
       <!-- Matrix table -->
       <div class="card" style="padding:0;overflow:hidden">
         <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${160 + allSeasons.reduce((w, s) => w + (isCurSeason(s) ? 200 : 130), 0)}px">
+          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${160 + allSeasons.reduce((w, s) => w + (isCurSeason(s) ? 200 : 95), 0)}px">
             <thead>
               <!-- Row 1: season labels -->
               <tr style="background:var(--surface)">
@@ -798,7 +798,7 @@ function renderCropPlan() {
                       border-left:2px solid var(--border);border-bottom:2px solid var(--border);
                       background:${isCur ? 'color-mix(in srgb,var(--blue) 8%,var(--surface))' : 'var(--surface)'};
                       color:${isCur ? 'var(--blue)' : 'var(--fg)'};
-                      white-space:nowrap;min-width:${isCur ? '200' : '95'}px">
+                      ${isCur ? 'white-space:nowrap;' : ''}min-width:${isCur ? '200' : '95'}px">
                     ${esc(s)}
                     ${tot > 0 ? `<span style="display:block;font-size:10px;font-weight:400;color:var(--hint);margin-top:1px">${tot.toFixed(0)} ha</span>` : ''}
                   </th>`;
