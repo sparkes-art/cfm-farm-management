@@ -649,7 +649,7 @@ function renderCropPlan() {
       </div>` : ''}
       ${usedCropTypes.length > 0 ? `
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);width:72px;flex-shrink:0">Type:</span>
+        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);width:72px;flex-shrink:0">Crop:</span>
         <button class="cp-type-chip cp-crop-chip${!_cpTypeFilter ? ' cp-type-chip--active' : ''}" data-type="">All</button>
         ${usedCropTypes.map(t => `<button class="cp-type-chip cp-crop-chip${_cpTypeFilter === t ? ' cp-type-chip--active' : ''}" data-type="${esc(t)}">${esc(t)}</button>`).join('')}
       </div>` : ''}
