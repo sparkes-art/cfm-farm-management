@@ -1,7 +1,7 @@
 // modules/acquisitions/acquisitions.js
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1792559266387';
-import { getSession, canWrite, isLawd } from '../../js/app-state.js?v=1792559266387';
-import { toast, openModal, formatCurrency, formatDate, qs } from '../../js/ui.js?v=1792559266387';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794519135634';
+import { getSession, canWrite, isLawd } from '../../js/app-state.js?v=1794519135634';
+import { toast, openModal, formatCurrency, formatDate, qs } from '../../js/ui.js?v=1794519135634';
 
 const SUPABASE_URL = 'https://nqvfuqvindsgnogejaei.supabase.co';
 
