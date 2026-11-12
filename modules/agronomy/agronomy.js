@@ -644,20 +644,22 @@ function renderCropPlan() {
     seasonTotals[s] = rows.reduce((t, c) => t + (_bestHa(c).ha || 0), 0);
   });
 
-  // Summary by commodity + variety across ALL entries (ignores filters) — best ha
+  // Summary by commodity + variety — planned ha and planted/actual ha separately
   const commoditySummary = {};
   allCropPlan.forEach(c => {
     if (!c.commodity) return;
-    const { ha } = _bestHa(c);
-    if (ha == null) return;
-    if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { ha: 0, varieties: {} };
-    commoditySummary[c.commodity].ha += ha;
+    if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { planned: 0, actual: 0, varieties: {} };
+    const plannedN = parseFloat(c.planned_ha) || 0;
+    commoditySummary[c.commodity].planned += plannedN;
+    const { ha: actualHa } = _bestHa(c);
+    if (actualHa != null) commoditySummary[c.commodity].actual += actualHa;
     const vKey = c.variety || '(no variety)';
     if (!commoditySummary[c.commodity].varieties[vKey])
-      commoditySummary[c.commodity].varieties[vKey] = { ha: 0 };
-    commoditySummary[c.commodity].varieties[vKey].ha += ha;
+      commoditySummary[c.commodity].varieties[vKey] = { planned: 0, actual: 0 };
+    commoditySummary[c.commodity].varieties[vKey].planned += plannedN;
+    if (actualHa != null) commoditySummary[c.commodity].varieties[vKey].actual += actualHa;
   });
-  const summaryEntries = Object.entries(commoditySummary).sort((a, b) => b[1].ha - a[1].ha);
+  const summaryEntries = Object.entries(commoditySummary).sort((a, b) => (b[1].actual || b[1].planned) - (a[1].actual || a[1].planned));
 
   const hasData = paddockKeys.length > 0;
 
@@ -708,23 +710,25 @@ function renderCropPlan() {
     ` : ''}
 
     ${summaryEntries.length > 0 ? `
-    <div style="margin-bottom:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;max-width:360px">
+    <div style="margin-bottom:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;max-width:480px">
       <table style="border-collapse:collapse;width:100%;font-size:0.82rem">
         <thead>
           <tr style="border-bottom:1px solid var(--border)">
             <th style="text-align:left;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Crop</th>
-            <th style="text-align:right;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Area</th>
+            <th style="text-align:right;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Planned</th>
+            <th style="text-align:right;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Planted / Actual</th>
             <th style="width:28px;padding:7px 8px"></th>
           </tr>
         </thead>
         <tbody id="cp-summary-body">
           ${summaryEntries.map(([commodity, tots]) => {
             const varRows = Object.entries(tots.varieties)
-              .sort((a, b) => b[1].ha - a[1].ha)
+              .sort((a, b) => (b[1].actual || b[1].planned) - (a[1].actual || a[1].planned))
               .map(([v, vt]) => `
                 <tr class="cp-summary-var-row" data-commodity="${esc(commodity)}" style="display:none;background:color-mix(in srgb,var(--blue) 3%,var(--surface))">
                   <td style="padding:5px 12px 5px 24px;color:var(--hint);font-size:0.76rem">${esc(v)}</td>
-                  <td style="text-align:right;padding:5px 12px;font-family:'DM Mono',monospace;font-size:0.76rem;color:var(--hint)">${vt.ha > 0 ? vt.ha.toFixed(0) + ' ha' : '—'}</td>
+                  <td style="text-align:right;padding:5px 12px;font-family:'DM Mono',monospace;font-size:0.76rem;color:var(--hint)">${vt.planned > 0 ? vt.planned.toFixed(0) : '—'}</td>
+                  <td style="text-align:right;padding:5px 12px;font-family:'DM Mono',monospace;font-size:0.76rem;color:${vt.actual > 0 ? 'var(--green,#22c55e)' : 'var(--hint)'}">${vt.actual > 0 ? vt.actual.toFixed(0) : '—'}</td>
                   <td></td>
                 </tr>`).join('');
             const hasVarieties = Object.keys(tots.varieties).length > 1 ||
@@ -732,7 +736,8 @@ function renderCropPlan() {
             return `
               <tr class="cp-summary-row" data-commodity="${esc(commodity)}" style="border-top:1px solid var(--border);cursor:${hasVarieties ? 'pointer' : 'default'}">
                 <td style="padding:8px 12px;font-weight:600;color:var(--fg)">${esc(commodity)}</td>
-                <td style="text-align:right;padding:8px 12px;font-family:'DM Mono',monospace;font-weight:600">${tots.ha.toFixed(0)} ha</td>
+                <td style="text-align:right;padding:8px 12px;font-family:'DM Mono',monospace;font-weight:600;color:var(--fg)">${tots.planned > 0 ? tots.planned.toFixed(0) + ' ha' : '—'}</td>
+                <td style="text-align:right;padding:8px 12px;font-family:'DM Mono',monospace;font-weight:600;color:${tots.actual > 0 ? 'var(--green,#22c55e)' : 'var(--hint)'}">${tots.actual > 0 ? tots.actual.toFixed(0) + ' ha' : '—'}</td>
                 <td style="text-align:center;padding:8px 8px;color:var(--hint);font-size:0.7rem">${hasVarieties ? '▾' : ''}</td>
               </tr>
               ${varRows}`;
@@ -987,11 +992,11 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
         : `<span style="color:var(--hint)">—</span>`;
     return `
       <td class="cp-matrix-cell" data-id="${id}" data-field="planned_ha" data-type="number"
-        style="${baseStyle}${borderL}min-width:95px" title="Click to edit planned ha">
-        ${topInfo}${plannedDisp}
+        style="${baseStyle}${borderL}min-width:95px;text-align:right" title="Click to edit planned ha">
+        ${commodityLine}<div style="display:flex;align-items:center;justify-content:flex-end;gap:3px;margin-bottom:2px">${statusDot}${statusLabel}</div>${plannedDisp}
       </td>
       <td class="cp-matrix-cell" data-id="${id}" data-field="${entry.status === 'harvested' ? 'area_loss_ha' : 'planted_ha'}" data-type="number"
-        style="${baseStyle}min-width:95px" title="Click to edit ${entry.status === 'harvested' ? 'loss ha (harvested = planted − loss)' : 'planted ha'}">
+        style="${baseStyle}min-width:95px;text-align:right" title="Click to edit ${entry.status === 'harvested' ? 'loss ha (harvested = planted − loss)' : 'planted ha'}">
         ${plantedDisp}
       </td>`;
   }
