@@ -45,7 +45,7 @@ const MODULE_LOADERS = {
     return { mount: m.mountRecommendations, unmount: m.unmountRecommendations };
   },
   agronomy: async () => {
-    const m = await import('../modules/agronomy/agronomy.js');
+    const m = await import('../modules/agronomy/agronomy.js?v=1794518502677');
     return { mount: m.mountAgronomy, unmount: m.unmountAgronomy };
   },
   weather: async () => {
