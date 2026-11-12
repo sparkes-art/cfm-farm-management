@@ -2,9 +2,9 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794520312767';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794520312767';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794520312767';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794520714747';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794520714747';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794520714747';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -592,9 +592,6 @@ function renderCropPlan() {
   _currentSeasonLabel = latestSeason;
   // Local inline check — bypasses any closure/timing issue with the module-level variable
   const isCurSeason = s => !!latestSeason && s === latestSeason;
-  console.log('[CropPlan] allSeasons:', allSeasons, '→ latestSeason:', latestSeason, 'checks:', allSeasons.map(s => s + '=' + isCurSeason(s)));
-  const _dbg = allSeasons.map(s => `${s}: colspan=${isCurSeason(s) ? 2 : 1}`);
-  console.log('[CropPlan] HEADER colspans:', _dbg);
 
 
   // ── Build the paddock × season matrix ──────────────────────────────────
@@ -673,9 +670,14 @@ function renderCropPlan() {
     seasonCommodities[s] = [...new Set(rows.map(c => c.commodity).filter(Boolean))].sort();
   });
 
-  // Summary by commodity + variety — current season only, planned ha and planted/actual ha separately
+  // Summary by commodity + variety — entries matching the global season picker
+  // The global picker returns e.g. "2026-27"; crop plan labels may be "Summer 2026-27" or "2026-27"
+  const activeSeason = getActiveSeason() || '';
+  const summarySeasonEntries = allCropPlan.filter(c =>
+    c.season_label && (c.season_label === activeSeason || c.season_label.endsWith(activeSeason))
+  );
   const commoditySummary = {};
-  allCropPlan.filter(c => c.season_label === latestSeason).forEach(c => {
+  summarySeasonEntries.forEach(c => {
     if (!c.commodity) return;
     if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { planned: 0, actual: 0, varieties: {} };
     const plannedN = parseFloat(c.planned_ha) || 0;

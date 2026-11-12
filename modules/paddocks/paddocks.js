@@ -2,9 +2,9 @@
 // Paddock list — inline-editable table, saves on blur/change.
 // Fields: name, map_area (ha), type (select + custom)
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794520312767';
-import { getActiveFarm } from '../../js/app-state.js?v=1794520312767';
-import { toast, openModal } from '../../js/ui.js?v=1794520312767';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794520714747';
+import { getActiveFarm } from '../../js/app-state.js?v=1794520714747';
+import { toast, openModal } from '../../js/ui.js?v=1794520714747';
 
 const PADDOCK_TYPES = [
   'Pasture',
