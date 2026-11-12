@@ -2,9 +2,9 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js';
-import { toast, openModal, formatDate }            from '../../js/ui.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794519135634';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794519135634';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794519135634';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -592,6 +592,8 @@ function renderCropPlan() {
   // Local inline check — bypasses any closure/timing issue with the module-level variable
   const isCurSeason = s => !!latestSeason && s === latestSeason;
   console.log('[CropPlan] allSeasons:', allSeasons, '→ latestSeason:', latestSeason, 'checks:', allSeasons.map(s => s + '=' + isCurSeason(s)));
+  const _dbg = allSeasons.map(s => `${s}: colspan=${isCurSeason(s) ? 2 : 1}`);
+  console.log('[CropPlan] HEADER colspans:', _dbg);
 
 
   // ── Build the paddock × season matrix ──────────────────────────────────
