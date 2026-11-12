@@ -451,6 +451,17 @@ let _cpTypeFilter    = null;   // null = show all; string = filter by commodity
 let _cpPaddockFilter = null;   // null = show all; string = filter by paddock type
 let _cpSearch        = '';     // paddock name search string
 
+// Best ha for a single entry — harvested > planted > planned (module-scope so cpMatrixCell can use it)
+const _bestHa = c => {
+  if (c.status === 'harvested') {
+    const harv = (parseFloat(c.planted_ha) || 0) - (parseFloat(c.area_loss_ha) || 0);
+    return { ha: harv, label: 'Harvested' };
+  }
+  if (c.planted_ha != null && !isNaN(parseFloat(c.planted_ha))) return { ha: parseFloat(c.planted_ha), label: 'Planted' };
+  if (c.planned_ha != null && !isNaN(parseFloat(c.planned_ha))) return { ha: parseFloat(c.planned_ha), label: 'Planned' };
+  return { ha: null, label: null };
+};
+
 // Paddock type colour palette — mirrors paddocks.js
 const PADDOCK_TYPE_COLORS = {
   'Pasture':                     { bg: '#d1fae5', text: '#065f46', dot: '#10b981' },
@@ -625,17 +636,6 @@ function renderCropPlan() {
     if (!idx[pk]) idx[pk] = {};
     idx[pk][c.season_label] = c;
   });
-
-  // Best ha for a single entry — harvested > planted > planned
-  const _bestHa = c => {
-    if (c.status === 'harvested') {
-      const harv = (parseFloat(c.planted_ha) || 0) - (parseFloat(c.area_loss_ha) || 0);
-      return { ha: harv, label: 'Harvested' };
-    }
-    if (c.planted_ha != null && !isNaN(parseFloat(c.planted_ha))) return { ha: parseFloat(c.planted_ha), label: 'Planted' };
-    if (c.planned_ha != null && !isNaN(parseFloat(c.planned_ha))) return { ha: parseFloat(c.planned_ha), label: 'Planned' };
-    return { ha: null, label: null };
-  };
 
   // Totals per season (single best-ha number, top-level rows only)
   const seasonTotals = {};
