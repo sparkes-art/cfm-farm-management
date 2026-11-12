@@ -626,30 +626,38 @@ function renderCropPlan() {
     idx[pk][c.season_label] = c;
   });
 
-  // Totals per season (planned + planted, top-level only)
+  // Best ha for a single entry — harvested > planted > planned
+  const _bestHa = c => {
+    if (c.status === 'harvested') {
+      const harv = (parseFloat(c.planted_ha) || 0) - (parseFloat(c.area_loss_ha) || 0);
+      return { ha: harv, label: 'Harvested' };
+    }
+    if (c.planted_ha != null && !isNaN(parseFloat(c.planted_ha))) return { ha: parseFloat(c.planted_ha), label: 'Planted' };
+    if (c.planned_ha != null && !isNaN(parseFloat(c.planned_ha))) return { ha: parseFloat(c.planned_ha), label: 'Planned' };
+    return { ha: null, label: null };
+  };
+
+  // Totals per season (single best-ha number, top-level rows only)
   const seasonTotals = {};
   allSeasons.forEach(s => {
     const rows = allCropPlan.filter(c => c.season_label === s && !c.sub_block);
-    seasonTotals[s] = {
-      planned: rows.reduce((t, c) => t + (parseFloat(c.planned_ha) || 0), 0),
-      planted: rows.filter(c => c.planted_ha != null).reduce((t, c) => t + (parseFloat(c.planted_ha) || 0), 0),
-    };
+    seasonTotals[s] = rows.reduce((t, c) => t + (_bestHa(c).ha || 0), 0);
   });
 
-  // Summary by commodity + variety across ALL entries (ignores filters)
+  // Summary by commodity + variety across ALL entries (ignores filters) — best ha
   const commoditySummary = {};
   allCropPlan.forEach(c => {
     if (!c.commodity) return;
-    if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { planned: 0, planted: 0, varieties: {} };
-    commoditySummary[c.commodity].planned += parseFloat(c.planned_ha) || 0;
-    commoditySummary[c.commodity].planted += parseFloat(c.planted_ha) || 0;
+    const { ha } = _bestHa(c);
+    if (ha == null) return;
+    if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { ha: 0, varieties: {} };
+    commoditySummary[c.commodity].ha += ha;
     const vKey = c.variety || '(no variety)';
     if (!commoditySummary[c.commodity].varieties[vKey])
-      commoditySummary[c.commodity].varieties[vKey] = { planned: 0, planted: 0 };
-    commoditySummary[c.commodity].varieties[vKey].planned += parseFloat(c.planned_ha) || 0;
-    commoditySummary[c.commodity].varieties[vKey].planted += parseFloat(c.planted_ha) || 0;
+      commoditySummary[c.commodity].varieties[vKey] = { ha: 0 };
+    commoditySummary[c.commodity].varieties[vKey].ha += ha;
   });
-  const summaryEntries = Object.entries(commoditySummary).sort((a, b) => b[1].planned - a[1].planned);
+  const summaryEntries = Object.entries(commoditySummary).sort((a, b) => b[1].ha - a[1].ha);
 
   const hasData = paddockKeys.length > 0;
 
@@ -700,25 +708,23 @@ function renderCropPlan() {
     ` : ''}
 
     ${summaryEntries.length > 0 ? `
-    <div style="margin-bottom:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;max-width:480px">
+    <div style="margin-bottom:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;max-width:360px">
       <table style="border-collapse:collapse;width:100%;font-size:0.82rem">
         <thead>
           <tr style="border-bottom:1px solid var(--border)">
             <th style="text-align:left;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Crop</th>
-            <th style="text-align:right;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Planned</th>
-            <th style="text-align:right;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Planted</th>
+            <th style="text-align:right;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Area</th>
             <th style="width:28px;padding:7px 8px"></th>
           </tr>
         </thead>
         <tbody id="cp-summary-body">
           ${summaryEntries.map(([commodity, tots]) => {
             const varRows = Object.entries(tots.varieties)
-              .sort((a, b) => b[1].planned - a[1].planned)
+              .sort((a, b) => b[1].ha - a[1].ha)
               .map(([v, vt]) => `
                 <tr class="cp-summary-var-row" data-commodity="${esc(commodity)}" style="display:none;background:color-mix(in srgb,var(--blue) 3%,var(--surface))">
                   <td style="padding:5px 12px 5px 24px;color:var(--hint);font-size:0.76rem">${esc(v)}</td>
-                  <td style="text-align:right;padding:5px 12px;font-family:'DM Mono',monospace;font-size:0.76rem;color:var(--hint)">${vt.planned > 0 ? vt.planned.toFixed(0) + ' ha' : '—'}</td>
-                  <td style="text-align:right;padding:5px 12px;font-family:'DM Mono',monospace;font-size:0.76rem;color:${vt.planted > 0 ? 'var(--green,#22c55e)' : 'var(--hint)'}">${vt.planted > 0 ? vt.planted.toFixed(0) + ' ha' : '—'}</td>
+                  <td style="text-align:right;padding:5px 12px;font-family:'DM Mono',monospace;font-size:0.76rem;color:var(--hint)">${vt.ha > 0 ? vt.ha.toFixed(0) + ' ha' : '—'}</td>
                   <td></td>
                 </tr>`).join('');
             const hasVarieties = Object.keys(tots.varieties).length > 1 ||
@@ -726,8 +732,7 @@ function renderCropPlan() {
             return `
               <tr class="cp-summary-row" data-commodity="${esc(commodity)}" style="border-top:1px solid var(--border);cursor:${hasVarieties ? 'pointer' : 'default'}">
                 <td style="padding:8px 12px;font-weight:600;color:var(--fg)">${esc(commodity)}</td>
-                <td style="text-align:right;padding:8px 12px;font-family:'DM Mono',monospace;font-weight:600">${tots.planned.toFixed(0)} ha</td>
-                <td style="text-align:right;padding:8px 12px;font-family:'DM Mono',monospace;font-weight:600;color:${tots.planted > 0 ? 'var(--green,#22c55e)' : 'var(--hint)'}">${tots.planted > 0 ? tots.planted.toFixed(0) + ' ha' : '—'}</td>
+                <td style="text-align:right;padding:8px 12px;font-family:'DM Mono',monospace;font-weight:600">${tots.ha.toFixed(0)} ha</td>
                 <td style="text-align:center;padding:8px 8px;color:var(--hint);font-size:0.7rem">${hasVarieties ? '▾' : ''}</td>
               </tr>
               ${varRows}`;
@@ -748,38 +753,26 @@ function renderCropPlan() {
       <!-- Matrix table -->
       <div class="card" style="padding:0;overflow:hidden">
         <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${140 + allSeasons.length * 200}px">
-            <!-- Header row 1: season labels spanning 2 sub-columns each -->
+          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${160 + allSeasons.length * 130}px">
             <thead>
-              <tr style="background:var(--surface)">
-                <th style="${TH_FIXED}border-bottom:1px solid var(--border);padding:10px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);white-space:nowrap">
+              <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
+                <th style="${TH_FIXED}border-bottom:2px solid var(--border);padding:10px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);white-space:nowrap;min-width:160px">
                   Paddock
                 </th>
                 ${allSeasons.map(s => {
                   const tot = seasonTotals[s];
                   const isCurrentSeason = s === currentSeason;
-                  return `<th colspan="2"
+                  return `<th
                     style="padding:8px 10px;font-size:12px;font-weight:700;text-align:center;
-                      border-left:2px solid var(--border);border-bottom:1px solid var(--border);
+                      border-left:2px solid var(--border);border-bottom:2px solid var(--border);
                       background:${isCurrentSeason ? 'color-mix(in srgb,var(--blue) 8%,var(--surface))' : 'var(--surface)'};
                       color:${isCurrentSeason ? 'var(--blue)' : 'var(--fg)'};
-                      white-space:nowrap;min-width:200px">
+                      white-space:nowrap;min-width:120px">
                     ${esc(s)}
-                    ${tot.planned > 0 ? `<span style="display:block;font-size:10px;font-weight:400;color:var(--hint);margin-top:1px">${tot.planned.toFixed(0)} ha planned${tot.planted > 0 ? ' · ' + tot.planted.toFixed(0) + ' planted' : ''}</span>` : ''}
+                    ${tot > 0 ? `<span style="display:block;font-size:10px;font-weight:400;color:var(--hint);margin-top:1px">${tot.toFixed(0)} ha</span>` : ''}
                   </th>`;
                 }).join('')}
-                <th style="width:32px;border-bottom:1px solid var(--border);background:var(--surface)"></th>
-              </tr>
-              <!-- Sub-header: planned / planted per season -->
-              <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
-                <th style="${TH_FIXED}padding:5px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint)">
-                  Sub-block
-                </th>
-                ${allSeasons.map(s => `
-                  <th style="padding:5px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);border-left:2px solid var(--border);text-align:right;width:100px">Planned</th>
-                  <th style="padding:5px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);text-align:right;width:100px">Planted</th>
-                `).join('')}
-                <th style="background:var(--surface)"></th>
+                <th style="width:32px;border-bottom:2px solid var(--border);background:var(--surface)"></th>
               </tr>
             </thead>
             <tbody id="cp-matrix-body">
@@ -792,11 +785,8 @@ function renderCropPlan() {
                 ${allSeasons.map(s => {
                   const tot = seasonTotals[s];
                   return `
-                    <td style="padding:8px 8px;border-left:2px solid var(--border);text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700">
-                      ${tot.planned > 0 ? tot.planned.toFixed(1) : '—'}
-                    </td>
-                    <td style="padding:8px 8px;text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:${tot.planted > 0 ? 'var(--green,#22c55e)' : 'var(--hint)'}">
-                      ${tot.planted > 0 ? tot.planted.toFixed(1) : '—'}
+                    <td style="padding:8px 10px;border-left:2px solid var(--border);text-align:center;font-family:'DM Mono',monospace;font-size:12px;font-weight:700">
+                      ${tot > 0 ? tot.toFixed(1) + ' ha' : '—'}
                     </td>`;
                 }).join('')}
                 <td style="background:var(--surface)"></td>
@@ -935,51 +925,49 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
 }
 
 function cpMatrixCell(entry, paddockName, subBlock, seasonLabel) {
-  // Each season gets 2 tds: planned ha | planted ha
-  // Both are inline-editable. If no entry exists, clicking creates one.
-  const borderL = 'border-left:2px solid var(--border);';
-  const baseStyle = `padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;vertical-align:middle;cursor:pointer;`;
+  // Single td per season — shows best ha based on status
+  const borderL   = 'border-left:2px solid var(--border);';
+  const baseStyle = `padding:7px 8px;border-bottom:1px solid var(--border);text-align:center;vertical-align:middle;cursor:pointer;min-width:120px;`;
 
   if (!entry) {
-    // Empty cell — click to plan this paddock for this season
-    return `
-      <td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
+    return `<td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
         data-season="${esc(seasonLabel)}" data-field="planned_ha"
-        style="${baseStyle}${borderL}color:var(--border);font-size:0.78rem" title="Click to add">—</td>
-      <td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
-        data-season="${esc(seasonLabel)}" data-field="planted_ha"
-        style="${baseStyle}color:var(--border);font-size:0.78rem" title="Click to add">—</td>`;
+        style="${baseStyle}${borderL}color:var(--border);font-size:0.78rem" title="Click to add">—</td>`;
   }
 
   const id = entry.id;
+  const { ha, label: haLabel } = _bestHa(entry);
 
-  const plannedN = parseFloat(entry.planned_ha);
-  const plantedN = parseFloat(entry.planted_ha);
+  // Colour of the ha number based on what it represents
+  const haColor = entry.status === 'harvested' ? 'var(--hint)'
+    : (entry.planted_ha != null && !isNaN(parseFloat(entry.planted_ha))) ? 'var(--green,#22c55e)'
+    : 'var(--fg)';
 
-  const plannedDisp = !isNaN(plannedN)
-    ? `<span style="font-family:'DM Mono',monospace;font-size:0.85rem">${plannedN.toFixed(1)}</span>`
+  const haDisp = ha != null
+    ? `<span style="font-family:'DM Mono',monospace;font-size:0.88rem;font-weight:600;color:${haColor}">${ha.toFixed(1)}</span><span style="font-size:9px;color:var(--hint);margin-left:2px">ha</span>`
     : `<span style="color:var(--hint)">—</span>`;
-  const plantedDisp = !isNaN(plantedN)
-    ? `<span style="font-family:'DM Mono',monospace;font-size:0.85rem;color:var(--green,#22c55e)">${plantedN.toFixed(1)}</span>`
-    : `<span style="color:var(--hint)">—</span>`;
 
-  // Commodity + status header (no variety in main view — it's in the expand row)
+  // Commodity chip
+  const commColor     = entry.commodity ? (CP_COMMODITY_COLORS[entry.commodity] || { bg: '#e0f2fe', text: '#0c4a6e' }) : null;
+  const commodityLine = entry.commodity
+    ? `<div style="font-size:10px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:1px 4px;border-radius:4px;background:${commColor.bg};color:${commColor.text};margin-bottom:3px" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
+    : '';
+
+  // Status dot + label
   const statusDot   = _statusDot(entry.status);
   const statusLabel = entry.status ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--hint)">${CP_STATUS_LABELS[entry.status] || entry.status}</span>` : '';
-  const commColor = entry.commodity ? (CP_COMMODITY_COLORS[entry.commodity] || { bg: '#e0f2fe', text: '#0c4a6e' }) : null;
-  const commodityLine = entry.commodity
-    ? `<div style="font-size:10px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:1px 4px;border-radius:4px;background:${commColor.bg};color:${commColor.text}" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
-    : '';
-  const topInfo = `<div style="margin-bottom:4px">${commodityLine}<div style="display:flex;align-items:center;justify-content:center;gap:3px">${statusDot}${statusLabel}</div></div>`;
+
+  // Click edits: harvested entries edit area_loss_ha, planted edits planted_ha, else planned_ha
+  const editField = entry.status === 'harvested' ? 'area_loss_ha'
+    : (entry.planted_ha != null && !isNaN(parseFloat(entry.planted_ha))) ? 'planted_ha'
+    : 'planned_ha';
 
   return `
-    <td class="cp-matrix-cell" data-id="${id}" data-field="planned_ha" data-type="number"
-      style="${baseStyle}${borderL}min-width:95px" title="Click to edit">
-      ${topInfo}${plannedDisp}
-    </td>
-    <td class="cp-matrix-cell" data-id="${id}" data-field="planted_ha" data-type="number"
-      style="${baseStyle}min-width:95px" title="Click to edit">
-      ${topInfo}${plantedDisp}
+    <td class="cp-matrix-cell" data-id="${id}" data-field="${editField}" data-type="number"
+      style="${baseStyle}${borderL}" title="Click to edit — ${haLabel || 'planned'} ha">
+      ${commodityLine}
+      <div style="display:flex;align-items:center;justify-content:center;gap:3px;margin-bottom:3px">${statusDot}${statusLabel}</div>
+      ${haDisp}
     </td>`;
 }
 
@@ -1149,20 +1137,24 @@ function _openCellPopover(td, entry) {
           <tr style="border-bottom:1px solid var(--border)">
             <th style="text-align:left;padding:3px 4px;color:var(--hint);font-weight:600">Season</th>
             <th style="text-align:left;padding:3px 4px;color:var(--hint);font-weight:600">Crop</th>
-            <th style="text-align:right;padding:3px 4px;color:var(--hint);font-weight:600">Planned</th>
-            <th style="text-align:right;padding:3px 4px;color:var(--hint);font-weight:600">Planted</th>
+            <th style="text-align:right;padding:3px 4px;color:var(--hint);font-weight:600">Ha</th>
             <th style="text-align:left;padding:3px 4px;color:var(--hint);font-weight:600">Status</th>
           </tr>
         </thead>
         <tbody>
-          ${history.map(h => `
+          ${history.map(h => {
+            const { ha: hBest, label: hLabel } = _bestHa(h);
+            const hColor = h.status === 'harvested' ? 'var(--hint)'
+              : (h.planted_ha != null && !isNaN(parseFloat(h.planted_ha))) ? 'var(--green,#22c55e)'
+              : 'var(--fg)';
+            return `
             <tr style="border-bottom:1px solid color-mix(in srgb,var(--border) 50%,transparent)">
               <td style="padding:3px 4px;white-space:nowrap;color:var(--hint)">${esc(h.season_label)}</td>
               <td style="padding:3px 4px;font-weight:600;color:var(--fg)">${esc(h.commodity || '—')}</td>
-              <td style="padding:3px 4px;text-align:right;font-family:'DM Mono',monospace;color:var(--fg)">${h.planned_ha != null ? parseFloat(h.planned_ha).toFixed(1) : '—'}</td>
-              <td style="padding:3px 4px;text-align:right;font-family:'DM Mono',monospace;color:${h.planted_ha != null ? 'var(--green,#22c55e)' : 'var(--hint)'}">${h.planted_ha != null ? parseFloat(h.planted_ha).toFixed(1) : '—'}</td>
+              <td style="padding:3px 4px;text-align:right;font-family:'DM Mono',monospace;color:${hColor}" title="${hLabel || ''}">${hBest != null ? hBest.toFixed(1) : '—'}</td>
               <td style="padding:3px 4px;color:var(--hint)">${h.status ? (CP_STATUS_LABELS[h.status] || h.status) : '—'}</td>
-            </tr>`).join('')}
+            </tr>`;
+          }).join('')}
         </tbody>
       </table>
     </div>` : '';
@@ -1576,6 +1568,7 @@ function openPlanSeasonModal(allSeasons, currentSeason) {
       if (existing.length) throw new Error(`Season "${label}" already has ${existing.length} entries — delete them first or choose a different label`);
 
       const copyFrom = document.getElementById('ps-copy-from')?.value;
+      const source   = document.querySelector('input[name="ps-source"]:checked')?.value || 'paddocks';
 
       let rows = [];
 
