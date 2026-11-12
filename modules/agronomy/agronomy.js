@@ -2,9 +2,9 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794520070385';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794520070385';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794520070385';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794520312767';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794520312767';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794520312767';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -451,6 +451,7 @@ let _cpTypeFilter    = null;   // null = show all; string = filter by commodity
 let _cpPaddockFilter = null;   // null = show all; string = filter by paddock type
 let _cpSearch        = '';     // paddock name search string
 let _cpActiveSeason  = null;   // which season gets 2-column treatment; null = auto (latest)
+let _cpSeasonFilter  = {};    // { [seasonLabel]: commodityName } — filter paddock rows by what they grew in that season
 
 // Active season label (full label like "Summer 2026-27") — set each render
 let _currentSeasonLabel = null;
@@ -613,6 +614,14 @@ function renderCropPlan() {
     ? new Set(allPaddocks.filter(p => p.type === _cpPaddockFilter).map(p => p.name))
     : null;
 
+  // Index entries: paddockKey → seasonLabel → entry (built first so season filters can use it)
+  const idx = {};
+  allCropPlan.forEach(c => {
+    const pk = c.paddock_name + '|' + (c.sub_block || '');
+    if (!idx[pk]) idx[pk] = {};
+    idx[pk][c.season_label] = c;
+  });
+
   // Collect all paddock keys (paddock_name + sub_block)
   // Rows with any planned or planted data float to top; rest alphabetical below
   const paddockKeys = [];
@@ -642,25 +651,26 @@ function renderCropPlan() {
       const passesPaddockType = !filteredPaddockSet   || filteredPaddockSet.has(c.paddock_name);
       const searchLower = _cpSearch.trim().toLowerCase();
       const passesSearch = !searchLower || c.paddock_name.toLowerCase().includes(searchLower);
-      if (!seen.has(key) && passesCropType && passesPaddockType && passesSearch) {
+      // Per-season commodity filters: paddock must have the specified commodity in that season
+      const passesSeasonFilters = Object.entries(_cpSeasonFilter).every(([seasonLabel, commodity]) => {
+        if (!commodity) return true;
+        const e = idx[key]?.[seasonLabel];
+        return e?.commodity === commodity;
+      });
+      if (!seen.has(key) && passesCropType && passesPaddockType && passesSearch && passesSeasonFilters) {
         seen.add(key);
         paddockKeys.push({ paddock_name: c.paddock_name, sub_block: c.sub_block || null });
       }
     });
 
-  // Index entries: paddockKey → seasonLabel → entry
-  const idx = {};
-  allCropPlan.forEach(c => {
-    const pk = c.paddock_name + '|' + (c.sub_block || '');
-    if (!idx[pk]) idx[pk] = {};
-    idx[pk][c.season_label] = c;
-  });
-
   // Totals per season (single best-ha number, top-level rows only)
   const seasonTotals = {};
+  // Commodities per season (for column filter dropdowns)
+  const seasonCommodities = {};
   allSeasons.forEach(s => {
     const rows = allCropPlan.filter(c => c.season_label === s && !c.sub_block);
     seasonTotals[s] = rows.reduce((t, c) => t + (_bestHa(c).ha || 0), 0);
+    seasonCommodities[s] = [...new Set(rows.map(c => c.commodity).filter(Boolean))].sort();
   });
 
   // Summary by commodity + variety — current season only, planned ha and planted/actual ha separately
@@ -792,15 +802,26 @@ function renderCropPlan() {
                   // Non-current seasons span both thead rows (rowspan=2) since they have
                   // no Planned/Planted sub-header in row 2. Without rowspan=2 the table
                   // is malformed and browsers lay out columns incorrectly.
-                  // min-width for non-current matches a single current-season column (95px).
+                  const sfVal = _cpSeasonFilter[s] || '';
+                  const sfOpts = (seasonCommodities[s] || []).map(c =>
+                    `<option value="${esc(c)}"${sfVal === c ? ' selected' : ''}>${esc(c)}</option>`).join('');
+                  const filterDrop = sfOpts ? `
+                    <select class="cp-season-filter-sel" data-season="${esc(s)}"
+                      style="margin-top:4px;font-size:9px;padding:1px 3px;border:1px solid var(--border);border-radius:4px;
+                        background:var(--bg);color:var(--hint);max-width:88px;cursor:pointer"
+                      title="Filter rows by crop in ${esc(s)}">
+                      <option value="">All crops</option>
+                      ${sfOpts}
+                    </select>` : '';
                   return `<th ${isCur ? 'colspan="2"' : 'rowspan="2"'}
                     style="padding:8px 10px;font-size:12px;font-weight:700;text-align:center;
                       border-left:2px solid var(--border);border-bottom:2px solid var(--border);
                       background:${isCur ? 'color-mix(in srgb,var(--blue) 8%,var(--surface))' : 'var(--surface)'};
                       color:${isCur ? 'var(--blue)' : 'var(--fg)'};
-                      ${isCur ? 'white-space:nowrap;' : ''}min-width:${isCur ? '200' : '95'}px">
+                      ${isCur ? 'white-space:nowrap;' : 'width:95px;max-width:95px;'}min-width:${isCur ? '200' : '95'}px">
                     ${esc(s)}
                     ${tot > 0 ? `<span style="display:block;font-size:10px;font-weight:400;color:var(--hint);margin-top:1px">${tot.toFixed(0)} ha</span>` : ''}
+                    ${filterDrop}
                   </th>`;
                 }).join('')}
                 <th style="width:32px;border-bottom:2px solid var(--border);background:var(--surface)" rowspan="2"></th>
@@ -879,6 +900,16 @@ function renderCropPlan() {
   el.querySelectorAll('.cp-crop-chip').forEach(btn => {
     btn.addEventListener('click', () => {
       _cpTypeFilter = btn.dataset.type || null;
+      renderCropPlan();
+    });
+  });
+
+  // Season column crop filters
+  el.querySelectorAll('.cp-season-filter-sel').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const season = sel.dataset.season;
+      if (sel.value) _cpSeasonFilter[season] = sel.value;
+      else delete _cpSeasonFilter[season];
       renderCropPlan();
     });
   });
@@ -997,7 +1028,7 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
   // Commodity chip (shared)
   const commColor     = entry?.commodity ? (CP_COMMODITY_COLORS[entry.commodity] || { bg: '#e0f2fe', text: '#0c4a6e' }) : null;
   const commodityLine = entry?.commodity
-    ? `<div style="font-size:10px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:1px 4px;border-radius:4px;background:${commColor.bg};color:${commColor.text};margin-bottom:3px" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
+    ? `<div style="font-size:10px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:79px;padding:1px 4px;border-radius:4px;background:${commColor.bg};color:${commColor.text};margin-bottom:3px" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
     : '';
   const statusDot   = entry ? _statusDot(entry.status) : '';
   const statusLabel = entry?.status ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--hint)">${CP_STATUS_LABELS[entry.status] || entry.status}</span>` : '';
