@@ -2,9 +2,9 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794519574623';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794519574623';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794519574623';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794519829423';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794519829423';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794519829423';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -670,13 +670,15 @@ function renderCropPlan() {
     if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { planned: 0, actual: 0, varieties: {} };
     const plannedN = parseFloat(c.planned_ha) || 0;
     commoditySummary[c.commodity].planned += plannedN;
+    // Only count as actual if the entry has a real planted/harvested status — not budget/intent/planned
+    const isActual = ACTUAL_STATUSES.has(c.status);
     const { ha: actualHa } = _bestHa(c);
-    if (actualHa != null) commoditySummary[c.commodity].actual += actualHa;
+    if (isActual && actualHa != null) commoditySummary[c.commodity].actual += actualHa;
     const vKey = c.variety || '(no variety)';
     if (!commoditySummary[c.commodity].varieties[vKey])
       commoditySummary[c.commodity].varieties[vKey] = { planned: 0, actual: 0 };
     commoditySummary[c.commodity].varieties[vKey].planned += plannedN;
-    if (actualHa != null) commoditySummary[c.commodity].varieties[vKey].actual += actualHa;
+    if (isActual && actualHa != null) commoditySummary[c.commodity].varieties[vKey].actual += actualHa;
   });
   const summaryEntries = Object.entries(commoditySummary).sort((a, b) => (b[1].actual || b[1].planned) - (a[1].actual || a[1].planned));
 
@@ -790,12 +792,13 @@ function renderCropPlan() {
                   // Non-current seasons span both thead rows (rowspan=2) since they have
                   // no Planned/Planted sub-header in row 2. Without rowspan=2 the table
                   // is malformed and browsers lay out columns incorrectly.
+                  // min-width for non-current matches a single current-season column (95px).
                   return `<th ${isCur ? 'colspan="2"' : 'rowspan="2"'}
                     style="padding:8px 10px;font-size:12px;font-weight:700;text-align:center;
                       border-left:2px solid var(--border);border-bottom:2px solid var(--border);
                       background:${isCur ? 'color-mix(in srgb,var(--blue) 8%,var(--surface))' : 'var(--surface)'};
                       color:${isCur ? 'var(--blue)' : 'var(--fg)'};
-                      white-space:nowrap;min-width:${isCur ? '200' : '120'}px">
+                      white-space:nowrap;min-width:${isCur ? '200' : '95'}px">
                     ${esc(s)}
                     ${tot > 0 ? `<span style="display:block;font-size:10px;font-weight:400;color:var(--hint);margin-top:1px">${tot.toFixed(0)} ha</span>` : ''}
                   </th>`;
@@ -1027,20 +1030,22 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
         : `<span style="color:var(--hint)">—</span>`;
     return `
       <td class="cp-matrix-cell" data-id="${id}" data-field="planned_ha" data-type="number"
-        style="${baseStyle}${borderL}min-width:95px;text-align:right" title="Click to edit planned ha">
-        ${commodityLine}<div style="display:flex;align-items:center;justify-content:flex-end;gap:3px;margin-bottom:2px">${statusDot}${statusLabel}</div>${plannedDisp}
+        style="${baseStyle}${borderL}min-width:95px;text-align:right" title="Planned ha — click to edit">
+        ${commodityLine}
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:3px;margin-bottom:2px">${statusDot}${statusLabel}</div>
+        ${plannedDisp}
       </td>
       <td class="cp-matrix-cell" data-id="${id}" data-field="${entry.status === 'harvested' ? 'area_loss_ha' : 'planted_ha'}" data-type="number"
-        style="${baseStyle}min-width:95px;text-align:right" title="Click to edit ${entry.status === 'harvested' ? 'loss ha (harvested = planted − loss)' : 'planted ha'}">
+        style="${baseStyle}min-width:95px;text-align:right;border-left:1px dashed var(--border)" title="${entry.status === 'harvested' ? 'Loss ha — click to edit (harvested = planted − loss)' : 'Planted ha — click to edit'}">
         ${plantedDisp}
       </td>`;
   }
 
-  // Other seasons: single smart column
+  // Other seasons: single smart column — same width as one current-season column
   if (!entry) {
     return `<td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
         data-season="${esc(seasonLabel)}" data-field="planned_ha"
-        style="${baseStyle}${borderL}min-width:120px;color:var(--border);font-size:0.78rem" title="Click to add">—</td>`;
+        style="${baseStyle}${borderL}min-width:95px;color:var(--border);font-size:0.78rem" title="Click to add">—</td>`;
   }
 
   const id = entry.id;
@@ -1057,7 +1062,7 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
 
   return `
     <td class="cp-matrix-cell" data-id="${id}" data-field="${editField}" data-type="number"
-      style="${baseStyle}${borderL}min-width:120px" title="Click to edit — ${haLabel || 'planned'} ha">
+      style="${baseStyle}${borderL}min-width:95px" title="Click to edit — ${haLabel || 'planned'} ha">
       ${topInfo}${haDisp}
     </td>`;
 }
