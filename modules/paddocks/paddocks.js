@@ -238,7 +238,7 @@ function _rowHTML(p) {
         <button class="btn btn-xs pk-history-btn" data-id="${p.id}"
           title="Paddock history"
           style="margin-right:4px;opacity:${histCount > 0 ? 1 : 0.4}">
-          ${isOpen ? '▾' : '▸'} ${histCount > 0 ? histCount : ''}
+          ${isOpen ? '▾' : '▸'} History${histCount > 0 ? ` (${histCount})` : ''}
         </button>
         <button class="btn btn-xs btn-danger pk-delete-btn" data-id="${p.id}" data-name="${_esc(p.name)}">✕</button>
       </td>
@@ -379,7 +379,8 @@ function _bindTableEvents() {
       _historyOpen.delete(id);
       // Remove the history row
       _container.querySelector(`tr.pk-history-row[data-history-for="${id}"]`)?.remove();
-      btn.textContent = `▸ ${(_history[id] || []).length || ''}`;
+      const c0 = (_history[id] || []).length;
+      btn.textContent = `▸ History${c0 > 0 ? ` (${c0})` : ''}`;
     } else {
       _historyOpen.add(id);
       // Insert history row after the paddock row
@@ -392,7 +393,8 @@ function _bindTableEvents() {
         _container.querySelector(`.pk-add-note-btn[data-id="${id}"]`)
           ?.addEventListener('click', () => _promptAddNote(id, p.name));
       }
-      btn.textContent = `▾ ${(_history[id] || []).length || ''}`;
+      const c1 = (_history[id] || []).length;
+      btn.textContent = `▾ History${c1 > 0 ? ` (${c1})` : ''}`;
     }
   });
 
@@ -505,7 +507,7 @@ async function _logHistory(paddockId, field, oldValue, newValue, notes = null) {
       if (btn) {
         const count = _history[paddockId].length;
         btn.style.opacity = '1';
-        btn.textContent = `▸ ${count}`;
+        btn.textContent = `▸ History (${count})`;
       }
     }
   }
