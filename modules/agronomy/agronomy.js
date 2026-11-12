@@ -40,7 +40,15 @@ const CP_STATUS_CLASSES = {
   harvested: 'badge-info',
 };
 const CP_SEASON_TYPES = ['Summer', 'Winter', 'Annual'];
-const CP_WATER_TYPES  = ['IRR', 'Dryland'];
+const CP_CROP_TYPES = [
+  'Dryland',
+  'Irrigated - Overhead Pivot',
+  'Irrigated - Overhead Lateral',
+  'Irrigated - Furrow',
+  'Pasture',
+  'Grazing/Bush',
+  'Permanent Crop',
+];
 
 // ── Mount / unmount ────────────────────────────────────────────────────────
 export async function mountAgronomy(container) {
@@ -429,7 +437,7 @@ const CP_COLUMNS = [
   { key: 'paddock_name',  label: 'Paddock',     type: 'text',    width: '160px', bold: true },
   { key: 'sub_block',     label: 'Sub-block',   type: 'text',    width: '110px' },
   { key: 'commodity',     label: 'Commodity',   type: 'select',  width: '130px', options: () => CP_COMMODITY_OPTIONS },
-  { key: 'water_type',    label: 'Water',       type: 'select',  width: '90px',  options: () => ['IRR', 'DL', 'Dryland'] },
+  { key: 'water_type',    label: 'Crop type',   type: 'select',  width: '130px', options: () => CP_CROP_TYPES },
   { key: 'variety',       label: 'Variety',     type: 'text',    width: '110px' },
   { key: 'planned_ha',    label: 'Planned ha',  type: 'number',  width: '90px',  align: 'right' },
   { key: 'planted_ha',    label: 'Planted ha',  type: 'number',  width: '90px',  align: 'right' },
@@ -847,12 +855,10 @@ function _openCellPopover(td, entry) {
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
       <div class="form-group">
-        <label class="form-label" style="font-size:0.72rem">Water type</label>
+        <label class="form-label" style="font-size:0.72rem">Crop type</label>
         <select class="form-select" id="cpop-water" style="font-size:0.82rem;padding:5px 8px">
           <option value="">—</option>
-          <option value="IRR"${entry.water_type === 'IRR' ? ' selected' : ''}>IRR</option>
-          <option value="DL"${entry.water_type === 'DL' ? ' selected' : ''}>DL</option>
-          <option value="Dryland"${entry.water_type === 'Dryland' ? ' selected' : ''}>Dryland</option>
+          ${CP_CROP_TYPES.map(t => `<option value="${t}"${entry.water_type === t ? ' selected' : ''}>${t}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -949,12 +955,10 @@ function _openAddSubBlockModal(paddockName, allSeasons) {
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Water type</label>
+          <label class="form-label">Crop type</label>
           <select class="form-select" id="sb-water">
             <option value="">—</option>
-            <option value="IRR">IRR</option>
-            <option value="DL">DL</option>
-            <option value="Dryland">Dryland</option>
+            ${CP_CROP_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -1077,12 +1081,10 @@ function openAddPaddockModal(allSeasons, currentSeason) {
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Water type</label>
+          <label class="form-label">Crop type</label>
           <select class="form-select" id="ap-water">
             <option value="">—</option>
-            <option value="IRR">IRR</option>
-            <option value="DL">DL</option>
-            <option value="Dryland">Dryland</option>
+            ${CP_CROP_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -1638,9 +1640,10 @@ function openCropPlanModal(entry = null) {
           value="${esc(entry?.variety || '')}">
       </div>
       <div class="form-group">
-        <label class="form-label">Water type</label>
+        <label class="form-label">Crop type</label>
         <select class="form-select" id="cp-water">
-          ${CP_WATER_TYPES.map(t =>
+          <option value="">—</option>
+          ${CP_CROP_TYPES.map(t =>
             `<option value="${t}"${entry?.water_type === t ? ' selected' : ''}>${t}</option>`
           ).join('')}
         </select>
