@@ -589,7 +589,9 @@ function renderCropPlan() {
   // season in the crop plan.
   const latestSeason = allSeasons[allSeasons.length - 1] || null;
   _currentSeasonLabel = latestSeason;
-  console.log('[CropPlan] allSeasons:', allSeasons, '→ latestSeason:', latestSeason);
+  // Local inline check — bypasses any closure/timing issue with the module-level variable
+  const isCurSeason = s => !!latestSeason && s === latestSeason;
+  console.log('[CropPlan] allSeasons:', allSeasons, '→ latestSeason:', latestSeason, 'checks:', allSeasons.map(s => s + '=' + isCurSeason(s)));
 
 
   // ── Build the paddock × season matrix ──────────────────────────────────
@@ -773,7 +775,7 @@ function renderCropPlan() {
       <!-- Matrix table -->
       <div class="card" style="padding:0;overflow:hidden">
         <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${160 + allSeasons.reduce((w, s) => w + (isCurrentSeasonLabel(s) ? 200 : 130), 0)}px">
+          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${160 + allSeasons.reduce((w, s) => w + (isCurSeason(s) ? 200 : 130), 0)}px">
             <thead>
               <!-- Row 1: season labels -->
               <tr style="background:var(--surface)">
@@ -782,7 +784,7 @@ function renderCropPlan() {
                 </th>
                 ${allSeasons.map(s => {
                   const tot = seasonTotals[s];
-                  const isCur = isCurrentSeasonLabel(s);
+                  const isCur = isCurSeason(s);
                   return `<th ${isCur ? 'colspan="2"' : ''}
                     style="padding:8px 10px;font-size:12px;font-weight:700;text-align:center;
                       border-left:2px solid var(--border);border-bottom:${isCur ? '1' : '2'}px solid var(--border);
@@ -798,7 +800,7 @@ function renderCropPlan() {
               <!-- Row 2: Planned / Planted sub-headers for current season only -->
               <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
                 ${allSeasons.map(s => {
-                  if (!isCurrentSeasonLabel(s)) return '';
+                  if (!isCurSeason(s)) return '';
                   return `
                     <th style="padding:4px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);border-left:2px solid var(--border);text-align:right;width:95px;background:color-mix(in srgb,var(--blue) 8%,var(--surface))">Planned</th>
                     <th style="padding:4px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);text-align:right;width:95px;background:color-mix(in srgb,var(--blue) 8%,var(--surface))">Planted</th>`;
@@ -814,7 +816,7 @@ function renderCropPlan() {
                 <td style="${TH_FIXED}padding:8px 12px;font-size:11px;font-weight:700;color:var(--hint)">TOTAL</td>
                 ${allSeasons.map(s => {
                   const tot = seasonTotals[s];
-                  if (isCurrentSeasonLabel(s)) {
+                  if (isCurSeason(s)) {
                     // Two cells for current season: planned total | planted total
                     const rows = allCropPlan.filter(c => c.season_label === s && !c.sub_block);
                     const plannedTot = rows.reduce((t, c) => t + (parseFloat(c.planned_ha) || 0), 0);
@@ -954,7 +956,7 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex, currentSeason) {
 
   const seasonCells = seasons.map(s => {
     const entry = idx[key]?.[s] || null;
-    return cpMatrixCell(entry, paddock_name, sub_block, s, isCurrentSeasonLabel(s));
+    return cpMatrixCell(entry, paddock_name, sub_block, s, !!currentSeason && s === currentSeason);
   }).join('');
 
   const delBtn = !isSubRow ? `
