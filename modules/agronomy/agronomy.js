@@ -1,6 +1,6 @@
 // modules/agronomy/agronomy.js
-// CFM Agronomy Module — Paddock-based scouting visits
-// Rebuilt 2026-11-11
+// CFM Agronomy Module — Scouting visits & Crop Plan
+// Updated 2026-11-12
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js';
 import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js';
@@ -10,7 +10,8 @@ import { toast, openModal, formatDate }            from '../../js/ui.js';
 let allReports    = [];
 let allEntries    = [];
 let allPaddocks   = [];   // from paddocks table
-let activeTab     = 'board';
+let allCropPlan   = [];   // from crop_plan_entries table
+let activeTab     = 'scouting';
 let activePaddock = null;
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -22,6 +23,24 @@ const SOIL_TYPES = ['CL', 'MAP', 'Sandy Loam', 'Clay Loam', 'Heavy Clay', 'Sandy
 const PRIORITY_LABELS  = { none: 'On track', medium: 'Watch', high: 'Action needed' };
 const PRIORITY_CLASSES = { none: 'badge-success', medium: 'badge-warning', high: 'badge-danger' };
 const FALLOW_COMMODITIES = new Set(['Fallow']);
+
+const CP_STATUSES = ['intent', 'budget', 'planted', 'growing', 'harvested'];
+const CP_STATUS_LABELS = {
+  intent:    'Intent',
+  budget:    'Budget',
+  planted:   'Planted',
+  growing:   'Growing',
+  harvested: 'Harvested',
+};
+const CP_STATUS_CLASSES = {
+  intent:    'badge-secondary',
+  budget:    'badge-warning',
+  planted:   'badge-primary',
+  growing:   'badge-success',
+  harvested: 'badge-info',
+};
+const CP_SEASON_TYPES = ['Summer', 'Winter', 'Annual'];
+const CP_WATER_TYPES  = ['IRR', 'Dryland'];
 
 // ── Mount / unmount ────────────────────────────────────────────────────────
 export async function mountAgronomy(container) {
@@ -36,14 +55,13 @@ function _bindPaddocksNav(container) {
     const link = e.target.closest('a[data-module="paddocks"]');
     if (!link) return;
     e.preventDefault();
-    // Trigger navigation via sidebar link
     document.querySelector('#sidebar a[data-module="paddocks"]')?.click();
   });
 }
 
 export function unmountAgronomy() {
   activePaddock = null;
-  activeTab = 'board';
+  activeTab = 'scouting';
 }
 
 function buildShell() {
@@ -51,19 +69,20 @@ function buildShell() {
     <div class="page-header">
       <div>
         <h1>Agronomy</h1>
-        <p class="page-subtitle">Paddock scouting, crop metrics &amp; visit history</p>
+        <p class="page-subtitle">Crop planning, scouting &amp; visit history</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        <a href="#" data-module="paddocks" class="btn btn-secondary" id="agro-manage-paddocks-btn">🗺 Manage Paddocks</a>
-        <button class="btn btn-primary" id="agro-log-visit-btn">+ Log Visit</button>
+        <a href="#" data-module="paddocks" class="btn btn-secondary">🗺 Manage Paddocks</a>
+        <button class="btn btn-primary" id="agro-log-visit-btn" style="display:none">+ Log Visit</button>
+        <button class="btn btn-primary" id="agro-new-plan-btn" style="display:none">+ Add Crop</button>
       </div>
     </div>
     <nav class="tab-nav" id="agronomy-tabs">
-      <button class="tab-btn active" data-tab="board">Paddock Board</button>
-      <button class="tab-btn" data-tab="reports">Reports</button>
+      <button class="tab-btn active" data-tab="scouting">Scouting</button>
+      <button class="tab-btn" data-tab="cropplan">Crop Plan</button>
     </nav>
-    <div id="agro-tab-board"></div>
-    <div id="agro-tab-reports" style="display:none"></div>
+    <div id="agro-tab-scouting"></div>
+    <div id="agro-tab-cropplan" style="display:none"></div>
     <div id="agro-paddock-detail" style="display:none"></div>
   `;
 }
@@ -74,28 +93,41 @@ async function refreshAll() {
   const farmId = farm?.id || farm;
   const season = getActiveSeason();
 
-  const [reports, entries, paddocks] = await Promise.all([
+  const [reports, entries, paddocks, cropPlan] = await Promise.all([
     dbSelect('agronomy_reports',
       'farm_id=eq.' + farmId + '&season=eq.' + season + '&order=report_date.desc'),
     dbSelect('agronomy_paddock_entries',
       'farm_id=eq.' + farmId + '&order=paddock_name,created_at.desc'),
     dbSelect('paddocks', 'farm_id=eq.' + farmId + '&order=name.asc'),
+    dbSelect('crop_plan_entries',
+      'farm_id=eq.' + farmId + '&order=paddock_name,sub_block.asc').catch(() => []),
   ]);
-  allPaddocks = paddocks || [];
 
-  allReports = reports || [];
-  allEntries = (entries || []).filter(e =>
+  allPaddocks = paddocks || [];
+  allReports  = reports  || [];
+  allCropPlan = cropPlan || [];
+  allEntries  = (entries || []).filter(e =>
     allReports.some(r => r.id === e.report_id)
   );
 
-  // Wire log visit button once
-  const btn = document.getElementById('agro-log-visit-btn');
-  if (btn && !btn._wired) {
-    btn._wired = true;
-    btn.addEventListener('click', openLogVisitModal);
-  }
-
+  _syncHeaderBtns();
   renderActiveTab();
+}
+
+function _syncHeaderBtns() {
+  const logBtn  = document.getElementById('agro-log-visit-btn');
+  const planBtn = document.getElementById('agro-new-plan-btn');
+  if (logBtn)  logBtn.style.display  = activeTab === 'scouting'  ? '' : 'none';
+  if (planBtn) planBtn.style.display = activeTab === 'cropplan'  ? '' : 'none';
+
+  if (logBtn && !logBtn._wired) {
+    logBtn._wired = true;
+    logBtn.addEventListener('click', openLogVisitModal);
+  }
+  if (planBtn && !planBtn._wired) {
+    planBtn._wired = true;
+    planBtn.addEventListener('click', () => openCropPlanModal());
+  }
 }
 
 // ── Tab nav ────────────────────────────────────────────────────────────────
@@ -110,20 +142,21 @@ function switchTab(tab) {
   activePaddock = null;
   document.querySelectorAll('#agronomy-tabs .tab-btn')
     .forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-  document.getElementById('agro-paddock-detail').style.display = 'none';
-  document.getElementById('agro-tab-board').style.display   = tab === 'board'   ? '' : 'none';
-  document.getElementById('agro-tab-reports').style.display = tab === 'reports' ? '' : 'none';
+  document.getElementById('agro-paddock-detail').style.display  = 'none';
+  document.getElementById('agro-tab-scouting').style.display  = tab === 'scouting'  ? '' : 'none';
+  document.getElementById('agro-tab-cropplan').style.display  = tab === 'cropplan'  ? '' : 'none';
+  _syncHeaderBtns();
   renderActiveTab();
 }
 
 function renderActiveTab() {
-  if (activeTab === 'board')   renderBoard();
-  if (activeTab === 'reports') renderReports();
+  if (activeTab === 'scouting') renderBoard();
+  if (activeTab === 'cropplan') renderCropPlan();
 }
 
-// ── BOARD VIEW ─────────────────────────────────────────────────────────────
+// ── SCOUTING BOARD ─────────────────────────────────────────────────────────
 function renderBoard() {
-  const el = document.getElementById('agro-tab-board');
+  const el = document.getElementById('agro-tab-scouting');
   if (!el) return;
 
   const paddockMap = buildPaddockMap();
@@ -189,6 +222,13 @@ function paddockCardHTML(p) {
   const isFallow     = p.is_fallow;
   const entryCount   = allEntries.filter(e => e.paddock_name === p.paddock_name).length;
 
+  // Pull area from crop plan if available
+  const cpEntry = allCropPlan.find(c =>
+    c.paddock_name === p.paddock_name && !c.sub_block &&
+    ['planted','growing'].includes(c.status)
+  );
+  const displayArea = cpEntry?.planted_ha ?? cpEntry?.planned_ha ?? p.area_ha;
+
   return `
     <div class="card agro-paddock-card${isFallow ? ' agro-paddock-card--fallow' : ''}"
          data-paddock="${esc(p.paddock_name)}" style="cursor:pointer">
@@ -201,13 +241,13 @@ function paddockCardHTML(p) {
 
       ${!isFallow ? `
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 8px">
-        ${metricPill(fmtHa(p.area_ha), 'ha')}
+        ${metricPill(fmtHa(displayArea), 'ha')}
         ${metricPill(p.plant_est_pct != null ? p.plant_est_pct + '%' : null, 'est.')}
         ${metricPill(latestNodes, 'nodes')}
         ${metricPill(latestHeight != null ? latestHeight + 'cm' : null, 'ht')}
       </div>` : `
       <div style="display:flex;gap:12px;margin:10px 0 8px">
-        ${metricPill(fmtHa(p.area_ha), 'ha')}
+        ${metricPill(fmtHa(displayArea), 'ha')}
       </div>`}
 
       <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid var(--border);font-size:0.72rem;color:var(--hint)">
@@ -229,8 +269,8 @@ function metricPill(val, lbl) {
 // ── PADDOCK DETAIL ─────────────────────────────────────────────────────────
 function openPaddockDetail(paddockName) {
   activePaddock = paddockName;
-  document.getElementById('agro-tab-board').style.display   = 'none';
-  document.getElementById('agro-tab-reports').style.display = 'none';
+  document.getElementById('agro-tab-scouting').style.display  = 'none';
+  document.getElementById('agro-tab-cropplan').style.display  = 'none';
   renderPaddockDetail(paddockName);
   document.getElementById('agro-paddock-detail').style.display = '';
 }
@@ -249,16 +289,32 @@ function renderPaddockDetail(paddockName) {
 
   const latest = entries[entries.length - 1];
 
+  // Active crop plan entry for this paddock — used to show authoritative area
+  const cpActive = allCropPlan.find(c =>
+    c.paddock_name === paddockName && !c.sub_block &&
+    ['planted','growing'].includes(c.status)
+  );
+
   el.innerHTML = `
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px">
-      <button class="btn btn-secondary btn-sm" id="agro-back-btn">← Board</button>
+      <button class="btn btn-secondary btn-sm" id="agro-back-btn">← Scouting</button>
       <div>
         <h2 style="margin:0;font-size:1.2rem">${esc(paddockName)}</h2>
         <div style="font-size:0.82rem;color:var(--hint)">
-          ${latest ? esc(latest.commodity || '') + (latest.variety ? ' · ' + esc(latest.variety) : '') + (latest.area_ha ? ' · ' + fmtHa(latest.area_ha) : '') : ''}
+          ${latest ? esc(latest.commodity || '') + (latest.variety ? ' · ' + esc(latest.variety) : '') : ''}
+          ${cpActive ? `<span style="margin-left:6px;font-weight:600;color:var(--blue)">${fmtHa(cpActive.planted_ha ?? cpActive.planned_ha)} (crop plan)</span>` : (latest?.area_ha ? ' · ' + fmtHa(latest.area_ha) : '')}
         </div>
       </div>
     </div>
+
+    ${cpActive ? `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:16px;display:flex;gap:20px;flex-wrap:wrap;font-size:0.82rem">
+      <div><span style="color:var(--hint)">Crop plan area: </span><strong>${fmtHa(cpActive.planted_ha ?? cpActive.planned_ha)}</strong></div>
+      <div><span style="color:var(--hint)">Status: </span><span class="badge ${CP_STATUS_CLASSES[cpActive.status] || ''}">${CP_STATUS_LABELS[cpActive.status] || cpActive.status}</span></div>
+      <div><span style="color:var(--hint)">Season: </span><strong>${esc(cpActive.season_label || cpActive.season_type || '')}</strong></div>
+      ${cpActive.variety ? `<div><span style="color:var(--hint)">Variety: </span><strong>${esc(cpActive.variety)}</strong></div>` : ''}
+      ${cpActive.area_loss_ha ? `<div style="color:var(--red)"><span>Area losses: </span><strong>${fmtHa(cpActive.area_loss_ha)}</strong></div>` : ''}
+    </div>` : ''}
 
     <div class="card">
       <div class="card-header">Visit history — ${esc(paddockName)}</div>
@@ -271,7 +327,7 @@ function renderPaddockDetail(paddockName) {
   el.querySelector('#agro-back-btn')?.addEventListener('click', () => {
     activePaddock = null;
     el.style.display = 'none';
-    document.getElementById('agro-tab-board').style.display = '';
+    document.getElementById('agro-tab-scouting').style.display = '';
     renderBoard();
   });
 
@@ -350,50 +406,380 @@ function inlineMetric(lbl, val) {
   </div>`;
 }
 
-// ── REPORTS LIST ───────────────────────────────────────────────────────────
-function renderReports() {
-  const el = document.getElementById('agro-tab-reports');
+// ── CROP PLAN TAB ──────────────────────────────────────────────────────────
+function renderCropPlan() {
+  const el = document.getElementById('agro-tab-cropplan');
   if (!el) return;
 
+  // Group entries by season label for display, sorted by season then paddock
+  const seasons = [...new Set(allCropPlan.map(c => c.season_label || c.season_type || 'No season'))];
+  const currentSeason = getActiveSeason();
+
+  // Season filter — default to active season if any entries exist for it
+  const activeCPSeason = el.dataset.cpSeason || currentSeason;
+
+  // All unique seasons in plan
+  const allSeasons = [...new Set(
+    allCropPlan.map(c => c.season_label).filter(Boolean)
+  )].sort().reverse();
+
+  // Entries for the displayed season
+  const displayed = allCropPlan.filter(c =>
+    (c.season_label || '') === activeCPSeason || allSeasons.length === 0
+  );
+
+  // Summary stats
+  const totalPlanned  = displayed.filter(c => !c.sub_block).reduce((s, c) => s + (parseFloat(c.planned_ha) || 0), 0);
+  const totalPlanted  = displayed.filter(c => !c.sub_block && c.planted_ha).reduce((s, c) => s + (parseFloat(c.planted_ha) || 0), 0);
+  const totalAdjusted = displayed.filter(c => !c.sub_block && c.area_loss_ha).reduce((s, c) => s + (parseFloat(c.area_loss_ha) || 0), 0);
+  const byStatus      = CP_STATUSES.map(s => ({
+    s, count: displayed.filter(c => c.status === s && !c.sub_block).length
+  })).filter(x => x.count > 0);
+
   el.innerHTML = `
-    <div class="card">
-      <div class="card-header">Scouting Reports — ${getActiveSeason()}</div>
-      <div class="table-responsive">
-        <table class="data-table">
-          <thead><tr>
-            <th>Date</th><th>Agronomist</th><th>Company</th>
-            <th>Paddocks</th><th>High priority</th><th></th>
-          </tr></thead>
-          <tbody>
-            ${allReports.length === 0
-              ? '<tr><td colspan="6" class="empty-cell">No reports this season.</td></tr>'
-              : allReports.map(r => {
-                  const ents    = allEntries.filter(e => e.report_id === r.id);
-                  const highPri = ents.filter(e => e.priority === 'high').length;
-                  return `<tr>
-                    <td>${formatDate(r.report_date)}</td>
-                    <td><strong>${esc(r.agronomist_name)}</strong></td>
-                    <td>${esc(r.agronomist_company || '—')}</td>
-                    <td>${ents.length}</td>
-                    <td>${highPri ? `<span class="badge badge-danger">${highPri} high</span>` : '—'}</td>
-                    <td class="row-actions">
-                      <button class="btn-link danger agro-del-report-btn" data-id="${r.id}">Delete</button>
-                    </td>
-                  </tr>`;
-                }).join('')}
-          </tbody>
-        </table>
+    <div style="display:flex;gap:12px;align-items:flex-start">
+
+      <!-- Left filter panel -->
+      <div style="width:200px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:10px;display:flex;flex-direction:column;gap:8px;align-self:flex-start">
+        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);margin-bottom:2px">Season</div>
+        ${allSeasons.length === 0
+          ? `<div style="font-size:0.8rem;color:var(--hint)">No seasons yet</div>`
+          : allSeasons.map(s => `
+              <button class="cp-season-btn" data-season="${esc(s)}"
+                style="font-size:11px;padding:5px 10px;border-radius:4px;border:1px solid ${s === activeCPSeason ? 'var(--blue)' : 'var(--border)'};
+                  background:${s === activeCPSeason ? 'var(--blue)' : 'transparent'};
+                  color:${s === activeCPSeason ? 'white' : 'var(--fg)'};cursor:pointer;text-align:left;width:100%">
+                ${esc(s)}
+              </button>`).join('')
+        }
+        <button class="cp-season-btn" data-season="${esc(currentSeason)}"
+          style="font-size:11px;padding:5px 10px;border-radius:4px;border:1px dashed var(--border);
+            background:transparent;color:var(--hint);cursor:pointer;text-align:left;width:100%;margin-top:4px"
+          title="Start planning for ${esc(currentSeason)}">
+          + ${esc(currentSeason)}
+        </button>
+
+        <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);margin-bottom:6px">Status filter</div>
+          <button class="cp-status-filter active" data-status=""
+            style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid var(--blue);background:var(--blue);color:white;cursor:pointer;width:100%;text-align:left;margin-bottom:3px">
+            All
+          </button>
+          ${CP_STATUSES.map(s => `
+            <button class="cp-status-filter" data-status="${s}"
+              style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--fg);cursor:pointer;width:100%;text-align:left;margin-bottom:3px">
+              ${CP_STATUS_LABELS[s]}
+            </button>`).join('')}
+        </div>
+      </div>
+
+      <!-- Right content -->
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:12px">
+
+        <!-- Summary strip -->
+        <div class="stat-row">
+          <div class="stat-card"><div class="stat-label">Planned ha</div><div class="stat-value">${totalPlanned > 0 ? totalPlanned.toFixed(1) : '—'}</div></div>
+          <div class="stat-card"><div class="stat-label">Planted ha</div><div class="stat-value">${totalPlanted > 0 ? totalPlanted.toFixed(1) : '—'}</div></div>
+          <div class="stat-card"><div class="stat-label">Area losses</div><div class="stat-value ${totalAdjusted > 0 ? 'red' : ''}">${totalAdjusted > 0 ? totalAdjusted.toFixed(1) : '—'}</div></div>
+          ${byStatus.map(x => `<div class="stat-card"><div class="stat-label">${CP_STATUS_LABELS[x.s]}</div><div class="stat-value">${x.count}</div></div>`).join('')}
+        </div>
+
+        <!-- Plan table -->
+        <div class="card">
+          ${displayed.length === 0 ? `
+            <div class="empty-state" style="padding:40px 20px">
+              <div class="empty-icon">🌾</div>
+              <p>No crops planned for this season yet.</p>
+              <button class="btn btn-primary" id="cp-empty-add-btn">+ Add First Crop</button>
+            </div>
+          ` : `
+            <div class="table-responsive">
+              <table class="data-table" id="cp-table">
+                <thead><tr>
+                  <th>Paddock</th>
+                  <th>Sub-block</th>
+                  <th>Crop / Variety</th>
+                  <th>Water</th>
+                  <th>Season type</th>
+                  <th style="text-align:right">Planned ha</th>
+                  <th style="text-align:right">Planted ha</th>
+                  <th style="text-align:right">Loss ha</th>
+                  <th style="text-align:right">Active ha</th>
+                  <th>Status</th>
+                  <th>Wet date</th>
+                  <th>Notes</th>
+                  <th></th>
+                </tr></thead>
+                <tbody id="cp-tbody">
+                  ${displayed.map(c => cpRowHTML(c)).join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </div>
       </div>
     </div>
   `;
 
-  el.querySelectorAll('.agro-del-report-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (!confirm('Delete this entire report and all its paddock entries?')) return;
-      await dbDelete('agronomy_reports', btn.dataset.id);
-      toast('Report deleted', 'success');
+  // Season btn wiring
+  el.querySelectorAll('.cp-season-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      el.dataset.cpSeason = btn.dataset.season;
+      renderCropPlan();
+    });
+  });
+
+  // Status filter wiring
+  el.querySelectorAll('.cp-status-filter').forEach(btn => {
+    btn.addEventListener('click', () => {
+      el.querySelectorAll('.cp-status-filter').forEach(b => {
+        b.style.background = 'transparent';
+        b.style.color = 'var(--fg)';
+        b.style.borderColor = 'var(--border)';
+        b.classList.remove('active');
+      });
+      btn.style.background = 'var(--blue)';
+      btn.style.color = 'white';
+      btn.style.borderColor = 'var(--blue)';
+      btn.classList.add('active');
+      const status = btn.dataset.status;
+      el.querySelectorAll('#cp-tbody tr').forEach(row => {
+        row.style.display = (!status || row.dataset.status === status) ? '' : 'none';
+      });
+    });
+  });
+
+  // Row action wiring
+  el.querySelectorAll('.cp-edit-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const entry = allCropPlan.find(c => c.id === btn.dataset.id);
+      if (entry) openCropPlanModal(entry);
+    });
+  });
+
+  el.querySelectorAll('.cp-del-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      if (!confirm('Delete this crop plan entry?')) return;
+      await dbDelete('crop_plan_entries', btn.dataset.id);
+      toast('Entry deleted', 'success');
       await refreshAll();
     });
+  });
+
+  // Status advance buttons
+  el.querySelectorAll('.cp-advance-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const entry = allCropPlan.find(c => c.id === btn.dataset.id);
+      if (!entry) return;
+      const idx  = CP_STATUSES.indexOf(entry.status);
+      const next = CP_STATUSES[idx + 1];
+      if (!next) return;
+      await dbUpdate('crop_plan_entries', entry.id, {
+        status: next, updated_at: new Date().toISOString(),
+      });
+      toast(`Moved to ${CP_STATUS_LABELS[next]}`, 'success');
+      await refreshAll();
+    });
+  });
+
+  el.querySelector('#cp-empty-add-btn')?.addEventListener('click', () => openCropPlanModal());
+}
+
+function cpRowHTML(c) {
+  const nextStatus = CP_STATUSES[CP_STATUSES.indexOf(c.status) + 1];
+  const activHa    = (parseFloat(c.planted_ha || c.planned_ha) || 0) - (parseFloat(c.area_loss_ha) || 0);
+
+  return `
+    <tr data-status="${c.status}" data-id="${c.id}" style="${c.sub_block ? 'background:var(--surface)' : ''}">
+      <td style="font-weight:${c.sub_block ? '400' : '600'}">
+        ${c.sub_block ? '' : esc(c.paddock_name)}
+      </td>
+      <td style="color:var(--hint);font-size:0.82rem;padding-left:${c.sub_block ? '24px' : ''}">
+        ${c.sub_block ? '↳ ' + esc(c.sub_block) : '—'}
+      </td>
+      <td>
+        <div style="font-weight:600;font-size:0.85rem">${esc(c.commodity || '—')}</div>
+        ${c.variety ? `<div style="font-size:0.75rem;color:var(--hint)">${esc(c.variety)}</div>` : ''}
+      </td>
+      <td><span style="font-size:0.8rem">${esc(c.water_type || '—')}</span></td>
+      <td><span style="font-size:0.8rem">${esc(c.season_type || '—')}</span></td>
+      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:0.85rem">${c.planned_ha != null ? parseFloat(c.planned_ha).toFixed(1) : '—'}</td>
+      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:0.85rem">${c.planted_ha != null ? parseFloat(c.planted_ha).toFixed(1) : '—'}</td>
+      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:0.85rem;color:${c.area_loss_ha ? 'var(--red)' : 'var(--hint)'}">${c.area_loss_ha ? parseFloat(c.area_loss_ha).toFixed(1) : '—'}</td>
+      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:0.85rem;font-weight:600">${activHa > 0 ? activHa.toFixed(1) : '—'}</td>
+      <td><span class="badge ${CP_STATUS_CLASSES[c.status] || 'badge-secondary'}">${CP_STATUS_LABELS[c.status] || c.status}</span></td>
+      <td style="font-size:0.8rem">${c.wet_date ? formatDate(c.wet_date) : '—'}</td>
+      <td style="font-size:0.78rem;color:var(--hint);max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.notes || '')}</td>
+      <td class="row-actions" style="white-space:nowrap">
+        ${nextStatus ? `<button class="btn-link cp-advance-btn" data-id="${c.id}" title="Advance to ${CP_STATUS_LABELS[nextStatus]}">→ ${CP_STATUS_LABELS[nextStatus]}</button>` : ''}
+        <button class="btn-link cp-edit-btn" data-id="${c.id}">Edit</button>
+        <button class="btn-link danger cp-del-btn" data-id="${c.id}">Del</button>
+      </td>
+    </tr>
+  `;
+}
+
+// ── CROP PLAN MODAL ────────────────────────────────────────────────────────
+function openCropPlanModal(entry = null) {
+  const isEdit     = !!entry;
+  const today      = todayStr();
+  const currentSsn = getActiveSeason();
+
+  // Build paddock options
+  const paddockOpts = allPaddocks.length
+    ? allPaddocks.map(p =>
+        `<option value="${esc(p.name)}"${entry?.paddock_name === p.name ? ' selected' : ''}>${esc(p.name)}</option>`
+      ).join('')
+    : `<option value="${esc(entry?.paddock_name || '')}">—</option>`;
+
+  const bodyHTML = `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Paddock *</label>
+        ${allPaddocks.length
+          ? `<select class="form-select" id="cp-paddock"><option value="">— Select —</option>${paddockOpts}</select>`
+          : `<input class="form-input" id="cp-paddock" placeholder="Paddock name" value="${esc(entry?.paddock_name || '')}">`
+        }
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sub-block <span style="color:var(--hint);font-weight:400">(optional)</span></label>
+        <input class="form-input" id="cp-subblock" placeholder="e.g. North half, Refuge"
+          value="${esc(entry?.sub_block || '')}">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Season label *</label>
+        <input class="form-input" id="cp-season-label" placeholder="e.g. Summer 2026-27"
+          value="${esc(entry?.season_label || currentSsn)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Season type</label>
+        <select class="form-select" id="cp-season-type">
+          ${CP_SEASON_TYPES.map(t =>
+            `<option value="${t}"${entry?.season_type === t ? ' selected' : ''}>${t}</option>`
+          ).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select class="form-select" id="cp-status">
+          ${CP_STATUSES.map(s =>
+            `<option value="${s}"${(entry?.status || 'intent') === s ? ' selected' : ''}>${CP_STATUS_LABELS[s]}</option>`
+          ).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Commodity *</label>
+        <select class="form-select" id="cp-commodity">
+          ${COMMODITIES.map(c =>
+            `<option value="${c}"${entry?.commodity === c ? ' selected' : ''}>${c}</option>`
+          ).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Variety</label>
+        <input class="form-input" id="cp-variety" placeholder="e.g. Sicot 714"
+          value="${esc(entry?.variety || '')}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Water type</label>
+        <select class="form-select" id="cp-water">
+          ${CP_WATER_TYPES.map(t =>
+            `<option value="${t}"${entry?.water_type === t ? ' selected' : ''}>${t}</option>`
+          ).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Planned ha</label>
+        <input class="form-input" id="cp-planned-ha" type="number" step="0.1" min="0"
+          placeholder="ha" value="${entry?.planned_ha != null ? entry.planned_ha : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Planted ha <span style="color:var(--hint);font-weight:400">(actual)</span></label>
+        <input class="form-input" id="cp-planted-ha" type="number" step="0.1" min="0"
+          placeholder="ha" value="${entry?.planted_ha != null ? entry.planted_ha : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Area losses ha</label>
+        <input class="form-input" id="cp-loss-ha" type="number" step="0.1" min="0"
+          placeholder="flood, fire…" value="${entry?.area_loss_ha != null ? entry.area_loss_ha : ''}">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Wet / plant date</label>
+        <input class="form-input" id="cp-wet-date" type="date"
+          value="${entry?.wet_date || ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Target yield (t/ha)</label>
+        <input class="form-input" id="cp-yield" type="number" step="0.1" min="0"
+          placeholder="t/ha" value="${entry?.yield_target_t_ha != null ? entry.yield_target_t_ha : ''}">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <textarea class="form-input" id="cp-notes" rows="2"
+        placeholder="Any planning notes or context">${esc(entry?.notes || '')}</textarea>
+    </div>
+  `;
+
+  openModal({
+    title: isEdit ? 'Edit Crop Plan — ' + esc(entry.paddock_name) : 'Add Crop to Plan',
+    bodyHTML,
+    confirmLabel: isEdit ? 'Save changes' : 'Add to plan',
+    wide: true,
+    onConfirm: async () => {
+      const farmId      = (() => { const f = getActiveFarm(); return f?.id || f; })();
+      const paddock     = document.getElementById('cp-paddock')?.value?.trim();
+      const seasonLabel = document.getElementById('cp-season-label')?.value?.trim();
+      const commodity   = document.getElementById('cp-commodity')?.value;
+
+      if (!paddock)     throw new Error('Paddock is required');
+      if (!seasonLabel) throw new Error('Season label is required');
+      if (!commodity)   throw new Error('Commodity is required');
+
+      const row = {
+        farm_id:           farmId,
+        paddock_name:      paddock,
+        sub_block:         document.getElementById('cp-subblock')?.value?.trim() || null,
+        season_label:      seasonLabel,
+        season_type:       document.getElementById('cp-season-type')?.value,
+        status:            document.getElementById('cp-status')?.value || 'intent',
+        commodity,
+        variety:           document.getElementById('cp-variety')?.value?.trim() || null,
+        water_type:        document.getElementById('cp-water')?.value || null,
+        planned_ha:        numOrNull(document.getElementById('cp-planned-ha')?.value),
+        planted_ha:        numOrNull(document.getElementById('cp-planted-ha')?.value),
+        area_loss_ha:      numOrNull(document.getElementById('cp-loss-ha')?.value),
+        wet_date:          document.getElementById('cp-wet-date')?.value || null,
+        yield_target_t_ha: numOrNull(document.getElementById('cp-yield')?.value),
+        notes:             document.getElementById('cp-notes')?.value?.trim() || null,
+        updated_at:        new Date().toISOString(),
+      };
+
+      if (isEdit) {
+        await dbUpdate('crop_plan_entries', entry.id, row);
+        toast('Crop plan updated', 'success');
+      } else {
+        await dbInsert('crop_plan_entries', row);
+        toast('Added to crop plan', 'success');
+      }
+      await refreshAll();
+    },
   });
 }
 
@@ -456,6 +842,17 @@ function openLogVisitModal() {
       if (rows.length === 0) throw new Error('Add at least one paddock entry');
       rows.forEach(r => { if (!r.paddock_name) throw new Error('Each paddock row needs a name'); });
 
+      // Show area from crop plan for each paddock row
+      rows.forEach(r => {
+        const cp = allCropPlan.find(c =>
+          c.paddock_name === r.paddock_name && !c.sub_block &&
+          ['budget','planted','growing'].includes(c.status)
+        );
+        if (cp && r.area_ha == null) {
+          r.area_ha = cp.planted_ha ?? cp.planned_ha ?? null;
+        }
+      });
+
       const [report] = await dbInsert('agronomy_reports', {
         farm_id: farmId, season, report_date: date,
         agronomist_name: name, agronomist_company: company,
@@ -479,10 +876,8 @@ function openLogVisitModal() {
 // ── Paddock row builder ────────────────────────────────────────────────────
 let _rowCounter = 0;
 
-// Build paddock name field — select if paddocks configured, else free text
 function _paddockNameField(currentValue) {
   if (allPaddocks.length === 0) {
-    // No paddocks configured yet — free text with hint
     return `<input class="form-input agro-ep-name" placeholder="Paddock name *"
       style="max-width:200px" value="${esc(currentValue)}"
       title="Add paddocks in the Paddocks module for a dropdown here">`;
@@ -494,6 +889,19 @@ function _paddockNameField(currentValue) {
     <option value="">— Select paddock —</option>
     ${opts}
   </select>`;
+}
+
+// Build area hint from crop plan for the selected paddock
+function _areaHint(paddockName) {
+  if (!paddockName) return '';
+  const cp = allCropPlan.find(c =>
+    c.paddock_name === paddockName && !c.sub_block &&
+    ['budget','planted','growing'].includes(c.status)
+  );
+  if (!cp) return '';
+  const ha = cp.planted_ha ?? cp.planned_ha;
+  if (ha == null) return '';
+  return `<span style="font-size:0.75rem;color:var(--blue);margin-left:4px" title="From crop plan">${parseFloat(ha).toFixed(1)} ha (plan)</span>`;
 }
 
 function addPaddockRow(overlay, copyFrom = null) {
@@ -520,8 +928,11 @@ function addPaddockRow(overlay, copyFrom = null) {
       </select>
       <input class="form-input agro-ep-variety" placeholder="Variety"
         style="max-width:120px" value="${esc(copyFrom?.variety || '')}">
-      <input class="form-input agro-ep-area" type="number" step="0.01" placeholder="ha"
-        style="max-width:80px" value="${copyFrom?.area_ha != null ? copyFrom.area_ha : ''}">
+      <div style="display:flex;align-items:center;gap:4px">
+        <input class="form-input agro-ep-area" type="number" step="0.01" placeholder="ha"
+          style="max-width:80px" value="${copyFrom?.area_ha != null ? copyFrom.area_ha : ''}">
+        <span class="agro-ep-area-hint" style="font-size:0.75rem;color:var(--blue)">${_areaHint(copyFrom?.paddock_name || '')}</span>
+      </div>
       <div style="display:flex;gap:6px;margin-left:auto">
         <button type="button" class="btn btn-secondary btn-sm agro-ep-copy-btn">Copy →</button>
         <button type="button" class="btn-link danger agro-ep-remove" style="font-size:1rem;padding:0 4px">✕</button>
@@ -632,17 +1043,20 @@ function addPaddockRow(overlay, copyFrom = null) {
 
   list.appendChild(div);
 
-  // Toggle fallow
+  // Update area hint when paddock selection changes
+  const nameEl = div.querySelector('.agro-ep-name');
+  const hintEl = div.querySelector('.agro-ep-area-hint');
+  nameEl?.addEventListener('change', () => {
+    if (hintEl) hintEl.innerHTML = _areaHint(nameEl.value);
+  });
+
   div.querySelector('.agro-ep-commodity')?.addEventListener('change', function () {
     div.querySelector('.agro-ep-crop-fields').style.display =
       FALLOW_COMMODITIES.has(this.value) ? 'none' : '';
   });
 
   div.querySelector('.agro-ep-remove')?.addEventListener('click', () => div.remove());
-
-  div.querySelector('.agro-ep-copy-btn')?.addEventListener('click', () => {
-    openCopyModal(div, list);
-  });
+  div.querySelector('.agro-ep-copy-btn')?.addEventListener('click', () => openCopyModal(div, list));
 }
 
 // ── Copy-to-paddocks modal ─────────────────────────────────────────────────
@@ -704,7 +1118,7 @@ function openCopyModal(sourceDiv, list) {
         if (!tgt) return;
         fields.filter(f => selFields.includes(f.key)).forEach(f => {
           if (f.key === 'priority') {
-            const srcVal = sourceDiv.querySelector('.agro-ep-priority:checked')?.value;
+            const srcVal   = sourceDiv.querySelector('.agro-ep-priority:checked')?.value;
             const tgtRadio = tgt.querySelector(`.agro-ep-priority[value="${srcVal}"]`);
             if (tgtRadio) tgtRadio.checked = true;
           } else {
