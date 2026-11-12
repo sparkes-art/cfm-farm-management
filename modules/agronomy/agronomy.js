@@ -753,30 +753,40 @@ function renderCropPlan() {
       <!-- Matrix table -->
       <div class="card" style="padding:0;overflow:hidden">
         <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${160 + allSeasons.length * 130}px">
+          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${160 + allSeasons.reduce((w, s) => w + (s === currentSeason ? 200 : 130), 0)}px">
             <thead>
-              <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
-                <th style="${TH_FIXED}border-bottom:2px solid var(--border);padding:10px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);white-space:nowrap;min-width:160px">
+              <!-- Row 1: season labels -->
+              <tr style="background:var(--surface)">
+                <th style="${TH_FIXED}border-bottom:2px solid var(--border);padding:10px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);white-space:nowrap;min-width:160px" rowspan="2">
                   Paddock
                 </th>
                 ${allSeasons.map(s => {
                   const tot = seasonTotals[s];
-                  const isCurrentSeason = s === currentSeason;
-                  return `<th
+                  const isCur = s === currentSeason;
+                  return `<th ${isCur ? 'colspan="2"' : ''}
                     style="padding:8px 10px;font-size:12px;font-weight:700;text-align:center;
-                      border-left:2px solid var(--border);border-bottom:2px solid var(--border);
-                      background:${isCurrentSeason ? 'color-mix(in srgb,var(--blue) 8%,var(--surface))' : 'var(--surface)'};
-                      color:${isCurrentSeason ? 'var(--blue)' : 'var(--fg)'};
-                      white-space:nowrap;min-width:120px">
+                      border-left:2px solid var(--border);border-bottom:${isCur ? '1' : '2'}px solid var(--border);
+                      background:${isCur ? 'color-mix(in srgb,var(--blue) 8%,var(--surface))' : 'var(--surface)'};
+                      color:${isCur ? 'var(--blue)' : 'var(--fg)'};
+                      white-space:nowrap;min-width:${isCur ? '200' : '120'}px">
                     ${esc(s)}
                     ${tot > 0 ? `<span style="display:block;font-size:10px;font-weight:400;color:var(--hint);margin-top:1px">${tot.toFixed(0)} ha</span>` : ''}
                   </th>`;
                 }).join('')}
-                <th style="width:32px;border-bottom:2px solid var(--border);background:var(--surface)"></th>
+                <th style="width:32px;border-bottom:2px solid var(--border);background:var(--surface)" rowspan="2"></th>
+              </tr>
+              <!-- Row 2: Planned / Planted sub-headers for current season only -->
+              <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
+                ${allSeasons.map(s => {
+                  if (s !== currentSeason) return '';
+                  return `
+                    <th style="padding:4px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);border-left:2px solid var(--border);text-align:right;width:95px;background:color-mix(in srgb,var(--blue) 8%,var(--surface))">Planned</th>
+                    <th style="padding:4px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);text-align:right;width:95px;background:color-mix(in srgb,var(--blue) 8%,var(--surface))">Planted</th>`;
+                }).join('')}
               </tr>
             </thead>
             <tbody id="cp-matrix-body">
-              ${paddockKeys.map((pk, i) => cpMatrixRowHTML(pk, allSeasons, idx, i)).join('')}
+              ${paddockKeys.map((pk, i) => cpMatrixRowHTML(pk, allSeasons, idx, i, currentSeason)).join('')}
             </tbody>
             <!-- Season totals footer -->
             <tfoot>
@@ -784,9 +794,22 @@ function renderCropPlan() {
                 <td style="${TH_FIXED}padding:8px 12px;font-size:11px;font-weight:700;color:var(--hint)">TOTAL</td>
                 ${allSeasons.map(s => {
                   const tot = seasonTotals[s];
+                  if (s === currentSeason) {
+                    // Two cells for current season: planned total | planted total
+                    const rows = allCropPlan.filter(c => c.season_label === s && !c.sub_block);
+                    const plannedTot = rows.reduce((t, c) => t + (parseFloat(c.planned_ha) || 0), 0);
+                    const plantedTot = rows.reduce((t, c) => t + (parseFloat(c.planted_ha) || 0), 0);
+                    return `
+                      <td style="padding:8px 10px;border-left:2px solid var(--border);text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;background:color-mix(in srgb,var(--blue) 5%,var(--surface))">
+                        ${plannedTot > 0 ? plannedTot.toFixed(1) : '—'}
+                      </td>
+                      <td style="padding:8px 10px;text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:${plantedTot > 0 ? 'var(--green,#22c55e)' : 'var(--hint)'};background:color-mix(in srgb,var(--blue) 5%,var(--surface))">
+                        ${plantedTot > 0 ? plantedTot.toFixed(1) : '—'}
+                      </td>`;
+                  }
                   return `
                     <td style="padding:8px 10px;border-left:2px solid var(--border);text-align:center;font-family:'DM Mono',monospace;font-size:12px;font-weight:700">
-                      ${tot > 0 ? tot.toFixed(1) + ' ha' : '—'}
+                      ${tot > 0 ? tot.toFixed(1) : '—'}
                     </td>`;
                 }).join('')}
                 <td style="background:var(--surface)"></td>
@@ -868,7 +891,7 @@ function renderCropPlan() {
 
 const TH_FIXED = 'position:sticky;left:0;z-index:2;background:var(--surface);';
 
-function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
+function cpMatrixRowHTML(pk, seasons, idx, rowIndex, currentSeason) {
   const { paddock_name, sub_block } = pk;
   const key      = paddock_name + '|' + (sub_block || '');
   const isSubRow = !!sub_block;
@@ -911,7 +934,7 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
 
   const seasonCells = seasons.map(s => {
     const entry = idx[key]?.[s] || null;
-    return cpMatrixCell(entry, paddock_name, sub_block, s);
+    return cpMatrixCell(entry, paddock_name, sub_block, s, s === currentSeason);
   }).join('');
 
   const delBtn = !isSubRow ? `
@@ -924,50 +947,78 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
     style="transition:background 0.1s">${paddockCell}${seasonCells}${delBtn}</tr>`;
 }
 
-function cpMatrixCell(entry, paddockName, subBlock, seasonLabel) {
-  // Single td per season — shows best ha based on status
+function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
   const borderL   = 'border-left:2px solid var(--border);';
-  const baseStyle = `padding:7px 8px;border-bottom:1px solid var(--border);text-align:center;vertical-align:middle;cursor:pointer;min-width:120px;`;
+  const baseStyle = `padding:7px 8px;border-bottom:1px solid var(--border);text-align:center;vertical-align:middle;cursor:pointer;`;
 
+  // Commodity chip (shared)
+  const commColor     = entry?.commodity ? (CP_COMMODITY_COLORS[entry.commodity] || { bg: '#e0f2fe', text: '#0c4a6e' }) : null;
+  const commodityLine = entry?.commodity
+    ? `<div style="font-size:10px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:1px 4px;border-radius:4px;background:${commColor.bg};color:${commColor.text};margin-bottom:3px" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
+    : '';
+  const statusDot   = entry ? _statusDot(entry.status) : '';
+  const statusLabel = entry?.status ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--hint)">${CP_STATUS_LABELS[entry.status] || entry.status}</span>` : '';
+  const topInfo     = `${commodityLine}<div style="display:flex;align-items:center;justify-content:center;gap:3px;margin-bottom:3px">${statusDot}${statusLabel}</div>`;
+
+  if (isCurrent) {
+    // Current season: two columns — Planned | Planted (same as original design)
+    if (!entry) {
+      return `
+        <td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
+          data-season="${esc(seasonLabel)}" data-field="planned_ha"
+          style="${baseStyle}${borderL}min-width:95px;color:var(--border);font-size:0.78rem" title="Click to add planned ha">—</td>
+        <td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
+          data-season="${esc(seasonLabel)}" data-field="planted_ha"
+          style="${baseStyle}min-width:95px;color:var(--border);font-size:0.78rem" title="Click to add planted ha">—</td>`;
+    }
+    const id = entry.id;
+    const plannedN = parseFloat(entry.planned_ha);
+    const plantedN = parseFloat(entry.planted_ha);
+    const harvestedN = entry.status === 'harvested'
+      ? (parseFloat(entry.planted_ha) || 0) - (parseFloat(entry.area_loss_ha) || 0)
+      : null;
+    const plannedDisp = !isNaN(plannedN)
+      ? `<span style="font-family:'DM Mono',monospace;font-size:0.85rem">${plannedN.toFixed(1)}</span>`
+      : `<span style="color:var(--hint)">—</span>`;
+    const plantedDisp = harvestedN != null
+      ? `<span style="font-family:'DM Mono',monospace;font-size:0.85rem;color:var(--hint)">${harvestedN.toFixed(1)}</span><span style="font-size:9px;color:var(--hint);margin-left:2px">hvst</span>`
+      : !isNaN(plantedN)
+        ? `<span style="font-family:'DM Mono',monospace;font-size:0.85rem;color:var(--green,#22c55e)">${plantedN.toFixed(1)}</span>`
+        : `<span style="color:var(--hint)">—</span>`;
+    return `
+      <td class="cp-matrix-cell" data-id="${id}" data-field="planned_ha" data-type="number"
+        style="${baseStyle}${borderL}min-width:95px" title="Click to edit planned ha">
+        ${topInfo}${plannedDisp}
+      </td>
+      <td class="cp-matrix-cell" data-id="${id}" data-field="${entry.status === 'harvested' ? 'area_loss_ha' : 'planted_ha'}" data-type="number"
+        style="${baseStyle}min-width:95px" title="Click to edit ${entry.status === 'harvested' ? 'loss ha (harvested = planted − loss)' : 'planted ha'}">
+        ${plantedDisp}
+      </td>`;
+  }
+
+  // Other seasons: single smart column
   if (!entry) {
     return `<td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
         data-season="${esc(seasonLabel)}" data-field="planned_ha"
-        style="${baseStyle}${borderL}color:var(--border);font-size:0.78rem" title="Click to add">—</td>`;
+        style="${baseStyle}${borderL}min-width:120px;color:var(--border);font-size:0.78rem" title="Click to add">—</td>`;
   }
 
   const id = entry.id;
   const { ha, label: haLabel } = _bestHa(entry);
-
-  // Colour of the ha number based on what it represents
   const haColor = entry.status === 'harvested' ? 'var(--hint)'
     : (entry.planted_ha != null && !isNaN(parseFloat(entry.planted_ha))) ? 'var(--green,#22c55e)'
     : 'var(--fg)';
-
   const haDisp = ha != null
     ? `<span style="font-family:'DM Mono',monospace;font-size:0.88rem;font-weight:600;color:${haColor}">${ha.toFixed(1)}</span><span style="font-size:9px;color:var(--hint);margin-left:2px">ha</span>`
     : `<span style="color:var(--hint)">—</span>`;
-
-  // Commodity chip
-  const commColor     = entry.commodity ? (CP_COMMODITY_COLORS[entry.commodity] || { bg: '#e0f2fe', text: '#0c4a6e' }) : null;
-  const commodityLine = entry.commodity
-    ? `<div style="font-size:10px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:1px 4px;border-radius:4px;background:${commColor.bg};color:${commColor.text};margin-bottom:3px" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
-    : '';
-
-  // Status dot + label
-  const statusDot   = _statusDot(entry.status);
-  const statusLabel = entry.status ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--hint)">${CP_STATUS_LABELS[entry.status] || entry.status}</span>` : '';
-
-  // Click edits: harvested entries edit area_loss_ha, planted edits planted_ha, else planned_ha
   const editField = entry.status === 'harvested' ? 'area_loss_ha'
     : (entry.planted_ha != null && !isNaN(parseFloat(entry.planted_ha))) ? 'planted_ha'
     : 'planned_ha';
 
   return `
     <td class="cp-matrix-cell" data-id="${id}" data-field="${editField}" data-type="number"
-      style="${baseStyle}${borderL}" title="Click to edit — ${haLabel || 'planned'} ha">
-      ${commodityLine}
-      <div style="display:flex;align-items:center;justify-content:center;gap:3px;margin-bottom:3px">${statusDot}${statusLabel}</div>
-      ${haDisp}
+      style="${baseStyle}${borderL}min-width:120px" title="Click to edit — ${haLabel || 'planned'} ha">
+      ${topInfo}${haDisp}
     </td>`;
 }
 
