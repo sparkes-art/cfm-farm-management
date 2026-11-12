@@ -47,7 +47,15 @@ export async function mountAgronomy(container) {
   container.innerHTML = buildShell();
   bindTabNav(container);
   _bindPaddocksNav(container);
+  // When the global season changes, refresh data and reset crop plan season
+  window.addEventListener('cfm:seasonchange', _onSeasonChange);
   await refreshAll();
+}
+
+function _onSeasonChange() {
+  const cpEl = document.getElementById('agro-tab-cropplan');
+  if (cpEl) delete cpEl.dataset.cpSeason;
+  refreshAll();
 }
 
 function _bindPaddocksNav(container) {
@@ -62,6 +70,7 @@ function _bindPaddocksNav(container) {
 export function unmountAgronomy() {
   activePaddock = null;
   activeTab = 'scouting';
+  window.removeEventListener('cfm:seasonchange', _onSeasonChange);
 }
 
 function buildShell() {
@@ -124,6 +133,11 @@ function switchTab(tab) {
   document.getElementById('agro-paddock-detail').style.display = 'none';
   document.getElementById('agro-tab-scouting').style.display   = tab === 'scouting'  ? '' : 'none';
   document.getElementById('agro-tab-cropplan').style.display   = tab === 'cropplan'  ? '' : 'none';
+  // Reset crop plan season when switching to it, so it re-reads the global season
+  if (tab === 'cropplan') {
+    const cpEl = document.getElementById('agro-tab-cropplan');
+    if (cpEl) delete cpEl.dataset.cpSeason;
+  }
   renderActiveTab();
 }
 
@@ -478,9 +492,11 @@ function renderCropPlan() {
     allCropPlan.map(c => c.season_label).filter(Boolean)
   )].sort().reverse();
 
-  // Pick active season — default to first loaded season or current
+  // Pick active season — prefer the globally active season if data exists for it,
+  // otherwise the most recent season in the plan, otherwise the global season
   if (!el.dataset.cpSeason) {
-    el.dataset.cpSeason = allSeasons[0] || currentSeason;
+    const matchGlobal = allSeasons.find(s => s === currentSeason);
+    el.dataset.cpSeason = matchGlobal || allSeasons[0] || currentSeason;
   }
   const activeCPSeason = el.dataset.cpSeason;
 
