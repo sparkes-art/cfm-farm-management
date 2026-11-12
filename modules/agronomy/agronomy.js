@@ -589,6 +589,7 @@ function renderCropPlan() {
   // season in the crop plan.
   const latestSeason = allSeasons[allSeasons.length - 1] || null;
   _currentSeasonLabel = latestSeason;
+  console.log('[CropPlan] allSeasons:', allSeasons, '→ latestSeason:', latestSeason);
 
 
   // ── Build the paddock × season matrix ──────────────────────────────────
