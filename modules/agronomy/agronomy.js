@@ -481,259 +481,465 @@ const BB_2526_SEED = [
   { paddock_name:'Yard East Jarrah',     sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:217.4, planted_ha:217.9, area_loss_ha:null },
 ];
 
+// ── Crop plan: sorted season list ──────────────────────────────────────────
+// Seasons sort chronologically: extract year pairs and type for ordering.
+// "Summer 2025-26" → type Summer, year 2025; "Annual 2025-26" → Annual, 2025.
+// Order: by start year ASC, then Summer < Annual < Winter within a year.
+function sortSeasons(seasons) {
+  const typeOrder = { Summer: 0, Annual: 1, Winter: 2 };
+  return [...seasons].sort((a, b) => {
+    const pa = _parseSeason(a), pb = _parseSeason(b);
+    if (pa.year !== pb.year) return pa.year - pb.year;
+    return (typeOrder[pa.type] ?? 9) - (typeOrder[pb.type] ?? 9);
+  });
+}
+function _parseSeason(label) {
+  const m = label.match(/(\d{4})/);
+  const year = m ? parseInt(m[1]) : 9999;
+  const type = label.startsWith('Summer') ? 'Summer'
+             : label.startsWith('Annual') ? 'Annual'
+             : label.startsWith('Winter') ? 'Winter' : 'Other';
+  return { year, type };
+}
+
 function renderCropPlan() {
   const el = document.getElementById('agro-tab-cropplan');
   if (!el) return;
 
   const currentSeason = getActiveSeason();
 
-  // All unique seasons in plan
-  const allSeasons = [...new Set(
-    allCropPlan.map(c => c.season_label).filter(Boolean)
-  )].sort().reverse();
+  // All unique seasons, chronologically sorted
+  const allSeasons = sortSeasons(
+    [...new Set(allCropPlan.map(c => c.season_label).filter(Boolean))]
+  );
 
-  // Pick active season — prefer the globally active season if data exists for it,
-  // otherwise the most recent season in the plan, otherwise the global season
-  if (!el.dataset.cpSeason) {
-    const matchGlobal = allSeasons.find(s => s === currentSeason);
-    el.dataset.cpSeason = matchGlobal || allSeasons[0] || currentSeason;
-  }
-  const activeCPSeason = el.dataset.cpSeason;
+  // Show seed button if 2025-26 data not yet loaded
+  const showSeedBtn = !allCropPlan.some(c =>
+    c.season_label === 'Summer 2025-26' || c.season_label === 'Annual 2025-26'
+  );
 
-  // Entries for the displayed season
-  const displayed = allCropPlan.filter(c =>
-    (c.season_label || '') === activeCPSeason
-  ).sort((a, b) => {
-    if (a.paddock_name < b.paddock_name) return -1;
-    if (a.paddock_name > b.paddock_name) return 1;
-    if (!a.sub_block && b.sub_block) return -1;
-    if (a.sub_block && !b.sub_block) return 1;
-    return (a.sub_block || '').localeCompare(b.sub_block || '');
+  // ── Build the paddock × season matrix ──────────────────────────────────
+  // Rows: all unique paddock+sub_block combos across ALL seasons (so blank cells
+  // appear for seasons where a paddock had nothing — planning rows can be added).
+  // Columns: paddock name | sub-block | ...one column per season...
+  // Each season cell shows: commodity (small, coloured) / planned ha / planted ha
+
+  // Collect all paddock keys (paddock_name + sub_block) in name order
+  const paddockKeys = [];
+  const seen = new Set();
+  [...allCropPlan]
+    .sort((a, b) => a.paddock_name.localeCompare(b.paddock_name) ||
+                    (a.sub_block || '').localeCompare(b.sub_block || ''))
+    .forEach(c => {
+      const key = c.paddock_name + '|' + (c.sub_block || '');
+      if (!seen.has(key)) { seen.add(key); paddockKeys.push({ paddock_name: c.paddock_name, sub_block: c.sub_block || null }); }
+    });
+
+  // Index entries: paddockKey → seasonLabel → entry
+  const idx = {};
+  allCropPlan.forEach(c => {
+    const pk = c.paddock_name + '|' + (c.sub_block || '');
+    if (!idx[pk]) idx[pk] = {};
+    idx[pk][c.season_label] = c;
   });
 
-  // Check if seed data already loaded for this season
-  const hasSeasonData   = allSeasons.includes(activeCPSeason);
-  const isSeedSeason    = activeCPSeason === 'Summer 2025-26' || activeCPSeason === 'Annual 2025-26';
-  const showSeedBtn     = !hasSeasonData &&
-    ['Summer 2025-26', 'Annual 2025-26'].some(s => !allSeasons.includes(s));
+  // Totals per season (planned + planted, top-level only)
+  const seasonTotals = {};
+  allSeasons.forEach(s => {
+    const rows = allCropPlan.filter(c => c.season_label === s && !c.sub_block);
+    seasonTotals[s] = {
+      planned: rows.reduce((t, c) => t + (parseFloat(c.planned_ha) || 0), 0),
+      planted: rows.filter(c => c.planted_ha != null).reduce((t, c) => t + (parseFloat(c.planted_ha) || 0), 0),
+    };
+  });
 
-  // Summary stats (top-level rows only)
-  const topRows        = displayed.filter(c => !c.sub_block);
-  const totalPlanned   = topRows.reduce((s, c) => s + (parseFloat(c.planned_ha) || 0), 0);
-  const totalPlanted   = topRows.filter(c => c.planted_ha).reduce((s, c) => s + (parseFloat(c.planted_ha) || 0), 0);
-  const totalLoss      = topRows.filter(c => c.area_loss_ha).reduce((s, c) => s + (parseFloat(c.area_loss_ha) || 0), 0);
-  const totalActive    = topRows.reduce((s, c) => {
-    const a = (parseFloat(c.planted_ha || c.planned_ha) || 0) - (parseFloat(c.area_loss_ha) || 0);
-    return s + Math.max(0, a);
-  }, 0);
+  const hasData = paddockKeys.length > 0;
 
   el.innerHTML = `
-    <div class="page-header" style="margin-bottom:12px">
+    <div class="page-header" style="margin-bottom:16px">
       <div>
         <h2 style="font-size:var(--text-md);font-weight:600;margin:0">Crop Plan</h2>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         ${showSeedBtn ? `<button class="btn btn-secondary" id="cp-load-actuals-btn">📥 Load 2025-26 actuals</button>` : ''}
-        <button class="btn btn-secondary" id="agro-modal-plan-btn">+ Add via form</button>
+        <button class="btn btn-secondary" id="cp-add-paddock-btn">+ Add paddock</button>
       </div>
     </div>
 
-    <!-- Season selector -->
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
-      <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);margin-right:4px">Season:</span>
-      ${allSeasons.map(s => `
-        <button class="cp-ssn-pill${s === activeCPSeason ? ' cp-ssn-pill--active' : ''}" data-season="${esc(s)}"
-          style="font-size:12px;padding:4px 12px;border-radius:20px;border:1px solid ${s === activeCPSeason ? 'var(--blue)' : 'var(--border)'};
-            background:${s === activeCPSeason ? 'var(--blue)' : 'var(--surface)'};
-            color:${s === activeCPSeason ? 'white' : 'var(--fg)'};cursor:pointer;white-space:nowrap">
-          ${esc(s)}
-        </button>`).join('')}
-      <button class="cp-ssn-new" style="font-size:12px;padding:4px 12px;border-radius:20px;border:1px dashed var(--border);background:transparent;color:var(--hint);cursor:pointer">
-        + New season
-      </button>
-    </div>
-
-    <!-- Summary strip -->
-    <div class="stat-row" style="margin-bottom:16px">
-      <div class="stat-card"><div class="stat-label">Paddocks</div><div class="stat-value">${topRows.length || '—'}</div></div>
-      <div class="stat-card"><div class="stat-label">Planned ha</div><div class="stat-value">${totalPlanned > 0 ? totalPlanned.toFixed(1) : '—'}</div></div>
-      <div class="stat-card"><div class="stat-label">Planted ha</div><div class="stat-value">${totalPlanted > 0 ? totalPlanted.toFixed(1) : '—'}</div></div>
-      <div class="stat-card"><div class="stat-label">Loss ha</div><div class="stat-value ${totalLoss > 0 ? 'red' : ''}">${totalLoss > 0 ? totalLoss.toFixed(1) : '—'}</div></div>
-      <div class="stat-card"><div class="stat-label">Active ha</div><div class="stat-value">${totalActive > 0 ? totalActive.toFixed(1) : '—'}</div></div>
-    </div>
-
-    <!-- Spreadsheet grid -->
-    <div class="card" style="overflow:hidden;padding:0">
-      ${displayed.length === 0 ? `
-        <div class="empty-state" style="padding:48px 20px">
-          <div class="empty-icon">🌾</div>
-          <p>No crops planned for <strong>${esc(activeCPSeason)}</strong> yet.</p>
-          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-            ${showSeedBtn ? `<button class="btn btn-primary" id="cp-empty-load-btn">📥 Load 2025-26 actuals</button>` : ''}
-            <button class="btn ${showSeedBtn ? 'btn-secondary' : 'btn-primary'}" id="cp-empty-add-btn">+ Add first row</button>
-          </div>
+    ${!hasData ? `
+      <div class="empty-state" style="padding:48px 20px">
+        <div class="empty-icon">🌾</div>
+        <p>No crop plan entries yet.</p>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <button class="btn btn-primary" id="cp-empty-load-btn">📥 Load 2025-26 actuals</button>
+          <button class="btn btn-secondary" id="cp-empty-add-btn">+ Add paddock</button>
         </div>
-      ` : `
-        <div style="overflow-x:auto">
-          <table class="cp-sheet" id="cp-sheet" style="border-collapse:collapse;width:100%;min-width:900px">
+      </div>
+    ` : `
+      <!-- Matrix table -->
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+          <table id="cp-matrix" style="border-collapse:collapse;width:100%;min-width:${200 + allSeasons.length * 160}px">
+            <!-- Header row 1: season labels spanning 2 sub-columns each -->
             <thead>
+              <tr style="background:var(--surface)">
+                <th style="${TH_FIXED}border-bottom:1px solid var(--border);padding:10px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);white-space:nowrap">
+                  Paddock
+                </th>
+                ${allSeasons.map(s => {
+                  const tot = seasonTotals[s];
+                  const isCurrentSeason = s === currentSeason;
+                  return `<th colspan="2"
+                    style="padding:8px 10px;font-size:12px;font-weight:700;text-align:center;
+                      border-left:2px solid var(--border);border-bottom:1px solid var(--border);
+                      background:${isCurrentSeason ? 'color-mix(in srgb,var(--blue) 8%,var(--surface))' : 'var(--surface)'};
+                      color:${isCurrentSeason ? 'var(--blue)' : 'var(--fg)'};
+                      white-space:nowrap;min-width:160px">
+                    ${esc(s)}
+                    ${tot.planned > 0 ? `<span style="display:block;font-size:10px;font-weight:400;color:var(--hint);margin-top:1px">${tot.planned.toFixed(0)} ha planned${tot.planted > 0 ? ' · ' + tot.planted.toFixed(0) + ' planted' : ''}</span>` : ''}
+                  </th>`;
+                }).join('')}
+                <th style="width:32px;border-bottom:1px solid var(--border);background:var(--surface)"></th>
+              </tr>
+              <!-- Sub-header: planned / planted per season -->
               <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
-                ${CP_COLUMNS.map(col => `
-                  <th style="padding:8px 10px;font-size:11px;font-weight:600;text-transform:uppercase;
-                    letter-spacing:0.05em;color:var(--hint);white-space:nowrap;
-                    text-align:${col.align || 'left'};width:${col.width};min-width:60px">
-                    ${col.label}
-                  </th>`).join('')}
-                <th style="width:36px"></th>
+                <th style="${TH_FIXED}padding:5px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint)">
+                  Sub-block
+                </th>
+                ${allSeasons.map(s => `
+                  <th style="padding:5px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);border-left:2px solid var(--border);text-align:right;width:80px">Planned</th>
+                  <th style="padding:5px 8px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--hint);text-align:right;width:80px">Planted</th>
+                `).join('')}
+                <th style="background:var(--surface)"></th>
               </tr>
             </thead>
-            <tbody id="cp-sheet-body">
-              ${displayed.map(c => cpSheetRowHTML(c)).join('')}
+            <tbody id="cp-matrix-body">
+              ${paddockKeys.map((pk, i) => cpMatrixRowHTML(pk, allSeasons, idx, i)).join('')}
             </tbody>
+            <!-- Season totals footer -->
+            <tfoot>
+              <tr style="background:var(--surface);border-top:2px solid var(--border)">
+                <td style="${TH_FIXED}padding:8px 12px;font-size:11px;font-weight:700;color:var(--hint)">TOTAL</td>
+                ${allSeasons.map(s => {
+                  const tot = seasonTotals[s];
+                  return `
+                    <td style="padding:8px 8px;border-left:2px solid var(--border);text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700">
+                      ${tot.planned > 0 ? tot.planned.toFixed(1) : '—'}
+                    </td>
+                    <td style="padding:8px 8px;text-align:right;font-family:'DM Mono',monospace;font-size:12px;font-weight:700;color:${tot.planted > 0 ? 'var(--green,#22c55e)' : 'var(--hint)'}">
+                      ${tot.planted > 0 ? tot.planted.toFixed(1) : '—'}
+                    </td>`;
+                }).join('')}
+                <td style="background:var(--surface)"></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
-        <div style="border-top:1px solid var(--border);padding:8px 12px">
-          <button class="btn-link" id="cp-add-row-btn" style="font-size:0.82rem">+ Add row</button>
+        <div style="border-top:1px solid var(--border);padding:8px 14px;display:flex;align-items:center;gap:16px">
+          <button class="btn-link" id="cp-add-row-btn" style="font-size:0.82rem">+ Add paddock row</button>
+          <button class="btn-link" id="cp-add-season-btn" style="font-size:0.82rem;color:var(--hint)">+ Add season column</button>
+          <span style="font-size:11px;color:var(--hint);margin-left:auto">Click a cell to edit · Tab moves right · Enter saves · Esc cancels</span>
         </div>
-      `}
-    </div>
-    <p style="font-size:11px;color:var(--hint);margin-top:8px;padding:0 2px">
-      Click any cell to edit · Tab to move right · Enter to save · Esc to cancel
-    </p>
+      </div>
+    `}
   `;
 
-  // Season pill wiring
-  el.querySelectorAll('.cp-ssn-pill').forEach(btn => {
-    btn.addEventListener('click', () => {
-      el.dataset.cpSeason = btn.dataset.season;
-      renderCropPlan();
-    });
-  });
-
-  // New season button
-  el.querySelector('.cp-ssn-new')?.addEventListener('click', () => {
-    openModal({
-      title: 'New season',
-      bodyHTML: `
-        <div class="form-group">
-          <label class="form-label">Season label</label>
-          <input class="form-input" id="cp-new-ssn" placeholder="e.g. Summer 2026-27" value="${esc(currentSeason)}">
-        </div>`,
-      confirmLabel: 'Create season',
-      onConfirm: async () => {
-        const lbl = document.getElementById('cp-new-ssn')?.value?.trim();
-        if (!lbl) throw new Error('Season label required');
-        el.dataset.cpSeason = lbl;
-        renderCropPlan();
-      },
-    });
-  });
-
-  // Load actuals buttons
+  // ── Wire buttons ─────────────────────────────────────────────────────────
   el.querySelector('#cp-load-actuals-btn')?.addEventListener('click', loadActuals);
   el.querySelector('#cp-empty-load-btn')?.addEventListener('click', loadActuals);
 
-  // Add via form
-  el.querySelector('#agro-modal-plan-btn')?.addEventListener('click', () => openCropPlanModal());
-  el.querySelector('#cp-empty-add-btn')?.addEventListener('click', () => addBlankRow(activeCPSeason));
-  el.querySelector('#cp-add-row-btn')?.addEventListener('click', () => addBlankRow(activeCPSeason));
+  const addPaddock = () => openAddPaddockModal(allSeasons, currentSeason);
+  el.querySelector('#cp-add-paddock-btn')?.addEventListener('click', addPaddock);
+  el.querySelector('#cp-empty-add-btn')?.addEventListener('click', addPaddock);
+  el.querySelector('#cp-add-row-btn')?.addEventListener('click', addPaddock);
+
+  el.querySelector('#cp-add-season-btn')?.addEventListener('click', () => openAddSeasonModal(currentSeason));
 
   // Delete row wiring
   el.querySelectorAll('.cp-del-row-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
       e.stopPropagation();
-      const id = btn.dataset.id;
-      const entry = allCropPlan.find(c => c.id === id);
-      const name = entry ? entry.paddock_name : 'this row';
-      if (!confirm(`Delete ${name} from the crop plan?`)) return;
-      await dbDelete('crop_plan_entries', id);
-      toast('Row deleted', 'success');
+      const paddock  = btn.dataset.paddock;
+      const subBlock = btn.dataset.subblock || null;
+      const toDelete = allCropPlan.filter(c =>
+        c.paddock_name === paddock && (c.sub_block || null) === subBlock
+      );
+      if (!toDelete.length) return;
+      if (!confirm(`Delete all ${toDelete.length} season entries for ${paddock}${subBlock ? ' / ' + subBlock : ''}?`)) return;
+      await Promise.all(toDelete.map(c => dbDelete('crop_plan_entries', c.id)));
+      toast('Paddock removed from plan', 'success');
       await refreshAll();
     });
   });
 
-  // Inline edit wiring — click on a data cell
-  bindInlineEdit(el);
+  // Inline edit wiring on the matrix
+  bindMatrixEdit(el);
 }
 
-function cpSheetRowHTML(c) {
-  const activeHa = Math.max(0, (parseFloat(c.planted_ha || c.planned_ha) || 0) - (parseFloat(c.area_loss_ha) || 0));
-  const isSubBlock = !!c.sub_block;
+const TH_FIXED = 'position:sticky;left:0;z-index:2;background:var(--surface);';
 
-  const cells = CP_COLUMNS.map(col => {
-    const isComputed = col.key === '_active_ha';
-    const editable   = !isComputed;
-    const val        = isComputed ? activeHa : c[col.key];
+function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
+  const { paddock_name, sub_block } = pk;
+  const key      = paddock_name + '|' + (sub_block || '');
+  const isSubRow = !!sub_block;
+  const rowBg    = isSubRow ? 'background:color-mix(in srgb,var(--surface) 60%,var(--bg));' : '';
 
-    let display = '';
-    if (isComputed) {
-      display = activeHa > 0 ? `<span style="font-family:'DM Mono',monospace;font-weight:600">${activeHa.toFixed(1)}</span>` : '<span style="color:var(--hint)">—</span>';
-    } else if (col.type === 'number') {
-      const n = parseFloat(val);
-      const color = col.red && n > 0 ? 'color:var(--red)' : '';
-      display = !isNaN(n) ? `<span style="font-family:'DM Mono',monospace;${color}">${n.toFixed(1)}</span>` : '<span style="color:var(--hint)">—</span>';
-    } else if (col.type === 'select' && col.badgeMap) {
-      const cls = col.badgeMap[val] || 'badge-secondary';
-      const lbl = col.labelMap ? (col.labelMap[val] || val || '—') : (val || '—');
-      display = `<span class="badge ${cls}">${esc(lbl)}</span>`;
-    } else if (col.type === 'date') {
-      display = val ? `<span>${formatDate(val)}</span>` : '<span style="color:var(--hint)">—</span>';
-    } else {
-      const style = `font-weight:${col.bold && !isSubBlock ? '600' : '400'};${col.hint ? 'color:var(--hint);font-size:0.8rem' : ''}`;
-      display = val ? `<span style="${style}">${esc(val)}</span>` : '<span style="color:var(--hint)">—</span>';
-    }
+  const paddockCell = `
+    <td style="${TH_FIXED}${rowBg}padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:middle;cursor:default">
+      <div style="font-weight:${isSubRow ? '400' : '600'};font-size:0.88rem;${isSubRow ? 'padding-left:16px;color:var(--hint)' : ''}">
+        ${isSubRow ? '↳ ' + esc(sub_block) : esc(paddock_name)}
+      </div>
+      ${!isSubRow ? `<div style="font-size:0.72rem;color:var(--hint)">${esc(paddock_name)}</div>` : ''}
+    </td>`;
 
-    return `<td
-      ${editable ? `class="cp-cell" data-id="${c.id}" data-field="${col.key}" data-type="${col.type}"` : ''}
-      style="padding:7px 10px;border-bottom:1px solid var(--border);
-        text-align:${col.align || 'left'};
-        vertical-align:middle;
-        ${editable ? 'cursor:pointer;' : ''}
-        ${isSubBlock ? 'background:var(--surface);' : ''}
-        ${col.key === 'paddock_name' && isSubBlock ? 'padding-left:28px;' : ''}
-        "
-      title="${editable ? 'Click to edit' : ''}"
-    >${display}</td>`;
+  const seasonCells = seasons.map(s => {
+    const entry = idx[key]?.[s] || null;
+    return cpMatrixCell(entry, paddock_name, sub_block, s);
   }).join('');
 
-  return `
-    <tr data-id="${c.id}" data-status="${c.status}" class="cp-sheet-row"
-      style="transition:background 0.1s">
-      ${cells}
-      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center">
-        <button class="cp-del-row-btn btn-link danger" data-id="${c.id}"
-          style="opacity:0;font-size:0.75rem;padding:2px 4px;line-height:1"
-          title="Delete row">✕</button>
-      </td>
-    </tr>
-  `;
+  const delBtn = !isSubRow ? `
+    <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center;${rowBg}">
+      <button class="cp-del-row-btn btn-link danger" data-paddock="${esc(paddock_name)}" data-subblock="${esc(sub_block || '')}"
+        style="opacity:0;font-size:0.75rem;padding:2px 4px" title="Remove from plan">✕</button>
+    </td>` : `<td style="border-bottom:1px solid var(--border);${rowBg}"></td>`;
+
+  return `<tr class="cp-matrix-row" data-paddock="${esc(paddock_name)}" data-subblock="${esc(sub_block || '')}"
+    style="transition:background 0.1s">${paddockCell}${seasonCells}${delBtn}</tr>`;
 }
 
-function bindInlineEdit(container) {
-  const sheet = container.querySelector('#cp-sheet');
-  if (!sheet) return;
+function cpMatrixCell(entry, paddockName, subBlock, seasonLabel) {
+  // Each season gets 2 tds: planned ha | planted ha
+  // Both are inline-editable. If no entry exists, clicking creates one.
+  const borderL = 'border-left:2px solid var(--border);';
+  const baseStyle = `padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;vertical-align:middle;cursor:pointer;`;
 
-  // Show delete button on row hover
-  sheet.addEventListener('mouseover', e => {
-    const row = e.target.closest('tr.cp-sheet-row');
+  if (!entry) {
+    // Empty cell — click to plan this paddock for this season
+    return `
+      <td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
+        data-season="${esc(seasonLabel)}" data-field="planned_ha"
+        style="${baseStyle}${borderL}color:var(--border);font-size:0.78rem" title="Click to add">—</td>
+      <td class="cp-matrix-cell cp-matrix-cell--empty" data-paddock="${esc(paddockName)}" data-subblock="${esc(subBlock||'')}"
+        data-season="${esc(seasonLabel)}" data-field="planted_ha"
+        style="${baseStyle}color:var(--border);font-size:0.78rem" title="Click to add">—</td>`;
+  }
+
+  const id = entry.id;
+  const commodity = entry.commodity ? `<div style="font-size:10px;color:var(--blue);font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:72px;margin:0 auto 2px">${esc(entry.commodity)}${entry.water_type ? ' ' + esc(entry.water_type) : ''}</div>` : '';
+  const statusDot = _statusDot(entry.status);
+
+  const plannedN = parseFloat(entry.planned_ha);
+  const plantedN = parseFloat(entry.planted_ha);
+
+  const plannedDisp = !isNaN(plannedN)
+    ? `<span style="font-family:'DM Mono',monospace;font-size:0.85rem">${plannedN.toFixed(1)}</span>`
+    : `<span style="color:var(--hint)">—</span>`;
+  const plantedDisp = !isNaN(plantedN)
+    ? `<span style="font-family:'DM Mono',monospace;font-size:0.85rem;color:var(--green,#22c55e)">${plantedN.toFixed(1)}</span>`
+    : `<span style="color:var(--hint)">—</span>`;
+
+  return `
+    <td class="cp-matrix-cell" data-id="${id}" data-field="planned_ha" data-type="number"
+      style="${baseStyle}${borderL}" title="Planned ha — click to edit">
+      ${commodity}${statusDot}${plannedDisp}
+    </td>
+    <td class="cp-matrix-cell" data-id="${id}" data-field="planted_ha" data-type="number"
+      style="${baseStyle}" title="Planted ha — click to edit">
+      ${plantedDisp}
+    </td>`;
+}
+
+function _statusDot(status) {
+  const colors = { intent:'var(--hint)', budget:'var(--warning,#f59e0b)', planted:'var(--blue)', growing:'var(--green,#22c55e)', harvested:'var(--hint)' };
+  const c = colors[status] || 'var(--hint)';
+  return `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${c};margin-right:4px;vertical-align:middle" title="${status}"></span>`;
+}
+
+function bindMatrixEdit(container) {
+  const table = container.querySelector('#cp-matrix');
+  if (!table) return;
+
+  // Hover: show del button, highlight row
+  table.addEventListener('mouseover', e => {
+    const row = e.target.closest('tr.cp-matrix-row');
     if (!row) return;
     row.style.background = 'color-mix(in srgb, var(--blue) 4%, transparent)';
-    row.querySelector('.cp-del-row-btn').style.opacity = '1';
+    row.querySelector('.cp-del-row-btn')?.style && (row.querySelector('.cp-del-row-btn').style.opacity = '1');
   });
-  sheet.addEventListener('mouseout', e => {
-    const row = e.target.closest('tr.cp-sheet-row');
+  table.addEventListener('mouseout', e => {
+    const row = e.target.closest('tr.cp-matrix-row');
     if (!row) return;
     row.style.background = '';
-    row.querySelector('.cp-del-row-btn').style.opacity = '0';
+    row.querySelector('.cp-del-row-btn')?.style && (row.querySelector('.cp-del-row-btn').style.opacity = '0');
   });
 
-  // Click a cell to edit
-  sheet.addEventListener('click', e => {
-    const td = e.target.closest('td.cp-cell');
+  // Click a cell
+  table.addEventListener('click', async e => {
+    const td = e.target.closest('td.cp-matrix-cell');
     if (!td) return;
-    if (_cpEditCell && _cpEditCell.td === td) return; // already editing
-    if (_cpEditCell) _commitEdit(_cpEditCell);         // save previous cell first
+
+    if (_cpEditCell && _cpEditCell.td === td) return;
+    if (_cpEditCell) await _commitEdit(_cpEditCell);
+
+    // Empty cell — create entry first, then start edit
+    if (td.classList.contains('cp-matrix-cell--empty')) {
+      await _createEntryForCell(td);
+      return;
+    }
+
     _startEdit(td);
+  });
+}
+
+async function _createEntryForCell(td) {
+  const farm   = getActiveFarm();
+  const farmId = farm?.id || farm;
+  const paddockName = td.dataset.paddock;
+  const subBlock    = td.dataset.subblock || null;
+  const seasonLabel = td.dataset.season;
+  const field       = td.dataset.field;
+
+  const [newEntry] = await dbInsert('crop_plan_entries', {
+    farm_id:      farmId,
+    paddock_name: paddockName,
+    sub_block:    subBlock || null,
+    season_label: seasonLabel,
+    season_type:  seasonLabel.startsWith('Summer') ? 'Summer' : seasonLabel.startsWith('Winter') ? 'Winter' : 'Annual',
+    status:       'intent',
+    commodity:    'Cotton',
+    updated_at:   new Date().toISOString(),
+  });
+
+  if (!newEntry) { toast('Failed to create entry', 'error'); return; }
+  await refreshAll();
+
+  // After re-render, find and focus the new cell
+  const el = document.getElementById('agro-tab-cropplan');
+  setTimeout(() => {
+    const newTd = el?.querySelector(`td.cp-matrix-cell[data-id="${newEntry.id}"][data-field="${field}"]`);
+    if (newTd) _startEdit(newTd);
+  }, 60);
+}
+
+function openAddPaddockModal(allSeasons, currentSeason) {
+  const seasonOpts = allSeasons.map(s =>
+    `<option value="${esc(s)}"${s === currentSeason ? ' selected' : ''}>${esc(s)}</option>`
+  ).join('');
+  const paddockOpts = allPaddocks.length
+    ? `<select class="form-select" id="ap-paddock"><option value="">— Select paddock —</option>` +
+      allPaddocks.map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('') + `</select>`
+    : `<input class="form-input" id="ap-paddock" placeholder="Paddock name">`;
+
+  openModal({
+    title: 'Add paddock to plan',
+    bodyHTML: `
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Paddock *</label>
+          ${paddockOpts}
+        </div>
+        <div class="form-group">
+          <label class="form-label">Sub-block</label>
+          <input class="form-input" id="ap-subblock" placeholder="optional">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Season *</label>
+          <select class="form-select" id="ap-season">
+            ${seasonOpts}
+            <option value="_new">+ New season…</option>
+          </select>
+        </div>
+        <div class="form-group" id="ap-new-ssn-wrap" style="display:none">
+          <label class="form-label">Season label</label>
+          <input class="form-input" id="ap-new-ssn" placeholder="e.g. Summer 2026-27">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Commodity</label>
+          <select class="form-select" id="ap-commodity">
+            ${CP_COMMODITY_OPTIONS.map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Water type</label>
+          <select class="form-select" id="ap-water">
+            <option value="">—</option>
+            <option value="IRR">IRR</option>
+            <option value="DL">DL</option>
+            <option value="Dryland">Dryland</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Planned ha</label>
+          <input class="form-input" id="ap-planned" type="number" step="0.1" min="0" placeholder="ha">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Planted ha</label>
+          <input class="form-input" id="ap-planted" type="number" step="0.1" min="0" placeholder="ha">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-select" id="ap-status">
+            ${CP_STATUSES.map(s => `<option value="${s}"${s === 'intent' ? ' selected' : ''}>${CP_STATUS_LABELS[s]}</option>`).join('')}
+          </select>
+        </div>
+      </div>`,
+    confirmLabel: 'Add to plan',
+    wide: true,
+    onMounted: overlay => {
+      overlay.querySelector('#ap-season')?.addEventListener('change', function () {
+        overlay.querySelector('#ap-new-ssn-wrap').style.display = this.value === '_new' ? '' : 'none';
+      });
+    },
+    onConfirm: async () => {
+      const farm    = getActiveFarm();
+      const farmId  = farm?.id || farm;
+      const paddock = document.getElementById('ap-paddock')?.value?.trim();
+      let season    = document.getElementById('ap-season')?.value;
+      if (season === '_new') season = document.getElementById('ap-new-ssn')?.value?.trim();
+      if (!paddock) throw new Error('Paddock required');
+      if (!season)  throw new Error('Season required');
+
+      await dbInsert('crop_plan_entries', {
+        farm_id:      farmId,
+        paddock_name: paddock,
+        sub_block:    document.getElementById('ap-subblock')?.value?.trim() || null,
+        season_label: season,
+        season_type:  season.startsWith('Summer') ? 'Summer' : season.startsWith('Winter') ? 'Winter' : 'Annual',
+        status:       document.getElementById('ap-status')?.value || 'intent',
+        commodity:    document.getElementById('ap-commodity')?.value || null,
+        water_type:   document.getElementById('ap-water')?.value || null,
+        planned_ha:   numOrNull(document.getElementById('ap-planned')?.value),
+        planted_ha:   numOrNull(document.getElementById('ap-planted')?.value),
+        updated_at:   new Date().toISOString(),
+      });
+      toast('Added to plan', 'success');
+      await refreshAll();
+    },
+  });
+}
+
+function openAddSeasonModal(currentSeason) {
+  openModal({
+    title: 'Add season column',
+    bodyHTML: `
+      <div class="form-group">
+        <label class="form-label">Season label</label>
+        <input class="form-input" id="cp-new-ssn" placeholder="e.g. Summer 2026-27" value="${esc(currentSeason)}">
+        <p style="font-size:0.78rem;color:var(--hint);margin-top:6px">
+          A new season column appears automatically once you add a paddock entry for that season.
+          Adding a paddock row will add this season to the matrix.
+        </p>
+      </div>`,
+    confirmLabel: 'Add paddock for this season',
+    onConfirm: async () => {
+      const lbl = document.getElementById('cp-new-ssn')?.value?.trim();
+      if (!lbl) throw new Error('Season label required');
+      openAddPaddockModal([...new Set([...sortSeasons([...new Set(allCropPlan.map(c => c.season_label).filter(Boolean))]), lbl])], lbl);
+    },
   });
 }
 
@@ -796,9 +1002,9 @@ function _startEdit(td) {
       e.preventDefault();
       _commitEdit(_cpEditCell);
       if (e.key === 'Tab') {
-        // Move to next editable cell in the row
+        // Move to next editable cell in the row (works for both sheet and matrix)
         const row   = td.closest('tr');
-        const cells = [...row.querySelectorAll('td.cp-cell')];
+        const cells = [...row.querySelectorAll('td.cp-cell, td.cp-matrix-cell:not(.cp-matrix-cell--empty)')];
         const idx   = cells.indexOf(td);
         const next  = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
         if (next) setTimeout(() => _startEdit(next), 10);
@@ -935,6 +1141,8 @@ function _rerenderCell(td, field, value, entry) {
 function _refreshCpStats() {
   const el = document.getElementById('agro-tab-cropplan');
   if (!el) return;
+  // Matrix view has no cpSeason selector — skip stats refresh (totals update via refreshAll)
+  if (!el.dataset.cpSeason) return;
   const activeCPSeason = el.dataset.cpSeason;
   const topRows = allCropPlan.filter(c => c.season_label === activeCPSeason && !c.sub_block);
   const tots = {
