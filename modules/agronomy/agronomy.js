@@ -450,11 +450,11 @@ let _cpSaving     = false;
 let _cpTypeFilter    = null;   // null = show all; string = filter by commodity
 let _cpPaddockFilter = null;   // null = show all; string = filter by paddock type
 let _cpSearch        = '';     // paddock name search string
+let _cpActiveSeason  = null;   // which season gets 2-column treatment; null = auto (latest)
 
-// Active season year (e.g. "2026-27") — set each render so module-level functions can use it
-let _currentSeasonYear = null;
-// Season labels include a type prefix ("Summer 2026-27") — match by suffix
-const isCurrentSeasonLabel = s => _currentSeasonYear ? s.endsWith(_currentSeasonYear) : false;
+// Active season label (full label like "Summer 2026-27") — set each render
+let _currentSeasonLabel = null;
+const isCurrentSeasonLabel = s => !!_currentSeasonLabel && s === _currentSeasonLabel;
 
 // Best ha for a single entry — harvested > planted > planned (module-scope so cpMatrixCell can use it)
 // Only treats planted_ha as actual if status is planted/growing/harvested (not intent/budget)
@@ -578,15 +578,17 @@ function renderCropPlan() {
   const el = document.getElementById('agro-tab-cropplan');
   if (!el) return;
 
-  const currentSeason = getActiveSeason(); // e.g. "2026-27"
-  // Season labels include a type prefix: "Summer 2026-27" etc.
-  // Update the module-level matcher so cpMatrixRowHTML can use it
-  _currentSeasonYear = currentSeason;
-
   // All unique seasons, chronologically sorted
   const allSeasons = sortSeasons(
     [...new Set(allCropPlan.map(c => c.season_label).filter(Boolean))]
   );
+
+  // "Current" season for 2-column treatment = latest season in the crop plan data.
+  // We do NOT use getActiveSeason() (the global budget-module picker) because it
+  // defaults to the most recent *budget* season which may differ from the latest
+  // season in the crop plan.
+  const latestSeason = allSeasons[allSeasons.length - 1] || null;
+  _currentSeasonLabel = latestSeason;
 
 
   // ── Build the paddock × season matrix ──────────────────────────────────
@@ -803,7 +805,7 @@ function renderCropPlan() {
               </tr>
             </thead>
             <tbody id="cp-matrix-body">
-              ${paddockKeys.map((pk, i) => cpMatrixRowHTML(pk, allSeasons, idx, i, currentSeason)).join('')}
+              ${paddockKeys.map((pk, i) => cpMatrixRowHTML(pk, allSeasons, idx, i, latestSeason)).join('')}
             </tbody>
             <!-- Season totals footer -->
             <tfoot>
@@ -864,13 +866,13 @@ function renderCropPlan() {
   });
 
   // ── Wire buttons ─────────────────────────────────────────────────────────
-  const addPaddock = () => openAddPaddockModal(allSeasons, currentSeason);
+  const addPaddock = () => openAddPaddockModal(allSeasons, latestSeason);
   el.querySelector('#cp-add-paddock-btn')?.addEventListener('click', addPaddock);
   el.querySelector('#cp-empty-add-btn')?.addEventListener('click', addPaddock);
   el.querySelector('#cp-add-row-btn')?.addEventListener('click', addPaddock);
 
-  el.querySelector('#cp-plan-season-btn')?.addEventListener('click', () => openPlanSeasonModal(allSeasons, currentSeason));
-  el.querySelector('#cp-add-season-btn')?.addEventListener('click', () => openPlanSeasonModal(allSeasons, currentSeason));
+  el.querySelector('#cp-plan-season-btn')?.addEventListener('click', () => openPlanSeasonModal(allSeasons, latestSeason));
+  el.querySelector('#cp-add-season-btn')?.addEventListener('click', () => openPlanSeasonModal(allSeasons, latestSeason));
 
   // Delete row wiring
   el.querySelectorAll('.cp-del-row-btn').forEach(btn => {
