@@ -79,8 +79,8 @@ async function _loadHistory(farmId) {
       if (!_history[row.paddock_id]) _history[row.paddock_id] = [];
       _history[row.paddock_id].push(row);
     }
-  } catch (_) {
-    // History table may not exist yet — degrade gracefully
+  } catch (err) {
+    console.warn('[CFM] paddock_history load failed (table may not exist yet):', err.message);
     _history = {};
   }
 }
@@ -463,7 +463,9 @@ async function _saveField(id, field, rawValue) {
     _setIndicator(id, '✓', 1400);
 
     // Log to history (best-effort — don't fail save if history write fails)
-    _logHistory(id, field, oldValue, value).catch(() => {});
+    _logHistory(id, field, oldValue, value).catch(err => {
+      console.warn('[CFM] paddock_history insert failed:', err.message);
+    });
   } catch (err) {
     toast('Save failed — ' + (err.message || 'error'), 'error');
     _setIndicator(id, '!');
