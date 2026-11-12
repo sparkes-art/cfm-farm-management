@@ -1189,15 +1189,37 @@ function openPlanSeasonModal(allSeasons, currentSeason) {
     `<option value="${esc(s)}">${esc(s)}</option>`
   ).join('');
 
+  // Guess current year range for default
+  const now = new Date();
+  const yr1 = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+  const defaultYearRange = `${yr1}-${String(yr1 + 1).slice(2)}`;
+
   openModal({
     title: 'Plan a season',
     wide: true,
     bodyHTML: `
-      <div class="form-group">
-        <label class="form-label">New season label *</label>
-        <input class="form-input" id="ps-label" placeholder="e.g. Summer 2026-27" value="${esc(currentSeason)}">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div class="form-group">
+          <label class="form-label">Season type *</label>
+          <select class="form-select" id="ps-type">
+            <option value="Summer">Summer</option>
+            <option value="Annual">Annual</option>
+            <option value="Winter">Winter</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Year *</label>
+          <input class="form-input" id="ps-year" placeholder="e.g. ${defaultYearRange}" value="${defaultYearRange}"
+            style="font-family:'DM Mono',monospace">
+        </div>
       </div>
-      <div class="form-group" style="margin-top:16px">
+      <div class="form-group" style="margin-bottom:16px">
+        <label class="form-label" style="color:var(--hint);font-size:0.78rem">Season label (auto-generated)</label>
+        <div id="ps-label-preview" style="font-weight:600;font-size:0.95rem;color:var(--blue);padding:6px 10px;background:color-mix(in srgb,var(--blue) 8%,var(--surface));border-radius:6px;border:1px solid color-mix(in srgb,var(--blue) 20%,var(--border))">
+          Summer ${defaultYearRange}
+        </div>
+      </div>
+      <div class="form-group">
         <label class="form-label">Start from</label>
         <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
           <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
@@ -1214,7 +1236,7 @@ function openPlanSeasonModal(allSeasons, currentSeason) {
             <input type="radio" name="ps-source" value="copy" style="margin-top:3px">
             <div>
               <div style="font-weight:600;font-size:0.88rem">Copy from previous season</div>
-              <div style="font-size:0.78rem;color:var(--hint)">Copies paddock, sub-block, commodity, water type and planned ha — resets planted ha and status to Intent</div>
+              <div style="font-size:0.78rem;color:var(--hint)">Copies paddock, sub-block, commodity, crop type and planned ha — resets planted ha and status to Intent</div>
               <select class="form-select" id="ps-copy-from" style="margin-top:8px;max-width:260px" disabled>
                 ${copyFromOpts}
               </select>
@@ -1224,32 +1246,36 @@ function openPlanSeasonModal(allSeasons, currentSeason) {
       </div>`,
     confirmLabel: 'Create season plan',
     onMounted: overlay => {
+      // Live-update the label preview
+      const updatePreview = () => {
+        const type = overlay.querySelector('#ps-type')?.value || 'Summer';
+        const year = overlay.querySelector('#ps-year')?.value?.trim() || '';
+        const preview = overlay.querySelector('#ps-label-preview');
+        if (preview) preview.textContent = year ? `${type} ${year}` : `${type} …`;
+      };
+      overlay.querySelector('#ps-type')?.addEventListener('change', updatePreview);
+      overlay.querySelector('#ps-year')?.addEventListener('input', updatePreview);
+
       // Enable/disable the copy-from dropdown based on radio
       overlay.querySelectorAll('input[name="ps-source"]').forEach(radio => {
         radio.addEventListener('change', () => {
-          const sel = overlay.querySelector('#ps-copy-from');
-          if (sel) sel.disabled = radio.value !== 'copy' || !radio.checked;
-          // Check if the changed radio is "copy" and it's now checked
-          overlay.querySelectorAll('input[name="ps-source"]').forEach(r => {
-            if (overlay.querySelector('#ps-copy-from'))
-              overlay.querySelector('#ps-copy-from').disabled =
-                overlay.querySelector('input[name="ps-source"]:checked')?.value !== 'copy';
-          });
+          if (overlay.querySelector('#ps-copy-from'))
+            overlay.querySelector('#ps-copy-from').disabled =
+              overlay.querySelector('input[name="ps-source"]:checked')?.value !== 'copy';
         });
       });
     },
     onConfirm: async () => {
-      const label  = document.getElementById('ps-label')?.value?.trim();
-      if (!label) throw new Error('Season label required');
+      const seasonType = document.getElementById('ps-type')?.value || 'Summer';
+      const year       = document.getElementById('ps-year')?.value?.trim();
+      if (!year) throw new Error('Year is required (e.g. 2026-27)');
+      const label = `${seasonType} ${year}`;
 
       // Check season doesn't already exist
       const existing = allCropPlan.filter(c => c.season_label === label);
       if (existing.length) throw new Error(`Season "${label}" already has ${existing.length} entries — delete them first or choose a different label`);
 
-      const source   = document.querySelector('input[name="ps-source"]:checked')?.value || 'paddocks';
       const copyFrom = document.getElementById('ps-copy-from')?.value;
-      const seasonType = label.startsWith('Summer') ? 'Summer'
-                       : label.startsWith('Winter') ? 'Winter' : 'Annual';
 
       let rows = [];
 
