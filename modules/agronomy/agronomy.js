@@ -2,9 +2,9 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794519135634';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794519135634';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794519135634';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794519355653';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794519355653';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794519355653';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -849,6 +849,19 @@ function renderCropPlan() {
       </div>
     `}
   `;
+
+  // ── DOM post-render diagnostic ───────────────────────────────────────────
+  // Read back the actual colspans from the rendered thead to confirm what landed in DOM
+  const _tbl = el.querySelector('#cp-matrix');
+  if (_tbl) {
+    const _ths = [..._tbl.querySelectorAll('thead tr:first-child th[border-left],' +
+      'thead tr:first-child th')].filter(th => th.textContent.trim().match(/\d{4}/));
+    console.log('[CropPlan] DOM colspans:', _ths.map(th => th.textContent.trim().split('\n')[0].trim() + ':colspan=' + (th.colSpan || th.getAttribute('colspan') || 1)));
+    const _rows = [..._tbl.querySelectorAll('tbody tr.cp-matrix-row')];
+    if (_rows[0]) {
+      console.log('[CropPlan] DOM first-row cells:', _rows[0].cells.length, 'cells');
+    }
+  }
 
   // ── Wire filter chips ────────────────────────────────────────────────────
   el.querySelectorAll('.cp-paddock-chip').forEach(btn => {
