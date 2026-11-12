@@ -557,6 +557,7 @@ function renderCropPlan() {
         <h2 style="font-size:var(--text-md);font-weight:600;margin:0">Crop Plan</h2>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-secondary" id="cp-plan-season-btn">+ Plan season</button>
         <button class="btn btn-secondary" id="cp-add-paddock-btn">+ Add paddock</button>
       </div>
     </div>
@@ -644,7 +645,8 @@ function renderCropPlan() {
   el.querySelector('#cp-empty-add-btn')?.addEventListener('click', addPaddock);
   el.querySelector('#cp-add-row-btn')?.addEventListener('click', addPaddock);
 
-  el.querySelector('#cp-add-season-btn')?.addEventListener('click', () => openAddSeasonModal(currentSeason));
+  el.querySelector('#cp-plan-season-btn')?.addEventListener('click', () => openPlanSeasonModal(allSeasons, currentSeason));
+  el.querySelector('#cp-add-season-btn')?.addEventListener('click', () => openPlanSeasonModal(allSeasons, currentSeason));
 
   // Delete row wiring
   el.querySelectorAll('.cp-del-row-btn').forEach(btn => {
@@ -913,23 +915,126 @@ function openAddPaddockModal(allSeasons, currentSeason) {
   });
 }
 
-function openAddSeasonModal(currentSeason) {
+function openPlanSeasonModal(allSeasons, currentSeason) {
+  const farm   = getActiveFarm();
+  const farmId = farm?.id || farm;
+
+  // Build copy-from options (existing seasons that have data)
+  const copyFromOpts = allSeasons.map(s =>
+    `<option value="${esc(s)}">${esc(s)}</option>`
+  ).join('');
+
   openModal({
-    title: 'Add season column',
+    title: 'Plan a season',
+    wide: true,
     bodyHTML: `
       <div class="form-group">
-        <label class="form-label">Season label</label>
-        <input class="form-input" id="cp-new-ssn" placeholder="e.g. Summer 2026-27" value="${esc(currentSeason)}">
-        <p style="font-size:0.78rem;color:var(--hint);margin-top:6px">
-          A new season column appears automatically once you add a paddock entry for that season.
-          Adding a paddock row will add this season to the matrix.
-        </p>
+        <label class="form-label">New season label *</label>
+        <input class="form-input" id="ps-label" placeholder="e.g. Summer 2026-27" value="${esc(currentSeason)}">
+      </div>
+      <div class="form-group" style="margin-top:16px">
+        <label class="form-label">Start from</label>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:6px">
+          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+            <input type="radio" name="ps-source" value="paddocks" checked style="margin-top:3px">
+            <div>
+              <div style="font-weight:600;font-size:0.88rem">Base paddock list</div>
+              <div style="font-size:0.78rem;color:var(--hint)">
+                One blank row per paddock (${allPaddocks.length} paddocks) — commodity and ha to be filled in
+              </div>
+            </div>
+          </label>
+          ${allSeasons.length ? `
+          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+            <input type="radio" name="ps-source" value="copy" style="margin-top:3px">
+            <div>
+              <div style="font-weight:600;font-size:0.88rem">Copy from previous season</div>
+              <div style="font-size:0.78rem;color:var(--hint)">Copies paddock, sub-block, commodity, water type and planned ha — resets planted ha and status to Intent</div>
+              <select class="form-select" id="ps-copy-from" style="margin-top:8px;max-width:260px" disabled>
+                ${copyFromOpts}
+              </select>
+            </div>
+          </label>` : ''}
+        </div>
       </div>`,
-    confirmLabel: 'Add paddock for this season',
+    confirmLabel: 'Create season plan',
+    onMounted: overlay => {
+      // Enable/disable the copy-from dropdown based on radio
+      overlay.querySelectorAll('input[name="ps-source"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+          const sel = overlay.querySelector('#ps-copy-from');
+          if (sel) sel.disabled = radio.value !== 'copy' || !radio.checked;
+          // Check if the changed radio is "copy" and it's now checked
+          overlay.querySelectorAll('input[name="ps-source"]').forEach(r => {
+            if (overlay.querySelector('#ps-copy-from'))
+              overlay.querySelector('#ps-copy-from').disabled =
+                overlay.querySelector('input[name="ps-source"]:checked')?.value !== 'copy';
+          });
+        });
+      });
+    },
     onConfirm: async () => {
-      const lbl = document.getElementById('cp-new-ssn')?.value?.trim();
-      if (!lbl) throw new Error('Season label required');
-      openAddPaddockModal([...new Set([...sortSeasons([...new Set(allCropPlan.map(c => c.season_label).filter(Boolean))]), lbl])], lbl);
+      const label  = document.getElementById('ps-label')?.value?.trim();
+      if (!label) throw new Error('Season label required');
+
+      // Check season doesn't already exist
+      const existing = allCropPlan.filter(c => c.season_label === label);
+      if (existing.length) throw new Error(`Season "${label}" already has ${existing.length} entries — delete them first or choose a different label`);
+
+      const source   = document.querySelector('input[name="ps-source"]:checked')?.value || 'paddocks';
+      const copyFrom = document.getElementById('ps-copy-from')?.value;
+      const seasonType = label.startsWith('Summer') ? 'Summer'
+                       : label.startsWith('Winter') ? 'Winter' : 'Annual';
+
+      let rows = [];
+
+      if (source === 'copy' && copyFrom) {
+        // Copy from an existing season
+        const srcEntries = allCropPlan.filter(c => c.season_label === copyFrom);
+        if (!srcEntries.length) throw new Error(`No entries found for ${copyFrom}`);
+        rows = srcEntries.map(e => ({
+          farm_id:      farmId,
+          paddock_name: e.paddock_name,
+          sub_block:    e.sub_block || null,
+          season_label: label,
+          season_type:  seasonType,
+          status:       'intent',
+          commodity:    e.commodity || null,
+          water_type:   e.water_type || null,
+          variety:      e.variety || null,
+          planned_ha:   e.planned_ha || null,
+          planted_ha:   null,
+          area_loss_ha: null,
+          wet_date:     null,
+          notes:        null,
+          updated_at:   new Date().toISOString(),
+        }));
+      } else {
+        // Base paddock list
+        if (!allPaddocks.length) throw new Error('No paddocks found — add paddocks in the Paddocks tab first');
+        rows = allPaddocks.map(p => ({
+          farm_id:      farmId,
+          paddock_name: p.name,
+          sub_block:    null,
+          season_label: label,
+          season_type:  seasonType,
+          status:       'intent',
+          commodity:    null,
+          water_type:   null,
+          variety:      null,
+          planned_ha:   null,
+          planted_ha:   null,
+          area_loss_ha: null,
+          wet_date:     null,
+          notes:        null,
+          updated_at:   new Date().toISOString(),
+        }));
+      }
+
+      // Bulk insert
+      await dbInsert('crop_plan_entries', rows);
+      toast(`${rows.length} paddocks added to ${label}`, 'success');
+      await refreshAll();
     },
   });
 }
