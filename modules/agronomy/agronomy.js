@@ -604,6 +604,16 @@ function renderCropPlan() {
     };
   });
 
+  // Summary by commodity across ALL entries (ignores filters)
+  const commoditySummary = {};
+  allCropPlan.forEach(c => {
+    if (!c.commodity) return;
+    if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { planned: 0, planted: 0 };
+    commoditySummary[c.commodity].planned += parseFloat(c.planned_ha) || 0;
+    commoditySummary[c.commodity].planted += parseFloat(c.planted_ha) || 0;
+  });
+  const summaryEntries = Object.entries(commoditySummary).sort((a, b) => b[1].planned - a[1].planned);
+
   const hasData = paddockKeys.length > 0;
 
   el.innerHTML = `
@@ -639,12 +649,23 @@ function renderCropPlan() {
       </div>` : ''}
       ${usedCropTypes.length > 0 ? `
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);width:72px;flex-shrink:0">Crop:</span>
+        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);width:72px;flex-shrink:0">Type:</span>
         <button class="cp-type-chip cp-crop-chip${!_cpTypeFilter ? ' cp-type-chip--active' : ''}" data-type="">All</button>
         ${usedCropTypes.map(t => `<button class="cp-type-chip cp-crop-chip${_cpTypeFilter === t ? ' cp-type-chip--active' : ''}" data-type="${esc(t)}">${esc(t)}</button>`).join('')}
       </div>` : ''}
     </div>
     ` : ''}
+
+    ${summaryEntries.length > 0 ? `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${summaryEntries.map(([commodity, tots]) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:0.82rem">
+          <span style="font-weight:700;color:var(--fg)">${esc(commodity)}</span>
+          <span style="color:var(--hint);font-size:0.72rem">planned</span>
+          <span style="font-family:'DM Mono',monospace;font-weight:600">${tots.planned.toFixed(0)} ha</span>
+          ${tots.planted > 0 ? `<span style="color:var(--hint);font-size:0.72rem">planted</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:var(--green,#22c55e)">${tots.planted.toFixed(0)} ha</span>` : ''}
+        </div>`).join('')}
+    </div>` : ''}
 
     ${!hasData ? `
       <div class="empty-state" style="padding:48px 20px">
@@ -777,6 +798,7 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
 
   const paddockMeta = !isSubRow ? allPaddocks.find(p => p.name === paddock_name) : null;
   const paddockType = paddockMeta?.type || null;
+  const paddockArea = paddockMeta?.area_ha ? parseFloat(paddockMeta.area_ha) : null;
 
   const paddockCell = `
     <td style="${TH_FIXED}${rowBg}padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle;cursor:default;min-width:120px;max-width:160px">
@@ -785,16 +807,27 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
           <div style="font-weight:${isSubRow ? '400' : '600'};font-size:0.85rem;${isSubRow ? 'padding-left:12px;color:var(--hint);' : ''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(isSubRow ? sub_block : paddock_name)}">
             ${isSubRow ? '↳ ' + esc(sub_block) : esc(paddock_name)}
           </div>
-          ${!isSubRow && paddockType ? (() => {
-            const c = PADDOCK_TYPE_COLORS[paddockType];
-            return c
-              ? `<div style="font-size:0.72rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:8px;background:${c.bg};color:${c.text}"><span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${c.dot};flex-shrink:0"></span>${esc(paddockType)}</div>`
-              : `<div style="font-size:0.72rem;color:var(--hint);font-weight:400;margin-top:1px">${esc(paddockType)}</div>`;
+          ${!isSubRow ? (() => {
+            const c = paddockType ? PADDOCK_TYPE_COLORS[paddockType] : null;
+            const typeBadge = c
+              ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:8px;background:${c.bg};color:${c.text};font-weight:600"><span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${c.dot};flex-shrink:0"></span>${esc(paddockType)}</span>`
+              : paddockType ? `<span style="color:var(--hint)">${esc(paddockType)}</span>` : '';
+            const areaTag = paddockArea != null
+              ? `<span style="color:var(--hint);font-family:'DM Mono',monospace">${paddockArea.toFixed(0)} ha</span>`
+              : '';
+            return (typeBadge || areaTag)
+              ? `<div style="font-size:0.72rem;margin-top:3px;display:flex;align-items:center;gap:5px;flex-wrap:wrap">${typeBadge}${areaTag}</div>`
+              : '';
           })() : ''}
         </div>
-        ${!isSubRow ? `<button class="cp-add-subblock-btn btn-link" data-paddock="${esc(paddock_name)}"
-          style="opacity:0;font-size:0.7rem;color:var(--hint);padding:1px 5px;border:1px dashed var(--border);border-radius:3px;white-space:nowrap;flex-shrink:0;transition:opacity 0.1s"
-          title="Add sub-block">+ sub</button>` : ''}
+        <div style="display:flex;gap:3px;flex-shrink:0">
+          ${!isSubRow ? `<button class="cp-add-subblock-btn btn-link" data-paddock="${esc(paddock_name)}"
+            style="opacity:0;font-size:0.7rem;color:var(--hint);padding:1px 5px;border:1px dashed var(--border);border-radius:3px;white-space:nowrap;transition:opacity 0.1s"
+            title="Add sub-block">+ sub</button>` : ''}
+          <button class="cp-expand-btn btn-link" data-paddock="${esc(paddock_name)}" data-subblock="${esc(sub_block || '')}"
+            style="opacity:0;font-size:0.75rem;color:var(--hint);padding:1px 5px;border:1px solid var(--border);border-radius:3px;transition:opacity 0.1s;line-height:1"
+            title="Show detail">···</button>
+        </div>
       </div>
     </td>`;
 
@@ -831,8 +864,6 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel) {
   }
 
   const id = entry.id;
-  const commodity = entry.commodity ? `<div style="font-size:10px;color:var(--blue);font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;margin:0 auto 2px" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>` : '';
-  const statusDot = _statusDot(entry.status);
 
   const plannedN = parseFloat(entry.planned_ha);
   const plantedN = parseFloat(entry.planted_ha);
@@ -844,13 +875,24 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel) {
     ? `<span style="font-family:'DM Mono',monospace;font-size:0.85rem;color:var(--green,#22c55e)">${plantedN.toFixed(1)}</span>`
     : `<span style="color:var(--hint)">—</span>`;
 
+  // Commodity + status shown in planned cell as header; variety shown small if set
+  const statusDot  = _statusDot(entry.status);
+  const statusLabel = entry.status ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--hint)">${CP_STATUS_LABELS[entry.status] || entry.status}</span>` : '';
+  const commodityLine = entry.commodity
+    ? `<div style="font-size:10px;color:var(--blue);font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
+    : '';
+  const varietyLine = entry.variety
+    ? `<div style="font-size:9px;color:var(--hint);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(entry.variety)}">${esc(entry.variety)}</div>`
+    : '';
+  const topInfo = `<div style="margin-bottom:4px">${commodityLine}${varietyLine}<div style="display:flex;align-items:center;justify-content:center;gap:3px">${statusDot}${statusLabel}</div></div>`;
+
   return `
     <td class="cp-matrix-cell" data-id="${id}" data-field="planned_ha" data-type="number"
-      style="${baseStyle}${borderL}" title="Planned ha — click to edit">
-      ${commodity}${statusDot}${plannedDisp}
+      style="${baseStyle}${borderL}min-width:95px" title="Click to edit">
+      ${topInfo}${plannedDisp}
     </td>
     <td class="cp-matrix-cell" data-id="${id}" data-field="planted_ha" data-type="number"
-      style="${baseStyle}" title="Planted ha — click to edit">
+      style="${baseStyle}min-width:95px" title="Click to edit">
       ${plantedDisp}
     </td>`;
 }
@@ -866,20 +908,15 @@ function bindMatrixEdit(container) {
   if (!table) return;
 
   // Hover: show del + sub-block buttons, highlight row
-  table.addEventListener('mouseover', e => {
-    const row = e.target.closest('tr.cp-matrix-row');
+  const _setRowHover = (row, on) => {
     if (!row) return;
-    row.style.background = 'color-mix(in srgb, var(--blue) 4%, transparent)';
-    row.querySelector('.cp-del-row-btn')?.style && (row.querySelector('.cp-del-row-btn').style.opacity = '1');
-    row.querySelector('.cp-add-subblock-btn')?.style && (row.querySelector('.cp-add-subblock-btn').style.opacity = '1');
-  });
-  table.addEventListener('mouseout', e => {
-    const row = e.target.closest('tr.cp-matrix-row');
-    if (!row) return;
-    row.style.background = '';
-    row.querySelector('.cp-del-row-btn')?.style && (row.querySelector('.cp-del-row-btn').style.opacity = '0');
-    row.querySelector('.cp-add-subblock-btn')?.style && (row.querySelector('.cp-add-subblock-btn').style.opacity = '0');
-  });
+    row.style.background = on ? 'color-mix(in srgb, var(--blue) 4%, transparent)' : '';
+    row.querySelector('.cp-del-row-btn')?.style      && (row.querySelector('.cp-del-row-btn').style.opacity      = on ? '1' : '0');
+    row.querySelector('.cp-add-subblock-btn')?.style && (row.querySelector('.cp-add-subblock-btn').style.opacity = on ? '1' : '0');
+    row.querySelector('.cp-expand-btn')?.style       && (row.querySelector('.cp-expand-btn').style.opacity       = on ? '1' : '0');
+  };
+  table.addEventListener('mouseover', e => _setRowHover(e.target.closest('tr.cp-matrix-row'), true));
+  table.addEventListener('mouseout',  e => _setRowHover(e.target.closest('tr.cp-matrix-row'), false));
 
   // Add sub-block
   table.addEventListener('click', e => {
@@ -889,6 +926,77 @@ function bindMatrixEdit(container) {
     const paddockName = btn.dataset.paddock;
     const allSeasons  = sortSeasons([...new Set(allCropPlan.map(c => c.season_label).filter(Boolean))]);
     _openAddSubBlockModal(paddockName, allSeasons);
+  });
+
+  // Expand row detail
+  table.addEventListener('click', e => {
+    const btn = e.target.closest('.cp-expand-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const paddock  = btn.dataset.paddock;
+    const subblock = btn.dataset.subblock || '';
+    const rowKey   = paddock + '\x00' + subblock;
+    const tr       = btn.closest('tr.cp-matrix-row');
+    if (!tr) return;
+
+    // Toggle existing detail row
+    const existingDetail = tr.nextElementSibling;
+    if (existingDetail && existingDetail.classList.contains('cp-detail-row') &&
+        existingDetail.dataset.key === rowKey) {
+      existingDetail.remove();
+      btn.textContent = '···';
+      btn.title = 'Show detail';
+      return;
+    }
+    // Remove any other open detail rows
+    table.querySelectorAll('tr.cp-detail-row').forEach(r => r.remove());
+    table.querySelectorAll('.cp-expand-btn').forEach(b => { b.textContent = '···'; b.title = 'Show detail'; });
+
+    // Build detail row from entries for this paddock/subblock
+    const entries = allCropPlan.filter(c =>
+      c.paddock_name === paddock && (c.sub_block || '') === subblock
+    );
+    const seasons = sortSeasons([...new Set(allCropPlan.map(c => c.season_label).filter(Boolean))]);
+    const colCount = 2 + seasons.length; // paddock col + seasons
+
+    const detailRow = document.createElement('tr');
+    detailRow.className = 'cp-detail-row';
+    detailRow.dataset.key = rowKey;
+    detailRow.style.cssText = 'background:color-mix(in srgb, var(--blue) 3%, var(--surface))';
+
+    // Label cell (sticky)
+    const labelTd = document.createElement('td');
+    labelTd.colSpan = 2;
+    labelTd.style.cssText = `position:sticky;left:0;z-index:2;background:color-mix(in srgb, var(--blue) 3%, var(--surface));
+      padding:6px 8px;border-top:1px dashed var(--border);font-size:0.7rem;color:var(--hint);font-style:italic;white-space:nowrap`;
+    labelTd.textContent = 'Detail';
+    detailRow.appendChild(labelTd);
+
+    // One td per season
+    seasons.forEach(season => {
+      const entry = entries.find(c => c.season_label === season);
+      const td = document.createElement('td');
+      td.style.cssText = 'border-top:1px dashed var(--border);padding:6px 8px;vertical-align:top;min-width:110px';
+
+      if (entry) {
+        const rows = [
+          entry.variety   ? `<div><span style="color:var(--hint);font-size:0.68rem">Variety</span> <span style="font-size:0.72rem">${esc(entry.variety)}</span></div>` : '',
+          entry.status    ? `<div><span style="color:var(--hint);font-size:0.68rem">Status</span> <span style="font-size:0.72rem">${esc(CP_STATUS_LABELS[entry.status] || entry.status)}</span></div>` : '',
+          entry.water_type? `<div><span style="color:var(--hint);font-size:0.68rem">Type</span> <span style="font-size:0.72rem">${esc(entry.water_type)}</span></div>` : '',
+          entry.wet_date  ? `<div><span style="color:var(--hint);font-size:0.68rem">Wet date</span> <span style="font-size:0.72rem">${esc(entry.wet_date)}</span></div>` : '',
+          entry.yield_target_t_ha != null ? `<div><span style="color:var(--hint);font-size:0.68rem">Yield target</span> <span style="font-size:0.72rem">${entry.yield_target_t_ha} t/ha</span></div>` : '',
+          entry.notes     ? `<div style="margin-top:3px;font-size:0.7rem;color:var(--hint);font-style:italic">${esc(entry.notes)}</div>` : '',
+        ].filter(Boolean).join('');
+        td.innerHTML = rows || '<span style="color:var(--hint);font-size:0.68rem">—</span>';
+      } else {
+        td.innerHTML = '<span style="color:var(--border);font-size:0.68rem">—</span>';
+      }
+      detailRow.appendChild(td);
+    });
+
+    tr.insertAdjacentElement('afterend', detailRow);
+    btn.textContent = '▴';
+    btn.title = 'Hide detail';
   });
 
   // Click a cell — open popover for the entry
