@@ -267,9 +267,14 @@ function _historyPanelHTML(p) {
           const newV  = e.new_value != null ? _esc(String(e.new_value)) : '<em style="color:var(--hint)">—</em>';
           change = `<span style="font-size:0.78rem"><strong>${label}:</strong> ${oldV} → ${newV}</span>`;
         }
-        const note = e.notes ? `<span style="font-size:0.78rem;color:var(--ink);font-style:italic">${_esc(e.notes)}</span>` : '';
+        const noteEl = e.notes
+          ? `<span class="pk-hist-note" style="font-size:0.78rem;color:var(--ink);font-style:italic">${_esc(e.notes)}</span>
+             <button class="btn btn-xs pk-edit-note-btn" data-hist-id="${e.id}" data-paddock-id="${p.id}"
+               style="font-size:0.68rem;padding:1px 5px;opacity:0.5">edit note</button>`
+          : `<button class="btn btn-xs pk-edit-note-btn" data-hist-id="${e.id}" data-paddock-id="${p.id}"
+               style="font-size:0.68rem;padding:1px 5px;opacity:0.5">+ add note</button>`;
         return `
-          <div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)">
+          <div class="pk-hist-entry" data-hist-id="${e.id}" style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)">
             <div style="flex-shrink:0;text-align:right;min-width:88px">
               <div style="font-size:0.72rem;color:var(--hint)">${dateStr}</div>
               <div style="font-size:0.68rem;color:var(--hint)">${timeStr}</div>
@@ -277,7 +282,9 @@ function _historyPanelHTML(p) {
             </div>
             <div style="flex:1;display:flex;flex-direction:column;gap:3px;padding-top:1px">
               ${change}
-              ${note}
+              <div class="pk-hist-note-row" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                ${noteEl}
+              </div>
             </div>
           </div>`;
       }).join('');
@@ -403,6 +410,13 @@ function _bindTableEvents() {
     const btn = e.target.closest('.pk-add-note-btn');
     if (!btn) return;
     _promptAddNote(btn.dataset.id, btn.dataset.name);
+  });
+
+  // Inline note on individual history entry
+  tb.addEventListener('click', (e) => {
+    const btn = e.target.closest('.pk-edit-note-btn');
+    if (!btn) return;
+    _inlineEditNote(btn);
   });
 
   // Delete
@@ -605,6 +619,61 @@ function _confirmDelete(id, name) {
       toast(`"${name}" deleted`);
     },
   });
+}
+
+// ── Inline note edit on a history entry ─────────────────────────────────────
+
+function _inlineEditNote(btn) {
+  const histId    = btn.dataset.histId;
+  const paddockId = btn.dataset.paddockId;
+  const entry     = (_history[paddockId] || []).find(e => e.id === histId);
+  if (!entry) return;
+
+  const noteRow = btn.closest('.pk-hist-note-row');
+  if (!noteRow) return;
+
+  // Replace button (and existing note text) with an inline input
+  const current = entry.notes || '';
+  noteRow.innerHTML = `
+    <input class="pk-inline-note-input" type="text" value="${_esc(current)}"
+      placeholder="Add a note…"
+      style="flex:1;min-width:0;font-size:0.78rem;padding:2px 6px;border:1px solid var(--border);
+      border-radius:4px;background:var(--surface);color:var(--ink);font-style:italic">
+    <button class="btn btn-xs pk-inline-note-save" style="font-size:0.68rem;padding:1px 6px">Save</button>
+    <button class="btn btn-xs pk-inline-note-cancel" style="font-size:0.68rem;padding:1px 5px;opacity:0.5">✕</button>`;
+
+  const input  = noteRow.querySelector('.pk-inline-note-input');
+  const save   = noteRow.querySelector('.pk-inline-note-save');
+  const cancel = noteRow.querySelector('.pk-inline-note-cancel');
+
+  input.focus();
+  input.select();
+
+  const doSave = async () => {
+    const val = input.value.trim() || null;
+    try {
+      await _updateHistoryNote(histId, paddockId, val);
+      // Refresh the whole history panel to reflect the change
+      _refreshHistoryPanel(paddockId);
+    } catch (err) {
+      toast('Could not save note', 'error');
+      _refreshHistoryPanel(paddockId);
+    }
+  };
+
+  save.addEventListener('click', doSave);
+  cancel.addEventListener('click', () => _refreshHistoryPanel(paddockId));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter')  { e.preventDefault(); doSave(); }
+    if (e.key === 'Escape') { e.preventDefault(); _refreshHistoryPanel(paddockId); }
+  });
+}
+
+async function _updateHistoryNote(histId, paddockId, notes) {
+  await dbUpdate('paddock_history', histId, { notes });
+  // Update in-memory entry
+  const entry = (_history[paddockId] || []).find(e => e.id === histId);
+  if (entry) entry.notes = notes;
 }
 
 // ── Add standalone note ──────────────────────────────────────────────────────
