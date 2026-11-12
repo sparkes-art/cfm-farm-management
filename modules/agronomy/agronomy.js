@@ -726,11 +726,17 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
   const isSubRow = !!sub_block;
   const rowBg    = isSubRow ? 'background:color-mix(in srgb,var(--surface) 60%,var(--bg));' : '';
 
+  const paddockMeta = !isSubRow ? allPaddocks.find(p => p.name === paddock_name) : null;
+  const paddockType = paddockMeta?.type || null;
+
   const paddockCell = `
     <td style="${TH_FIXED}${rowBg}padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle;cursor:default;min-width:120px;max-width:160px">
       <div style="display:flex;align-items:center;gap:6px">
-        <div style="font-weight:${isSubRow ? '400' : '600'};font-size:0.85rem;${isSubRow ? 'padding-left:12px;color:var(--hint)' : ''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px" title="${esc(isSubRow ? sub_block : paddock_name)}">
-          ${isSubRow ? '↳ ' + esc(sub_block) : esc(paddock_name)}
+        <div style="min-width:0">
+          <div style="font-weight:${isSubRow ? '400' : '600'};font-size:0.85rem;${isSubRow ? 'padding-left:12px;color:var(--hint);' : ''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(isSubRow ? sub_block : paddock_name)}">
+            ${isSubRow ? '↳ ' + esc(sub_block) : esc(paddock_name)}
+          </div>
+          ${!isSubRow && paddockType ? `<div style="font-size:0.72rem;color:var(--hint);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px">${esc(paddockType)}</div>` : ''}
         </div>
         ${!isSubRow ? `<button class="cp-add-subblock-btn btn-link" data-paddock="${esc(paddock_name)}"
           style="opacity:0;font-size:0.7rem;color:var(--hint);padding:1px 5px;border:1px dashed var(--border);border-radius:3px;white-space:nowrap;flex-shrink:0;transition:opacity 0.1s"
