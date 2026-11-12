@@ -13,6 +13,7 @@ let _container = null;
 
 // ── Entry point ───────────────────────────────────────────────
 export async function mountContracts(container) {
+  const pillStyle = 'font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid var(--border);cursor:pointer;width:100%;text-align:left';
   container.innerHTML = `
     <div class="page-header">
       <div>
@@ -25,46 +26,57 @@ export async function mountContracts(container) {
       </div>
     </div>
 
-    <!-- Filter panel — Excel slicer style -->
-    <div class="card" style="margin-bottom:12px;overflow:hidden">
+    <div style="display:flex;gap:12px;align-items:flex-start">
 
-      <!-- Contract # search — like invoice contract picker -->
-      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px">
-        <div style="position:relative;width:320px">
-          <input type="text" id="con-search" class="form-input" placeholder="Search contract number…" autocomplete="off" style="width:100%;padding-right:32px">
+      <!-- Left filter panel -->
+      <div id="con-side-panel" style="width:260px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:10px;display:flex;flex-direction:column;gap:10px;align-self:flex-start">
+
+        <!-- Search -->
+        <div style="position:relative">
+          <input type="text" id="con-search" class="form-input" placeholder="Search…" autocomplete="off" style="width:100%;font-size:12px;padding:5px 8px">
           <div id="con-search-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:white;border:1px solid var(--border);border-radius:var(--radius-md);margin-top:2px;max-height:200px;overflow-y:auto;box-shadow:var(--shadow-md)">
             <div id="con-search-opts"></div>
           </div>
         </div>
-        <span id="con-count" style="font-size:11px;color:var(--hint)"></span>
-        <button id="con-clear-filters" class="btn btn-ghost btn-sm" style="display:none;margin-left:auto">✕ Clear all</button>
-      </div>
 
-      <!-- Slicer rows -->
-      <div style="display:grid;grid-template-columns:110px 1fr;border-bottom:1px solid var(--border)">
-        <div style="padding:10px 16px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);border-right:1px solid var(--border);display:flex;align-items:center">Commodity</div>
-        <div id="con-commodity-pills" style="padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
-      </div>
-      <div style="display:grid;grid-template-columns:110px 1fr;border-bottom:1px solid var(--border)">
-        <div style="padding:10px 16px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);border-right:1px solid var(--border);display:flex;align-items:center">Status</div>
-        <div style="padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-          <button class="con-status-pill con-slicer-btn active" data-val="" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--blue);color:white;border-color:var(--blue);cursor:pointer;font-weight:500">All</button>
-          <button class="con-status-pill con-slicer-btn" data-val="not_started" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:white;color:var(--ink-mid);cursor:pointer">Not started</button>
-          <button class="con-status-pill con-slicer-btn" data-val="filling" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:white;color:var(--ink-mid);cursor:pointer">Filling</button>
-          <button class="con-status-pill con-slicer-btn" data-val="complete" style="font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:white;color:var(--ink-mid);cursor:pointer">Complete</button>
+        <!-- Commodity filter -->
+        <div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Commodity</div>
+          <div id="con-commodity-pills" style="display:flex;flex-direction:column;gap:3px"></div>
+        </div>
+
+        <!-- Status filter -->
+        <div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Status</div>
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <button class="con-status-pill con-slicer-btn active" data-val="" style="${pillStyle};background:var(--blue);color:white;border-color:var(--blue);font-weight:500">All</button>
+            <button class="con-status-pill con-slicer-btn" data-val="not_started" style="${pillStyle};background:white;color:var(--ink-mid)">Not started</button>
+            <button class="con-status-pill con-slicer-btn" data-val="filling" style="${pillStyle};background:white;color:var(--ink-mid)">Filling</button>
+            <button class="con-status-pill con-slicer-btn" data-val="complete" style="${pillStyle};background:white;color:var(--ink-mid)">Complete</button>
+          </div>
+        </div>
+
+        <!-- Delivery month filter -->
+        <div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Delivery month</div>
+          <div id="con-month-pills" style="display:flex;flex-direction:column;gap:3px"></div>
+        </div>
+
+        <!-- Footer -->
+        <div style="border-top:1px solid var(--border);padding-top:7px;display:flex;justify-content:space-between;align-items:center">
+          <span id="con-count" style="font-size:11px;color:var(--hint)"></span>
+          <button id="con-clear-filters" class="btn btn-ghost btn-sm" style="display:none;font-size:11px;padding:2px 7px">✕ Clear</button>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:110px 1fr">
-        <div style="padding:10px 16px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);border-right:1px solid var(--border);display:flex;align-items:center">Delivery</div>
-        <div id="con-month-pills" style="padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
-      </div>
-    </div>
 
-    <div class="card" id="con-summary-strip" style="margin-bottom:12px;overflow:hidden;padding:0"></div>
-
-    <div class="card">
-      <div id="con-table-wrap">
-        <div class="empty-state"><div class="empty-icon">📋</div><p>Loading contracts…</p></div>
+      <!-- Right content -->
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:12px">
+        <div class="card" id="con-summary-strip" style="overflow:hidden;padding:0"></div>
+        <div class="card">
+          <div id="con-table-wrap">
+            <div class="empty-state"><div class="empty-icon">📋</div><p>Loading contracts…</p></div>
+          </div>
+        </div>
       </div>
     </div>
   `;
@@ -362,15 +374,15 @@ function _renderSummaryStrip(container) {
 }
 
 function _renderTable() {
+  const pillStyle = 'font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid var(--border);cursor:pointer;width:100%;text-align:left';
   // Build commodity pills dynamically
   const _cpWrap = document.getElementById('con-commodity-pills');
   if (_cpWrap && !_cpWrap.dataset.built) {
     _cpWrap.dataset.built = '1';
     const commodities = [...new Set(_contracts.map(c=>c.commodity).filter(Boolean))].sort();
     const activeComms = new Set([...(_container?.querySelectorAll('.con-commodity-pill.active')||[])].map(el=>el.dataset.val).filter(Boolean));
-    const slicerStyle = 'font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);cursor:pointer';
-    _cpWrap.innerHTML = `<button class="con-commodity-pill con-slicer-btn ${activeComms.size===0?'active':''}" data-val="" style="${slicerStyle};background:${activeComms.size===0?'var(--blue)':'white'};color:${activeComms.size===0?'white':'var(--ink-mid)'};border-color:${activeComms.size===0?'var(--blue)':'var(--border)'};font-weight:500">All</button>` +
-      commodities.map(c => `<button class="con-commodity-pill con-slicer-btn ${activeComms.has(c)?'active':''}" data-val="${c}" style="${slicerStyle};background:${activeComms.has(c)?'var(--blue)':'white'};color:${activeComms.has(c)?'white':'var(--ink-mid)'};border-color:${activeComms.has(c)?'var(--blue)':'var(--border)'}">${c}</button>`).join('');
+    _cpWrap.innerHTML = `<button class="con-commodity-pill con-slicer-btn ${activeComms.size===0?'active':''}" data-val="" style="${pillStyle};background:${activeComms.size===0?'var(--blue)':'white'};color:${activeComms.size===0?'white':'var(--ink-mid)'};border-color:${activeComms.size===0?'var(--blue)':'var(--border)'};font-weight:500">All</button>` +
+      commodities.map(c => `<button class="con-commodity-pill con-slicer-btn ${activeComms.has(c)?'active':''}" data-val="${c}" style="${pillStyle};background:${activeComms.has(c)?'var(--blue)':'white'};color:${activeComms.has(c)?'white':'var(--ink-mid)'};border-color:${activeComms.has(c)?'var(--blue)':'var(--border)'}">${c}</button>`).join('');
     _wirePillGroup(_container, '.con-commodity-pill');
   }
 
@@ -380,12 +392,11 @@ function _renderTable() {
     _mpWrap.dataset.built = '1';
     const months = [...new Set(_contracts.filter(c=>c.delivery_start).map(c=>c.delivery_start.slice(0,7)))].sort();
     const activeMonths = new Set([...(_container?.querySelectorAll('.con-month-pill.active')||[])].map(el=>el.dataset.val).filter(Boolean));
-    const slicerStyle2 = 'font-size:11px;padding:4px 12px;border-radius:4px;border:1px solid var(--border);cursor:pointer';
-    _mpWrap.innerHTML = `<button class="con-month-pill con-slicer-btn ${activeMonths.size===0?'active':''}" data-val="" style="${slicerStyle2};background:${activeMonths.size===0?'var(--blue)':'white'};color:${activeMonths.size===0?'white':'var(--ink-mid)'};border-color:${activeMonths.size===0?'var(--blue)':'var(--border)'};font-weight:500">All</button>` +
+    _mpWrap.innerHTML = `<button class="con-month-pill con-slicer-btn ${activeMonths.size===0?'active':''}" data-val="" style="${pillStyle};background:${activeMonths.size===0?'var(--blue)':'white'};color:${activeMonths.size===0?'white':'var(--ink-mid)'};border-color:${activeMonths.size===0?'var(--blue)':'var(--border)'};font-weight:500">All</button>` +
       months.map(m => {
         const [y,mo] = m.split('-');
         const label = new Date(y,mo-1).toLocaleDateString('en-AU',{month:'short',year:'numeric'});
-        return `<button class="con-month-pill con-slicer-btn ${activeMonths.has(m)?'active':''}" data-val="${m}" style="${slicerStyle2};background:${activeMonths.has(m)?'var(--blue)':'white'};color:${activeMonths.has(m)?'white':'var(--ink-mid)'};border-color:${activeMonths.has(m)?'var(--blue)':'var(--border)'}">${label}</button>`;
+        return `<button class="con-month-pill con-slicer-btn ${activeMonths.has(m)?'active':''}" data-val="${m}" style="${pillStyle};background:${activeMonths.has(m)?'var(--blue)':'white'};color:${activeMonths.has(m)?'white':'var(--ink-mid)'};border-color:${activeMonths.has(m)?'var(--blue)':'var(--border)'}">${label}</button>`;
       }).join('');
     _wirePillGroup(_container, '.con-month-pill');
   }

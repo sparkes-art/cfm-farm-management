@@ -293,9 +293,8 @@ function _historyPanelHTML(p) {
     <tr class="pk-history-row" data-history-for="${p.id}">
       <td colspan="4" style="padding:0;border-top:none">
         <div style="background:var(--bg,#f9fafb);border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;padding:10px 12px">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="margin-bottom:8px">
             <span style="font-size:0.75rem;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:0.04em">History — ${_esc(p.name)}</span>
-            <button class="btn btn-xs pk-add-note-btn" data-id="${p.id}" data-name="${_esc(p.name)}">+ Add note</button>
           </div>
           <div style="max-height:240px;overflow-y:auto">
             ${timelineRows}
@@ -396,20 +395,10 @@ function _bindTableEvents() {
         const tmp = document.createElement('tbody');
         tmp.innerHTML = _historyPanelHTML(p);
         paddockRow.after(tmp.firstElementChild);
-        // Bind add-note button
-        _container.querySelector(`.pk-add-note-btn[data-id="${id}"]`)
-          ?.addEventListener('click', () => _promptAddNote(id, p.name));
       }
       const c1 = (_history[id] || []).length;
       btn.textContent = `▾ History${c1 > 0 ? ` (${c1})` : ''}`;
     }
-  });
-
-  // Add note (re-bind after any re-render)
-  tb.addEventListener('click', (e) => {
-    const btn = e.target.closest('.pk-add-note-btn');
-    if (!btn) return;
-    _promptAddNote(btn.dataset.id, btn.dataset.name);
   });
 
   // Inline note on individual history entry
@@ -537,9 +526,6 @@ function _refreshHistoryPanel(paddockId) {
     const tmp = document.createElement('tbody');
     tmp.innerHTML = _historyPanelHTML(p);
     existing.replaceWith(tmp.firstElementChild);
-    // Re-bind the add-note button on the fresh panel
-    _container.querySelector(`.pk-add-note-btn[data-id="${paddockId}"]`)
-      ?.addEventListener('click', () => _promptAddNote(paddockId, p.name));
   }
 }
 
@@ -674,38 +660,6 @@ async function _updateHistoryNote(histId, paddockId, notes) {
   // Update in-memory entry
   const entry = (_history[paddockId] || []).find(e => e.id === histId);
   if (entry) entry.notes = notes;
-}
-
-// ── Add standalone note ──────────────────────────────────────────────────────
-
-function _promptAddNote(paddockId, paddockName) {
-  const noteId = `pk-note-input-${paddockId}`;
-  openModal({
-    title: `Add note — ${paddockName}`,
-    bodyHTML: `
-      <p style="font-size:0.85rem;color:var(--hint);margin-bottom:10px">
-        Record an event or change for this paddock (e.g. pivot installation, boundary change, fencing).
-      </p>
-      <textarea id="${noteId}" rows="4" placeholder="Describe the change or event…"
-        style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);
-        border-radius:6px;font-size:0.88rem;font-family:inherit;resize:vertical;
-        background:var(--bg);color:var(--ink)"></textarea>`,
-    confirmLabel: 'Save note',
-    onMounted: (overlay) => {
-      overlay.querySelector(`#${noteId}`)?.focus();
-    },
-    onConfirm: async () => {
-      const textarea = document.getElementById(noteId);
-      const note = textarea?.value?.trim();
-      if (!note) { toast('Note cannot be empty', 'warning'); return; }
-      try {
-        await _logHistory(paddockId, null, null, null, note);
-        toast('Note saved');
-      } catch (err) {
-        toast('Could not save note', 'error');
-      }
-    },
-  });
 }
 
 // ── CSV export ───────────────────────────────────────────────────────────────

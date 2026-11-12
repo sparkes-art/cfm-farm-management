@@ -17,18 +17,10 @@ export async function mountInvoices(container) {
   await loadCommodities();
 
   container.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <div style="display:flex;gap:8px">
-
-        <select id="inv-filter-month" class="form-select" style="width:130px">
-          <option value="">All months</option>
-        </select>
-        <select id="inv-filter-commodity" class="form-select" style="width:160px">
-          <option value="">All commodities</option>
-        </select>
-        <select id="inv-filter-contract" class="form-select" style="width:180px">
-          <option value="">All contracts</option>
-        </select>
+    <div class="page-header" style="margin-bottom:12px">
+      <div>
+        <h1>Invoices</h1>
+        <p class="page-subtitle">Sales invoices — crop and livestock</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn btn-secondary" id="btn-export-invoices">↓ Export CSV</button>
@@ -36,8 +28,43 @@ export async function mountInvoices(container) {
       </div>
     </div>
 
-    <div class="card" id="inv-table-wrap">
-      <div class="empty-state"><span class="loading-spinner"></span></div>
+    <div style="display:flex;gap:12px;align-items:flex-start">
+
+      <!-- Left filter panel -->
+      <div style="width:260px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:10px;display:flex;flex-direction:column;gap:10px;align-self:flex-start">
+
+        <div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Month</div>
+          <select id="inv-filter-month" class="form-select" style="width:100%;font-size:12px">
+            <option value="">All months</option>
+          </select>
+        </div>
+
+        <div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Commodity</div>
+          <select id="inv-filter-commodity" class="form-select" style="width:100%;font-size:12px">
+            <option value="">All commodities</option>
+          </select>
+        </div>
+
+        <div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Contract</div>
+          <select id="inv-filter-contract" class="form-select" style="width:100%;font-size:12px">
+            <option value="">All contracts</option>
+          </select>
+        </div>
+
+        <div style="border-top:1px solid var(--border);padding-top:7px;font-size:11px;color:var(--hint);text-align:center">
+          Changes save automatically
+        </div>
+      </div>
+
+      <!-- Right content -->
+      <div style="flex:1;min-width:0">
+        <div class="card" id="inv-table-wrap">
+          <div class="empty-state"><span class="loading-spinner"></span></div>
+        </div>
+      </div>
     </div>
   `;
 
