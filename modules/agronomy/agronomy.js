@@ -566,16 +566,29 @@ function renderCropPlan() {
     ? new Set(allPaddocks.filter(p => p.type === _cpPaddockFilter).map(p => p.name))
     : null;
 
-  // Collect all paddock keys (paddock_name + sub_block) in name order
-  // Apply both filters with AND logic
+  // Collect all paddock keys (paddock_name + sub_block)
+  // Rows with any planned or planted data float to top; rest alphabetical below
   const paddockKeys = [];
   const seen = new Set();
   const cropTypeFilteredKeys = _cpTypeFilter
     ? new Set(allCropPlan.filter(c => c.water_type === _cpTypeFilter).map(c => c.paddock_name + '|' + (c.sub_block || '')))
     : null;
+  // hasEntry: set of keys that have at least one entry with planned_ha or planted_ha
+  const hasEntrySet = new Set(
+    allCropPlan
+      .filter(c => (parseFloat(c.planned_ha) || 0) > 0 || (parseFloat(c.planted_ha) || 0) > 0)
+      .map(c => c.paddock_name + '|' + (c.sub_block || ''))
+  );
   [...allCropPlan]
-    .sort((a, b) => a.paddock_name.localeCompare(b.paddock_name) ||
-                    (a.sub_block || '').localeCompare(b.sub_block || ''))
+    .sort((a, b) => {
+      const aKey = a.paddock_name + '|' + (a.sub_block || '');
+      const bKey = b.paddock_name + '|' + (b.sub_block || '');
+      const aHas = hasEntrySet.has(aKey) ? 0 : 1;
+      const bHas = hasEntrySet.has(bKey) ? 0 : 1;
+      if (aHas !== bHas) return aHas - bHas;
+      return a.paddock_name.localeCompare(b.paddock_name) ||
+             (a.sub_block || '').localeCompare(b.sub_block || '');
+    })
     .forEach(c => {
       const key = c.paddock_name + '|' + (c.sub_block || '');
       const passesCropType    = !cropTypeFilteredKeys || cropTypeFilteredKeys.has(key);
@@ -875,16 +888,13 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel) {
     ? `<span style="font-family:'DM Mono',monospace;font-size:0.85rem;color:var(--green,#22c55e)">${plantedN.toFixed(1)}</span>`
     : `<span style="color:var(--hint)">—</span>`;
 
-  // Commodity + status shown in planned cell as header; variety shown small if set
-  const statusDot  = _statusDot(entry.status);
+  // Commodity + status header (no variety in main view — it's in the expand row)
+  const statusDot   = _statusDot(entry.status);
   const statusLabel = entry.status ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--hint)">${CP_STATUS_LABELS[entry.status] || entry.status}</span>` : '';
   const commodityLine = entry.commodity
     ? `<div style="font-size:10px;color:var(--blue);font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
     : '';
-  const varietyLine = entry.variety
-    ? `<div style="font-size:9px;color:var(--hint);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(entry.variety)}">${esc(entry.variety)}</div>`
-    : '';
-  const topInfo = `<div style="margin-bottom:4px">${commodityLine}${varietyLine}<div style="display:flex;align-items:center;justify-content:center;gap:3px">${statusDot}${statusLabel}</div></div>`;
+  const topInfo = `<div style="margin-bottom:4px">${commodityLine}<div style="display:flex;align-items:center;justify-content:center;gap:3px">${statusDot}${statusLabel}</div></div>`;
 
   return `
     <td class="cp-matrix-cell" data-id="${id}" data-field="planned_ha" data-type="number"
@@ -893,7 +903,7 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel) {
     </td>
     <td class="cp-matrix-cell" data-id="${id}" data-field="planted_ha" data-type="number"
       style="${baseStyle}min-width:95px" title="Click to edit">
-      ${plantedDisp}
+      ${topInfo}${plantedDisp}
     </td>`;
 }
 
