@@ -555,8 +555,8 @@ function renderCropPlan() {
   // Columns: paddock name | sub-block | ...one column per season...
   // Each season cell shows: commodity (small, coloured) / planned ha / planted ha
 
-  // All unique crop types in use (for filter chips)
-  const usedCropTypes = [...new Set(allCropPlan.map(c => c.water_type).filter(Boolean))].sort();
+  // All unique commodities in use (for Crop filter chips)
+  const usedCropTypes = [...new Set(allCropPlan.map(c => c.commodity).filter(Boolean))].sort();
 
   // All unique paddock types from the paddock list (for filter chips)
   const usedPaddockTypes = [...new Set(allPaddocks.map(p => p.type).filter(Boolean))].sort();
@@ -571,7 +571,7 @@ function renderCropPlan() {
   const paddockKeys = [];
   const seen = new Set();
   const cropTypeFilteredKeys = _cpTypeFilter
-    ? new Set(allCropPlan.filter(c => c.water_type === _cpTypeFilter).map(c => c.paddock_name + '|' + (c.sub_block || '')))
+    ? new Set(allCropPlan.filter(c => c.commodity === _cpTypeFilter).map(c => c.paddock_name + '|' + (c.sub_block || '')))
     : null;
   // hasEntry: set of keys that have at least one entry with planned_ha or planted_ha
   const hasEntrySet = new Set(
@@ -617,13 +617,18 @@ function renderCropPlan() {
     };
   });
 
-  // Summary by commodity across ALL entries (ignores filters)
+  // Summary by commodity + variety across ALL entries (ignores filters)
   const commoditySummary = {};
   allCropPlan.forEach(c => {
     if (!c.commodity) return;
-    if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { planned: 0, planted: 0 };
+    if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { planned: 0, planted: 0, varieties: {} };
     commoditySummary[c.commodity].planned += parseFloat(c.planned_ha) || 0;
     commoditySummary[c.commodity].planted += parseFloat(c.planted_ha) || 0;
+    const vKey = c.variety || '(no variety)';
+    if (!commoditySummary[c.commodity].varieties[vKey])
+      commoditySummary[c.commodity].varieties[vKey] = { planned: 0, planted: 0 };
+    commoditySummary[c.commodity].varieties[vKey].planned += parseFloat(c.planned_ha) || 0;
+    commoditySummary[c.commodity].varieties[vKey].planted += parseFloat(c.planted_ha) || 0;
   });
   const summaryEntries = Object.entries(commoditySummary).sort((a, b) => b[1].planned - a[1].planned);
 
@@ -670,14 +675,40 @@ function renderCropPlan() {
     ` : ''}
 
     ${summaryEntries.length > 0 ? `
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-      ${summaryEntries.map(([commodity, tots]) => `
-        <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:0.82rem">
-          <span style="font-weight:700;color:var(--fg)">${esc(commodity)}</span>
-          <span style="color:var(--hint);font-size:0.72rem">planned</span>
-          <span style="font-family:'DM Mono',monospace;font-weight:600">${tots.planned.toFixed(0)} ha</span>
-          ${tots.planted > 0 ? `<span style="color:var(--hint);font-size:0.72rem">planted</span><span style="font-family:'DM Mono',monospace;font-weight:600;color:var(--green,#22c55e)">${tots.planted.toFixed(0)} ha</span>` : ''}
-        </div>`).join('')}
+    <div style="margin-bottom:16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;max-width:480px">
+      <table style="border-collapse:collapse;width:100%;font-size:0.82rem">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Crop</th>
+            <th style="text-align:right;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Planned</th>
+            <th style="text-align:right;padding:7px 12px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Planted</th>
+            <th style="width:28px;padding:7px 8px"></th>
+          </tr>
+        </thead>
+        <tbody id="cp-summary-body">
+          ${summaryEntries.map(([commodity, tots]) => {
+            const varRows = Object.entries(tots.varieties)
+              .sort((a, b) => b[1].planned - a[1].planned)
+              .map(([v, vt]) => `
+                <tr class="cp-summary-var-row" data-commodity="${esc(commodity)}" style="display:none;background:color-mix(in srgb,var(--blue) 3%,var(--surface))">
+                  <td style="padding:5px 12px 5px 24px;color:var(--hint);font-size:0.76rem">${esc(v)}</td>
+                  <td style="text-align:right;padding:5px 12px;font-family:'DM Mono',monospace;font-size:0.76rem;color:var(--hint)">${vt.planned > 0 ? vt.planned.toFixed(0) + ' ha' : '—'}</td>
+                  <td style="text-align:right;padding:5px 12px;font-family:'DM Mono',monospace;font-size:0.76rem;color:${vt.planted > 0 ? 'var(--green,#22c55e)' : 'var(--hint)'}">${vt.planted > 0 ? vt.planted.toFixed(0) + ' ha' : '—'}</td>
+                  <td></td>
+                </tr>`).join('');
+            const hasVarieties = Object.keys(tots.varieties).length > 1 ||
+              (Object.keys(tots.varieties).length === 1 && !Object.keys(tots.varieties)[0].startsWith('(no'));
+            return `
+              <tr class="cp-summary-row" data-commodity="${esc(commodity)}" style="border-top:1px solid var(--border);cursor:${hasVarieties ? 'pointer' : 'default'}">
+                <td style="padding:8px 12px;font-weight:600;color:var(--fg)">${esc(commodity)}</td>
+                <td style="text-align:right;padding:8px 12px;font-family:'DM Mono',monospace;font-weight:600">${tots.planned.toFixed(0)} ha</td>
+                <td style="text-align:right;padding:8px 12px;font-family:'DM Mono',monospace;font-weight:600;color:${tots.planted > 0 ? 'var(--green,#22c55e)' : 'var(--hint)'}">${tots.planted > 0 ? tots.planted.toFixed(0) + ' ha' : '—'}</td>
+                <td style="text-align:center;padding:8px 8px;color:var(--hint);font-size:0.7rem">${hasVarieties ? '▾' : ''}</td>
+              </tr>
+              ${varRows}`;
+          }).join('')}
+        </tbody>
+      </table>
     </div>` : ''}
 
     ${!hasData ? `
@@ -794,6 +825,19 @@ function renderCropPlan() {
       await Promise.all(toDelete.map(c => dbDelete('crop_plan_entries', c.id)));
       toast('Paddock removed from plan', 'success');
       await refreshAll();
+    });
+  });
+
+  // Summary table: expand/collapse variety rows
+  el.querySelectorAll('.cp-summary-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const commodity = row.dataset.commodity;
+      const varRows = el.querySelectorAll(`.cp-summary-var-row[data-commodity="${CSS.escape(commodity)}"]`);
+      if (!varRows.length) return;
+      const isOpen = varRows[0].style.display !== 'none';
+      varRows.forEach(r => { r.style.display = isOpen ? 'none' : ''; });
+      const arrow = row.querySelector('td:last-child');
+      if (arrow) arrow.textContent = isOpen ? '▾' : '▴';
     });
   });
 
