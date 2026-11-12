@@ -682,7 +682,7 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
       <div style="font-weight:${isSubRow ? '400' : '600'};font-size:0.88rem;${isSubRow ? 'padding-left:16px;color:var(--hint)' : ''}">
         ${isSubRow ? '↳ ' + esc(sub_block) : esc(paddock_name)}
       </div>
-      ${!isSubRow ? `<div style="font-size:0.72rem;color:var(--hint)">${esc(paddock_name)}</div>` : ''}
+      ${isSubRow ? '' : sub_block ? `<div style="font-size:0.72rem;color:var(--hint)">${esc(sub_block)}</div>` : ''}
     </td>`;
 
   const seasonCells = seasons.map(s => {
@@ -1022,7 +1022,7 @@ function openPlanSeasonModal(allSeasons, currentSeason) {
           commodity:    null,
           water_type:   null,
           variety:      null,
-          planned_ha:   null,
+          planned_ha:   p.area_ha || null,
           planted_ha:   null,
           area_loss_ha: null,
           wet_date:     null,
