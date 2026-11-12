@@ -2,9 +2,9 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794519355653';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794519355653';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794519355653';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794519574623';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794519574623';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794519574623';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -787,9 +787,12 @@ function renderCropPlan() {
                 ${allSeasons.map(s => {
                   const tot = seasonTotals[s];
                   const isCur = isCurSeason(s);
-                  return `<th ${isCur ? 'colspan="2"' : ''}
+                  // Non-current seasons span both thead rows (rowspan=2) since they have
+                  // no Planned/Planted sub-header in row 2. Without rowspan=2 the table
+                  // is malformed and browsers lay out columns incorrectly.
+                  return `<th ${isCur ? 'colspan="2"' : 'rowspan="2"'}
                     style="padding:8px 10px;font-size:12px;font-weight:700;text-align:center;
-                      border-left:2px solid var(--border);border-bottom:${isCur ? '1' : '2'}px solid var(--border);
+                      border-left:2px solid var(--border);border-bottom:2px solid var(--border);
                       background:${isCur ? 'color-mix(in srgb,var(--blue) 8%,var(--surface))' : 'var(--surface)'};
                       color:${isCur ? 'var(--blue)' : 'var(--fg)'};
                       white-space:nowrap;min-width:${isCur ? '200' : '120'}px">

@@ -2,10 +2,10 @@
 // Sales dashboard — Option A: Revenue scorecard
 // Season totals as hero, tight crop table below, summer/winter split
 
-import { dbSelect } from '../../js/supabase-client.js?v=1794519355653';
-import { getActiveFarm } from '../../js/app-state.js?v=1794519355653';
-import { formatCurrency, formatNumber } from '../../js/ui.js?v=1794519355653';
-import { getCommodities } from '../../js/commodities.js?v=1794519355653';
+import { dbSelect } from '../../js/supabase-client.js?v=1794519574623';
+import { getActiveFarm } from '../../js/app-state.js?v=1794519574623';
+import { formatCurrency, formatNumber } from '../../js/ui.js?v=1794519574623';
+import { getCommodities } from '../../js/commodities.js?v=1794519574623';
 
 // ── Crop season classification ─────────────────────────────────
 const SUMMER_CROPS = ['cotton lint', 'cotton', 'cotton seed', 'sweet corn', 'maize', 'sorghum', 'sunflower', 'mung bean', 'cowpea', 'soybean'];
