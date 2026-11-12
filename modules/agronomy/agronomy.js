@@ -431,7 +431,19 @@ function inlineMetric(lbl, val) {
 // Inline-edit state
 let _cpEditCell   = null;   // { td, entryId, field, originalValue }
 let _cpSaving     = false;
-let _cpTypeFilter = null;   // null = show all; string = filter by water_type (crop type)
+let _cpTypeFilter    = null;   // null = show all; string = filter by water_type (crop type)
+let _cpPaddockFilter = null;   // null = show all; string = filter by paddock type
+
+// Paddock type colour palette — mirrors paddocks.js
+const PADDOCK_TYPE_COLORS = {
+  'Pasture':                     { bg: '#d1fae5', text: '#065f46', dot: '#10b981' },
+  'Grazing/Bush':                { bg: '#dcfce7', text: '#14532d', dot: '#22c55e' },
+  'Dryland':                     { bg: '#fef9c3', text: '#713f12', dot: '#eab308' },
+  'Irrigated - Overhead Pivot':  { bg: '#dbeafe', text: '#1e3a8a', dot: '#3b82f6' },
+  'Irrigated - Overhead Lateral':{ bg: '#e0f2fe', text: '#0c4a6e', dot: '#0ea5e9' },
+  'Irrigated - Furrow':          { bg: '#ede9fe', text: '#3b0764', dot: '#8b5cf6' },
+  'Permanent Crop':              { bg: '#fce7f3', text: '#831843', dot: '#ec4899' },
+};
 
 // Inject chip styles once
 if (!document.getElementById('cp-chip-styles')) {
@@ -439,8 +451,10 @@ if (!document.getElementById('cp-chip-styles')) {
   s.id = 'cp-chip-styles';
   s.textContent = `
     .cp-type-chip { display:inline-flex;align-items:center;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;border:1px solid var(--border);background:var(--surface);color:var(--hint);cursor:pointer;transition:all 0.12s;white-space:nowrap }
-    .cp-type-chip:hover { border-color:var(--blue);color:var(--blue) }
-    .cp-type-chip--active { background:var(--blue);border-color:var(--blue);color:#fff }
+    .cp-type-chip:hover { border-color:currentColor;opacity:0.85 }
+    .cp-type-chip--active { opacity:1 }
+    .cp-type-chip.cp-crop-chip:hover  { color:var(--blue) }
+    .cp-type-chip.cp-crop-chip.cp-type-chip--active { background:var(--blue);border-color:var(--blue);color:#fff }
   `;
   document.head.appendChild(s);
 }
@@ -544,22 +558,29 @@ function renderCropPlan() {
   // All unique crop types in use (for filter chips)
   const usedCropTypes = [...new Set(allCropPlan.map(c => c.water_type).filter(Boolean))].sort();
 
+  // All unique paddock types from the paddock list (for filter chips)
+  const usedPaddockTypes = [...new Set(allPaddocks.map(p => p.type).filter(Boolean))].sort();
+
+  // Paddock names matching the paddock-type filter
+  const filteredPaddockSet = _cpPaddockFilter
+    ? new Set(allPaddocks.filter(p => p.type === _cpPaddockFilter).map(p => p.name))
+    : null;
+
   // Collect all paddock keys (paddock_name + sub_block) in name order
-  // If a type filter is active, only include paddocks that have at least one entry matching that type
+  // Apply both filters with AND logic
   const paddockKeys = [];
   const seen = new Set();
-  const filteredPlan = _cpTypeFilter
-    ? allCropPlan.filter(c => c.water_type === _cpTypeFilter)
-    : allCropPlan;
-  const filteredPaddockNames = _cpTypeFilter
-    ? new Set(filteredPlan.map(c => c.paddock_name + '|' + (c.sub_block || '')))
+  const cropTypeFilteredKeys = _cpTypeFilter
+    ? new Set(allCropPlan.filter(c => c.water_type === _cpTypeFilter).map(c => c.paddock_name + '|' + (c.sub_block || '')))
     : null;
   [...allCropPlan]
     .sort((a, b) => a.paddock_name.localeCompare(b.paddock_name) ||
                     (a.sub_block || '').localeCompare(b.sub_block || ''))
     .forEach(c => {
       const key = c.paddock_name + '|' + (c.sub_block || '');
-      if (!seen.has(key) && (!filteredPaddockNames || filteredPaddockNames.has(key))) {
+      const passesCropType    = !cropTypeFilteredKeys || cropTypeFilteredKeys.has(key);
+      const passesPaddockType = !filteredPaddockSet   || filteredPaddockSet.has(c.paddock_name);
+      if (!seen.has(key) && passesCropType && passesPaddockType) {
         seen.add(key);
         paddockKeys.push({ paddock_name: c.paddock_name, sub_block: c.sub_block || null });
       }
@@ -595,11 +616,33 @@ function renderCropPlan() {
         <button class="btn btn-secondary" id="cp-add-paddock-btn">+ Add paddock</button>
       </div>
     </div>
-    ${usedCropTypes.length > 0 ? `
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-      <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);margin-right:2px">Crop type:</span>
-      <button class="cp-type-chip${!_cpTypeFilter ? ' cp-type-chip--active' : ''}" data-type="">All</button>
-      ${usedCropTypes.map(t => `<button class="cp-type-chip${_cpTypeFilter === t ? ' cp-type-chip--active' : ''}" data-type="${esc(t)}">${esc(t)}</button>`).join('')}
+    ${(usedCropTypes.length > 0 || usedPaddockTypes.length > 0) ? `
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+      ${usedPaddockTypes.length > 0 ? `
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);width:72px;flex-shrink:0">Paddock:</span>
+        <button class="cp-type-chip cp-paddock-chip${!_cpPaddockFilter ? ' cp-type-chip--active' : ''}"
+          data-type="" style="${!_cpPaddockFilter ? 'background:var(--surface);border-color:var(--fg);color:var(--fg)' : ''}">All</button>
+        ${usedPaddockTypes.map(t => {
+          const c = PADDOCK_TYPE_COLORS[t] || { bg: 'var(--surface)', text: 'var(--hint)', dot: 'var(--border)' };
+          const isActive = _cpPaddockFilter === t;
+          const style = isActive
+            ? `background:${c.bg};border-color:${c.dot};color:${c.text}`
+            : ``;
+          return `<button class="cp-type-chip cp-paddock-chip${isActive ? ' cp-type-chip--active' : ''}"
+            data-type="${esc(t)}"
+            style="${style}"
+            onmouseover="if(!this.classList.contains('cp-type-chip--active')){this.style.background='${c.bg}';this.style.borderColor='${c.dot}';this.style.color='${c.text}'}"
+            onmouseout="if(!this.classList.contains('cp-type-chip--active')){this.style.background='';this.style.borderColor='';this.style.color=''}"
+          ><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c.dot};margin-right:5px;flex-shrink:0"></span>${esc(t)}</button>`;
+        }).join('')}
+      </div>` : ''}
+      ${usedCropTypes.length > 0 ? `
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);width:72px;flex-shrink:0">Crop:</span>
+        <button class="cp-type-chip cp-crop-chip${!_cpTypeFilter ? ' cp-type-chip--active' : ''}" data-type="">All</button>
+        ${usedCropTypes.map(t => `<button class="cp-type-chip cp-crop-chip${_cpTypeFilter === t ? ' cp-type-chip--active' : ''}" data-type="${esc(t)}">${esc(t)}</button>`).join('')}
+      </div>` : ''}
     </div>
     ` : ''}
 
@@ -681,7 +724,13 @@ function renderCropPlan() {
   `;
 
   // ── Wire filter chips ────────────────────────────────────────────────────
-  el.querySelectorAll('.cp-type-chip').forEach(btn => {
+  el.querySelectorAll('.cp-paddock-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      _cpPaddockFilter = btn.dataset.type || null;
+      renderCropPlan();
+    });
+  });
+  el.querySelectorAll('.cp-crop-chip').forEach(btn => {
     btn.addEventListener('click', () => {
       _cpTypeFilter = btn.dataset.type || null;
       renderCropPlan();
@@ -736,7 +785,12 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex) {
           <div style="font-weight:${isSubRow ? '400' : '600'};font-size:0.85rem;${isSubRow ? 'padding-left:12px;color:var(--hint);' : ''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(isSubRow ? sub_block : paddock_name)}">
             ${isSubRow ? '↳ ' + esc(sub_block) : esc(paddock_name)}
           </div>
-          ${!isSubRow && paddockType ? `<div style="font-size:0.72rem;color:var(--hint);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px">${esc(paddockType)}</div>` : ''}
+          ${!isSubRow && paddockType ? (() => {
+            const c = PADDOCK_TYPE_COLORS[paddockType];
+            return c
+              ? `<div style="font-size:0.72rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;display:inline-flex;align-items:center;gap:3px;padding:1px 5px;border-radius:8px;background:${c.bg};color:${c.text}"><span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${c.dot};flex-shrink:0"></span>${esc(paddockType)}</div>`
+              : `<div style="font-size:0.72rem;color:var(--hint);font-weight:400;margin-top:1px">${esc(paddockType)}</div>`;
+          })() : ''}
         </div>
         ${!isSubRow ? `<button class="cp-add-subblock-btn btn-link" data-paddock="${esc(paddock_name)}"
           style="opacity:0;font-size:0.7rem;color:var(--hint);padding:1px 5px;border:1px dashed var(--border);border-radius:3px;white-space:nowrap;flex-shrink:0;transition:opacity 0.1s"
