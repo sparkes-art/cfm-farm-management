@@ -782,22 +782,147 @@ function bindMatrixEdit(container) {
     _openAddSubBlockModal(paddockName, allSeasons);
   });
 
-  // Click a cell
+  // Click a cell — open popover for the entry
   table.addEventListener('click', async e => {
     const td = e.target.closest('td.cp-matrix-cell');
     if (!td) return;
+    if (e.target.closest('.cp-cell-popover')) return; // click inside popover itself
 
-    if (_cpEditCell && _cpEditCell.td === td) return;
-    if (_cpEditCell) await _commitEdit(_cpEditCell);
+    _closeCellPopover();
 
-    // Empty cell — create entry first, then start edit
+    // Empty cell — create entry first, then open popover
     if (td.classList.contains('cp-matrix-cell--empty')) {
       await _createEntryForCell(td);
       return;
     }
 
-    _startEdit(td);
+    const entryId = td.dataset.id;
+    const entry   = allCropPlan.find(c => c.id === entryId);
+    if (entry) _openCellPopover(td, entry);
   });
+
+  // Close popover on outside click
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.cp-cell-popover') && !e.target.closest('td.cp-matrix-cell')) {
+      _closeCellPopover();
+    }
+  }, { capture: true });
+}
+
+// ── Cell popover ───────────────────────────────────────────────────────────
+let _activePopover = null;
+
+function _closeCellPopover() {
+  if (_activePopover) {
+    _activePopover.remove();
+    _activePopover = null;
+  }
+}
+
+function _openCellPopover(td, entry) {
+  _closeCellPopover();
+
+  const pop = document.createElement('div');
+  pop.className = 'cp-cell-popover';
+  pop.style.cssText = `
+    position:fixed;z-index:200;
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.18);
+    padding:14px 16px;min-width:260px;max-width:320px;
+  `;
+
+  pop.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:0.82rem;font-weight:700;color:var(--fg)">${esc(entry.paddock_name)}${entry.sub_block ? ' · ' + esc(entry.sub_block) : ''}</div>
+      <div style="font-size:0.75rem;color:var(--hint)">${esc(entry.season_label)}</div>
+    </div>
+
+    <div class="form-group" style="margin-bottom:10px">
+      <label class="form-label" style="font-size:0.72rem">Commodity</label>
+      <select class="form-select" id="cpop-commodity" style="font-size:0.82rem;padding:5px 8px">
+        <option value="">—</option>
+        ${CP_COMMODITY_OPTIONS.map(c => `<option value="${c}"${entry.commodity === c ? ' selected' : ''}>${c}</option>`).join('')}
+      </select>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.72rem">Water type</label>
+        <select class="form-select" id="cpop-water" style="font-size:0.82rem;padding:5px 8px">
+          <option value="">—</option>
+          <option value="IRR"${entry.water_type === 'IRR' ? ' selected' : ''}>IRR</option>
+          <option value="DL"${entry.water_type === 'DL' ? ' selected' : ''}>DL</option>
+          <option value="Dryland"${entry.water_type === 'Dryland' ? ' selected' : ''}>Dryland</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.72rem">Status</label>
+        <select class="form-select" id="cpop-status" style="font-size:0.82rem;padding:5px 8px">
+          ${CP_STATUSES.map(s => `<option value="${s}"${entry.status === s ? ' selected' : ''}>${CP_STATUS_LABELS[s]}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.72rem">Planned ha</label>
+        <input class="form-input" id="cpop-planned" type="number" step="0.1" min="0"
+          value="${entry.planned_ha ?? ''}" style="font-size:0.82rem;padding:5px 8px;text-align:right;font-family:'DM Mono',monospace">
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:0.72rem">Planted ha</label>
+        <input class="form-input" id="cpop-planted" type="number" step="0.1" min="0"
+          value="${entry.planted_ha ?? ''}" style="font-size:0.82rem;padding:5px 8px;text-align:right;font-family:'DM Mono',monospace">
+      </div>
+    </div>
+
+    <div class="form-group" style="margin-bottom:12px">
+      <label class="form-label" style="font-size:0.72rem">Variety</label>
+      <input class="form-input" id="cpop-variety" type="text"
+        value="${esc(entry.variety || '')}" placeholder="—" style="font-size:0.82rem;padding:5px 8px">
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-secondary" id="cpop-cancel" style="font-size:0.8rem;padding:5px 12px">Cancel</button>
+      <button class="btn btn-primary"   id="cpop-save"   style="font-size:0.8rem;padding:5px 12px">Save</button>
+    </div>
+  `;
+
+  document.body.appendChild(pop);
+  _activePopover = pop;
+
+  // Position anchored to the td
+  const rect = td.getBoundingClientRect();
+  const popW = 320, popH = 300;
+  let top  = rect.bottom + 4;
+  let left = rect.left;
+  if (top + popH > window.innerHeight - 8) top = rect.top - popH - 4;
+  if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
+  pop.style.top  = top  + 'px';
+  pop.style.left = left + 'px';
+
+  pop.querySelector('#cpop-cancel').addEventListener('click', _closeCellPopover);
+
+  pop.querySelector('#cpop-save').addEventListener('click', async () => {
+    const updates = {
+      commodity:  document.getElementById('cpop-commodity')?.value || null,
+      water_type: document.getElementById('cpop-water')?.value     || null,
+      status:     document.getElementById('cpop-status')?.value    || 'intent',
+      variety:    document.getElementById('cpop-variety')?.value?.trim() || null,
+      planned_ha: numOrNull(document.getElementById('cpop-planned')?.value),
+      planted_ha: numOrNull(document.getElementById('cpop-planted')?.value),
+      updated_at: new Date().toISOString(),
+    };
+    _closeCellPopover();
+    try {
+      await dbUpdate('crop_plan_entries', entry.id, updates);
+      Object.assign(entry, updates); // optimistic update in memory
+      toast('Saved', 'success');
+      renderCropPlan(); // re-render matrix to show updated cell
+    } catch (err) {
+      toast('Save failed — ' + (err.message || err), 'error');
+    }
+  });
+
+  // Focus commodity on open
+  setTimeout(() => pop.querySelector('#cpop-commodity')?.focus(), 50);
 }
 
 function _openAddSubBlockModal(paddockName, allSeasons) {
@@ -897,18 +1022,17 @@ async function _createEntryForCell(td) {
     season_label: seasonLabel,
     season_type:  seasonLabel.startsWith('Summer') ? 'Summer' : seasonLabel.startsWith('Winter') ? 'Winter' : 'Annual',
     status:       'intent',
-    commodity:    'Cotton',
     updated_at:   new Date().toISOString(),
   });
 
   if (!newEntry) { toast('Failed to create entry', 'error'); return; }
   await refreshAll();
 
-  // After re-render, find and focus the new cell
+  // After re-render, open the cell popover so user can fill in commodity etc.
   const el = document.getElementById('agro-tab-cropplan');
   setTimeout(() => {
-    const newTd = el?.querySelector(`td.cp-matrix-cell[data-id="${newEntry.id}"][data-field="${field}"]`);
-    if (newTd) _startEdit(newTd);
+    const newTd = el?.querySelector(`td.cp-matrix-cell[data-id="${newEntry.id}"][data-field="planned_ha"]`);
+    if (newTd) _openCellPopover(newTd, newEntry);
   }, 60);
 }
 
