@@ -405,231 +405,627 @@ function inlineMetric(lbl, val) {
 }
 
 // ── CROP PLAN TAB ──────────────────────────────────────────────────────────
+
+// Inline-edit state
+let _cpEditCell   = null;   // { td, entryId, field, originalValue }
+let _cpSaving     = false;
+
+// Column definitions for the spreadsheet
+const CP_COLUMNS = [
+  { key: 'paddock_name',  label: 'Paddock',     type: 'text',    width: '160px', bold: true },
+  { key: 'sub_block',     label: 'Sub-block',   type: 'text',    width: '110px' },
+  { key: 'commodity',     label: 'Commodity',   type: 'select',  width: '130px', options: () => CP_COMMODITY_OPTIONS },
+  { key: 'water_type',    label: 'Water',       type: 'select',  width: '90px',  options: () => ['IRR', 'DL', 'Dryland'] },
+  { key: 'variety',       label: 'Variety',     type: 'text',    width: '110px' },
+  { key: 'planned_ha',    label: 'Planned ha',  type: 'number',  width: '90px',  align: 'right' },
+  { key: 'planted_ha',    label: 'Planted ha',  type: 'number',  width: '90px',  align: 'right' },
+  { key: 'area_loss_ha',  label: 'Loss ha',     type: 'number',  width: '80px',  align: 'right', red: true },
+  { key: '_active_ha',    label: 'Active ha',   type: 'computed',width: '85px',  align: 'right', bold: true },
+  { key: 'status',        label: 'Status',      type: 'select',  width: '110px', options: () => CP_STATUSES, labelMap: CP_STATUS_LABELS, badgeMap: CP_STATUS_CLASSES },
+  { key: 'wet_date',      label: 'Wet date',    type: 'date',    width: '110px' },
+  { key: 'notes',         label: 'Notes',       type: 'text',    width: '180px', hint: true },
+];
+
+const CP_COMMODITY_OPTIONS = [
+  'Cotton', 'Corn', 'Sorghum', 'Wheat', 'Chickpea', 'Pigeon Pea',
+  'Rhodes Hay', 'Jarrah Hay', 'Cavalcade Hay', 'Setaria Hay', 'Corn Hay',
+  'Fallow', 'Pasture', 'Other',
+];
+
+// Blackbull 2025-26 seed data
+const BB_2526_SEED = [
+  // Cotton — Summer 2025-26 (harvested)
+  { paddock_name:'Pivot 1',              sub_block:null, commodity:'Cotton', water_type:'IRR', variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:52.3,  planted_ha:51.1,  area_loss_ha:1.2  },
+  { paddock_name:'Pivot 2',              sub_block:null, commodity:'Cotton', water_type:'IRR', variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:53.5,  planted_ha:49.9,  area_loss_ha:3.6  },
+  { paddock_name:'Pivot Dryland/Bradens',sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:46.8,  planted_ha:31.5,  area_loss_ha:15.3 },
+  { paddock_name:'House Mahogany',       sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:267.2, planted_ha:195.3, area_loss_ha:71.9 },
+  { paddock_name:'Sabi & Airstrip',      sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:250.0, planted_ha:244.0, area_loss_ha:6.0  },
+  { paddock_name:'Yard East Buffel',     sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:112.4, planted_ha:92.8,  area_loss_ha:19.6 },
+  { paddock_name:'Black Bull 5',         sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:125.8, planted_ha:94.7,  area_loss_ha:31.1 },
+  { paddock_name:'Black Bull 1',         sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:43.3,  planted_ha:36.2,  area_loss_ha:7.1  },
+  { paddock_name:'Black Bull 2',         sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:89.1,  planted_ha:75.0,  area_loss_ha:14.1 },
+  { paddock_name:'Black Bull 3',         sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:152.4, planted_ha:140.3, area_loss_ha:12.1 },
+  { paddock_name:'Black Bull 4',         sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:112.0, planted_ha:82.1,  area_loss_ha:29.9 },
+  { paddock_name:'Tree Trial',           sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:17.6,  planted_ha:17.6,  area_loss_ha:0.0  },
+  { paddock_name:'Leuceana',             sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:20.2,  planted_ha:19.7,  area_loss_ha:0.5  },
+  // Hay / Pasture — Annual 2025-26
+  { paddock_name:'Pivot 3',              sub_block:null, commodity:'Rhodes Hay',    water_type:'IRR', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:38.0,  planted_ha:40.4,  area_loss_ha:null },
+  { paddock_name:'Pivot 4',              sub_block:null, commodity:'Rhodes Hay',    water_type:'IRR', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:50.0,  planted_ha:51.8,  area_loss_ha:null },
+  { paddock_name:'Braedons',             sub_block:null, commodity:'Jarrah Hay',    water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:17.8,  planted_ha:17.8,  area_loss_ha:null },
+  { paddock_name:'Billabong',            sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'growing',   planned_ha:116.1, planted_ha:null,  area_loss_ha:null, notes:'Not harvested — cattle feed' },
+  { paddock_name:'Boghole 1',            sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:101.2, planted_ha:85.0,  area_loss_ha:null },
+  { paddock_name:'Boghole 2',            sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:404.9, planted_ha:335.0, area_loss_ha:null },
+  { paddock_name:'Boghole 3',            sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:165.3, planted_ha:137.0, area_loss_ha:null },
+  { paddock_name:'Broken Windmill',      sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:234.4, planted_ha:213.0, area_loss_ha:null },
+  { paddock_name:'House Buffel',         sub_block:null, commodity:'Corn Hay',      water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:75.0,  planted_ha:60.0,  area_loss_ha:null },
+  { paddock_name:'Cadell',               sub_block:null, commodity:'Jarrah Hay',    water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:269.5, planted_ha:250.0, area_loss_ha:null },
+  { paddock_name:'Black Bull North Top', sub_block:null, commodity:'Jarrah Hay',    water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:152.3, planted_ha:140.0, area_loss_ha:null },
+  { paddock_name:'Black Bull North Middle',sub_block:null,commodity:'Jarrah Hay',   water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:128.0, planted_ha:190.0, area_loss_ha:null },
+  { paddock_name:'Black Bull South Top', sub_block:null, commodity:'Jarrah Hay',    water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'growing',   planned_ha:103.2, planted_ha:null,  area_loss_ha:null, notes:'Not harvested — cattle feed' },
+  { paddock_name:'Black Bull South Bottom',sub_block:null,commodity:'Sorghum',      water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:170.7, planted_ha:170.0, area_loss_ha:null },
+  { paddock_name:'Quarry Hay',           sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'growing',   planned_ha:25.0,  planted_ha:null,  area_loss_ha:null, notes:'Not harvested — cattle feed' },
+  { paddock_name:'Yard East Jarrah',     sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:217.4, planted_ha:217.9, area_loss_ha:null },
+];
+
 function renderCropPlan() {
   const el = document.getElementById('agro-tab-cropplan');
   if (!el) return;
 
-  // Group entries by season label for display, sorted by season then paddock
-  const seasons = [...new Set(allCropPlan.map(c => c.season_label || c.season_type || 'No season'))];
   const currentSeason = getActiveSeason();
-
-  // Season filter — default to active season if any entries exist for it
-  const activeCPSeason = el.dataset.cpSeason || currentSeason;
 
   // All unique seasons in plan
   const allSeasons = [...new Set(
     allCropPlan.map(c => c.season_label).filter(Boolean)
   )].sort().reverse();
 
+  // Pick active season — default to first loaded season or current
+  if (!el.dataset.cpSeason) {
+    el.dataset.cpSeason = allSeasons[0] || currentSeason;
+  }
+  const activeCPSeason = el.dataset.cpSeason;
+
   // Entries for the displayed season
   const displayed = allCropPlan.filter(c =>
-    (c.season_label || '') === activeCPSeason || allSeasons.length === 0
-  );
+    (c.season_label || '') === activeCPSeason
+  ).sort((a, b) => {
+    if (a.paddock_name < b.paddock_name) return -1;
+    if (a.paddock_name > b.paddock_name) return 1;
+    if (!a.sub_block && b.sub_block) return -1;
+    if (a.sub_block && !b.sub_block) return 1;
+    return (a.sub_block || '').localeCompare(b.sub_block || '');
+  });
 
-  // Summary stats
-  const totalPlanned  = displayed.filter(c => !c.sub_block).reduce((s, c) => s + (parseFloat(c.planned_ha) || 0), 0);
-  const totalPlanted  = displayed.filter(c => !c.sub_block && c.planted_ha).reduce((s, c) => s + (parseFloat(c.planted_ha) || 0), 0);
-  const totalAdjusted = displayed.filter(c => !c.sub_block && c.area_loss_ha).reduce((s, c) => s + (parseFloat(c.area_loss_ha) || 0), 0);
-  const byStatus      = CP_STATUSES.map(s => ({
-    s, count: displayed.filter(c => c.status === s && !c.sub_block).length
-  })).filter(x => x.count > 0);
+  // Check if seed data already loaded for this season
+  const hasSeasonData   = allSeasons.includes(activeCPSeason);
+  const isSeedSeason    = activeCPSeason === 'Summer 2025-26' || activeCPSeason === 'Annual 2025-26';
+  const showSeedBtn     = !hasSeasonData &&
+    ['Summer 2025-26', 'Annual 2025-26'].some(s => !allSeasons.includes(s));
+
+  // Summary stats (top-level rows only)
+  const topRows        = displayed.filter(c => !c.sub_block);
+  const totalPlanned   = topRows.reduce((s, c) => s + (parseFloat(c.planned_ha) || 0), 0);
+  const totalPlanted   = topRows.filter(c => c.planted_ha).reduce((s, c) => s + (parseFloat(c.planted_ha) || 0), 0);
+  const totalLoss      = topRows.filter(c => c.area_loss_ha).reduce((s, c) => s + (parseFloat(c.area_loss_ha) || 0), 0);
+  const totalActive    = topRows.reduce((s, c) => {
+    const a = (parseFloat(c.planted_ha || c.planned_ha) || 0) - (parseFloat(c.area_loss_ha) || 0);
+    return s + Math.max(0, a);
+  }, 0);
 
   el.innerHTML = `
     <div class="page-header" style="margin-bottom:12px">
       <div>
         <h2 style="font-size:var(--text-md);font-weight:600;margin:0">Crop Plan</h2>
       </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button class="btn btn-primary" id="agro-new-plan-btn">+ Add Crop</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${showSeedBtn ? `<button class="btn btn-secondary" id="cp-load-actuals-btn">📥 Load 2025-26 actuals</button>` : ''}
+        <button class="btn btn-secondary" id="agro-modal-plan-btn">+ Add via form</button>
       </div>
     </div>
-    <div style="display:flex;gap:12px;align-items:flex-start">
 
-      <!-- Left filter panel -->
-      <div style="width:200px;flex-shrink:0;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:10px;display:flex;flex-direction:column;gap:8px;align-self:flex-start">
-        <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);margin-bottom:2px">Season</div>
-        ${allSeasons.length === 0
-          ? `<div style="font-size:0.8rem;color:var(--hint)">No seasons yet</div>`
-          : allSeasons.map(s => `
-              <button class="cp-season-btn" data-season="${esc(s)}"
-                style="font-size:11px;padding:5px 10px;border-radius:4px;border:1px solid ${s === activeCPSeason ? 'var(--blue)' : 'var(--border)'};
-                  background:${s === activeCPSeason ? 'var(--blue)' : 'transparent'};
-                  color:${s === activeCPSeason ? 'white' : 'var(--fg)'};cursor:pointer;text-align:left;width:100%">
-                ${esc(s)}
-              </button>`).join('')
-        }
-        <button class="cp-season-btn" data-season="${esc(currentSeason)}"
-          style="font-size:11px;padding:5px 10px;border-radius:4px;border:1px dashed var(--border);
-            background:transparent;color:var(--hint);cursor:pointer;text-align:left;width:100%;margin-top:4px"
-          title="Start planning for ${esc(currentSeason)}">
-          + ${esc(currentSeason)}
-        </button>
-
-        <div style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px">
-          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);margin-bottom:6px">Status filter</div>
-          <button class="cp-status-filter active" data-status=""
-            style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid var(--blue);background:var(--blue);color:white;cursor:pointer;width:100%;text-align:left;margin-bottom:3px">
-            All
-          </button>
-          ${CP_STATUSES.map(s => `
-            <button class="cp-status-filter" data-status="${s}"
-              style="font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--fg);cursor:pointer;width:100%;text-align:left;margin-bottom:3px">
-              ${CP_STATUS_LABELS[s]}
-            </button>`).join('')}
-        </div>
-      </div>
-
-      <!-- Right content -->
-      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:12px">
-
-        <!-- Summary strip -->
-        <div class="stat-row">
-          <div class="stat-card"><div class="stat-label">Planned ha</div><div class="stat-value">${totalPlanned > 0 ? totalPlanned.toFixed(1) : '—'}</div></div>
-          <div class="stat-card"><div class="stat-label">Planted ha</div><div class="stat-value">${totalPlanted > 0 ? totalPlanted.toFixed(1) : '—'}</div></div>
-          <div class="stat-card"><div class="stat-label">Area losses</div><div class="stat-value ${totalAdjusted > 0 ? 'red' : ''}">${totalAdjusted > 0 ? totalAdjusted.toFixed(1) : '—'}</div></div>
-          ${byStatus.map(x => `<div class="stat-card"><div class="stat-label">${CP_STATUS_LABELS[x.s]}</div><div class="stat-value">${x.count}</div></div>`).join('')}
-        </div>
-
-        <!-- Plan table -->
-        <div class="card">
-          ${displayed.length === 0 ? `
-            <div class="empty-state" style="padding:40px 20px">
-              <div class="empty-icon">🌾</div>
-              <p>No crops planned for this season yet.</p>
-              <button class="btn btn-primary" id="cp-empty-add-btn">+ Add First Crop</button>
-            </div>
-          ` : `
-            <div class="table-responsive">
-              <table class="data-table" id="cp-table">
-                <thead><tr>
-                  <th>Paddock</th>
-                  <th>Sub-block</th>
-                  <th>Crop / Variety</th>
-                  <th>Water</th>
-                  <th>Season type</th>
-                  <th style="text-align:right">Planned ha</th>
-                  <th style="text-align:right">Planted ha</th>
-                  <th style="text-align:right">Loss ha</th>
-                  <th style="text-align:right">Active ha</th>
-                  <th>Status</th>
-                  <th>Wet date</th>
-                  <th>Notes</th>
-                  <th></th>
-                </tr></thead>
-                <tbody id="cp-tbody">
-                  ${displayed.map(c => cpRowHTML(c)).join('')}
-                </tbody>
-              </table>
-            </div>
-          `}
-        </div>
-      </div>
+    <!-- Season selector -->
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+      <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);margin-right:4px">Season:</span>
+      ${allSeasons.map(s => `
+        <button class="cp-ssn-pill${s === activeCPSeason ? ' cp-ssn-pill--active' : ''}" data-season="${esc(s)}"
+          style="font-size:12px;padding:4px 12px;border-radius:20px;border:1px solid ${s === activeCPSeason ? 'var(--blue)' : 'var(--border)'};
+            background:${s === activeCPSeason ? 'var(--blue)' : 'var(--surface)'};
+            color:${s === activeCPSeason ? 'white' : 'var(--fg)'};cursor:pointer;white-space:nowrap">
+          ${esc(s)}
+        </button>`).join('')}
+      <button class="cp-ssn-new" style="font-size:12px;padding:4px 12px;border-radius:20px;border:1px dashed var(--border);background:transparent;color:var(--hint);cursor:pointer">
+        + New season
+      </button>
     </div>
+
+    <!-- Summary strip -->
+    <div class="stat-row" style="margin-bottom:16px">
+      <div class="stat-card"><div class="stat-label">Paddocks</div><div class="stat-value">${topRows.length || '—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Planned ha</div><div class="stat-value">${totalPlanned > 0 ? totalPlanned.toFixed(1) : '—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Planted ha</div><div class="stat-value">${totalPlanted > 0 ? totalPlanted.toFixed(1) : '—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Loss ha</div><div class="stat-value ${totalLoss > 0 ? 'red' : ''}">${totalLoss > 0 ? totalLoss.toFixed(1) : '—'}</div></div>
+      <div class="stat-card"><div class="stat-label">Active ha</div><div class="stat-value">${totalActive > 0 ? totalActive.toFixed(1) : '—'}</div></div>
+    </div>
+
+    <!-- Spreadsheet grid -->
+    <div class="card" style="overflow:hidden;padding:0">
+      ${displayed.length === 0 ? `
+        <div class="empty-state" style="padding:48px 20px">
+          <div class="empty-icon">🌾</div>
+          <p>No crops planned for <strong>${esc(activeCPSeason)}</strong> yet.</p>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+            ${showSeedBtn ? `<button class="btn btn-primary" id="cp-empty-load-btn">📥 Load 2025-26 actuals</button>` : ''}
+            <button class="btn ${showSeedBtn ? 'btn-secondary' : 'btn-primary'}" id="cp-empty-add-btn">+ Add first row</button>
+          </div>
+        </div>
+      ` : `
+        <div style="overflow-x:auto">
+          <table class="cp-sheet" id="cp-sheet" style="border-collapse:collapse;width:100%;min-width:900px">
+            <thead>
+              <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
+                ${CP_COLUMNS.map(col => `
+                  <th style="padding:8px 10px;font-size:11px;font-weight:600;text-transform:uppercase;
+                    letter-spacing:0.05em;color:var(--hint);white-space:nowrap;
+                    text-align:${col.align || 'left'};width:${col.width};min-width:60px">
+                    ${col.label}
+                  </th>`).join('')}
+                <th style="width:36px"></th>
+              </tr>
+            </thead>
+            <tbody id="cp-sheet-body">
+              ${displayed.map(c => cpSheetRowHTML(c)).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div style="border-top:1px solid var(--border);padding:8px 12px">
+          <button class="btn-link" id="cp-add-row-btn" style="font-size:0.82rem">+ Add row</button>
+        </div>
+      `}
+    </div>
+    <p style="font-size:11px;color:var(--hint);margin-top:8px;padding:0 2px">
+      Click any cell to edit · Tab to move right · Enter to save · Esc to cancel
+    </p>
   `;
 
-  // Header button
-  el.querySelector('#agro-new-plan-btn')
-    ?.addEventListener('click', () => openCropPlanModal());
-
-  // Season btn wiring
-  el.querySelectorAll('.cp-season-btn').forEach(btn => {
+  // Season pill wiring
+  el.querySelectorAll('.cp-ssn-pill').forEach(btn => {
     btn.addEventListener('click', () => {
       el.dataset.cpSeason = btn.dataset.season;
       renderCropPlan();
     });
   });
 
-  // Status filter wiring
-  el.querySelectorAll('.cp-status-filter').forEach(btn => {
-    btn.addEventListener('click', () => {
-      el.querySelectorAll('.cp-status-filter').forEach(b => {
-        b.style.background = 'transparent';
-        b.style.color = 'var(--fg)';
-        b.style.borderColor = 'var(--border)';
-        b.classList.remove('active');
-      });
-      btn.style.background = 'var(--blue)';
-      btn.style.color = 'white';
-      btn.style.borderColor = 'var(--blue)';
-      btn.classList.add('active');
-      const status = btn.dataset.status;
-      el.querySelectorAll('#cp-tbody tr').forEach(row => {
-        row.style.display = (!status || row.dataset.status === status) ? '' : 'none';
-      });
+  // New season button
+  el.querySelector('.cp-ssn-new')?.addEventListener('click', () => {
+    openModal({
+      title: 'New season',
+      bodyHTML: `
+        <div class="form-group">
+          <label class="form-label">Season label</label>
+          <input class="form-input" id="cp-new-ssn" placeholder="e.g. Summer 2026-27" value="${esc(currentSeason)}">
+        </div>`,
+      confirmLabel: 'Create season',
+      onConfirm: async () => {
+        const lbl = document.getElementById('cp-new-ssn')?.value?.trim();
+        if (!lbl) throw new Error('Season label required');
+        el.dataset.cpSeason = lbl;
+        renderCropPlan();
+      },
     });
   });
 
-  // Row action wiring
-  el.querySelectorAll('.cp-edit-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const entry = allCropPlan.find(c => c.id === btn.dataset.id);
-      if (entry) openCropPlanModal(entry);
-    });
-  });
+  // Load actuals buttons
+  el.querySelector('#cp-load-actuals-btn')?.addEventListener('click', loadActuals);
+  el.querySelector('#cp-empty-load-btn')?.addEventListener('click', loadActuals);
 
-  el.querySelectorAll('.cp-del-btn').forEach(btn => {
+  // Add via form
+  el.querySelector('#agro-modal-plan-btn')?.addEventListener('click', () => openCropPlanModal());
+  el.querySelector('#cp-empty-add-btn')?.addEventListener('click', () => addBlankRow(activeCPSeason));
+  el.querySelector('#cp-add-row-btn')?.addEventListener('click', () => addBlankRow(activeCPSeason));
+
+  // Delete row wiring
+  el.querySelectorAll('.cp-del-row-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
       e.stopPropagation();
-      if (!confirm('Delete this crop plan entry?')) return;
-      await dbDelete('crop_plan_entries', btn.dataset.id);
-      toast('Entry deleted', 'success');
+      const id = btn.dataset.id;
+      const entry = allCropPlan.find(c => c.id === id);
+      const name = entry ? entry.paddock_name : 'this row';
+      if (!confirm(`Delete ${name} from the crop plan?`)) return;
+      await dbDelete('crop_plan_entries', id);
+      toast('Row deleted', 'success');
       await refreshAll();
     });
   });
 
-  // Status advance buttons
-  el.querySelectorAll('.cp-advance-btn').forEach(btn => {
-    btn.addEventListener('click', async e => {
-      e.stopPropagation();
-      const entry = allCropPlan.find(c => c.id === btn.dataset.id);
-      if (!entry) return;
-      const idx  = CP_STATUSES.indexOf(entry.status);
-      const next = CP_STATUSES[idx + 1];
-      if (!next) return;
-      await dbUpdate('crop_plan_entries', entry.id, {
-        status: next, updated_at: new Date().toISOString(),
-      });
-      toast(`Moved to ${CP_STATUS_LABELS[next]}`, 'success');
-      await refreshAll();
-    });
-  });
-
-  el.querySelector('#cp-empty-add-btn')?.addEventListener('click', () => openCropPlanModal());
+  // Inline edit wiring — click on a data cell
+  bindInlineEdit(el);
 }
 
-function cpRowHTML(c) {
-  const nextStatus = CP_STATUSES[CP_STATUSES.indexOf(c.status) + 1];
-  const activHa    = (parseFloat(c.planted_ha || c.planned_ha) || 0) - (parseFloat(c.area_loss_ha) || 0);
+function cpSheetRowHTML(c) {
+  const activeHa = Math.max(0, (parseFloat(c.planted_ha || c.planned_ha) || 0) - (parseFloat(c.area_loss_ha) || 0));
+  const isSubBlock = !!c.sub_block;
+
+  const cells = CP_COLUMNS.map(col => {
+    const isComputed = col.key === '_active_ha';
+    const editable   = !isComputed;
+    const val        = isComputed ? activeHa : c[col.key];
+
+    let display = '';
+    if (isComputed) {
+      display = activeHa > 0 ? `<span style="font-family:'DM Mono',monospace;font-weight:600">${activeHa.toFixed(1)}</span>` : '<span style="color:var(--hint)">—</span>';
+    } else if (col.type === 'number') {
+      const n = parseFloat(val);
+      const color = col.red && n > 0 ? 'color:var(--red)' : '';
+      display = !isNaN(n) ? `<span style="font-family:'DM Mono',monospace;${color}">${n.toFixed(1)}</span>` : '<span style="color:var(--hint)">—</span>';
+    } else if (col.type === 'select' && col.badgeMap) {
+      const cls = col.badgeMap[val] || 'badge-secondary';
+      const lbl = col.labelMap ? (col.labelMap[val] || val || '—') : (val || '—');
+      display = `<span class="badge ${cls}">${esc(lbl)}</span>`;
+    } else if (col.type === 'date') {
+      display = val ? `<span>${formatDate(val)}</span>` : '<span style="color:var(--hint)">—</span>';
+    } else {
+      const style = `font-weight:${col.bold && !isSubBlock ? '600' : '400'};${col.hint ? 'color:var(--hint);font-size:0.8rem' : ''}`;
+      display = val ? `<span style="${style}">${esc(val)}</span>` : '<span style="color:var(--hint)">—</span>';
+    }
+
+    return `<td
+      ${editable ? `class="cp-cell" data-id="${c.id}" data-field="${col.key}" data-type="${col.type}"` : ''}
+      style="padding:7px 10px;border-bottom:1px solid var(--border);
+        text-align:${col.align || 'left'};
+        vertical-align:middle;
+        ${editable ? 'cursor:pointer;' : ''}
+        ${isSubBlock ? 'background:var(--surface);' : ''}
+        ${col.key === 'paddock_name' && isSubBlock ? 'padding-left:28px;' : ''}
+        "
+      title="${editable ? 'Click to edit' : ''}"
+    >${display}</td>`;
+  }).join('');
 
   return `
-    <tr data-status="${c.status}" data-id="${c.id}" style="${c.sub_block ? 'background:var(--surface)' : ''}">
-      <td style="font-weight:${c.sub_block ? '400' : '600'}">
-        ${c.sub_block ? '' : esc(c.paddock_name)}
-      </td>
-      <td style="color:var(--hint);font-size:0.82rem;padding-left:${c.sub_block ? '24px' : ''}">
-        ${c.sub_block ? '↳ ' + esc(c.sub_block) : '—'}
-      </td>
-      <td>
-        <div style="font-weight:600;font-size:0.85rem">${esc(c.commodity || '—')}</div>
-        ${c.variety ? `<div style="font-size:0.75rem;color:var(--hint)">${esc(c.variety)}</div>` : ''}
-      </td>
-      <td><span style="font-size:0.8rem">${esc(c.water_type || '—')}</span></td>
-      <td><span style="font-size:0.8rem">${esc(c.season_type || '—')}</span></td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:0.85rem">${c.planned_ha != null ? parseFloat(c.planned_ha).toFixed(1) : '—'}</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:0.85rem">${c.planted_ha != null ? parseFloat(c.planted_ha).toFixed(1) : '—'}</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:0.85rem;color:${c.area_loss_ha ? 'var(--red)' : 'var(--hint)'}">${c.area_loss_ha ? parseFloat(c.area_loss_ha).toFixed(1) : '—'}</td>
-      <td style="text-align:right;font-family:'DM Mono',monospace;font-size:0.85rem;font-weight:600">${activHa > 0 ? activHa.toFixed(1) : '—'}</td>
-      <td><span class="badge ${CP_STATUS_CLASSES[c.status] || 'badge-secondary'}">${CP_STATUS_LABELS[c.status] || c.status}</span></td>
-      <td style="font-size:0.8rem">${c.wet_date ? formatDate(c.wet_date) : '—'}</td>
-      <td style="font-size:0.78rem;color:var(--hint);max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.notes || '')}</td>
-      <td class="row-actions" style="white-space:nowrap">
-        ${nextStatus ? `<button class="btn-link cp-advance-btn" data-id="${c.id}" title="Advance to ${CP_STATUS_LABELS[nextStatus]}">→ ${CP_STATUS_LABELS[nextStatus]}</button>` : ''}
-        <button class="btn-link cp-edit-btn" data-id="${c.id}">Edit</button>
-        <button class="btn-link danger cp-del-btn" data-id="${c.id}">Del</button>
+    <tr data-id="${c.id}" data-status="${c.status}" class="cp-sheet-row"
+      style="transition:background 0.1s">
+      ${cells}
+      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center">
+        <button class="cp-del-row-btn btn-link danger" data-id="${c.id}"
+          style="opacity:0;font-size:0.75rem;padding:2px 4px;line-height:1"
+          title="Delete row">✕</button>
       </td>
     </tr>
   `;
+}
+
+function bindInlineEdit(container) {
+  const sheet = container.querySelector('#cp-sheet');
+  if (!sheet) return;
+
+  // Show delete button on row hover
+  sheet.addEventListener('mouseover', e => {
+    const row = e.target.closest('tr.cp-sheet-row');
+    if (!row) return;
+    row.style.background = 'color-mix(in srgb, var(--blue) 4%, transparent)';
+    row.querySelector('.cp-del-row-btn').style.opacity = '1';
+  });
+  sheet.addEventListener('mouseout', e => {
+    const row = e.target.closest('tr.cp-sheet-row');
+    if (!row) return;
+    row.style.background = '';
+    row.querySelector('.cp-del-row-btn').style.opacity = '0';
+  });
+
+  // Click a cell to edit
+  sheet.addEventListener('click', e => {
+    const td = e.target.closest('td.cp-cell');
+    if (!td) return;
+    if (_cpEditCell && _cpEditCell.td === td) return; // already editing
+    if (_cpEditCell) _commitEdit(_cpEditCell);         // save previous cell first
+    _startEdit(td);
+  });
+}
+
+function _startEdit(td) {
+  const entryId = td.dataset.id;
+  const field   = td.dataset.field;
+  const type    = td.dataset.type;
+  const entry   = allCropPlan.find(c => c.id === entryId);
+  if (!entry) return;
+
+  const originalValue = entry[field];
+  _cpEditCell = { td, entryId, field, originalValue };
+
+  td.style.background = 'color-mix(in srgb, var(--blue) 8%, var(--bg))';
+  td.style.outline = '2px solid var(--blue)';
+  td.style.outlineOffset = '-2px';
+
+  let input;
+
+  if (type === 'select') {
+    const col = CP_COLUMNS.find(c => c.key === field);
+    const opts = col.options ? col.options() : [];
+    input = document.createElement('select');
+    input.className = 'form-select';
+    input.style.cssText = 'min-width:90px;padding:3px 6px;font-size:0.82rem;height:auto';
+    // Allow blank for nullable fields
+    input.innerHTML = `<option value="">—</option>` +
+      opts.map(o => {
+        const val = o;
+        const lbl = col.labelMap ? (col.labelMap[o] || o) : o;
+        return `<option value="${esc(val)}"${originalValue === val ? ' selected' : ''}>${esc(lbl)}</option>`;
+      }).join('');
+    // For status: save immediately on change (feels natural for a dropdown)
+    input.addEventListener('change', () => _commitEdit(_cpEditCell));
+  } else if (type === 'date') {
+    input = document.createElement('input');
+    input.type = 'date';
+    input.className = 'form-input';
+    input.style.cssText = 'min-width:130px;padding:3px 6px;font-size:0.82rem;height:auto';
+    input.value = originalValue || '';
+  } else if (type === 'number') {
+    input = document.createElement('input');
+    input.type = 'number';
+    input.step = '0.1';
+    input.min = '0';
+    input.className = 'form-input';
+    input.style.cssText = 'min-width:70px;text-align:right;padding:3px 6px;font-size:0.82rem;height:auto;font-family:\'DM Mono\',monospace';
+    input.value = originalValue != null ? originalValue : '';
+  } else {
+    input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'form-input';
+    input.style.cssText = 'min-width:100px;padding:3px 6px;font-size:0.82rem;height:auto';
+    input.value = originalValue || '';
+  }
+
+  // Keyboard handling
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      _commitEdit(_cpEditCell);
+      if (e.key === 'Tab') {
+        // Move to next editable cell in the row
+        const row   = td.closest('tr');
+        const cells = [...row.querySelectorAll('td.cp-cell')];
+        const idx   = cells.indexOf(td);
+        const next  = e.shiftKey ? cells[idx - 1] : cells[idx + 1];
+        if (next) setTimeout(() => _startEdit(next), 10);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      _cancelEdit(_cpEditCell);
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    // Small delay so Tab/Enter handlers run first
+    setTimeout(() => {
+      if (_cpEditCell?.td === td) _commitEdit(_cpEditCell);
+    }, 120);
+  });
+
+  td.innerHTML = '';
+  td.appendChild(input);
+  input.focus();
+  if (input.select) input.select();
+}
+
+async function _commitEdit(editState) {
+  if (!editState || _cpSaving) return;
+  const { td, entryId, field, originalValue } = editState;
+  _cpEditCell = null;
+
+  // Reset cell style
+  td.style.background = '';
+  td.style.outline = '';
+
+  const input = td.querySelector('input, select');
+  if (!input) return;
+
+  const rawVal = input.value.trim();
+  let newValue;
+
+  const col = CP_COLUMNS.find(c => c.key === field);
+  if (col?.type === 'number') {
+    newValue = rawVal === '' ? null : parseFloat(rawVal);
+    if (rawVal !== '' && isNaN(newValue)) {
+      toast('Invalid number', 'error');
+      newValue = originalValue;
+    }
+  } else if (col?.type === 'date') {
+    newValue = rawVal || null;
+  } else {
+    newValue = rawVal || null;
+  }
+
+  // Re-render cell content (even if unchanged, to remove input element)
+  const entry = allCropPlan.find(c => c.id === entryId);
+  if (entry) entry[field] = newValue; // optimistic update
+
+  _rerenderCell(td, field, newValue, entry);
+
+  if (newValue === originalValue || (newValue == null && originalValue == null)) return;
+
+  // Persist to Supabase
+  _cpSaving = true;
+  try {
+    await dbUpdate('crop_plan_entries', entryId, {
+      [field]: newValue,
+      updated_at: new Date().toISOString(),
+    });
+    // Update allCropPlan in memory (already done optimistically above)
+    // Rerender active_ha cell if ha field changed
+    if (['planted_ha', 'planned_ha', 'area_loss_ha'].includes(field)) {
+      const row       = td.closest('tr');
+      const activeCol = CP_COLUMNS.findIndex(c => c.key === '_active_ha');
+      if (row && activeCol >= 0) {
+        const cells    = row.querySelectorAll('td');
+        const activeTd = cells[activeCol];
+        if (activeTd) {
+          const updEntry = allCropPlan.find(c => c.id === entryId);
+          const aHa = Math.max(0,
+            (parseFloat(updEntry?.planted_ha || updEntry?.planned_ha) || 0) -
+            (parseFloat(updEntry?.area_loss_ha) || 0)
+          );
+          activeTd.innerHTML = aHa > 0
+            ? `<span style="font-family:'DM Mono',monospace;font-weight:600">${aHa.toFixed(1)}</span>`
+            : '<span style="color:var(--hint)">—</span>';
+        }
+      }
+      // Update stats bar
+      _refreshCpStats();
+    }
+  } catch (err) {
+    toast('Save failed — ' + (err.message || err), 'error');
+    if (entry) entry[field] = originalValue; // revert
+    _rerenderCell(td, field, originalValue, entry);
+  } finally {
+    _cpSaving = false;
+  }
+}
+
+function _cancelEdit(editState) {
+  if (!editState) return;
+  const { td, field, originalValue, entryId } = editState;
+  _cpEditCell = null;
+  td.style.background = '';
+  td.style.outline = '';
+  const entry = allCropPlan.find(c => c.id === entryId);
+  _rerenderCell(td, field, originalValue, entry);
+}
+
+function _rerenderCell(td, field, value, entry) {
+  const col = CP_COLUMNS.find(c => c.key === field);
+  if (!col) return;
+
+  const isSubBlock = entry?.sub_block != null;
+
+  if (col.type === 'number') {
+    const n = parseFloat(value);
+    const color = col.red && n > 0 ? 'color:var(--red)' : '';
+    td.innerHTML = !isNaN(n)
+      ? `<span style="font-family:'DM Mono',monospace;${color}">${n.toFixed(1)}</span>`
+      : '<span style="color:var(--hint)">—</span>';
+  } else if (col.type === 'select' && col.badgeMap) {
+    const cls = col.badgeMap[value] || 'badge-secondary';
+    const lbl = col.labelMap ? (col.labelMap[value] || value || '—') : (value || '—');
+    td.innerHTML = `<span class="badge ${cls}">${esc(lbl)}</span>`;
+  } else if (col.type === 'date') {
+    td.innerHTML = value ? `<span>${formatDate(value)}</span>` : '<span style="color:var(--hint)">—</span>';
+  } else {
+    const style = `font-weight:${col.bold && !isSubBlock ? '600' : '400'};${col.hint ? 'color:var(--hint);font-size:0.8rem' : ''}`;
+    td.innerHTML = value
+      ? `<span style="${style}">${esc(value)}</span>`
+      : '<span style="color:var(--hint)">—</span>';
+  }
+}
+
+function _refreshCpStats() {
+  const el = document.getElementById('agro-tab-cropplan');
+  if (!el) return;
+  const activeCPSeason = el.dataset.cpSeason;
+  const topRows = allCropPlan.filter(c => c.season_label === activeCPSeason && !c.sub_block);
+  const tots = {
+    planned: topRows.reduce((s, c) => s + (parseFloat(c.planned_ha) || 0), 0),
+    planted: topRows.filter(c => c.planted_ha).reduce((s, c) => s + (parseFloat(c.planted_ha) || 0), 0),
+    loss:    topRows.filter(c => c.area_loss_ha).reduce((s, c) => s + (parseFloat(c.area_loss_ha) || 0), 0),
+    active:  topRows.reduce((s, c) => {
+      return s + Math.max(0, (parseFloat(c.planted_ha || c.planned_ha) || 0) - (parseFloat(c.area_loss_ha) || 0));
+    }, 0),
+  };
+  const cards = el.querySelectorAll('.stat-row .stat-card');
+  if (cards.length >= 5) {
+    cards[0].querySelector('.stat-value').textContent = topRows.length || '—';
+    cards[1].querySelector('.stat-value').textContent = tots.planned > 0 ? tots.planned.toFixed(1) : '—';
+    cards[2].querySelector('.stat-value').textContent = tots.planted > 0 ? tots.planted.toFixed(1) : '—';
+    cards[3].querySelector('.stat-value').textContent = tots.loss > 0 ? tots.loss.toFixed(1) : '—';
+    cards[4].querySelector('.stat-value').textContent = tots.active > 0 ? tots.active.toFixed(1) : '—';
+  }
+}
+
+async function addBlankRow(seasonLabel) {
+  const farm   = getActiveFarm();
+  const farmId = farm?.id || farm;
+
+  const [newRow] = await dbInsert('crop_plan_entries', {
+    farm_id:      farmId,
+    paddock_name: 'New paddock',
+    season_label: seasonLabel,
+    season_type:  seasonLabel.startsWith('Summer') ? 'Summer' : seasonLabel.startsWith('Winter') ? 'Winter' : 'Annual',
+    status:       'intent',
+    commodity:    'Cotton',
+    updated_at:   new Date().toISOString(),
+  });
+
+  if (!newRow) { toast('Failed to add row', 'error'); return; }
+  toast('Row added — click to edit', 'success');
+  await refreshAll();
+
+  // Scroll to and open the paddock_name cell of the new row
+  const el = document.getElementById('agro-tab-cropplan');
+  setTimeout(() => {
+    const newTr   = el?.querySelector(`tr[data-id="${newRow.id}"]`);
+    const firstTd = newTr?.querySelector('td.cp-cell');
+    if (firstTd) {
+      newTr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      _startEdit(firstTd);
+    }
+  }, 60);
+}
+
+async function loadActuals() {
+  const farm   = getActiveFarm();
+  const farmId = farm?.id || farm;
+  if (!farmId) { toast('No farm selected', 'error'); return; }
+
+  // Check which seasons aren't already loaded
+  const existingSeasons = new Set(allCropPlan.map(c => c.season_label));
+  const toInsert = BB_2526_SEED.filter(r => !existingSeasons.has(r.season_label));
+
+  if (toInsert.length === 0) {
+    toast('2025-26 actuals already loaded', 'info');
+    return;
+  }
+
+  // Show confirmation
+  const summerCount = toInsert.filter(r => r.season_label === 'Summer 2025-26').length;
+  const annualCount = toInsert.filter(r => r.season_label === 'Annual 2025-26').length;
+  const msg = [
+    summerCount ? `${summerCount} cotton paddocks (Summer 2025-26)` : '',
+    annualCount ? `${annualCount} hay/pasture paddocks (Annual 2025-26)` : '',
+  ].filter(Boolean).join(' + ');
+
+  if (!confirm(`Load Blackbull 2025-26 actuals?\n${msg}\n\nAll will be marked as harvested/growing as per the harvest summary.`)) return;
+
+  toast('Loading actuals…', 'info');
+
+  try {
+    // Insert in batches of 10 to avoid payload limits
+    const rows = toInsert.map(r => ({
+      farm_id:      farmId,
+      paddock_name: r.paddock_name,
+      sub_block:    r.sub_block || null,
+      season_label: r.season_label,
+      season_type:  r.season_type,
+      status:       r.status,
+      commodity:    r.commodity,
+      variety:      r.variety || null,
+      water_type:   r.water_type || null,
+      planned_ha:   r.planned_ha ?? null,
+      planted_ha:   r.planted_ha ?? null,
+      area_loss_ha: r.area_loss_ha ?? null,
+      notes:        r.notes || null,
+      updated_at:   new Date().toISOString(),
+    }));
+
+    for (let i = 0; i < rows.length; i += 10) {
+      const batch = rows.slice(i, i + 10);
+      await Promise.all(batch.map(r => dbInsert('crop_plan_entries', r)));
+    }
+
+    toast(`Loaded ${rows.length} paddocks`, 'success');
+    const el = document.getElementById('agro-tab-cropplan');
+    if (el) el.dataset.cpSeason = 'Summer 2025-26';
+    await refreshAll();
+  } catch (err) {
+    toast('Load failed: ' + (err.message || err), 'error');
+  }
 }
 
 // ── CROP PLAN MODAL ────────────────────────────────────────────────────────
