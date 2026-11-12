@@ -27,7 +27,18 @@ const FALLOW_COMMODITIES = new Set(['Fallow']);
 export async function mountAgronomy(container) {
   container.innerHTML = buildShell();
   bindTabNav(container);
+  _bindPaddocksNav(container);
   await refreshAll();
+}
+
+function _bindPaddocksNav(container) {
+  container.addEventListener('click', (e) => {
+    const link = e.target.closest('a[data-module="paddocks"]');
+    if (!link) return;
+    e.preventDefault();
+    // Trigger navigation via sidebar link
+    document.querySelector('#sidebar a[data-module="paddocks"]')?.click();
+  });
 }
 
 export function unmountAgronomy() {
@@ -42,7 +53,10 @@ function buildShell() {
         <h1>Agronomy</h1>
         <p class="page-subtitle">Paddock scouting, crop metrics &amp; visit history</p>
       </div>
-      <button class="btn btn-primary" id="agro-log-visit-btn">+ Log Visit</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <a href="#" data-module="paddocks" class="btn btn-secondary" id="agro-manage-paddocks-btn">🗺 Manage Paddocks</a>
+        <button class="btn btn-primary" id="agro-log-visit-btn">+ Log Visit</button>
+      </div>
     </div>
     <nav class="tab-nav" id="agronomy-tabs">
       <button class="tab-btn active" data-tab="board">Paddock Board</button>
@@ -65,7 +79,7 @@ async function refreshAll() {
       'farm_id=eq.' + farmId + '&season=eq.' + season + '&order=report_date.desc'),
     dbSelect('agronomy_paddock_entries',
       'farm_id=eq.' + farmId + '&order=paddock_name,created_at.desc'),
-    dbSelect('paddocks', { farm_id: farmId }, 'name'),
+    dbSelect('paddocks', 'farm_id=eq.' + farmId + '&order=name.asc'),
   ]);
   allPaddocks = paddocks || [];
 
@@ -120,6 +134,9 @@ function renderBoard() {
       <div class="empty-state">
         <div class="empty-icon">🌱</div>
         <p>No scouting visits recorded this season.</p>
+        <p style="font-size:0.82rem;color:var(--hint);margin-top:-8px">
+          <a href="#" data-module="paddocks" style="color:var(--blue)">Set up paddocks</a> first to get a dropdown when logging visits.
+        </p>
         <button class="btn btn-primary" id="agro-empty-log-btn">Log First Visit</button>
       </div>`;
     document.getElementById('agro-empty-log-btn')
@@ -468,7 +485,7 @@ function _paddockNameField(currentValue) {
     // No paddocks configured yet — free text with hint
     return `<input class="form-input agro-ep-name" placeholder="Paddock name *"
       style="max-width:200px" value="${esc(currentValue)}"
-      title="Add paddocks in Settings → Paddocks for a dropdown here">`;
+      title="Add paddocks in the Paddocks module for a dropdown here">`;
   }
   const opts = allPaddocks.map(p =>
     `<option value="${esc(p.name)}"${p.name === currentValue ? ' selected' : ''}>${esc(p.name)}</option>`
