@@ -513,10 +513,6 @@ function renderCropPlan() {
     [...new Set(allCropPlan.map(c => c.season_label).filter(Boolean))]
   );
 
-  // Show seed button if 2025-26 data not yet loaded
-  const showSeedBtn = !allCropPlan.some(c =>
-    c.season_label === 'Summer 2025-26' || c.season_label === 'Annual 2025-26'
-  );
 
   // ── Build the paddock × season matrix ──────────────────────────────────
   // Rows: all unique paddock+sub_block combos across ALL seasons (so blank cells
@@ -561,7 +557,6 @@ function renderCropPlan() {
         <h2 style="font-size:var(--text-md);font-weight:600;margin:0">Crop Plan</h2>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        ${showSeedBtn ? `<button class="btn btn-secondary" id="cp-load-actuals-btn">📥 Load 2025-26 actuals</button>` : ''}
         <button class="btn btn-secondary" id="cp-add-paddock-btn">+ Add paddock</button>
       </div>
     </div>
@@ -571,8 +566,7 @@ function renderCropPlan() {
         <div class="empty-icon">🌾</div>
         <p>No crop plan entries yet.</p>
         <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-          <button class="btn btn-primary" id="cp-empty-load-btn">📥 Load 2025-26 actuals</button>
-          <button class="btn btn-secondary" id="cp-empty-add-btn">+ Add paddock</button>
+          <button class="btn btn-primary" id="cp-empty-add-btn">+ Add paddock</button>
         </div>
       </div>
     ` : `
@@ -645,9 +639,6 @@ function renderCropPlan() {
   `;
 
   // ── Wire buttons ─────────────────────────────────────────────────────────
-  el.querySelector('#cp-load-actuals-btn')?.addEventListener('click', loadActuals);
-  el.querySelector('#cp-empty-load-btn')?.addEventListener('click', loadActuals);
-
   const addPaddock = () => openAddPaddockModal(allSeasons, currentSeason);
   el.querySelector('#cp-add-paddock-btn')?.addEventListener('click', addPaddock);
   el.querySelector('#cp-empty-add-btn')?.addEventListener('click', addPaddock);
