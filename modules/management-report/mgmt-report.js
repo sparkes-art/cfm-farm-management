@@ -5,9 +5,9 @@
 // Revenue actuals from CFM invoices; cost actuals from Xero P&L.
 // Line-level comments per row + month, tracked by user and timestamp.
 
-import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794533442387';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794533442387';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794533442387';
+import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794541175400';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794541175400';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794541175400';
 
 // Module-level state — persists across re-renders within a session
 let _selectedMonth = null;   // 'YYYY-MM' or null = full YTD
@@ -1531,11 +1531,11 @@ window._mgmtOpenInvoice = async function(invoiceId) {
   document.querySelectorAll('[style*="position:fixed"]').forEach(el => {
     if (el.style.zIndex >= 9999) el.remove();
   });
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794533442387');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794541175400');
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   setTimeout(async () => {
     try {
-      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794533442387');
+      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794541175400');
       const rows = await ds('invoices', 'id=eq.' + invoiceId + '&select=*');
       const inv  = rows?.[0];
       if (!inv) return;

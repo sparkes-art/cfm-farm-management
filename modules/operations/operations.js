@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794533442387';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794533442387';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794533442387';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794533442387';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794541175400';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794541175400';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794541175400';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794541175400';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;

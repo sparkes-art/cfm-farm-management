@@ -2,9 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794533442387';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794533442387';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794533442387';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794541175400';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794541175400';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794541175400';
+import { loadCommodities, getCommodities }         from '../settings/commodities.js?v=1794541175400';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -40,15 +41,6 @@ const CP_STATUS_CLASSES = {
   harvested: 'badge-info',
 };
 const CP_SEASON_TYPES = ['Summer', 'Winter', 'Annual'];
-const CP_CROP_TYPES = [
-  'Dryland',
-  'Irrigated - Overhead Pivot',
-  'Irrigated - Overhead Lateral',
-  'Irrigated - Furrow',
-  'Pasture',
-  'Grazing/Bush',
-  'Permanent Crop',
-];
 
 // Commodity colour map — distinct colours per crop so cells are distinguishable at a glance
 const CP_COMMODITY_COLORS = {
@@ -121,6 +113,8 @@ async function refreshAll() {
   const farm   = getActiveFarm();
   const farmId = farm?.id || farm;
   const season = getActiveSeason();
+
+  await loadCommodities();
 
   const [reports, entries, paddocks, cropPlan] = await Promise.all([
     dbSelect('agronomy_reports',
@@ -501,8 +495,7 @@ if (!document.getElementById('cp-chip-styles')) {
 const CP_COLUMNS = [
   { key: 'paddock_name',  label: 'Paddock',     type: 'text',    width: '160px', bold: true },
   { key: 'sub_block',     label: 'Sub-block',   type: 'text',    width: '110px' },
-  { key: 'commodity',     label: 'Commodity',   type: 'select',  width: '130px', options: () => CP_COMMODITY_OPTIONS },
-  { key: 'water_type',    label: 'Crop type',   type: 'select',  width: '130px', options: () => CP_CROP_TYPES },
+  { key: 'commodity',     label: 'Commodity',   type: 'select',  width: '130px', options: () => getCommodities().map(c => c.name) },
   { key: 'variety',       label: 'Variety',     type: 'text',    width: '110px' },
   { key: 'planned_ha',    label: 'Planned ha',  type: 'number',  width: '90px',  align: 'right' },
   { key: 'planted_ha',    label: 'Planted ha',  type: 'number',  width: '90px',  align: 'right' },
@@ -513,11 +506,6 @@ const CP_COLUMNS = [
   { key: 'notes',         label: 'Notes',       type: 'text',    width: '180px', hint: true },
 ];
 
-const CP_COMMODITY_OPTIONS = [
-  'Cotton', 'Corn', 'Sorghum', 'Wheat', 'Chickpea', 'Pigeon Pea',
-  'Rhodes Hay', 'Jarrah Hay', 'Cavalcade Hay', 'Setaria Hay', 'Corn Hay',
-  'Fallow', 'Pasture', 'Other',
-];
 
 // Blackbull 2025-26 seed data
 const BB_2526_SEED = [
