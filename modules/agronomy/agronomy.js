@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794544669376';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794544669376';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794544669376';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794544669376';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794544846087';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794544846087';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794544846087';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794544846087';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -1718,18 +1718,31 @@ function openBulkAssignModal(allSeasons, currentSeason) {
       const toCreate = checked.filter(name => !existing.has(name));
       const skipped  = checked.filter(name =>  existing.has(name));
 
+      if (!toCreate.length && skipped.length) {
+        result.style.color = 'var(--amber)';
+        result.textContent = `All ${skipped.length} selected paddock${skipped.length > 1 ? 's' : ''} already have entries for ${season} — nothing to create.`;
+        throw new Error('');
+      }
+
       if (toCreate.length) {
-        await Promise.all(toCreate.map(name => {
+        const rows = toCreate.map(name => {
           const pd = allPaddocks.find(p => p.name === name);
-          return dbInsert('crop_plan_entries', {
+          return {
             farm_id:      farmId,
             paddock_name: name,
             season_label: season,
             commodity:    crop,
             status,
-            planned_ha:   pd?.area_ha || null,
-          });
-        }));
+            planned_ha:   pd?.area_ha ?? null,
+          };
+        });
+        try {
+          await dbInsert('crop_plan_entries', rows.length === 1 ? rows[0] : rows);
+        } catch (err) {
+          result.style.color = 'var(--red)';
+          result.textContent = `Save failed: ${err.message}`;
+          throw err;
+        }
       }
 
       const msg = [
