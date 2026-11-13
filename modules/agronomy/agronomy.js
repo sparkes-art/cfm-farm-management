@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794545651272';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794545651272';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794545651272';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794545651272';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794545956983';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794545956983';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794545956983';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794545956983';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -1662,7 +1662,7 @@ function openBulkAssignModal(allSeasons, currentSeason) {
     confirmLabel: 'Apply',
     bodyHTML: `
       <p style="font-size:var(--text-sm);color:var(--hint);margin-bottom:16px">
-        Select paddocks, choose a crop type and season, then apply. Paddocks that already have an entry for that season will be skipped.
+        Select paddocks, choose a crop type and season, then apply. Existing entries for the selected season will be overwritten.
       </p>
 
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
@@ -1744,58 +1744,47 @@ function openBulkAssignModal(allSeasons, currentSeason) {
       if (!season)         { result.style.color='var(--red)'; result.textContent='Please select a season.'; throw new Error(''); }
       if (!checked.length) { result.style.color='var(--red)'; result.textContent='Please select at least one paddock.'; throw new Error(''); }
 
-      // Find paddocks that already have an entry WITH a commodity for the selected season.
-      // Entries with no commodity are skeleton rows (not visible in the table) and should
-      // NOT block bulk assign — the user sees nothing there and expects bulk assign to fill them.
-      const existing = new Set(
-        allCropPlan
-          .filter(e => e.season_label === season && !e.sub_block && e.commodity)
-          .map(e => e.paddock_name)
-      );
+      // Bulk assign always overwrites — it's a planning tool, not a planting record.
+      // For paddocks that already have an entry for this season, upsert updates them.
+      // For paddocks with no entry, upsert creates one.
+      const rows = checked.map(name => {
+        const pd = allPaddocks.find(p => p.name === name);
+        return {
+          farm_id:      farmId,
+          paddock_name: name,
+          sub_block:    null,
+          season_label: season,
+          commodity:    crop,
+          status,
+          planned_ha:   pd?.area_ha ?? null,
+        };
+      });
 
-
-      const toCreate = checked.filter(name => !existing.has(name));
-      const skipped  = checked.filter(name =>  existing.has(name));
-
-      if (!toCreate.length && skipped.length) {
-        result.style.color = 'var(--amber)';
-        result.textContent = `All ${skipped.length} selected paddock${skipped.length > 1 ? 's' : ''} already have entries for ${season} — nothing to create.`;
-        throw new Error('');
-      }
-
-      if (toCreate.length) {
-        const rows = toCreate.map(name => {
-          const pd = allPaddocks.find(p => p.name === name);
-          return {
-            farm_id:      farmId,
-            paddock_name: name,
-            season_label: season,
-            commodity:    crop,
-            status,
-            planned_ha:   pd?.area_ha ?? null,
-          };
-        });
+      const failed = [];
+      for (const row of rows) {
         try {
-          // Send one at a time to get per-row errors and avoid bulk-insert edge cases
-          for (const row of rows) {
-            await dbInsert('crop_plan_entries', row);
-          }
+          // Upsert: creates new entry or updates existing one for this paddock+season
+          await dbUpsert('crop_plan_entries', row, 'farm_id,paddock_name,season_label,sub_block');
         } catch (err) {
-          const msg = err.message || JSON.stringify(err) || 'Unknown error';
-          console.error('[CFM] Bulk assign failed:', msg, '\nRows attempted:', rows);
-          result.style.color = 'var(--red)';
-          result.textContent = `Save failed: ${msg}`;
-          throw new Error(msg);
+          console.error('[CFM] Bulk assign row failed:', row.paddock_name, err.message || err);
+          failed.push(row.paddock_name);
         }
       }
 
-      const msg = [
-        toCreate.length ? `${toCreate.length} paddock${toCreate.length > 1 ? 's' : ''} assigned` : '',
-        skipped.length  ? `${skipped.length} skipped (already had entries)` : '',
-      ].filter(Boolean).join(' · ');
+      if (failed.length === rows.length) {
+        result.style.color = 'var(--red)';
+        result.textContent = `All saves failed — check browser console for details.`;
+        throw new Error('All rows failed');
+      }
 
-      toast(msg || 'Done', 'success');
-      refreshAll(); // async — don't await, modal closes immediately
+      if (failed.length) {
+        await refreshAll();
+        toast(`${rows.length - failed.length} assigned · ${failed.length} failed: ${failed.join(', ')}`, 'warning', 6000);
+        return;
+      }
+
+      toast(`${rows.length} paddock${rows.length > 1 ? 's' : ''} assigned`, 'success');
+      refreshAll();
     },
   });
 }
