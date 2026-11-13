@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794543156124';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794543156124';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794543156124';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794543156124';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794543800500';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794543800500';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794543800500';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794543800500';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -58,19 +58,26 @@ const CP_SEASON_TYPES = ['Summer', 'Winter', 'Annual'];
 
 // Commodity colour map — distinct colours per crop so cells are distinguishable at a glance
 const CP_COMMODITY_COLORS = {
+  // Cotton — blues
   'Cotton Irrigated':{ bg: '#dbeafe', text: '#1e3a8a', dot: '#3b82f6' },
   'Cotton Dryland':  { bg: '#bfdbfe', text: '#1e40af', dot: '#2563eb' },
   'Cotton':          { bg: '#dbeafe', text: '#1e3a8a', dot: '#3b82f6' }, // legacy fallback
+  // Cereals / row crops — yellows & oranges
   'Corn':            { bg: '#fef9c3', text: '#713f12', dot: '#eab308' },
   'Corn Hay':        { bg: '#fef3c7', text: '#78350f', dot: '#f59e0b' },
   'Sorghum':         { bg: '#ffedd5', text: '#7c2d12', dot: '#f97316' },
   'Wheat':           { bg: '#fce7f3', text: '#831843', dot: '#ec4899' },
+  // Legumes — purples
   'Chickpea':        { bg: '#ede9fe', text: '#3b0764', dot: '#8b5cf6' },
   'Pigeon Pea':      { bg: '#f3e8ff', text: '#581c87', dot: '#a855f7' },
-  'Rhodes Hay':      { bg: '#d1fae5', text: '#065f46', dot: '#10b981' },
-  'Jarrah Hay':      { bg: '#dcfce7', text: '#14532d', dot: '#22c55e' },
-  'Cavalcade Hay':   { bg: '#ecfccb', text: '#365314', dot: '#84cc16' },
-  'Setaria Hay':     { bg: '#d1fae5', text: '#064e3b', dot: '#059669' },
+  // Hays / pastures — clearly distinct greens & teals
+  'Rhodes Hay':      { bg: '#ccfbf1', text: '#134e4a', dot: '#14b8a6' }, // teal
+  'Jarrah Hay':      { bg: '#d1fae5', text: '#065f46', dot: '#10b981' }, // emerald
+  'Jarrah Dryland':  { bg: '#d1fae5', text: '#065f46', dot: '#10b981' }, // emerald (alias)
+  'Cavalcade Hay':   { bg: '#fef08a', text: '#713f12', dot: '#ca8a04' }, // amber-yellow — clearly distinct from greens
+  'Cavalcade Dryland':{ bg: '#fef08a', text: '#713f12', dot: '#ca8a04' }, // amber-yellow (alias)
+  'Setaria Hay':     { bg: '#bbf7d0', text: '#14532d', dot: '#16a34a' }, // lighter green
+  // Fallow
   'Fallow':          { bg: '#f1f5f9', text: '#64748b', dot: '#94a3b8' },
 };
 
@@ -706,6 +713,7 @@ function renderCropPlan() {
         <h2 style="font-size:var(--text-md);font-weight:600;margin:0">Crop Plan</h2>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-secondary" id="cp-bulk-assign-btn">☑ Bulk assign</button>
         <button class="btn btn-secondary" id="cp-plan-season-btn">+ Plan season</button>
         <button class="btn btn-secondary" id="cp-add-paddock-btn">+ Add paddock</button>
       </div>
@@ -934,6 +942,7 @@ function renderCropPlan() {
 
   el.querySelector('#cp-plan-season-btn')?.addEventListener('click', () => openPlanSeasonModal(allSeasons, latestSeason));
   el.querySelector('#cp-add-season-btn')?.addEventListener('click', () => openPlanSeasonModal(allSeasons, latestSeason));
+  el.querySelector('#cp-bulk-assign-btn')?.addEventListener('click', () => openBulkAssignModal(allSeasons, latestSeason));
 
   // Delete row wiring
   el.querySelectorAll('.cp-del-row-btn').forEach(btn => {
@@ -1034,7 +1043,7 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
   // Commodity chip (shared)
   const commColor     = entry?.commodity ? (CP_COMMODITY_COLORS[entry.commodity] || { bg: '#e0f2fe', text: '#0c4a6e' }) : null;
   const commodityLine = entry?.commodity
-    ? `<div style="font-size:10px;font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:79px;padding:1px 4px;border-radius:4px;background:${commColor.bg};color:${commColor.text};margin-bottom:3px" title="${esc(entry.commodity)}">${esc(entry.commodity)}</div>`
+    ? `<div style="font-size:11px;font-weight:700;text-align:center;white-space:normal;word-break:break-word;padding:2px 5px;border-radius:4px;background:${commColor.bg};color:${commColor.text};margin-bottom:3px;line-height:1.3">${esc(entry.commodity)}</div>`
     : '';
   const statusDot   = entry ? _statusDot(entry.status) : '';
   const statusLabel = entry?.status ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--hint)">${CP_STATUS_LABELS[entry.status] || entry.status}</span>` : '';
@@ -1576,6 +1585,131 @@ function openAddPaddockModal(allSeasons, currentSeason) {
       });
       toast('Added to plan', 'success');
       await refreshAll();
+    },
+  });
+}
+
+// ── Bulk Assign Modal ──────────────────────────────────────────────────────
+function openBulkAssignModal(allSeasons, currentSeason) {
+  const farm      = getActiveFarm();
+  const farmId    = farm?.id || farm;
+  const cropTypes = _planCropTypes();
+  const statuses  = CP_STATUSES;
+
+  // Build paddock list from all paddocks in plan + any paddocks table rows
+  const paddockNames = [...new Set([
+    ...allPaddocks.map(p => p.name),
+    ...allCropPlan.map(e => e.paddock_name),
+  ])].sort((a, b) => a.localeCompare(b));
+
+  if (!paddockNames.length) {
+    toast('No paddocks found — add paddocks first', 'warning');
+    return;
+  }
+
+  const seasonOpts = allSeasons.map(s =>
+    `<option value="${esc(s)}"${s === currentSeason ? ' selected' : ''}>${esc(s)}</option>`
+  ).join('');
+
+  const cropOpts = cropTypes.map(c =>
+    `<option value="${esc(c)}">${esc(c)}</option>`
+  ).join('');
+
+  const statusOpts = statuses.map(s =>
+    `<option value="${esc(s)}"${s === 'intent' ? ' selected' : ''}>${esc(CP_STATUS_LABELS[s])}</option>`
+  ).join('');
+
+  openModal({
+    title: 'Bulk assign crop type',
+    wide: true,
+    confirmLabel: 'Apply',
+    bodyHTML: `
+      <p style="font-size:var(--text-sm);color:var(--hint);margin-bottom:16px">
+        Select paddocks, choose a crop type and season, then apply. Paddocks that already have an entry for that season will be skipped.
+      </p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+        <div>
+          <label class="form-label">Crop type</label>
+          <select class="form-select" id="ba-crop">${cropOpts}</select>
+        </div>
+        <div>
+          <label class="form-label">Season</label>
+          <select class="form-select" id="ba-season">${seasonOpts}</select>
+        </div>
+        <div>
+          <label class="form-label">Status</label>
+          <select class="form-select" id="ba-status">${statusOpts}</select>
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:0;margin-bottom:6px">
+        <label class="form-label" style="margin:0">Select paddocks</label>
+        <button type="button" id="ba-select-all" style="margin-left:12px;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">Select all</button>
+        <button type="button" id="ba-select-none" style="margin-left:8px;font-size:11px;color:var(--hint);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">None</button>
+      </div>
+      <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+          ${paddockNames.map(name => `
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:3px 0">
+              <input type="checkbox" class="ba-paddock-check" value="${esc(name)}">
+              ${esc(name)}
+            </label>
+          `).join('')}
+        </div>
+      </div>
+      <div id="ba-result" style="margin-top:10px;font-size:var(--text-sm);color:var(--hint)"></div>
+    `,
+    onMounted: (overlay) => {
+      overlay.querySelector('#ba-select-all')?.addEventListener('click', () => {
+        overlay.querySelectorAll('.ba-paddock-check').forEach(c => { c.checked = true; });
+      });
+      overlay.querySelector('#ba-select-none')?.addEventListener('click', () => {
+        overlay.querySelectorAll('.ba-paddock-check').forEach(c => { c.checked = false; });
+      });
+    },
+    onConfirm: async (overlay) => {
+      const crop    = overlay.querySelector('#ba-crop')?.value;
+      const season  = overlay.querySelector('#ba-season')?.value;
+      const status  = overlay.querySelector('#ba-status')?.value;
+      const checked = [...overlay.querySelectorAll('.ba-paddock-check:checked')].map(el => el.value);
+      const result  = overlay.querySelector('#ba-result');
+
+      if (!crop)           { result.style.color='var(--red)'; result.textContent='Please select a crop type.'; throw new Error(''); }
+      if (!season)         { result.style.color='var(--red)'; result.textContent='Please select a season.'; throw new Error(''); }
+      if (!checked.length) { result.style.color='var(--red)'; result.textContent='Please select at least one paddock.'; throw new Error(''); }
+
+      // Find paddocks that already have an entry for this season (top-level only)
+      const existing = new Set(
+        allCropPlan
+          .filter(e => e.season_label === season && !e.sub_block)
+          .map(e => e.paddock_name)
+      );
+
+      const toCreate = checked.filter(name => !existing.has(name));
+      const skipped  = checked.filter(name =>  existing.has(name));
+
+      if (toCreate.length) {
+        await Promise.all(toCreate.map(name => {
+          const pd = allPaddocks.find(p => p.name === name);
+          return dbInsert('crop_plan_entries', {
+            farm_id:      farmId,
+            paddock_name: name,
+            season_label: season,
+            commodity:    crop,
+            status,
+            planned_ha:   pd?.area_ha || null,
+          });
+        }));
+      }
+
+      const msg = [
+        toCreate.length ? `${toCreate.length} paddock${toCreate.length > 1 ? 's' : ''} assigned` : '',
+        skipped.length  ? `${skipped.length} skipped (already had entries)` : '',
+      ].filter(Boolean).join(' · ');
+
+      toast(msg || 'Done', 'success');
+      refreshAll(); // async — don't await, modal closes immediately
     },
   });
 }
