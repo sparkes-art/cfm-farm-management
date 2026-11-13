@@ -16,10 +16,10 @@
 // deletes a row, since a field missing from a partial re-upload just means
 // "not re-typed this time," not "no longer exists."
 
-import { dbInsert, dbUpdate } from '../../js/supabase-client.js?v=1794543981580';
-import { getCommodities, getCropTypes, addCropType } from '../../js/commodities.js?v=1794543981580';
-import { getActiveFarm, getSession } from '../../js/app-state.js?v=1794543981580';
-import { toast } from '../../js/ui.js?v=1794543981580';
+import { dbInsert, dbUpdate } from '../../js/supabase-client.js?v=1794544669376';
+import { getCommodities, getCropTypes, addCropType } from '../../js/commodities.js?v=1794544669376';
+import { getActiveFarm, getSession } from '../../js/app-state.js?v=1794544669376';
+import { toast } from '../../js/ui.js?v=1794544669376';
 
 // The workbook doesn't carry a commodity name at all — this is always a
 // cotton picking sheet, and it reports lint bales (Total 227kg Bales), not

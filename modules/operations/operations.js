@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794543981580';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794543981580';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794543981580';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794543981580';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794544669376';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794544669376';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794544669376';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794544669376';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -330,7 +330,7 @@ function _renderDetail() {
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">
         ${[
-          ['Commodity', session.commodity],
+          ['Crop Type', session.commodity],
           ['Variety',   session.variety],
           ['Lot #',     session.auslot_default],
           ['Operator',  session.operator_default],
@@ -756,11 +756,11 @@ function _showNewSessionModal() {
         </div>
         <div id="ns-cp-banner" style="grid-column:1/-1;display:none"></div>
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Commodity</label>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Crop Type</label>
           <select id="ns-commodity"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
-            <option value="">Select commodity…</option>
-            ${getCommodities().map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}
+            <option value="">Select crop type…</option>
+            ${getCropTypes().map(ct => `<option value="${esc(ct.name)}">${esc(ct.name)}</option>`).join('')}
           </select>
         </div>
         <div>
@@ -900,11 +900,11 @@ function _showEditHeaderModal(session) {
     bodyHTML: `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Commodity</label>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Crop Type</label>
           <select id="ns-commodity"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
-            <option value="">Select commodity…</option>
-            ${getCommodities().map(c => `<option value="${esc(c.name)}" ${c.name === session.commodity ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+            <option value="">Select crop type…</option>
+            ${getCropTypes().map(ct => `<option value="${esc(ct.name)}" ${ct.name === session.commodity ? 'selected' : ''}>${esc(ct.name)}</option>`).join('')}
           </select>
         </div>
         ${[

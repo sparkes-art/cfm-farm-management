@@ -73,13 +73,13 @@
 //
 // ── Usage ─────────────────────────────────────────────────────────────────
 //
-//   import { parseBudgetExcel, showBudgetImportPreview } from './budget-import.js?v=1794543981580';
+//   import { parseBudgetExcel, showBudgetImportPreview } from './budget-import.js?v=1794544669376';
 //   const result = await parseBudgetExcel(file);
 //   showBudgetImportPreview(container, result);
 
-import { dbInsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794543981580';
-import { getActiveFarm } from '../../js/app-state.js?v=1794543981580';
-import { toast, qs } from '../../js/ui.js?v=1794543981580';
+import { dbInsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794544669376';
+import { getActiveFarm } from '../../js/app-state.js?v=1794544669376';
+import { toast, qs } from '../../js/ui.js?v=1794544669376';
 
 // ── SheetJS loader ─────────────────────────────────────────────────────────
 async function _ensureXLSX() {

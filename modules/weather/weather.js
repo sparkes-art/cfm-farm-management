@@ -1,9 +1,9 @@
 // modules/weather/weather.js
 // Seasonal weather module — rainfall and GDD charts, BOM / Open-Meteo data
 
-import { dbSelect } from '../../js/supabase-client.js?v=1794543981580';
-import { getActiveFarm, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794543981580';
-import { qs } from '../../js/ui.js?v=1794543981580';
+import { dbSelect } from '../../js/supabase-client.js?v=1794544669376';
+import { getActiveFarm, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794544669376';
+import { qs } from '../../js/ui.js?v=1794544669376';
 
 export async function mountWeather(container) {
   const farm = getActiveFarm();
