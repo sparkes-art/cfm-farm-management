@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794545194964';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794545194964';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794545194964';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794545194964';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794545281519';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794545281519';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794545281519';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794545281519';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -1737,11 +1737,16 @@ function openBulkAssignModal(allSeasons, currentSeason) {
           };
         });
         try {
-          await dbInsert('crop_plan_entries', rows.length === 1 ? rows[0] : rows);
+          // Send one at a time to get per-row errors and avoid bulk-insert edge cases
+          for (const row of rows) {
+            await dbInsert('crop_plan_entries', row);
+          }
         } catch (err) {
+          const msg = err.message || JSON.stringify(err) || 'Unknown error';
+          console.error('[CFM] Bulk assign failed:', msg, '\nRows attempted:', rows);
           result.style.color = 'var(--red)';
-          result.textContent = `Save failed: ${err.message}`;
-          throw err;
+          result.textContent = `Save failed: ${msg}`;
+          throw new Error(msg);
         }
       }
 
