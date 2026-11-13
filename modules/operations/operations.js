@@ -4,9 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794523141775';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794523141775';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794523141775';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794531396260';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794531396260';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794531396260';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794531396260';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -31,6 +32,8 @@ async function _loadAll() {
   const farmId = getActiveFarm()?.id;
   const season = getActiveSeason();
   if (!farmId) return;
+
+  await loadCommodities().catch(() => {});
 
   const [sessions, paddocks, cropPlan] = await Promise.all([
     dbSelect('planting_sessions',
@@ -716,8 +719,11 @@ function _showNewSessionModal() {
         <div id="ns-cp-banner" style="grid-column:1/-1;display:none"></div>
         <div>
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Commodity</label>
-          <input id="ns-commodity" type="text" placeholder="e.g. Cotton"
+          <select id="ns-commodity"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            <option value="">Select commodity…</option>
+            ${getCommodities().map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('')}
+          </select>
         </div>
         <div>
           <label id="ns-variety-label" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Variety</label>
@@ -725,12 +731,12 @@ function _showNewSessionModal() {
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
         </div>
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Default AusLot #</label>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">AusLot #</label>
           <input id="ns-auslot" type="text" placeholder="e.g. N12/25/293"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
         </div>
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Default Operator</label>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Operator</label>
           <input id="ns-operator" type="text" placeholder="e.g. Bailey"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
         </div>
@@ -780,7 +786,11 @@ function _showNewSessionModal() {
           const varEl  = modalEl.querySelector('#ns-variety');
           const comEl  = modalEl.querySelector('#ns-commodity');
           if (varEl && !varEl.value && cp.variety)   { varEl.value = cp.variety; varEl.style.background = 'var(--blue-bg)'; varEl.style.borderColor = 'var(--blue)'; }
-          if (comEl && !comEl.value && cp.commodity) { comEl.value = cp.commodity; comEl.style.background = 'var(--blue-bg)'; comEl.style.borderColor = 'var(--blue)'; }
+          if (comEl && !comEl.value && cp.commodity) {
+            // Try to select matching option in the dropdown
+            const opt = [...comEl.options].find(o => o.value === cp.commodity);
+            if (opt) { comEl.value = cp.commodity; comEl.style.background = 'var(--blue-bg)'; comEl.style.borderColor = 'var(--blue)'; }
+          }
           modalEl.querySelector('#ns-variety-label').innerHTML =
             `Variety <span style="font-size:10px;color:var(--blue);font-weight:600">from crop plan</span>`;
         } else {
@@ -834,11 +844,18 @@ function _showEditHeaderModal(session) {
     wide: true,
     bodyHTML: `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Commodity</label>
+          <select id="ns-commodity"
+            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            <option value="">Select commodity…</option>
+            ${getCommodities().map(c => `<option value="${esc(c.name)}" ${c.name === session.commodity ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+          </select>
+        </div>
         ${[
-          ['ns-commodity',  'Commodity',           session.commodity,         'text', 'e.g. Cotton'],
           ['ns-variety',    'Variety',              session.variety,           'text', 'e.g. 606'],
-          ['ns-auslot',     'Default AusLot #',    session.auslot_default,    'text', ''],
-          ['ns-operator',   'Default Operator',    session.operator_default,  'text', ''],
+          ['ns-auslot',     'AusLot #',            session.auslot_default,    'text', ''],
+          ['ns-operator',   'Operator',            session.operator_default,  'text', ''],
           ['ns-seed-in',    'Seed Carried In (bags)', session.seed_in_bags,   'number', '0'],
           ['ns-water-in',   'Water Carried In (L)', session.water_in_litres,  'number', '0'],
           ['ns-prev-field', 'Previous Field',      session.previous_field,    'text', ''],
@@ -857,7 +874,7 @@ function _showEditHeaderModal(session) {
     confirmLabel: 'Save Changes',
     onConfirm: async (modalEl) => {
       const updates = {
-        commodity:        modalEl.querySelector('#ns-commodity')?.value?.trim() || null,
+        commodity:        modalEl.querySelector('#ns-commodity')?.value || null,
         variety:          modalEl.querySelector('#ns-variety')?.value?.trim() || null,
         auslot_default:   modalEl.querySelector('#ns-auslot')?.value?.trim() || null,
         operator_default: modalEl.querySelector('#ns-operator')?.value?.trim() || null,
