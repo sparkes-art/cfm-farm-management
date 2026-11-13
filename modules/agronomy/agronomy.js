@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794545956983';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794545956983';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794545956983';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794545956983';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794546180515';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794546180515';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794546180515';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794546180515';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -1680,26 +1680,33 @@ function openBulkAssignModal(allSeasons, currentSeason) {
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+      ${paddockTypes.length ? `
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);width:72px;flex-shrink:0">Type:</span>
+        ${paddockTypes.map(t => {
+          const c = PADDOCK_TYPE_COLORS[t] || { bg: 'var(--surface)', text: 'var(--hint)', dot: 'var(--border)' };
+          return `<button type="button" class="cp-type-chip ba-type-chip" data-type="${esc(t)}"
+            onmouseover="if(!this.classList.contains('cp-type-chip--active')){this.style.background='${c.bg}';this.style.borderColor='${c.dot}';this.style.color='${c.text}'}"
+            onmouseout="if(!this.classList.contains('cp-type-chip--active')){this.style.background='';this.style.borderColor='';this.style.color=''}"
+          ><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c.dot};margin-right:5px;flex-shrink:0"></span>${esc(t)}</button>`;
+        }).join('')}
+      </div>` : ''}
+      <div style="display:flex;align-items:center;gap:0;margin-bottom:6px">
         <label class="form-label" style="margin:0">Select paddocks</label>
-        ${paddockTypes.length ? `
-          <select class="form-select" id="ba-type-filter" style="font-size:12px;padding:3px 8px;height:auto;width:auto">
-            <option value="">All types</option>
-            ${paddockTypes.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
-          </select>
-        ` : ''}
-        <button type="button" id="ba-select-all" style="margin-left:auto;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">Select all</button>
-        <button type="button" id="ba-select-none" style="font-size:11px;color:var(--hint);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">None</button>
+        <button type="button" id="ba-select-all" style="margin-left:12px;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">Select all</button>
+        <button type="button" id="ba-select-none" style="margin-left:8px;font-size:11px;color:var(--hint);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">None</button>
       </div>
-      <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px 12px" id="ba-paddock-list">
+      <div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px 12px" id="ba-paddock-list">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px" id="ba-paddock-grid">
-          ${[...paddockObjs.map(p => ({ name: p.name, type: p.type || '' })), ...extraNames.map(n => ({ name: n, type: '' }))]
-            .map(p => `
-            <label class="ba-paddock-row" data-type="${esc(p.type)}" style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:3px 0">
+          ${[...paddockObjs.map(p => ({ name: p.name, type: p.type || '', ha: p.area_ha ?? null })), ...extraNames.map(n => ({ name: n, type: '', ha: null }))]
+            .map(p => {
+              const haStr = p.ha != null ? ` · ${parseFloat(p.ha).toLocaleString('en-AU', { maximumFractionDigits: 1 })} ha` : '';
+              const typeStr = p.type ? ` (${esc(p.type)})` : '';
+              return `<label class="ba-paddock-row" data-type="${esc(p.type)}" style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:3px 0">
               <input type="checkbox" class="ba-paddock-check" value="${esc(p.name)}">
-              <span>${esc(p.name)}${p.type ? ` <span style="font-size:10px;color:var(--hint)">(${esc(p.type)})</span>` : ''}</span>
-            </label>
-          `).join('')}
+              <span>${esc(p.name)}${typeStr ? `<span style="font-size:10px;color:var(--hint)">${typeStr}</span>` : ''}<span style="font-size:10px;color:var(--hint)">${haStr}</span></span>
+            </label>`;
+            }).join('')}
         </div>
       </div>
       <div id="ba-result" style="margin-top:10px;font-size:var(--text-sm);color:var(--hint)"></div>
@@ -1720,16 +1727,34 @@ function openBulkAssignModal(allSeasons, currentSeason) {
           if (cb) cb.checked = false;
         });
       });
-      overlay.querySelector('#ba-type-filter')?.addEventListener('change', (e) => {
-        const selected = e.target.value;
-        overlay.querySelectorAll('.ba-paddock-row').forEach(row => {
-          const hide = selected ? row.dataset.type !== selected : false;
-          row.hidden = hide;
-          // Uncheck hidden rows so they aren't included in the submit
-          if (hide) {
-            const cb = row.querySelector('.ba-paddock-check');
-            if (cb) cb.checked = false;
+      // Multi-select type chips — toggle active state, filter paddock rows
+      const activeTypes = new Set();
+      overlay.querySelectorAll('.ba-type-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const t = chip.dataset.type;
+          const c = PADDOCK_TYPE_COLORS[t] || { bg: 'var(--surface)', text: 'var(--hint)', dot: 'var(--border)' };
+          if (activeTypes.has(t)) {
+            activeTypes.delete(t);
+            chip.classList.remove('cp-type-chip--active');
+            chip.style.background = '';
+            chip.style.borderColor = '';
+            chip.style.color = '';
+          } else {
+            activeTypes.add(t);
+            chip.classList.add('cp-type-chip--active');
+            chip.style.background = c.bg;
+            chip.style.borderColor = c.dot;
+            chip.style.color = c.text;
           }
+          // Show/hide paddock rows; uncheck hidden ones
+          overlay.querySelectorAll('.ba-paddock-row').forEach(row => {
+            const hide = activeTypes.size > 0 && !activeTypes.has(row.dataset.type);
+            row.hidden = hide;
+            if (hide) {
+              const cb = row.querySelector('.ba-paddock-check');
+              if (cb) cb.checked = false;
+            }
+          });
         });
       });
     },
