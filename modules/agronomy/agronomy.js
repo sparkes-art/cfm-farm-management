@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794545281519';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794545281519';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794545281519';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794545281519';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794545651272';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794545651272';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794545651272';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794545651272';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -1625,16 +1625,24 @@ function openBulkAssignModal(allSeasons, currentSeason) {
   const cropTypes = _planCropTypes();
   const statuses  = CP_STATUSES;
 
-  // Build paddock list from all paddocks in plan + any paddocks table rows
-  const paddockNames = [...new Set([
-    ...allPaddocks.map(p => p.name),
-    ...allCropPlan.map(e => e.paddock_name),
-  ])].sort((a, b) => a.localeCompare(b));
+  // Build paddock list from allPaddocks (with type info) + any crop plan names not in paddocks
+  const paddockObjs = allPaddocks
+    .slice()
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
-  if (!paddockNames.length) {
+  // Extra names from crop plan that may not be in allPaddocks
+  const knownNames = new Set(allPaddocks.map(p => p.name));
+  const extraNames = [...new Set(allCropPlan.map(e => e.paddock_name))]
+    .filter(n => n && !knownNames.has(n))
+    .sort();
+
+  if (!paddockObjs.length && !extraNames.length) {
     toast('No paddocks found — add paddocks first', 'warning');
     return;
   }
+
+  // Unique paddock types for filter
+  const paddockTypes = [...new Set(allPaddocks.map(p => p.type).filter(Boolean))].sort();
 
   const seasonOpts = allSeasons.map(s =>
     `<option value="${esc(s)}"${s === currentSeason ? ' selected' : ''}>${esc(s)}</option>`
@@ -1672,17 +1680,24 @@ function openBulkAssignModal(allSeasons, currentSeason) {
         </div>
       </div>
 
-      <div style="display:flex;align-items:center;gap:0;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
         <label class="form-label" style="margin:0">Select paddocks</label>
-        <button type="button" id="ba-select-all" style="margin-left:12px;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">Select all</button>
-        <button type="button" id="ba-select-none" style="margin-left:8px;font-size:11px;color:var(--hint);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">None</button>
+        ${paddockTypes.length ? `
+          <select class="form-select" id="ba-type-filter" style="font-size:12px;padding:3px 8px;height:auto;width:auto">
+            <option value="">All types</option>
+            ${paddockTypes.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+          </select>
+        ` : ''}
+        <button type="button" id="ba-select-all" style="margin-left:auto;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">Select all</button>
+        <button type="button" id="ba-select-none" style="font-size:11px;color:var(--hint);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">None</button>
       </div>
-      <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px 12px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
-          ${paddockNames.map(name => `
-            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:3px 0">
-              <input type="checkbox" class="ba-paddock-check" value="${esc(name)}">
-              ${esc(name)}
+      <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px 12px" id="ba-paddock-list">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px" id="ba-paddock-grid">
+          ${[...paddockObjs.map(p => ({ name: p.name, type: p.type || '' })), ...extraNames.map(n => ({ name: n, type: '' }))]
+            .map(p => `
+            <label class="ba-paddock-row" data-type="${esc(p.type)}" style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:3px 0">
+              <input type="checkbox" class="ba-paddock-check" value="${esc(p.name)}">
+              <span>${esc(p.name)}${p.type ? ` <span style="font-size:10px;color:var(--hint)">(${esc(p.type)})</span>` : ''}</span>
             </label>
           `).join('')}
         </div>
@@ -1690,11 +1705,32 @@ function openBulkAssignModal(allSeasons, currentSeason) {
       <div id="ba-result" style="margin-top:10px;font-size:var(--text-sm);color:var(--hint)"></div>
     `,
     onMounted: (overlay) => {
+      function getVisibleRows() {
+        return [...overlay.querySelectorAll('.ba-paddock-row:not([hidden])')];
+      }
       overlay.querySelector('#ba-select-all')?.addEventListener('click', () => {
-        overlay.querySelectorAll('.ba-paddock-check').forEach(c => { c.checked = true; });
+        getVisibleRows().forEach(row => {
+          const cb = row.querySelector('.ba-paddock-check');
+          if (cb) cb.checked = true;
+        });
       });
       overlay.querySelector('#ba-select-none')?.addEventListener('click', () => {
-        overlay.querySelectorAll('.ba-paddock-check').forEach(c => { c.checked = false; });
+        getVisibleRows().forEach(row => {
+          const cb = row.querySelector('.ba-paddock-check');
+          if (cb) cb.checked = false;
+        });
+      });
+      overlay.querySelector('#ba-type-filter')?.addEventListener('change', (e) => {
+        const selected = e.target.value;
+        overlay.querySelectorAll('.ba-paddock-row').forEach(row => {
+          const hide = selected ? row.dataset.type !== selected : false;
+          row.hidden = hide;
+          // Uncheck hidden rows so they aren't included in the submit
+          if (hide) {
+            const cb = row.querySelector('.ba-paddock-check');
+            if (cb) cb.checked = false;
+          }
+        });
       });
     },
     onConfirm: async (overlay) => {
@@ -1708,12 +1744,15 @@ function openBulkAssignModal(allSeasons, currentSeason) {
       if (!season)         { result.style.color='var(--red)'; result.textContent='Please select a season.'; throw new Error(''); }
       if (!checked.length) { result.style.color='var(--red)'; result.textContent='Please select at least one paddock.'; throw new Error(''); }
 
-      // Find paddocks that already have an entry for this season (top-level only)
+      // Find paddocks that already have an entry WITH a commodity for the selected season.
+      // Entries with no commodity are skeleton rows (not visible in the table) and should
+      // NOT block bulk assign — the user sees nothing there and expects bulk assign to fill them.
       const existing = new Set(
         allCropPlan
-          .filter(e => e.season_label === season && !e.sub_block)
+          .filter(e => e.season_label === season && !e.sub_block && e.commodity)
           .map(e => e.paddock_name)
       );
+
 
       const toCreate = checked.filter(name => !existing.has(name));
       const skipped  = checked.filter(name =>  existing.has(name));
