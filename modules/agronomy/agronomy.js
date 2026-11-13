@@ -2,10 +2,20 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794541637440';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794541637440';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794541637440';
-import { loadCommodities, getCommodities }         from '../../js/commodities.js?v=1794541637440';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794541976220';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794541976220';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794541976220';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794541976220';
+
+// Deduplicated crop type names across all commodities — for the crop plan dropdown.
+// Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
+function _planCropTypes() {
+  const seen = new Set();
+  return getCropTypes()
+    .map(ct => ct.name)
+    .filter(n => { if (seen.has(n)) return false; seen.add(n); return true; })
+    .sort((a, b) => a.localeCompare(b));
+}
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -497,7 +507,7 @@ if (!document.getElementById('cp-chip-styles')) {
 const CP_COLUMNS = [
   { key: 'paddock_name',  label: 'Paddock',     type: 'text',    width: '160px', bold: true },
   { key: 'sub_block',     label: 'Sub-block',   type: 'text',    width: '110px' },
-  { key: 'commodity',     label: 'Commodity',   type: 'select',  width: '130px', options: () => getCommodities().map(c => c.name) },
+  { key: 'commodity',     label: 'Crop type',   type: 'select',  width: '130px', options: () => _planCropTypes() },
   { key: 'variety',       label: 'Variety',     type: 'text',    width: '110px' },
   { key: 'planned_ha',    label: 'Planned ha',  type: 'number',  width: '90px',  align: 'right' },
   { key: 'planted_ha',    label: 'Planted ha',  type: 'number',  width: '90px',  align: 'right' },
@@ -1295,10 +1305,10 @@ function _openCellPopover(td, entry) {
     ${mapArea != null ? `<div style="font-size:0.72rem;color:var(--hint);margin-bottom:12px">Map area: <span style="font-family:'DM Mono',monospace;color:var(--fg);font-weight:600">${mapArea.toFixed(1)} ha</span></div>` : '<div style="margin-bottom:12px"></div>'}
 
     <div class="form-group" style="margin-bottom:10px">
-      <label class="form-label" style="font-size:0.72rem">Commodity</label>
+      <label class="form-label" style="font-size:0.72rem">Crop type</label>
       <select class="form-select" id="cpop-commodity" style="font-size:0.82rem;padding:5px 8px">
         <option value="">—</option>
-        ${getCommodities().map(c => `<option value="${c.name}"${entry.commodity === c.name ? ' selected' : ''}>${c.name}</option>`).join('')}
+        ${_planCropTypes().map(n => `<option value="${n}"${entry.commodity === n ? ' selected' : ''}>${n}</option>`).join('')}
       </select>
     </div>
 
@@ -1391,10 +1401,10 @@ function _openAddSubBlockModal(paddockName, allSeasons) {
           <input class="form-input" id="sb-name" placeholder="e.g. North, A, Irrigated">
         </div>
         <div class="form-group">
-          <label class="form-label">Commodity</label>
+          <label class="form-label">Crop type</label>
           <select class="form-select" id="sb-commodity">
             <option value="">—</option>
-            ${getCommodities().map(c => `<option value="${c.name}">${c.name}</option>`).join('')}
+            ${_planCropTypes().map(n => `<option value="${n}">${n}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -1509,10 +1519,10 @@ function openAddPaddockModal(allSeasons, currentSeason) {
           <input class="form-input" id="ap-new-ssn" placeholder="e.g. Summer 2026-27">
         </div>
         <div class="form-group">
-          <label class="form-label">Commodity</label>
+          <label class="form-label">Crop type</label>
           <select class="form-select" id="ap-commodity">
             <option value="">—</option>
-            ${getCommodities().map(c => `<option value="${c.name}">${c.name}</option>`).join('')}
+            ${_planCropTypes().map(n => `<option value="${n}">${n}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -2078,11 +2088,11 @@ function openCropPlanModal(entry = null) {
 
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Commodity *</label>
+        <label class="form-label">Crop type *</label>
         <select class="form-select" id="cp-commodity">
           <option value="">—</option>
-          ${getCommodities().map(c =>
-            `<option value="${c.name}"${entry?.commodity === c.name ? ' selected' : ''}>${c.name}</option>`
+          ${_planCropTypes().map(n =>
+            `<option value="${n}"${entry?.commodity === n ? ' selected' : ''}>${n}</option>`
           ).join('')}
         </select>
       </div>
@@ -2144,7 +2154,7 @@ function openCropPlanModal(entry = null) {
 
       if (!paddock)     throw new Error('Paddock is required');
       if (!seasonLabel) throw new Error('Season label is required');
-      if (!commodity)   throw new Error('Commodity is required');
+      if (!commodity)   throw new Error('Crop type is required');
 
       const row = {
         farm_id:           farmId,

@@ -2,9 +2,9 @@
 // Cotton market prices — regional daily prices, futures, farm gate price
 // Receives data from Power Automate via /api/push-cotton-prices
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794541637440';
-import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js?v=1794541637440';
-import { toast, openModal, formatCurrency, formatDate, qs, currentSeason } from '../../js/ui.js?v=1794541637440';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794541976220';
+import { getActiveFarm, getSession, canWrite } from '../../js/app-state.js?v=1794541976220';
+import { toast, openModal, formatCurrency, formatDate, qs, currentSeason } from '../../js/ui.js?v=1794541976220';
 
 // All regions from LDC report
 export const COTTON_REGIONS = [
