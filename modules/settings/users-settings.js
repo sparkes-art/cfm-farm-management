@@ -1,9 +1,9 @@
 // modules/settings/users-settings.js
 // User management — list, add, edit, deactivate
 
-import { dbSelect } from '../../js/supabase-client.js?v=1794546366705';
-import { getActiveFarm, getFarms } from '../../js/app-state.js?v=1794546366705';
-import { toast, openModal, qs, formatDate } from '../../js/ui.js?v=1794546366705';
+import { dbSelect } from '../../js/supabase-client.js?v=1794546557760';
+import { getActiveFarm, getFarms } from '../../js/app-state.js?v=1794546557760';
+import { toast, openModal, qs, formatDate } from '../../js/ui.js?v=1794546557760';
 
 const ROLES = [
   { value: 'admin', label: 'Admin / Accounting', desc: 'Full access to all data and settings' },

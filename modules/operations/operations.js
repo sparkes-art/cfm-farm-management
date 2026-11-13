@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794546366705';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794546366705';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794546366705';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794546366705';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794546557760';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794546557760';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794546557760';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794546557760';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -850,12 +850,7 @@ function _showNewSessionModal() {
           </div>
 
           <!-- Bag mode fields -->
-          <div id="ns-seed-bags-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div>
-              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">AusLot #</label>
-              <input id="ns-auslot" type="text" placeholder="e.g. N12/25/293"
-                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
-            </div>
+          <div id="ns-seed-bags-fields" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
             <div>
               <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Total Bags</label>
               <input id="ns-seed-in" type="number" min="0" placeholder="0"
@@ -897,8 +892,11 @@ function _showNewSessionModal() {
         </div>
         <div>
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Previous Field</label>
-          <input id="ns-prev-field" type="text" placeholder="e.g. B3"
+          <select id="ns-prev-field"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            <option value="">— none —</option>
+            ${_paddocks.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(p=>`<option value="${esc(p.name)}">${esc(p.name)}</option>`).join('')}
+          </select>
         </div>
         <div style="display:flex;align-items:center">
           <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 0">
