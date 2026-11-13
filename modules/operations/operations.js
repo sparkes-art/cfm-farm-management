@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794531615418';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794531615418';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794531615418';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794531615418';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794533442387';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794533442387';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794533442387';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794533442387';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -90,6 +90,15 @@ function _sessionTotalHa(sessionId) {
 
 function _sessionTotalBags(sessionId) {
   return (_allRows[sessionId] || []).reduce((t, r) => t + (parseInt(r.cotton_bags) || 0), 0);
+}
+
+function _sessionTotalKg(sessionId, session) {
+  const kgPerBag = parseFloat(session?.kg_per_bag) || 20;
+  return (_allRows[sessionId] || []).reduce((t, r) => {
+    const bagKg  = (parseInt(r.cotton_bags) || 0) * kgPerBag;
+    const bulkKg = parseFloat(r.bulk_kg) || 0;
+    return t + bagKg + bulkKg;
+  }, 0);
 }
 
 // Find a matching crop plan entry for a given field/sub_block/season
@@ -201,6 +210,7 @@ function _renderList() {
                 <span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:20px;background:${isOpen ? 'var(--green-bg)' : 'var(--surface2)'};color:${isOpen ? 'var(--green)' : 'var(--hint)'}">
                   ${isOpen ? '● Open' : 'Closed'}
                 </span>
+                ${s.is_replant ? `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border)">↩ Replant</span>` : ''}
                 ${cp ? `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--blue-bg);color:var(--blue)">Linked to crop plan</span>` : ''}
                 ${remaining !== null && remaining > 0 && isOpen ? `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border)">⚠ ${remaining.toFixed(1)} ha remaining</span>` : ''}
                 ${remaining !== null && remaining < 0 ? `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--red-bg);color:var(--red)">⚠ ${Math.abs(remaining).toFixed(1)} ha over plan</span>` : ''}
@@ -311,6 +321,7 @@ function _renderDetail() {
           ${session.previous_field ? `<div style="font-size:12px;color:var(--fg2);margin-top:2px">Previous field: ${esc(session.previous_field)} · ${esc(session.season_label)}</div>` : ''}
         </div>
         <div style="display:flex;gap:8px;align-items:flex-start;flex-shrink:0">
+          ${session.is_replant ? `<span style="font-size:12px;font-weight:600;padding:4px 10px;border-radius:20px;background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border)">↩ Replant</span>` : ''}
           <span style="font-size:12px;font-weight:600;padding:4px 10px;border-radius:20px;background:${isOpen ? 'var(--green-bg)' : 'var(--surface2)'};color:${isOpen ? 'var(--green)' : 'var(--hint)'}">
             ${isOpen ? '● Open' : 'Closed'}
           </span>
@@ -321,10 +332,11 @@ function _renderDetail() {
         ${[
           ['Commodity', session.commodity],
           ['Variety',   session.variety],
-          ['Default Lot', session.auslot_default],
+          ['Lot #',     session.auslot_default],
           ['Operator',  session.operator_default],
           ['Seed In',   session.seed_in_bags != null ? `${session.seed_in_bags} bags` : null],
           ['Water In',  session.water_in_litres != null ? `${session.water_in_litres} L` : null],
+          ['Bag Weight', `${parseFloat(session.kg_per_bag) || 20} kg/bag`],
         ].filter(([,v]) => v).map(([l, v]) => `
           <div>
             <div style="font-size:11px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div>
@@ -344,15 +356,20 @@ function _renderDetail() {
         // Collect all chemical names used in this session for column display
         const chemNames = [...new Set(rows.flatMap(r => (r.chemicals || []).map(c => c.name).filter(Boolean)))];
 
+        const kgPerBag = parseFloat(session.kg_per_bag) || 20;
         const rowHtmls = [...rows].reverse().map(row => {
           const operator = row.operator || session.operator_default;
           const auslot   = row.auslot_override || session.auslot_default;
+          const bulkKg   = parseFloat(row.bulk_kg) || 0;
+          const rowKg    = (parseInt(row.cotton_bags) || 0) * kgPerBag + bulkKg;
           return `<tr class="ops-row-tr" data-row-id="${esc(row.id)}">
             <td style="padding:10px 12px;white-space:nowrap">${_fmtDate(row.row_date)}</td>
             <td style="padding:10px 12px;color:var(--fg2)">${esc(row.row_time || '—')}</td>
             <td style="padding:10px 12px">${esc(operator || '—')}</td>
             <td style="padding:10px 12px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right">${row.hectares != null ? parseFloat(row.hectares).toFixed(2) : '—'}</td>
             <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">${row.cotton_bags != null ? row.cotton_bags : '—'}</td>
+            <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;color:${bulkKg > 0 ? 'var(--fg)' : 'var(--hint)'}">${bulkKg > 0 ? bulkKg.toFixed(0) : '—'}</td>
+            <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600">${rowKg > 0 ? rowKg.toFixed(0) : '—'}</td>
             <td style="padding:10px 12px;color:var(--hint);font-size:12px">${esc(auslot || '—')}</td>
             <td style="padding:10px 12px">
               ${(row.chemicals || []).map(c =>
@@ -377,6 +394,8 @@ function _renderDetail() {
                     <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:left;white-space:nowrap;border-bottom:1px solid var(--border)">Operator</th>
                     <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)">Ha</th>
                     <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)">Bags</th>
+                    <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)">Bulk kg</th>
+                    <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)">Total kg</th>
                     <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:left;white-space:nowrap;border-bottom:1px solid var(--border)">AusLot</th>
                     <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:left;border-bottom:1px solid var(--border)">Chemicals</th>
                     <th style="border-bottom:1px solid var(--border)"></th>
@@ -388,7 +407,9 @@ function _renderDetail() {
                     <td colspan="3" style="padding:10px 12px;font-weight:700;border-top:2px solid var(--border)">Total</td>
                     <td style="padding:10px 12px;font-weight:700;text-align:right;border-top:2px solid var(--border);font-variant-numeric:tabular-nums">${totalHa.toFixed(2)}</td>
                     <td style="padding:10px 12px;font-weight:700;text-align:right;border-top:2px solid var(--border);font-variant-numeric:tabular-nums">${totalBags}</td>
-                    <td colspan="3" style="border-top:2px solid var(--border)"></td>
+                    <td style="padding:10px 12px;font-weight:700;text-align:right;border-top:2px solid var(--border);font-variant-numeric:tabular-nums">${rows.reduce((t,r) => t + (parseFloat(r.bulk_kg)||0), 0).toFixed(0)}</td>
+                    <td style="padding:10px 12px;font-weight:700;text-align:right;border-top:2px solid var(--border);font-variant-numeric:tabular-nums">${_sessionTotalKg(session.id, session).toFixed(0)} kg</td>
+                    <td colspan="2" style="border-top:2px solid var(--border)"></td>
                   </tr>
                 </tbody>
               </table>
@@ -473,9 +494,16 @@ function _renderAddRowForm(session) {
         </div>
         <div>
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px;display:block">
-            Cotton (bags)
+            Bags
           </label>
           <input id="ops-row-bags" type="number" min="0" placeholder="0"
+            style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px;display:block">
+            Bulk kg <span style="font-size:10px;color:var(--hint);text-transform:none;letter-spacing:0;font-weight:400">silo/truck fill</span>
+          </label>
+          <input id="ops-row-bulk-kg" type="number" step="0.1" min="0" placeholder="0"
             style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
         </div>
       </div>
@@ -558,6 +586,7 @@ function _readRowForm() {
     auslot_override: _container.querySelector('#ops-row-auslot')?.value?.trim() || null,
     hectares:        parseFloat(_container.querySelector('#ops-row-ha')?.value) || null,
     cotton_bags:     parseInt(_container.querySelector('#ops-row-bags')?.value) || null,
+    bulk_kg:         parseFloat(_container.querySelector('#ops-row-bulk-kg')?.value) || null,
     chemicals,
   };
 }
@@ -668,6 +697,7 @@ async function _saveRow() {
       operator:        data.operator || null,
       hectares:        data.hectares,
       cotton_bags:     data.cotton_bags,
+      bulk_kg:         data.bulk_kg,
       auslot_override: data.auslot_override || null,
       chemicals:       data.chemicals,
     });
@@ -763,6 +793,21 @@ function _showNewSessionModal() {
           <input id="ns-prev-field" type="text" placeholder="e.g. B3"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
         </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Bag Weight (kg)</label>
+          <input id="ns-kg-per-bag" type="number" step="0.1" min="0" value="20" placeholder="20"
+            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+        </div>
+        <div style="display:flex;align-items:center">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 0">
+            <input id="ns-is-replant" type="checkbox"
+              style="width:18px;height:18px;accent-color:var(--amber);cursor:pointer;flex-shrink:0">
+            <span>
+              <span style="font-size:13px;font-weight:600;display:block">This is a replant session</span>
+              <span style="font-size:11px;color:var(--hint)">Re-planting failed or damaged areas</span>
+            </span>
+          </label>
+        </div>
         <div style="grid-column:1/-1">
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Notes</label>
           <input id="ns-notes" type="text" placeholder="Optional"
@@ -829,6 +874,8 @@ function _showNewSessionModal() {
         water_in_litres:  parseFloat(modalEl.querySelector('#ns-water-in')?.value) || null,
         previous_field:   modalEl.querySelector('#ns-prev-field')?.value?.trim() || null,
         notes:            modalEl.querySelector('#ns-notes')?.value?.trim() || null,
+        kg_per_bag:       parseFloat(modalEl.querySelector('#ns-kg-per-bag')?.value) || 20,
+        is_replant:       modalEl.querySelector('#ns-is-replant')?.checked || false,
         crop_plan_entry_id: cp?.id || null,
         status:           'open',
       };
@@ -862,17 +909,28 @@ function _showEditHeaderModal(session) {
         </div>
         ${[
           ['ns-variety',    'Variety',              session.variety,           'text', 'e.g. 606'],
-          ['ns-auslot',     'AusLot #',            session.auslot_default,    'text', ''],
+          ['ns-auslot',     'Lot #',               session.auslot_default,    'text', ''],
           ['ns-operator',   'Operator',            session.operator_default,  'text', ''],
           ['ns-seed-in',    'Seed Carried In (bags)', session.seed_in_bags,   'number', '0'],
           ['ns-water-in',   'Water Carried In (L)', session.water_in_litres,  'number', '0'],
           ['ns-prev-field', 'Previous Field',      session.previous_field,    'text', ''],
+          ['ns-kg-per-bag', 'Bag Weight (kg)',     session.kg_per_bag != null ? session.kg_per_bag : 20, 'number', '20'],
         ].map(([id, lbl, val, type, ph]) => `
           <div>
             <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">${lbl}</label>
             <input id="${id}" type="${type}" value="${esc(val || '')}" placeholder="${ph}"
               style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
           </div>`).join('')}
+        <div style="display:flex;align-items:center">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 0">
+            <input id="ns-is-replant" type="checkbox" ${session.is_replant ? 'checked' : ''}
+              style="width:18px;height:18px;accent-color:var(--amber);cursor:pointer;flex-shrink:0">
+            <span>
+              <span style="font-size:13px;font-weight:600;display:block">Replant session</span>
+              <span style="font-size:11px;color:var(--hint)">Re-planting failed or damaged areas</span>
+            </span>
+          </label>
+        </div>
         <div style="grid-column:1/-1">
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Notes</label>
           <input id="ns-notes" type="text" value="${esc(session.notes || '')}"
@@ -890,6 +948,8 @@ function _showEditHeaderModal(session) {
         water_in_litres:  parseFloat(modalEl.querySelector('#ns-water-in')?.value) || null,
         previous_field:   modalEl.querySelector('#ns-prev-field')?.value?.trim() || null,
         notes:            modalEl.querySelector('#ns-notes')?.value?.trim() || null,
+        kg_per_bag:       parseFloat(modalEl.querySelector('#ns-kg-per-bag')?.value) || 20,
+        is_replant:       modalEl.querySelector('#ns-is-replant')?.checked || false,
       };
       await dbUpdate('planting_sessions', session.id, updates);
       Object.assign(session, updates);
@@ -942,8 +1002,13 @@ function _showEditRowModal(row, session) {
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:16px;font-weight:700;font-family:inherit;box-sizing:border-box">
         </div>
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Cotton (bags)</label>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Bags</label>
           <input id="er-bags" type="number" value="${row.cotton_bags != null ? row.cotton_bags : ''}"
+            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Bulk kg <span style="font-size:10px;color:var(--hint);text-transform:none;letter-spacing:0;font-weight:400">silo/truck fill</span></label>
+          <input id="er-bulk-kg" type="number" step="0.1" value="${row.bulk_kg != null ? row.bulk_kg : ''}" placeholder="0"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
         </div>
       </div>
@@ -984,6 +1049,7 @@ function _showEditRowModal(row, session) {
         auslot_override: modalEl.querySelector('#er-auslot')?.value?.trim() || null,
         hectares:        parseFloat(modalEl.querySelector('#er-ha')?.value) || null,
         cotton_bags:     parseInt(modalEl.querySelector('#er-bags')?.value) || null,
+        bulk_kg:         parseFloat(modalEl.querySelector('#er-bulk-kg')?.value) || null,
         chemicals,
       };
       await dbUpdate('planting_rows', row.id, updates);
@@ -1029,7 +1095,7 @@ function _showCloseSessionModal(session) {
     bodyHTML: `
       <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-radius:8px;margin-bottom:14px;background:var(--green-bg);font-size:12px;color:var(--green)">
         <div>✓</div>
-        <div><strong>Total planted: ${totalHa.toFixed(2)} ha</strong> across ${rows.length} row${rows.length !== 1 ? 's' : ''} · ${totalBags} bags used.</div>
+        <div><strong>Total planted: ${totalHa.toFixed(2)} ha</strong> across ${rows.length} row${rows.length !== 1 ? 's' : ''} · ${totalBags} bags · ${_sessionTotalKg(session.id, session).toFixed(0)} kg seed used.</div>
       </div>
       <div style="font-size:13px;color:var(--fg2);margin-bottom:14px">Record end-of-session details before marking complete. This locks the session against further row entry.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
