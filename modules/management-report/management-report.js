@@ -3,9 +3,9 @@
 // Revenue actuals from CFM invoices; cost budgets from budget_costs table.
 // Fixed cost actuals pulled from Xero P&L when the farm has a Xero connection.
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794543800500';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794543800500';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794543800500';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794543981580';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794543981580';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794543981580';
 
 export function unmountManagementReport() {}
 
@@ -745,8 +745,8 @@ window._mgmtOpenInvoice = async function(invoiceId) {
     if (el.style.zIndex >= 9999) el.remove();
   });
   // Switch to outputs module
-  const { dbSelect } = await import('../../js/supabase-client.js?v=1794543800500');
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794543800500');
+  const { dbSelect } = await import('../../js/supabase-client.js?v=1794543981580');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794543981580');
   // Navigate to outputs tab
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   // Wait briefly for module to mount, then open the invoice

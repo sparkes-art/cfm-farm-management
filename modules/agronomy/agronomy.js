@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794543800500';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794543800500';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794543800500';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794543800500';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794543981580';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794543981580';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794543981580';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794543981580';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -1489,6 +1489,14 @@ async function _createEntryForCell(td) {
   if (!newEntry) { toast('Failed to create entry', 'error'); return; }
   await refreshAll();
 
+  // Pre-fill commodity from most recent plan entry for this paddock
+  const recent = allCropPlan
+    .filter(e => e.paddock_name === paddockName && e.commodity && e.id !== newEntry.id)
+    .sort((a, b) => (b.season_label || '').localeCompare(a.season_label || ''));
+  if (recent.length && !newEntry.commodity) {
+    newEntry.commodity = recent[0].commodity;
+  }
+
   // After re-render, open the cell popover so user can fill in commodity etc.
   const el = document.getElementById('agro-tab-cropplan');
   setTimeout(() => {
@@ -1561,6 +1569,27 @@ function openAddPaddockModal(allSeasons, currentSeason) {
       overlay.querySelector('#ap-season')?.addEventListener('change', function () {
         overlay.querySelector('#ap-new-ssn-wrap').style.display = this.value === '_new' ? '' : 'none';
       });
+
+      // When paddock changes, pre-fill crop type from most recent plan entry + area from paddocks table
+      const paddockEl = overlay.querySelector('#ap-paddock');
+      const prefill = (name) => {
+        if (!name) return;
+        // Area from paddocks table
+        const pd = allPaddocks.find(p => p.name === name);
+        if (pd?.area_ha != null) {
+          const plannedEl = overlay.querySelector('#ap-planned');
+          if (plannedEl && !plannedEl.value) plannedEl.value = pd.area_ha;
+        }
+        // Crop type from most recent plan entry for this paddock
+        const recent = allCropPlan
+          .filter(e => e.paddock_name === name && e.commodity)
+          .sort((a, b) => (b.season_label || '').localeCompare(a.season_label || ''));
+        if (recent.length) {
+          const cropEl = overlay.querySelector('#ap-commodity');
+          if (cropEl && !cropEl.value) cropEl.value = recent[0].commodity;
+        }
+      };
+      paddockEl?.addEventListener('change', e => prefill(e.target.value?.trim()));
     },
     onConfirm: async () => {
       const farm    = getActiveFarm();
