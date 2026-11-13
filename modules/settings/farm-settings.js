@@ -1,6 +1,6 @@
-import { dbSelect, dbUpdate } from '../../js/supabase-client.js?v=1794531396260';
-import { getActiveFarm, getFarms, setActiveFarm } from '../../js/app-state.js?v=1794531396260';
-import { toast, qs, formatDate } from '../../js/ui.js?v=1794531396260';
+import { dbSelect, dbUpdate } from '../../js/supabase-client.js?v=1794531615418';
+import { getActiveFarm, getFarms, setActiveFarm } from '../../js/app-state.js?v=1794531615418';
+import { toast, qs, formatDate } from '../../js/ui.js?v=1794531615418';
 const COTTON_REGIONS = [
   'Central QLD', 'Darling Downs', 'MacIntyre', 'Gwydir', 'LDC Moree',
   'Mungindi/St George', 'Namoi Valley', 'Macquarie Valley', 'Lachlan/Sth NSW', 'NT / WA'

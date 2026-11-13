@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794531396260';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794531396260';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794531396260';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794531396260';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794531615418';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794531615418';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794531615418';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794531615418';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -397,7 +397,8 @@ function _renderDetail() {
       })();
 
   const footerBtns = `
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:4px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+      ${canWrite() ? `<button id="ops-delete-session-btn" style="font-size:12px;font-weight:600;padding:7px 14px;border-radius:8px;border:1px solid var(--red);background:transparent;color:var(--red);cursor:pointer">Delete session</button>` : '<div></div>'}
       ${isOpen && canWrite()
         ? `<button id="ops-close-session-btn" style="font-size:13px;font-weight:600;padding:8px 18px;border-radius:8px;border:none;background:var(--green);color:#fff;cursor:pointer">Close Session ✓</button>`
         : ''}
@@ -619,6 +620,13 @@ function _wireEvents() {
   if (editHdrBtn) editHdrBtn.addEventListener('click', () => {
     const s = _sessions.find(s => s.id === _activeSessionId);
     if (s) _showEditHeaderModal(s);
+  });
+
+  // Delete session button
+  const deleteSessionBtn = _container.querySelector('#ops-delete-session-btn');
+  if (deleteSessionBtn) deleteSessionBtn.addEventListener('click', () => {
+    const s = _sessions.find(s => s.id === _activeSessionId);
+    if (s) _confirmDeleteSession(s);
   });
 
   // Close session button
@@ -985,6 +993,29 @@ function _showEditRowModal(row, session) {
       _render();
     },
   });
+}
+
+// ── Delete session ────────────────────────────────────────────────────────────
+async function _confirmDeleteSession(session) {
+  const rowCount = (_allRows[session.id] || []).length;
+  const label = `${session.field_name}${session.sub_block ? ` · ${session.sub_block}` : ''}`;
+  const msg = rowCount > 0
+    ? `Delete "${label}"? This will also delete ${rowCount} row${rowCount !== 1 ? 's' : ''} of planting data. This cannot be undone.`
+    : `Delete "${label}"? This cannot be undone.`;
+
+  if (!confirm(msg)) return;
+
+  try {
+    // planting_rows cascade-delete via FK, so just delete the session
+    await dbDelete('planting_sessions', session.id);
+    _sessions = _sessions.filter(s => s.id !== session.id);
+    delete _allRows[session.id];
+    toast('Session deleted', 'success');
+    _view = 'list';
+    _render();
+  } catch (err) {
+    toast(err.message || 'Failed to delete session', 'error');
+  }
 }
 
 // ── Close session modal ───────────────────────────────────────────────────────
