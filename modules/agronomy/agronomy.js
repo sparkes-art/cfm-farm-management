@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794546180515';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794546180515';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794546180515';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794546180515';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794546272916';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794546272916';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794546272916';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794546272916';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -1713,7 +1713,7 @@ function openBulkAssignModal(allSeasons, currentSeason) {
     `,
     onMounted: (overlay) => {
       function getVisibleRows() {
-        return [...overlay.querySelectorAll('.ba-paddock-row:not([hidden])')];
+        return [...overlay.querySelectorAll('.ba-paddock-row')].filter(r => r.style.display !== 'none');
       }
       overlay.querySelector('#ba-select-all')?.addEventListener('click', () => {
         getVisibleRows().forEach(row => {
@@ -1749,7 +1749,7 @@ function openBulkAssignModal(allSeasons, currentSeason) {
           // Show/hide paddock rows; uncheck hidden ones
           overlay.querySelectorAll('.ba-paddock-row').forEach(row => {
             const hide = activeTypes.size > 0 && !activeTypes.has(row.dataset.type);
-            row.hidden = hide;
+            row.style.display = hide ? 'none' : '';
             if (hide) {
               const cb = row.querySelector('.ba-paddock-check');
               if (cb) cb.checked = false;
