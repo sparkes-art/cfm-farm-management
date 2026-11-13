@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794546557760';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794546557760';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794546557760';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794546557760';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794546671365';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794546671365';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794546671365';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794546671365';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -611,8 +611,10 @@ function renderCropPlan() {
   // Columns: paddock name | sub-block | ...one column per season...
   // Each season cell shows: commodity (small, coloured) / planned ha / planted ha
 
-  // All unique commodities in use (for Crop filter chips)
-  const usedCropTypes = [...new Set(allCropPlan.map(c => c.commodity).filter(Boolean))].sort();
+  // All unique commodities in use for the CURRENT season only (for Crop filter chips)
+  const usedCropTypes = [...new Set(
+    allCropPlan.filter(c => c.season_label === latestSeason).map(c => c.commodity).filter(Boolean)
+  )].sort();
 
   // All unique paddock types from the paddock list (for filter chips)
   const usedPaddockTypes = [...new Set(allPaddocks.map(p => p.type).filter(Boolean))].sort();
@@ -1774,15 +1776,19 @@ function openBulkAssignModal(allSeasons, currentSeason) {
       // For paddocks with no entry, upsert creates one.
       const rows = checked.map(name => {
         const pd = allPaddocks.find(p => p.name === name);
-        return {
+        const ha = pd?.area_ha != null ? parseFloat(pd.area_ha) : null;
+        const row = {
           farm_id:      farmId,
           paddock_name: name,
           sub_block:    null,
           season_label: season,
           commodity:    crop,
           status,
-          planned_ha:   pd?.area_ha ?? null,
         };
+        // Only include planned_ha when the paddock has an area — avoids
+        // overwriting an existing planned_ha with null on merge-duplicates.
+        if (ha != null && !isNaN(ha)) row.planned_ha = ha;
+        return row;
       });
 
       const failed = [];
