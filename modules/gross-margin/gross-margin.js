@@ -1,9 +1,9 @@
 // modules/gross-margin/gross-margin.js
 // Gross Margin & Budgeting module
 
-import { dbSelect } from '../../js/supabase-client.js?v=1794544846087';
-import { getActiveFarm } from '../../js/app-state.js?v=1794544846087';
-import { formatCurrency, formatNumber, currentSeason } from '../../js/ui.js?v=1794544846087';
+import { dbSelect } from '../../js/supabase-client.js?v=1794545194964';
+import { getActiveFarm } from '../../js/app-state.js?v=1794545194964';
+import { formatCurrency, formatNumber, currentSeason } from '../../js/ui.js?v=1794545194964';
 
 export async function mountGrossMargin(container) {
   const farm = getActiveFarm();

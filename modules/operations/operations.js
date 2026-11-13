@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794544846087';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794544846087';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794544846087';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794544846087';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794545194964';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794545194964';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794545194964';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794545194964';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -334,7 +334,9 @@ function _renderDetail() {
           ['Variety',   session.variety],
           ['Lot #',     session.auslot_default],
           ['Operator',  session.operator_default],
-          ['Seed In',   session.seed_in_bags != null ? `${session.seed_in_bags} bags` : null],
+          ['Seed In',   session.seed_type === 'bulk'
+            ? (session.seed_in_kg != null ? `${session.seed_in_kg >= 1000 ? (session.seed_in_kg/1000).toFixed(2)+'t' : session.seed_in_kg+'kg'} bulk` : null)
+            : (session.seed_in_bags != null ? `${session.seed_in_bags} bags` : null)],
           ['Water In',  session.water_in_litres != null ? `${session.water_in_litres} L` : null],
           ['Bag Weight', `${parseFloat(session.kg_per_bag) || 20} kg/bag`],
         ].filter(([,v]) => v).map(([l, v]) => `
@@ -479,32 +481,59 @@ function _renderAddRowForm(session) {
             style="padding:8px 10px;border:1px solid var(--blue);border-radius:6px;background:var(--blue-bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
         </div>
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);display:flex;align-items:center;gap:4px;margin-bottom:4px">
-            AusLot # <span style="font-size:10px;color:var(--blue);font-weight:600">pre-filled</span>
-          </label>
-          <input id="ops-row-auslot" type="text" value="${esc(session.auslot_default || '')}" placeholder="Lot #"
-            style="padding:8px 10px;border:1px solid var(--blue);border-radius:6px;background:var(--blue-bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
-        </div>
-        <div>
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px;display:block">
             Hectares
           </label>
           <input id="ops-row-ha" type="number" step="0.01" min="0" placeholder="0.0"
             style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:16px;font-weight:700;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
         </div>
-        <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px;display:block">
-            Bags
-          </label>
-          <input id="ops-row-bags" type="number" min="0" placeholder="0"
-            style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
-        </div>
-        <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px;display:block">
-            Bulk kg <span style="font-size:10px;color:var(--hint);text-transform:none;letter-spacing:0;font-weight:400">silo/truck fill</span>
-          </label>
-          <input id="ops-row-bulk-kg" type="number" step="0.1" min="0" placeholder="0"
-            style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
+        <!-- Seed type toggle for row -->
+        <div style="grid-column:1/-1;border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:8px">Seed Fill</div>
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;font-weight:600;padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg)">
+              <input type="radio" id="ops-row-seed-type-bags" name="ops-row-seed-type" value="bags" checked style="accent-color:var(--blue)">
+              🌾 Bags
+            </label>
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;font-weight:600;padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg)">
+              <input type="radio" id="ops-row-seed-type-bulk" name="ops-row-seed-type" value="bulk" style="accent-color:var(--blue)">
+              🚛 Bulk
+            </label>
+          </div>
+          <!-- Bag fields -->
+          <div id="ops-row-bags-fields" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px;display:block">AusLot Override</label>
+              <input id="ops-row-auslot" type="text" value="${esc(session.auslot_default || '')}" placeholder="Lot #"
+                style="padding:8px 10px;border:1px solid var(--blue);border-radius:6px;background:var(--blue-bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px;display:block">Bags</label>
+              <input id="ops-row-bags" type="number" min="0" placeholder="0"
+                style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px;display:block">Bag Wt (kg)</label>
+              <input id="ops-row-kg-per-bag" type="number" step="0.1" min="0" value="${parseFloat(session.kg_per_bag) || 20}"
+                style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
+            </div>
+          </div>
+          <!-- Bulk fields -->
+          <div id="ops-row-bulk-fields" style="display:none;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px;display:block">Weight Used</label>
+              <input id="ops-row-bulk-weight" type="number" step="0.01" min="0" placeholder="0"
+                style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:4px;display:block">Unit</label>
+              <select id="ops-row-bulk-unit"
+                style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
+                <option value="kg">kg</option>
+                <option value="t">tonnes (t)</option>
+              </select>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -579,14 +608,30 @@ function _readRowForm() {
     const litres = row.querySelector('.ops-chem-litres')?.value;
     if (name) chemicals.push({ name, litres: litres ? parseFloat(litres) : null });
   });
+
+  const isBulk = _container.querySelector('#ops-row-seed-type-bulk')?.checked;
+  let cotton_bags = null, bulk_kg = null, row_seed_type = 'bags', kg_per_bag = null;
+
+  if (isBulk) {
+    row_seed_type = 'bulk';
+    const bulkVal  = parseFloat(_container.querySelector('#ops-row-bulk-weight')?.value) || null;
+    const bulkUnit = _container.querySelector('#ops-row-bulk-unit')?.value || 'kg';
+    bulk_kg = bulkVal != null ? (bulkUnit === 't' ? bulkVal * 1000 : bulkVal) : null;
+  } else {
+    cotton_bags = parseInt(_container.querySelector('#ops-row-bags')?.value) || null;
+    kg_per_bag  = parseFloat(_container.querySelector('#ops-row-kg-per-bag')?.value) || null;
+  }
+
   return {
     row_date:        _container.querySelector('#ops-row-date')?.value || null,
     row_time:        _container.querySelector('#ops-row-time')?.value?.trim() || null,
     operator:        _container.querySelector('#ops-row-operator')?.value?.trim() || null,
-    auslot_override: _container.querySelector('#ops-row-auslot')?.value?.trim() || null,
+    auslot_override: isBulk ? null : (_container.querySelector('#ops-row-auslot')?.value?.trim() || null),
     hectares:        parseFloat(_container.querySelector('#ops-row-ha')?.value) || null,
-    cotton_bags:     parseInt(_container.querySelector('#ops-row-bags')?.value) || null,
-    bulk_kg:         parseFloat(_container.querySelector('#ops-row-bulk-kg')?.value) || null,
+    cotton_bags,
+    bulk_kg,
+    row_seed_type,
+    kg_per_bag,
     chemicals,
   };
 }
@@ -624,13 +669,27 @@ function _wireEvents() {
   const haInput = _container.querySelector('#ops-row-ha');
   if (haInput) haInput.addEventListener('focus', () => haInput.select());
 
+  // Row seed type toggle
+  _container.querySelectorAll('input[name="ops-row-seed-type"]').forEach(r =>
+    r.addEventListener('change', () => {
+      const isBulk = _container.querySelector('#ops-row-seed-type-bulk')?.checked;
+      const bagsEl = _container.querySelector('#ops-row-bags-fields');
+      const bulkEl = _container.querySelector('#ops-row-bulk-fields');
+      if (bagsEl) bagsEl.style.display = isBulk ? 'none' : 'grid';
+      if (bulkEl) bulkEl.style.display = isBulk ? 'grid' : 'none';
+    })
+  );
+
   // Clear form button
   const clearBtn = _container.querySelector('#ops-row-clear-btn');
   if (clearBtn) clearBtn.addEventListener('click', () => {
-    ['#ops-row-ha','#ops-row-bags'].forEach(sel => {
+    ['#ops-row-ha','#ops-row-bags','#ops-row-bulk-weight'].forEach(sel => {
       const el = _container.querySelector(sel);
       if (el) el.value = '';
     });
+    // Reset to bags mode
+    const bagsRadio = _container.querySelector('#ops-row-seed-type-bags');
+    if (bagsRadio) { bagsRadio.checked = true; bagsRadio.dispatchEvent(new Event('change')); }
     _container.querySelectorAll('.ops-chem-row').forEach(r => r.remove());
     _container.querySelector('#ops-row-ha')?.focus();
   });
@@ -698,6 +757,8 @@ async function _saveRow() {
       hectares:        data.hectares,
       cotton_bags:     data.cotton_bags,
       bulk_kg:         data.bulk_kg,
+      row_seed_type:   data.row_seed_type,
+      kg_per_bag:      data.kg_per_bag,
       auslot_override: data.auslot_override || null,
       chemicals:       data.chemicals,
     });
@@ -778,11 +839,57 @@ function _showNewSessionModal() {
           <input id="ns-operator" type="text" placeholder="e.g. Bailey"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
         </div>
-        <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Seed Carried In (bags)</label>
-          <input id="ns-seed-in" type="number" min="0" placeholder="0"
-            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+
+        <!-- Seed carried in — toggle between bag and bulk -->
+        <div style="grid-column:1/-1;border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);margin-bottom:10px">Seed Carried In</div>
+          <div style="display:flex;gap:8px;margin-bottom:12px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:600;padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg)">
+              <input type="radio" id="ns-seed-type-bags" name="ns-seed-type" value="bags" checked style="accent-color:var(--blue)">
+              🌾 Seed Bag
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:600;padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg)">
+              <input type="radio" id="ns-seed-type-bulk" name="ns-seed-type" value="bulk" style="accent-color:var(--blue)">
+              🚛 Bulk
+            </label>
+          </div>
+
+          <!-- Bag mode fields -->
+          <div id="ns-seed-bags-fields" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Total Bags</label>
+              <input id="ns-seed-in" type="number" min="0" placeholder="0"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Bag Weight (kg)</label>
+              <input id="ns-kg-per-bag" type="number" step="0.1" min="0" value="20" placeholder="20"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Total Weight</label>
+              <div id="ns-seed-total-kg" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg2);font-size:14px;font-weight:600;font-family:inherit">— kg</div>
+            </div>
+          </div>
+
+          <!-- Bulk mode fields -->
+          <div id="ns-seed-bulk-fields" style="display:none;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Total Weight Used</label>
+              <input id="ns-seed-bulk-weight" type="number" step="0.01" min="0" placeholder="0"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Unit</label>
+              <select id="ns-seed-bulk-unit"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+                <option value="kg">kg</option>
+                <option value="t">tonnes (t)</option>
+              </select>
+            </div>
+          </div>
         </div>
+
         <div>
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Water Carried In (L)</label>
           <input id="ns-water-in" type="number" min="0" placeholder="0"
@@ -791,11 +898,6 @@ function _showNewSessionModal() {
         <div>
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Previous Field</label>
           <input id="ns-prev-field" type="text" placeholder="e.g. B3"
-            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
-        </div>
-        <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Bag Weight (kg)</label>
-          <input id="ns-kg-per-bag" type="number" step="0.1" min="0" value="20" placeholder="20"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
         </div>
         <div style="display:flex;align-items:center">
@@ -853,13 +955,47 @@ function _showNewSessionModal() {
 
       fieldSel.addEventListener('change', checkCropPlan);
       subBlk.addEventListener('input',   checkCropPlan);
+
+      // Seed type toggle
+      function updateSeedType() {
+        const isBulk = modalEl.querySelector('#ns-seed-type-bulk')?.checked;
+        const bagsFields = modalEl.querySelector('#ns-seed-bags-fields');
+        const bulkFields = modalEl.querySelector('#ns-seed-bulk-fields');
+        if (bagsFields) bagsFields.style.display = isBulk ? 'none' : 'grid';
+        if (bulkFields) bulkFields.style.display = isBulk ? 'grid' : 'none';
+      }
+      modalEl.querySelectorAll('input[name="ns-seed-type"]').forEach(r =>
+        r.addEventListener('change', updateSeedType)
+      );
+
+      // Live total kg display for bag mode
+      function updateBagTotal() {
+        const bags   = parseFloat(modalEl.querySelector('#ns-seed-in')?.value) || 0;
+        const kgEach = parseFloat(modalEl.querySelector('#ns-kg-per-bag')?.value) || 20;
+        const totalEl = modalEl.querySelector('#ns-seed-total-kg');
+        if (totalEl) totalEl.textContent = bags ? `${(bags * kgEach).toLocaleString('en-AU')} kg` : '— kg';
+      }
+      modalEl.querySelector('#ns-seed-in')?.addEventListener('input', updateBagTotal);
+      modalEl.querySelector('#ns-kg-per-bag')?.addEventListener('input', updateBagTotal);
     },
     onConfirm: async (modalEl) => {
       const field = modalEl.querySelector('#ns-field')?.value;
       if (!field) { toast('Select a paddock', 'error'); throw new Error('no field'); }
 
-      const sub     = modalEl.querySelector('#ns-subblock')?.value?.trim() || null;
-      const cp      = _findCropPlan(field, sub, season);
+      const sub      = modalEl.querySelector('#ns-subblock')?.value?.trim() || null;
+      const cp       = _findCropPlan(field, sub, season);
+      const seedType = modalEl.querySelector('#ns-seed-type-bulk')?.checked ? 'bulk' : 'bags';
+
+      // Seed carried in — convert bulk to kg if needed
+      let seedInBags = null, kgPerBag = 20, seedInKg = null;
+      if (seedType === 'bags') {
+        seedInBags = parseFloat(modalEl.querySelector('#ns-seed-in')?.value) || null;
+        kgPerBag   = parseFloat(modalEl.querySelector('#ns-kg-per-bag')?.value) || 20;
+      } else {
+        const bulkVal  = parseFloat(modalEl.querySelector('#ns-seed-bulk-weight')?.value) || null;
+        const bulkUnit = modalEl.querySelector('#ns-seed-bulk-unit')?.value || 'kg';
+        seedInKg = bulkVal != null ? (bulkUnit === 't' ? bulkVal * 1000 : bulkVal) : null;
+      }
 
       const payload = {
         farm_id:          farmId,
@@ -870,11 +1006,13 @@ function _showNewSessionModal() {
         variety:          modalEl.querySelector('#ns-variety')?.value?.trim() || null,
         auslot_default:   modalEl.querySelector('#ns-auslot')?.value?.trim() || null,
         operator_default: modalEl.querySelector('#ns-operator')?.value?.trim() || null,
-        seed_in_bags:     parseFloat(modalEl.querySelector('#ns-seed-in')?.value) || null,
+        seed_type:        seedType,
+        seed_in_bags:     seedInBags,
+        seed_in_kg:       seedInKg,
         water_in_litres:  parseFloat(modalEl.querySelector('#ns-water-in')?.value) || null,
         previous_field:   modalEl.querySelector('#ns-prev-field')?.value?.trim() || null,
         notes:            modalEl.querySelector('#ns-notes')?.value?.trim() || null,
-        kg_per_bag:       parseFloat(modalEl.querySelector('#ns-kg-per-bag')?.value) || 20,
+        kg_per_bag:       kgPerBag,
         is_replant:       modalEl.querySelector('#ns-is-replant')?.checked || false,
         crop_plan_entry_id: cp?.id || null,
         status:           'open',
@@ -908,19 +1046,66 @@ function _showEditHeaderModal(session) {
           </select>
         </div>
         ${[
-          ['ns-variety',    'Variety',              session.variety,           'text', 'e.g. 606'],
-          ['ns-auslot',     'Lot #',               session.auslot_default,    'text', ''],
-          ['ns-operator',   'Operator',            session.operator_default,  'text', ''],
-          ['ns-seed-in',    'Seed Carried In (bags)', session.seed_in_bags,   'number', '0'],
-          ['ns-water-in',   'Water Carried In (L)', session.water_in_litres,  'number', '0'],
-          ['ns-prev-field', 'Previous Field',      session.previous_field,    'text', ''],
-          ['ns-kg-per-bag', 'Bag Weight (kg)',     session.kg_per_bag != null ? session.kg_per_bag : 20, 'number', '20'],
+          ['ns-variety',    'Variety',       session.variety,          'text',   'e.g. 606'],
+          ['ns-auslot',     'AusLot #',      session.auslot_default,   'text',   ''],
+          ['ns-operator',   'Operator',      session.operator_default, 'text',   ''],
+          ['ns-water-in',   'Water In (L)',  session.water_in_litres,  'number', '0'],
+          ['ns-prev-field', 'Previous Field',session.previous_field,   'text',   ''],
         ].map(([id, lbl, val, type, ph]) => `
           <div>
             <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">${lbl}</label>
             <input id="${id}" type="${type}" value="${esc(val || '')}" placeholder="${ph}"
               style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
           </div>`).join('')}
+
+        <!-- Seed type toggle -->
+        <div style="grid-column:1/-1;border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);margin-bottom:10px">Seed Carried In</div>
+          <div style="display:flex;gap:8px;margin-bottom:12px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:600;padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg)">
+              <input type="radio" id="eh-seed-type-bags" name="eh-seed-type" value="bags" ${session.seed_type !== 'bulk' ? 'checked' : ''} style="accent-color:var(--blue)">
+              🌾 Seed Bag
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:600;padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg)">
+              <input type="radio" id="eh-seed-type-bulk" name="eh-seed-type" value="bulk" ${session.seed_type === 'bulk' ? 'checked' : ''} style="accent-color:var(--blue)">
+              🚛 Bulk
+            </label>
+          </div>
+          <div id="eh-seed-bags-fields" style="display:${session.seed_type === 'bulk' ? 'none' : 'grid'};grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Total Bags</label>
+              <input id="eh-seed-in" type="number" min="0" value="${esc(session.seed_in_bags ?? '')}"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Bag Weight (kg)</label>
+              <input id="eh-kg-per-bag" type="number" step="0.1" min="0" value="${esc(session.kg_per_bag ?? 20)}"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Total Weight</label>
+              <div id="eh-seed-total-kg" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg2);font-size:14px;font-weight:600">
+                ${(session.seed_in_bags && session.kg_per_bag) ? ((session.seed_in_bags * (session.kg_per_bag || 20)).toLocaleString('en-AU') + ' kg') : '— kg'}
+              </div>
+            </div>
+          </div>
+          <div id="eh-seed-bulk-fields" style="display:${session.seed_type === 'bulk' ? 'grid' : 'none'};grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Total Weight Used</label>
+              <input id="eh-seed-bulk-weight" type="number" step="0.01" min="0" value="${esc(session.seed_in_kg ?? '')}"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Unit</label>
+              <select id="eh-seed-bulk-unit"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+                <option value="kg">kg</option>
+                <option value="t">tonnes (t)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
         <div style="display:flex;align-items:center">
           <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 0">
             <input id="ns-is-replant" type="checkbox" ${session.is_replant ? 'checked' : ''}
@@ -938,17 +1123,49 @@ function _showEditHeaderModal(session) {
         </div>
       </div>`,
     confirmLabel: 'Save Changes',
+    onMounted: (modalEl) => {
+      // Seed type toggle
+      function updateSeedType() {
+        const isBulk = modalEl.querySelector('#eh-seed-type-bulk')?.checked;
+        modalEl.querySelector('#eh-seed-bags-fields').style.display = isBulk ? 'none' : 'grid';
+        modalEl.querySelector('#eh-seed-bulk-fields').style.display = isBulk ? 'grid' : 'none';
+      }
+      modalEl.querySelectorAll('input[name="eh-seed-type"]').forEach(r =>
+        r.addEventListener('change', updateSeedType)
+      );
+      // Live total for bag mode
+      function updateBagTotal() {
+        const bags  = parseFloat(modalEl.querySelector('#eh-seed-in')?.value) || 0;
+        const kgEa  = parseFloat(modalEl.querySelector('#eh-kg-per-bag')?.value) || 20;
+        const el    = modalEl.querySelector('#eh-seed-total-kg');
+        if (el) el.textContent = bags ? `${(bags * kgEa).toLocaleString('en-AU')} kg` : '— kg';
+      }
+      modalEl.querySelector('#eh-seed-in')?.addEventListener('input', updateBagTotal);
+      modalEl.querySelector('#eh-kg-per-bag')?.addEventListener('input', updateBagTotal);
+    },
     onConfirm: async (modalEl) => {
+      const seedType = modalEl.querySelector('#eh-seed-type-bulk')?.checked ? 'bulk' : 'bags';
+      let seedInBags = null, kgPerBag = 20, seedInKg = null;
+      if (seedType === 'bags') {
+        seedInBags = parseFloat(modalEl.querySelector('#eh-seed-in')?.value) || null;
+        kgPerBag   = parseFloat(modalEl.querySelector('#eh-kg-per-bag')?.value) || 20;
+      } else {
+        const bulkVal  = parseFloat(modalEl.querySelector('#eh-seed-bulk-weight')?.value) || null;
+        const bulkUnit = modalEl.querySelector('#eh-seed-bulk-unit')?.value || 'kg';
+        seedInKg = bulkVal != null ? (bulkUnit === 't' ? bulkVal * 1000 : bulkVal) : null;
+      }
       const updates = {
         commodity:        modalEl.querySelector('#ns-commodity')?.value || null,
         variety:          modalEl.querySelector('#ns-variety')?.value?.trim() || null,
         auslot_default:   modalEl.querySelector('#ns-auslot')?.value?.trim() || null,
         operator_default: modalEl.querySelector('#ns-operator')?.value?.trim() || null,
-        seed_in_bags:     parseFloat(modalEl.querySelector('#ns-seed-in')?.value) || null,
+        seed_type:        seedType,
+        seed_in_bags:     seedInBags,
+        seed_in_kg:       seedInKg,
         water_in_litres:  parseFloat(modalEl.querySelector('#ns-water-in')?.value) || null,
         previous_field:   modalEl.querySelector('#ns-prev-field')?.value?.trim() || null,
         notes:            modalEl.querySelector('#ns-notes')?.value?.trim() || null,
-        kg_per_bag:       parseFloat(modalEl.querySelector('#ns-kg-per-bag')?.value) || 20,
+        kg_per_bag:       kgPerBag,
         is_replant:       modalEl.querySelector('#ns-is-replant')?.checked || false,
       };
       await dbUpdate('planting_sessions', session.id, updates);

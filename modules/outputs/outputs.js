@@ -1,18 +1,18 @@
 // modules/outputs/outputs.js
 // Outputs module — Dashboard, Contracts, Market Prices, Invoices
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert, subscribeTable } from '../../js/supabase-client.js?v=1794544846087';
-import { getActiveFarm, getSession, canWrite, getActiveSeason, getRole } from '../../js/app-state.js?v=1794544846087';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert, subscribeTable } from '../../js/supabase-client.js?v=1794545194964';
+import { getActiveFarm, getSession, canWrite, getActiveSeason, getRole } from '../../js/app-state.js?v=1794545194964';
 import {
   toast, openModal, formatCurrency, formatDate,
   commodityBadge, statusBadge, qs, setContent, currentSeason, formatNumber
-} from '../../js/ui.js?v=1794544846087';
-import { mountContracts, unmountContracts } from './contracts.js?v=1794544846087';
-import { mountInvoices, unmountInvoices, openInvoiceForm } from './invoices.js?v=1794544846087';
-import { mountReconciliation, unmountReconciliation } from './reconciliation.js?v=1794544846087';
-import { mountMarketPrices, unmountMarketPrices } from './market-prices.js?v=1794544846087';
-import { buildCommodityCards, drawMiniCharts, buildContractPosition, buildOperationsSummary, buildLivestockPosition } from './commodity-card.js?v=1794544846087';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794544846087';
+} from '../../js/ui.js?v=1794545194964';
+import { mountContracts, unmountContracts } from './contracts.js?v=1794545194964';
+import { mountInvoices, unmountInvoices, openInvoiceForm } from './invoices.js?v=1794545194964';
+import { mountReconciliation, unmountReconciliation } from './reconciliation.js?v=1794545194964';
+import { mountMarketPrices, unmountMarketPrices } from './market-prices.js?v=1794545194964';
+import { buildCommodityCards, drawMiniCharts, buildContractPosition, buildOperationsSummary, buildLivestockPosition } from './commodity-card.js?v=1794545194964';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794545194964';
 
 let _invoices = [];
 let _contracts = [];
