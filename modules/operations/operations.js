@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794546872517';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794546872517';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794546872517';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794546872517';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794547062354';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794547062354';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794547062354';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794547062354';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -1307,6 +1307,13 @@ function _showCloseSessionModal(session) {
   const totalHa   = _sessionTotalHa(session.id);
   const totalBags = _sessionTotalBags(session.id);
   const rows      = _sessionRows(session.id);
+  const isBulk    = session.seed_type === 'bulk';
+
+  const paddockOpts = _paddocks
+    .slice()
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`)
+    .join('');
 
   openModal({
     title: `Close Session — ${session.field_name}${session.sub_block ? ` · ${session.sub_block}` : ''}`,
@@ -1317,20 +1324,45 @@ function _showCloseSessionModal(session) {
       </div>
       <div style="font-size:13px;color:var(--fg2);margin-bottom:14px">Record end-of-session details before marking complete. This locks the session against further row entry.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Seed Carried Out (bags)</label>
-          <input id="cs-seed-out" type="number" min="0" placeholder="0"
-            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+
+        <!-- Seed carried out — bags or bulk matching session type -->
+        <div style="grid-column:1/-1;border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);margin-bottom:10px">Seed Carried Out</div>
+          ${isBulk ? `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Weight Out</label>
+              <input id="cs-seed-out-kg" type="number" step="0.01" min="0" placeholder="0"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Unit</label>
+              <select id="cs-seed-out-unit"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+                <option value="kg">kg</option>
+                <option value="t">tonnes (t)</option>
+              </select>
+            </div>
+          </div>` : `
+          <div>
+            <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Bags Carried Out</label>
+            <input id="cs-seed-out-bags" type="number" min="0" placeholder="0"
+              style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+          </div>`}
         </div>
+
         <div>
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Water Carried Out (L)</label>
           <input id="cs-water-out" type="number" min="0" placeholder="0"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
         </div>
-        <div style="grid-column:1/-1">
+        <div>
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Next Field</label>
-          <input id="cs-next-field" type="text" placeholder="e.g. DL"
+          <select id="cs-next-field"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            <option value="">— none —</option>
+            ${paddockOpts}
+          </select>
         </div>
         <div style="grid-column:1/-1">
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Closing Notes</label>
@@ -1341,12 +1373,21 @@ function _showCloseSessionModal(session) {
     confirmLabel: 'Close Session ✓',
     confirmClass: 'btn-success',
     onConfirm: async (modalEl) => {
+      let seed_out_bags = null, seed_out_kg = null;
+      if (isBulk) {
+        const val  = parseFloat(modalEl.querySelector('#cs-seed-out-kg')?.value) || null;
+        const unit = modalEl.querySelector('#cs-seed-out-unit')?.value || 'kg';
+        seed_out_kg = val != null ? (unit === 't' ? val * 1000 : val) : null;
+      } else {
+        seed_out_bags = parseFloat(modalEl.querySelector('#cs-seed-out-bags')?.value) || null;
+      }
       const updates = {
-        status:          'closed',
-        seed_out_bags:   parseFloat(modalEl.querySelector('#cs-seed-out')?.value) || null,
+        status:           'closed',
+        seed_out_bags,
+        seed_out_kg,
         water_out_litres: parseFloat(modalEl.querySelector('#cs-water-out')?.value) || null,
-        next_field:      modalEl.querySelector('#cs-next-field')?.value?.trim() || null,
-        closing_notes:   modalEl.querySelector('#cs-notes')?.value?.trim() || null,
+        next_field:       modalEl.querySelector('#cs-next-field')?.value?.trim() || null,
+        closing_notes:    modalEl.querySelector('#cs-notes')?.value?.trim() || null,
       };
       await dbUpdate('planting_sessions', session.id, updates);
       Object.assign(session, updates);
