@@ -2,7 +2,7 @@
 // Central in-memory state for the running session.
 // Nothing is persisted to localStorage. State rebuilds from Supabase on each load.
 
-import { getSession, onSessionChange, dbSelect, closeAllSubscriptions } from './supabase-client.js?v=1794541175400';
+import { getSession, onSessionChange, dbSelect, closeAllSubscriptions } from './supabase-client.js?v=1794541419908';
 export { getSession };
 
 const _state = {

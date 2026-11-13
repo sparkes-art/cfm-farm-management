@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794541175400';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794541175400';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794541175400';
-import { loadCommodities, getCommodities }         from '../settings/commodities.js?v=1794541175400';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794541419908';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794541419908';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794541419908';
+import { loadCommodities, getCommodities }         from '../settings/commodities.js?v=1794541419908';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
@@ -44,7 +44,9 @@ const CP_SEASON_TYPES = ['Summer', 'Winter', 'Annual'];
 
 // Commodity colour map — distinct colours per crop so cells are distinguishable at a glance
 const CP_COMMODITY_COLORS = {
-  'Cotton':          { bg: '#dbeafe', text: '#1e3a8a', dot: '#3b82f6' },
+  'Cotton Irrigated':{ bg: '#dbeafe', text: '#1e3a8a', dot: '#3b82f6' },
+  'Cotton Dryland':  { bg: '#bfdbfe', text: '#1e40af', dot: '#2563eb' },
+  'Cotton':          { bg: '#dbeafe', text: '#1e3a8a', dot: '#3b82f6' }, // legacy fallback
   'Corn':            { bg: '#fef9c3', text: '#713f12', dot: '#eab308' },
   'Corn Hay':        { bg: '#fef3c7', text: '#78350f', dot: '#f59e0b' },
   'Sorghum':         { bg: '#ffedd5', text: '#7c2d12', dot: '#f97316' },
@@ -510,36 +512,36 @@ const CP_COLUMNS = [
 // Blackbull 2025-26 seed data
 const BB_2526_SEED = [
   // Cotton — Summer 2025-26 (harvested)
-  { paddock_name:'Pivot 1',              sub_block:null, commodity:'Cotton', water_type:'IRR', variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:52.3,  planted_ha:51.1,  area_loss_ha:1.2  },
-  { paddock_name:'Pivot 2',              sub_block:null, commodity:'Cotton', water_type:'IRR', variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:53.5,  planted_ha:49.9,  area_loss_ha:3.6  },
-  { paddock_name:'Pivot Dryland/Bradens',sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:46.8,  planted_ha:31.5,  area_loss_ha:15.3 },
-  { paddock_name:'House Mahogany',       sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:267.2, planted_ha:195.3, area_loss_ha:71.9 },
-  { paddock_name:'Sabi & Airstrip',      sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:250.0, planted_ha:244.0, area_loss_ha:6.0  },
-  { paddock_name:'Yard East Buffel',     sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:112.4, planted_ha:92.8,  area_loss_ha:19.6 },
-  { paddock_name:'Black Bull 5',         sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:125.8, planted_ha:94.7,  area_loss_ha:31.1 },
-  { paddock_name:'Black Bull 1',         sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:43.3,  planted_ha:36.2,  area_loss_ha:7.1  },
-  { paddock_name:'Black Bull 2',         sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:89.1,  planted_ha:75.0,  area_loss_ha:14.1 },
-  { paddock_name:'Black Bull 3',         sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:152.4, planted_ha:140.3, area_loss_ha:12.1 },
-  { paddock_name:'Black Bull 4',         sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:112.0, planted_ha:82.1,  area_loss_ha:29.9 },
-  { paddock_name:'Tree Trial',           sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:17.6,  planted_ha:17.6,  area_loss_ha:0.0  },
-  { paddock_name:'Leuceana',             sub_block:null, commodity:'Cotton', water_type:'DL',  variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:20.2,  planted_ha:19.7,  area_loss_ha:0.5  },
+  { paddock_name:'Pivot 1',               sub_block:null, commodity:'Cotton Irrigated', variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:52.3,  planted_ha:51.1,  area_loss_ha:1.2  },
+  { paddock_name:'Pivot 2',               sub_block:null, commodity:'Cotton Irrigated', variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:53.5,  planted_ha:49.9,  area_loss_ha:3.6  },
+  { paddock_name:'Pivot Dryland/Bradens', sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:46.8,  planted_ha:31.5,  area_loss_ha:15.3 },
+  { paddock_name:'House Mahogany',        sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:267.2, planted_ha:195.3, area_loss_ha:71.9 },
+  { paddock_name:'Sabi & Airstrip',       sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:250.0, planted_ha:244.0, area_loss_ha:6.0  },
+  { paddock_name:'Yard East Buffel',      sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:112.4, planted_ha:92.8,  area_loss_ha:19.6 },
+  { paddock_name:'Black Bull 5',          sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:125.8, planted_ha:94.7,  area_loss_ha:31.1 },
+  { paddock_name:'Black Bull 1',          sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:43.3,  planted_ha:36.2,  area_loss_ha:7.1  },
+  { paddock_name:'Black Bull 2',          sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:89.1,  planted_ha:75.0,  area_loss_ha:14.1 },
+  { paddock_name:'Black Bull 3',          sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:152.4, planted_ha:140.3, area_loss_ha:12.1 },
+  { paddock_name:'Black Bull 4',          sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:112.0, planted_ha:82.1,  area_loss_ha:29.9 },
+  { paddock_name:'Tree Trial',            sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:17.6,  planted_ha:17.6,  area_loss_ha:0.0  },
+  { paddock_name:'Leuceana',              sub_block:null, commodity:'Cotton Dryland',   variety:'253B3XF', season_label:'Summer 2025-26', season_type:'Summer', status:'harvested', planned_ha:20.2,  planted_ha:19.7,  area_loss_ha:0.5  },
   // Hay / Pasture — Annual 2025-26
-  { paddock_name:'Pivot 3',              sub_block:null, commodity:'Rhodes Hay',    water_type:'IRR', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:38.0,  planted_ha:40.4,  area_loss_ha:null },
-  { paddock_name:'Pivot 4',              sub_block:null, commodity:'Rhodes Hay',    water_type:'IRR', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:50.0,  planted_ha:51.8,  area_loss_ha:null },
-  { paddock_name:'Braedons',             sub_block:null, commodity:'Jarrah Hay',    water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:17.8,  planted_ha:17.8,  area_loss_ha:null },
-  { paddock_name:'Billabong',            sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'growing',   planned_ha:116.1, planted_ha:null,  area_loss_ha:null, notes:'Not harvested — cattle feed' },
-  { paddock_name:'Boghole 1',            sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:101.2, planted_ha:85.0,  area_loss_ha:null },
-  { paddock_name:'Boghole 2',            sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:404.9, planted_ha:335.0, area_loss_ha:null },
-  { paddock_name:'Boghole 3',            sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:165.3, planted_ha:137.0, area_loss_ha:null },
-  { paddock_name:'Broken Windmill',      sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:234.4, planted_ha:213.0, area_loss_ha:null },
-  { paddock_name:'House Buffel',         sub_block:null, commodity:'Corn Hay',      water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:75.0,  planted_ha:60.0,  area_loss_ha:null },
-  { paddock_name:'Cadell',               sub_block:null, commodity:'Jarrah Hay',    water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:269.5, planted_ha:250.0, area_loss_ha:null },
-  { paddock_name:'Black Bull North Top', sub_block:null, commodity:'Jarrah Hay',    water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:152.3, planted_ha:140.0, area_loss_ha:null },
-  { paddock_name:'Black Bull North Middle',sub_block:null,commodity:'Jarrah Hay',   water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:128.0, planted_ha:190.0, area_loss_ha:null },
-  { paddock_name:'Black Bull South Top', sub_block:null, commodity:'Jarrah Hay',    water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'growing',   planned_ha:103.2, planted_ha:null,  area_loss_ha:null, notes:'Not harvested — cattle feed' },
-  { paddock_name:'Black Bull South Bottom',sub_block:null,commodity:'Sorghum',      water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:170.7, planted_ha:170.0, area_loss_ha:null },
-  { paddock_name:'Quarry Hay',           sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'growing',   planned_ha:25.0,  planted_ha:null,  area_loss_ha:null, notes:'Not harvested — cattle feed' },
-  { paddock_name:'Yard East Jarrah',     sub_block:null, commodity:'Cavalcade Hay', water_type:null,  variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:217.4, planted_ha:217.9, area_loss_ha:null },
+  { paddock_name:'Pivot 3',               sub_block:null, commodity:'Rhodes Hay',    variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:38.0,  planted_ha:40.4,  area_loss_ha:null },
+  { paddock_name:'Pivot 4',               sub_block:null, commodity:'Rhodes Hay',    variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:50.0,  planted_ha:51.8,  area_loss_ha:null },
+  { paddock_name:'Braedons',              sub_block:null, commodity:'Jarrah Hay',    variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:17.8,  planted_ha:17.8,  area_loss_ha:null },
+  { paddock_name:'Billabong',             sub_block:null, commodity:'Cavalcade Hay', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'growing',   planned_ha:116.1, planted_ha:null,  area_loss_ha:null, notes:'Not harvested — cattle feed' },
+  { paddock_name:'Boghole 1',             sub_block:null, commodity:'Cavalcade Hay', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:101.2, planted_ha:85.0,  area_loss_ha:null },
+  { paddock_name:'Boghole 2',             sub_block:null, commodity:'Cavalcade Hay', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:404.9, planted_ha:335.0, area_loss_ha:null },
+  { paddock_name:'Boghole 3',             sub_block:null, commodity:'Cavalcade Hay', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:165.3, planted_ha:137.0, area_loss_ha:null },
+  { paddock_name:'Broken Windmill',       sub_block:null, commodity:'Cavalcade Hay', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:234.4, planted_ha:213.0, area_loss_ha:null },
+  { paddock_name:'House Buffel',          sub_block:null, commodity:'Corn Hay',      variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:75.0,  planted_ha:60.0,  area_loss_ha:null },
+  { paddock_name:'Cadell',                sub_block:null, commodity:'Jarrah Hay',    variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:269.5, planted_ha:250.0, area_loss_ha:null },
+  { paddock_name:'Black Bull North Top',  sub_block:null, commodity:'Jarrah Hay',    variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:152.3, planted_ha:140.0, area_loss_ha:null },
+  { paddock_name:'Black Bull North Middle',sub_block:null,commodity:'Jarrah Hay',    variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:128.0, planted_ha:190.0, area_loss_ha:null },
+  { paddock_name:'Black Bull South Top',  sub_block:null, commodity:'Jarrah Hay',    variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'growing',   planned_ha:103.2, planted_ha:null,  area_loss_ha:null, notes:'Not harvested — cattle feed' },
+  { paddock_name:'Black Bull South Bottom',sub_block:null,commodity:'Sorghum',       variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:170.7, planted_ha:170.0, area_loss_ha:null },
+  { paddock_name:'Quarry Hay',            sub_block:null, commodity:'Cavalcade Hay', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'growing',   planned_ha:25.0,  planted_ha:null,  area_loss_ha:null, notes:'Not harvested — cattle feed' },
+  { paddock_name:'Yard East Jarrah',      sub_block:null, commodity:'Cavalcade Hay', variety:null, season_label:'Annual 2025-26', season_type:'Annual', status:'harvested', planned_ha:217.4, planted_ha:217.9, area_loss_ha:null },
 ];
 
 // ── Crop plan: sorted season list ──────────────────────────────────────────
@@ -1173,7 +1175,6 @@ function bindMatrixEdit(container) {
         const rows = [
           entry.variety   ? `<div><span style="color:var(--hint);font-size:0.68rem">Variety</span> <span style="font-size:0.72rem">${esc(entry.variety)}</span></div>` : '',
           entry.status    ? `<div><span style="color:var(--hint);font-size:0.68rem">Status</span> <span style="font-size:0.72rem">${esc(CP_STATUS_LABELS[entry.status] || entry.status)}</span></div>` : '',
-          entry.water_type? `<div><span style="color:var(--hint);font-size:0.68rem">Type</span> <span style="font-size:0.72rem">${esc(entry.water_type)}</span></div>` : '',
           entry.wet_date  ? `<div><span style="color:var(--hint);font-size:0.68rem">Wet date</span> <span style="font-size:0.72rem">${esc(entry.wet_date)}</span></div>` : '',
           entry.yield_target_t_ha != null ? `<div><span style="color:var(--hint);font-size:0.68rem">Yield target</span> <span style="font-size:0.72rem">${entry.yield_target_t_ha} t/ha</span></div>` : '',
           entry.notes     ? `<div style="margin-top:3px;font-size:0.7rem;color:var(--hint);font-style:italic">${esc(entry.notes)}</div>` : '',
@@ -1297,18 +1298,11 @@ function _openCellPopover(td, entry) {
       <label class="form-label" style="font-size:0.72rem">Commodity</label>
       <select class="form-select" id="cpop-commodity" style="font-size:0.82rem;padding:5px 8px">
         <option value="">—</option>
-        ${CP_COMMODITY_OPTIONS.map(c => `<option value="${c}"${entry.commodity === c ? ' selected' : ''}>${c}</option>`).join('')}
+        ${getCommodities().map(c => `<option value="${c.name}"${entry.commodity === c.name ? ' selected' : ''}>${c.name}</option>`).join('')}
       </select>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-      <div class="form-group">
-        <label class="form-label" style="font-size:0.72rem">Crop type</label>
-        <select class="form-select" id="cpop-water" style="font-size:0.82rem;padding:5px 8px">
-          <option value="">—</option>
-          ${CP_CROP_TYPES.map(t => `<option value="${t}"${entry.water_type === t ? ' selected' : ''}>${t}</option>`).join('')}
-        </select>
-      </div>
       <div class="form-group">
         <label class="form-label" style="font-size:0.72rem">Status</label>
         <select class="form-select" id="cpop-status" style="font-size:0.82rem;padding:5px 8px">
@@ -1359,7 +1353,6 @@ function _openCellPopover(td, entry) {
   pop.querySelector('#cpop-save').addEventListener('click', async () => {
     const updates = {
       commodity:  document.getElementById('cpop-commodity')?.value || null,
-      water_type: document.getElementById('cpop-water')?.value     || null,
       status:     document.getElementById('cpop-status')?.value    || 'intent',
       variety:    document.getElementById('cpop-variety')?.value?.trim() || null,
       planned_ha: numOrNull(document.getElementById('cpop-planned')?.value),
@@ -1401,14 +1394,7 @@ function _openAddSubBlockModal(paddockName, allSeasons) {
           <label class="form-label">Commodity</label>
           <select class="form-select" id="sb-commodity">
             <option value="">—</option>
-            ${CP_COMMODITY_OPTIONS.map(c => `<option value="${c}">${c}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Crop type</label>
-          <select class="form-select" id="sb-water">
-            <option value="">—</option>
-            ${CP_CROP_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}
+            ${getCommodities().map(c => `<option value="${c.name}">${c.name}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -1434,7 +1420,6 @@ function _openAddSubBlockModal(paddockName, allSeasons) {
       const subBlock  = document.getElementById('sb-name')?.value?.trim();
       if (!subBlock) throw new Error('Sub-block name required');
       const commodity = document.getElementById('sb-commodity')?.value || null;
-      const waterType = document.getElementById('sb-water')?.value || null;
       const plannedHa = numOrNull(document.getElementById('sb-planned')?.value);
       const seasons   = [...document.getElementById('sb-seasons').selectedOptions].map(o => o.value);
       if (!seasons.length) throw new Error('Select at least one season');
@@ -1447,7 +1432,6 @@ function _openAddSubBlockModal(paddockName, allSeasons) {
         season_type:  s.startsWith('Summer') ? 'Summer' : s.startsWith('Winter') ? 'Winter' : 'Annual',
         status:       'intent',
         commodity,
-        water_type:   waterType,
         planned_ha:   plannedHa,
         planted_ha:   null,
         area_loss_ha: null,
@@ -1527,14 +1511,8 @@ function openAddPaddockModal(allSeasons, currentSeason) {
         <div class="form-group">
           <label class="form-label">Commodity</label>
           <select class="form-select" id="ap-commodity">
-            ${CP_COMMODITY_OPTIONS.map(c => `<option value="${c}">${c}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Crop type</label>
-          <select class="form-select" id="ap-water">
             <option value="">—</option>
-            ${CP_CROP_TYPES.map(t => `<option value="${t}">${t}</option>`).join('')}
+            ${getCommodities().map(c => `<option value="${c.name}">${c.name}</option>`).join('')}
           </select>
         </div>
       </div>
@@ -1578,7 +1556,6 @@ function openAddPaddockModal(allSeasons, currentSeason) {
         season_type:  season.startsWith('Summer') ? 'Summer' : season.startsWith('Winter') ? 'Winter' : 'Annual',
         status:       document.getElementById('ap-status')?.value || 'intent',
         commodity:    document.getElementById('ap-commodity')?.value || null,
-        water_type:   document.getElementById('ap-water')?.value || null,
         planned_ha:   numOrNull(document.getElementById('ap-planned')?.value),
         planted_ha:   numOrNull(document.getElementById('ap-planted')?.value),
         updated_at:   new Date().toISOString(),
@@ -1701,7 +1678,6 @@ function openPlanSeasonModal(allSeasons, currentSeason) {
           season_type:  seasonType,
           status:       'intent',
           commodity:    e.commodity || null,
-          water_type:   e.water_type || null,
           variety:      e.variety || null,
           planned_ha:   e.planned_ha || null,
           planted_ha:   null,
@@ -1721,7 +1697,6 @@ function openPlanSeasonModal(allSeasons, currentSeason) {
           season_type:  seasonType,
           status:       'intent',
           commodity:    null,
-          water_type:   null,
           variety:      null,
           planned_ha:   p.area_ha || null,
           planted_ha:   null,
@@ -2027,7 +2002,6 @@ async function loadActuals() {
       status:       r.status,
       commodity:    r.commodity,
       variety:      r.variety || null,
-      water_type:   r.water_type || null,
       planned_ha:   r.planned_ha ?? null,
       planted_ha:   r.planted_ha ?? null,
       area_loss_ha: r.area_loss_ha ?? null,
@@ -2106,8 +2080,9 @@ function openCropPlanModal(entry = null) {
       <div class="form-group">
         <label class="form-label">Commodity *</label>
         <select class="form-select" id="cp-commodity">
-          ${COMMODITIES.map(c =>
-            `<option value="${c}"${entry?.commodity === c ? ' selected' : ''}>${c}</option>`
+          <option value="">—</option>
+          ${getCommodities().map(c =>
+            `<option value="${c.name}"${entry?.commodity === c.name ? ' selected' : ''}>${c.name}</option>`
           ).join('')}
         </select>
       </div>
@@ -2115,15 +2090,6 @@ function openCropPlanModal(entry = null) {
         <label class="form-label">Variety</label>
         <input class="form-input" id="cp-variety" placeholder="e.g. Sicot 714"
           value="${esc(entry?.variety || '')}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Crop type</label>
-        <select class="form-select" id="cp-water">
-          <option value="">—</option>
-          ${CP_CROP_TYPES.map(t =>
-            `<option value="${t}"${entry?.water_type === t ? ' selected' : ''}>${t}</option>`
-          ).join('')}
-        </select>
       </div>
     </div>
 
@@ -2189,7 +2155,6 @@ function openCropPlanModal(entry = null) {
         status:            document.getElementById('cp-status')?.value || 'intent',
         commodity,
         variety:           document.getElementById('cp-variety')?.value?.trim() || null,
-        water_type:        document.getElementById('cp-water')?.value || null,
         planned_ha:        numOrNull(document.getElementById('cp-planned-ha')?.value),
         planted_ha:        numOrNull(document.getElementById('cp-planted-ha')?.value),
         area_loss_ha:      numOrNull(document.getElementById('cp-loss-ha')?.value),
