@@ -1,6 +1,7 @@
-import { dbSelect, dbUpdate } from '../../js/supabase-client.js?v=1794541976220';
-import { getActiveFarm, getFarms, setActiveFarm } from '../../js/app-state.js?v=1794541976220';
-import { toast, qs, formatDate } from '../../js/ui.js?v=1794541976220';
+import { dbSelect, dbUpdate } from '../../js/supabase-client.js?v=1794543156124';
+import { getActiveFarm, getFarms, setActiveFarm } from '../../js/app-state.js?v=1794543156124';
+import { toast, qs, formatDate } from '../../js/ui.js?v=1794543156124';
+import { loadCommodities, getCropTypes } from '../../js/commodities.js?v=1794543156124';
 const COTTON_REGIONS = [
   'Central QLD', 'Darling Downs', 'MacIntyre', 'Gwydir', 'LDC Moree',
   'Mungindi/St George', 'Namoi Valley', 'Macquarie Valley', 'Lachlan/Sth NSW', 'NT / WA'
@@ -357,6 +358,16 @@ export async function mountFarmSettings(container, onSave) {
           </div>
         </div>
 
+        <hr class="divider">
+
+        <div class="form-group" id="fs-crop-types-section">
+          <label class="form-label">Crop types for this farm</label>
+          <p class="form-helper" style="margin-bottom:12px">Tick the crop types relevant to this farm. Only these will appear in the crop plan dropdown. Leave all unticked to show every crop type (useful during initial setup).</p>
+          <div id="fs-crop-types-list" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+            <div style="color:var(--hint);font-size:12px">Loading crop types…</div>
+          </div>
+        </div>
+
         <div style="display:flex;gap:10px;margin-top:20px">
           <button class="btn btn-primary" id="fs-save-bottom">Save changes</button>
         </div>
@@ -426,6 +437,10 @@ export async function mountFarmSettings(container, onSave) {
       const livestockIndicators = Array.from(container.querySelectorAll('.ls-indicator-check:checked')).map(el => el.value);
       newSettings.livestockIndicators = livestockIndicators.length ? livestockIndicators : null;
 
+      // Save crop type filter
+      const cropTypes = Array.from(container.querySelectorAll('.fs-crop-type-check:checked')).map(el => el.value);
+      newSettings.cropTypes = cropTypes.length ? cropTypes : null;
+
       await dbUpdate('farms', farm.id, {
         name,
         location,
@@ -466,6 +481,8 @@ export async function mountFarmSettings(container, onSave) {
 
   qs('#fs-save-bottom', container)?.addEventListener('click', () => qs('#fs-save', container)?.click());
 
+  // Populate crop type filter checkboxes (async — needs commodities loaded)
+  _loadCropTypeFilter(container, settings);
 
   // Xero connection section
   const xeroSection = document.createElement('div');
@@ -479,6 +496,33 @@ export async function mountFarmSettings(container, onSave) {
   `;
   container.appendChild(xeroSection);
   _loadXeroStatus(farm);
+}
+
+async function _loadCropTypeFilter(container, settings) {
+  const list = qs('#fs-crop-types-list', container);
+  if (!list) return;
+  try {
+    await loadCommodities();
+    const seen = new Set();
+    const allTypes = getCropTypes()
+      .map(ct => ct.name)
+      .filter(n => { if (seen.has(n)) return false; seen.add(n); return true; })
+      .sort((a, b) => a.localeCompare(b));
+    const whitelist = settings.cropTypes || [];
+    if (!allTypes.length) {
+      list.innerHTML = '<div style="color:var(--hint);font-size:12px">No crop types defined yet. Add them in Settings → Commodities first.</div>';
+      return;
+    }
+    list.innerHTML = allTypes.map(name => `
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;padding:4px 0">
+        <input type="checkbox" class="fs-crop-type-check" value="${name}"
+          ${whitelist.includes(name) ? 'checked' : ''}>
+        ${name}
+      </label>
+    `).join('');
+  } catch (err) {
+    if (list) list.innerHTML = '<div style="color:var(--red);font-size:12px">Failed to load crop types</div>';
+  }
 }
 
 async function _loadXeroStatus(farm) {

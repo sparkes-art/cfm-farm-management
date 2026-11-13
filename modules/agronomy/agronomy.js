@@ -2,19 +2,23 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794541976220';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794541976220';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794541976220';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794541976220';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794543156124';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794543156124';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794543156124';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794543156124';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
+// If the active farm has a cropTypes whitelist in settings, only those names are shown.
 function _planCropTypes() {
   const seen = new Set();
-  return getCropTypes()
+  const all = getCropTypes()
     .map(ct => ct.name)
     .filter(n => { if (seen.has(n)) return false; seen.add(n); return true; })
     .sort((a, b) => a.localeCompare(b));
+  const whitelist = getActiveFarm()?.settings?.cropTypes;
+  if (!whitelist?.length) return all;
+  return all.filter(n => whitelist.includes(n));
 }
 
 // ── State ──────────────────────────────────────────────────────────────────
