@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794546272916';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794546272916';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794546272916';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794546272916';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794546366705';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794546366705';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794546366705';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794546366705';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -830,11 +830,6 @@ function _showNewSessionModal() {
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
         </div>
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">AusLot #</label>
-          <input id="ns-auslot" type="text" placeholder="e.g. N12/25/293"
-            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
-        </div>
-        <div>
           <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Operator</label>
           <input id="ns-operator" type="text" placeholder="e.g. Bailey"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
@@ -855,7 +850,12 @@ function _showNewSessionModal() {
           </div>
 
           <!-- Bag mode fields -->
-          <div id="ns-seed-bags-fields" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div id="ns-seed-bags-fields" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">AusLot #</label>
+              <input id="ns-auslot" type="text" placeholder="e.g. N12/25/293"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            </div>
             <div>
               <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Total Bags</label>
               <input id="ns-seed-in" type="number" min="0" placeholder="0"
@@ -1047,7 +1047,6 @@ function _showEditHeaderModal(session) {
         </div>
         ${[
           ['ns-variety',    'Variety',       session.variety,          'text',   'e.g. 606'],
-          ['ns-auslot',     'AusLot #',      session.auslot_default,   'text',   ''],
           ['ns-operator',   'Operator',      session.operator_default, 'text',   ''],
           ['ns-water-in',   'Water In (L)',  session.water_in_litres,  'number', '0'],
           ['ns-prev-field', 'Previous Field',session.previous_field,   'text',   ''],
@@ -1071,7 +1070,12 @@ function _showEditHeaderModal(session) {
               🚛 Bulk
             </label>
           </div>
-          <div id="eh-seed-bags-fields" style="display:${session.seed_type === 'bulk' ? 'none' : 'grid'};grid-template-columns:1fr 1fr 1fr;gap:10px">
+          <div id="eh-seed-bags-fields" style="display:${session.seed_type === 'bulk' ? 'none' : 'grid'};grid-template-columns:1fr 1fr;gap:10px">
+            <div>
+              <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">AusLot #</label>
+              <input id="ns-auslot" type="text" value="${esc(session.auslot_default || '')}" placeholder="e.g. N12/25/293"
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            </div>
             <div>
               <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Total Bags</label>
               <input id="eh-seed-in" type="number" min="0" value="${esc(session.seed_in_bags ?? '')}"
