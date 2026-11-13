@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794546671365';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794546671365';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794546671365';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794546671365';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794546872517';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794546872517';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794546872517';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794546872517';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -758,7 +758,6 @@ async function _saveRow() {
       cotton_bags:     data.cotton_bags,
       bulk_kg:         data.bulk_kg,
       row_seed_type:   data.row_seed_type,
-      kg_per_bag:      data.kg_per_bag,
       auslot_override: data.auslot_override || null,
       chemicals:       data.chemicals,
     });
