@@ -2,9 +2,9 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794531615418';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794531615418';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794531615418';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794533442387';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794533442387';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794533442387';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let allReports    = [];
