@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794785697249';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794785697249';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794785697249';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794785697249';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794786086720';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794786086720';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794786086720';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794786086720';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -226,7 +226,7 @@ function _renderList() {
       }).join('');
 
   return `
-    <div style="padding:24px;max-width:900px">
+    <div style="padding:24px">
       <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:24px">
         <div style="padding:8px 16px;font-size:13px;font-weight:700;color:var(--blue);border-bottom:2px solid var(--blue);margin-bottom:-2px">Planting</div>
         <div style="padding:8px 16px;font-size:13px;font-weight:600;color:var(--hint)">Fertiliser <span style="font-size:10px;padding:1px 5px;background:var(--border);border-radius:20px;margin-left:4px">coming soon</span></div>
@@ -428,7 +428,7 @@ function _renderDetail() {
     </div>`;
 
   return `
-    <div style="padding:24px;max-width:900px">
+    <div style="padding:24px">
       <button id="ops-back-btn" style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--blue);background:none;border:none;cursor:pointer;padding:0;margin-bottom:16px">
         ← Back to Planting
       </button>
@@ -1394,7 +1394,7 @@ function _showCloseSessionModal(session) {
 
       // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
       try {
-        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794785697249');
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794786086720');
         const farm = getActiveFarm();
         await writeSessionSeedUsage(farm, session);
       } catch (e) {
