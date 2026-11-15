@@ -1,6 +1,6 @@
 /* CFM Farm Management System — Design System v3
-   Theme: Fieldbook Carbon
-   Palette: Deep navy topbar · steel sidebar · white content · CFM blue-grey accent
+   Theme: Fieldbook Clean
+   Palette: White sidebar · white content · CFM blue accent · crisp black typography
 */
 
 /* ── Google Fonts ─────────────────────────────────────────────── */
@@ -8,20 +8,20 @@
 
 /* ── Design tokens ───────────────────────────────────────────── */
 :root {
-  /* Topbar — deep navy */
+  /* Topbar — deep navy (kept for brand) */
   --navy:          #1e2d3d;
   --navy-border:   #28404f;
 
-  /* Sidebar — mid steel */
-  --slate:         #f0f4f7;
-  --slate-border:  #dce4eb;
-  --slate-hover:   #e6edf3;
+  /* Sidebar — white/near-white */
+  --slate:         #f7f9fb;
+  --slate-border:  #e8edf2;
+  --slate-hover:   #eef2f6;
 
-  /* Blue — CFM steel blue-grey accent */
-  --blue:          #6a8faf;
-  --blue-light:    #e8f0f7;
-  --blue-mid:      #5a7d9e;
-  --blue-text:     #4a6d8e;
+  /* Blue — CFM clean blue accent */
+  --blue:          #2563eb;
+  --blue-light:    #eff6ff;
+  --blue-mid:      #1d4ed8;
+  --blue-text:     #1e40af;
 
   /* Green — positive / paid */
   --green:         #1a7a4a;
@@ -40,14 +40,14 @@
 
   /* Neutrals */
   --white:         #ffffff;
-  --page-bg:       #f0f4f7;
+  --page-bg:       #f4f6f9;
   --surface:       #ffffff;
-  --border:        #dce4eb;
-  --border-light:  #eaf0f5;
-  --ink:           #111820;
-  --ink-mid:       #2d3d4f;
-  --muted:         #6b7a87;
-  --hint:          #9aaabb;
+  --border:        #e2e8f0;
+  --border-light:  #edf2f7;
+  --ink:           #0f172a;
+  --ink-mid:       #1e293b;
+  --muted:         #64748b;
+  --hint:          #94a3b8;
 
   /* Status */
   --status-draft:    #9ca3af;
@@ -209,8 +209,8 @@ body {
 #sidebar {
   grid-column: 1;
   grid-row: 2;
-  background: #2b3f52;
-  border-right: 1px solid #233347;
+  background: #ffffff;
+  border-right: 1px solid var(--border);
   overflow-y: auto;
   padding: 14px 0;
 }
@@ -219,8 +219,8 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 16px;
-  color: rgba(255,255,255,0.55);
+  padding: 8px 14px;
+  color: var(--muted);
   text-decoration: none;
   font-size: var(--text-sm);
   font-weight: 500;
@@ -235,15 +235,15 @@ body {
   text-align: center;
   flex-shrink: 0;
   font-size: 14px;
-  opacity: 0.65;
+  opacity: 0.7;
 }
 #sidebar nav a:hover {
-  color: rgba(255,255,255,0.85);
-  background: rgba(255,255,255,0.06);
+  color: var(--ink);
+  background: var(--slate);
 }
 #sidebar nav a.active {
-  color: #ffffff;
-  background: rgba(106,143,175,0.2);
+  color: var(--blue);
+  background: var(--blue-light);
   border-left-color: var(--blue);
   font-weight: 600;
 }
@@ -251,7 +251,7 @@ body {
 
 .nav-section-label {
   font-size: 10px;
-  color: rgba(255,255,255,0.3);
+  color: var(--hint);
   text-transform: uppercase;
   letter-spacing: 0.12em;
   font-weight: 700;
@@ -327,7 +327,7 @@ body {
   justify-content: space-between;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border-light);
-  background: #fafbfc;
+  background: var(--page-bg);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 .card-header h2 {
@@ -437,7 +437,7 @@ body {
   padding: 8px 14px;
   border-bottom: 1px solid var(--border-light);
   white-space: nowrap;
-  background: #fafbfc;
+  background: var(--page-bg);
 }
 .data-table thead th.num { text-align: right; }
 .data-table tbody tr {
@@ -445,7 +445,7 @@ body {
   transition: background var(--t-fast);
 }
 .data-table tbody tr:last-child { border-bottom: none; }
-.data-table tbody tr:hover { background: #f8fafc; }
+.data-table tbody tr:hover { background: var(--slate); }
 .data-table tbody td {
   padding: 10px 14px;
   color: var(--ink);
@@ -494,7 +494,7 @@ body {
 .form-textarea:focus {
   outline: none;
   border-color: var(--blue);
-  box-shadow: 0 0 0 3px rgba(30,111,168,0.12);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
 }
 .form-input.num,
 .form-input[type="number"] {
@@ -591,7 +591,7 @@ body {
   gap: 8px;
   padding: 14px 20px;
   border-top: 1px solid var(--border-light);
-  background: #fafbfc;
+  background: var(--page-bg);
   border-radius: 0 0 var(--radius-xl) var(--radius-xl);
 }
 
@@ -767,8 +767,8 @@ body {
     right: 0;
     height: var(--mob-nav-h);
     padding-bottom: env(safe-area-inset-bottom, 0px);
-    background: #1e2d3d;
-    border-top: 1px solid rgba(255,255,255,0.1);
+    background: #ffffff;
+    border-top: 1px solid var(--border);
     z-index: 200;
     align-items: stretch;
   }
@@ -779,7 +779,7 @@ body {
     align-items: center;
     justify-content: center;
     gap: 3px;
-    color: rgba(255,255,255,0.45);
+    color: var(--hint);
     text-decoration: none;
     font-size: 10px;
     font-weight: 500;
@@ -789,10 +789,10 @@ body {
     min-height: 44px;
   }
   #mobile-nav a.active {
-    color: white;
+    color: var(--blue);
   }
   #mobile-nav a.active .mob-icon {
-    filter: drop-shadow(0 0 4px rgba(255,255,255,0.4));
+    filter: none;
   }
   #mobile-nav a .mob-icon { font-size: 22px; line-height: 1; }
 
@@ -804,7 +804,7 @@ body {
     align-items: center;
     justify-content: center;
     gap: 3px;
-    color: rgba(255,255,255,0.45);
+    color: var(--hint);
     font-size: 10px;
     font-weight: 500;
     background: none;
@@ -822,8 +822,8 @@ body {
     bottom: var(--mob-nav-h);
     left: 0;
     right: 0;
-    background: #2b3f52;
-    border-top: 1px solid rgba(255,255,255,0.12);
+    background: #ffffff;
+    border-top: 1px solid var(--border);
     border-radius: 12px 12px 0 0;
     z-index: 199;
     padding: 6px 0 8px;
@@ -838,15 +838,15 @@ body {
     align-items: center;
     gap: 12px;
     padding: 13px 20px;
-    color: rgba(255,255,255,0.75);
+    color: var(--ink-mid);
     text-decoration: none;
     font-size: 15px;
     font-weight: 500;
     -webkit-tap-highlight-color: transparent;
     min-height: 44px;
   }
-  #mobile-drawer a:active { background: rgba(255,255,255,0.06); }
-  #mobile-drawer a.active { color: white; }
+  #mobile-drawer a:active { background: var(--slate); }
+  #mobile-drawer a.active { color: var(--blue); font-weight: 600; }
   #mobile-drawer a span { font-size: 20px; width: 28px; text-align: center; }
 
   /* Overlay behind drawer */
