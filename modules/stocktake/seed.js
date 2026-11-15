@@ -26,9 +26,9 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794779787010';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794779787010';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794779787010';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794780150469';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794780150469';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794780150469';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -238,9 +238,8 @@ async function _render(container, farm, period, allPeriods = []) {
 
     // Chips
     const chips = [
-      attrs.variety       ? `<span class="sd-chip">${esc(attrs.variety)}</span>` : '',
-      attrs.produced_year ? `<span class="sd-chip">${esc(attrs.produced_year)}</span>` : '',
-      kpb                 ? `<span class="sd-chip">${kpb} kg/bag</span>` : '',
+      attrs.variety ? `<span class="sd-chip">${esc(attrs.variety)}</span>` : '',
+      kpb           ? `<span class="sd-chip">${kpb} kg/bag</span>` : '',
     ].filter(Boolean).join('');
 
     // Linked planting session usage this period
@@ -454,7 +453,6 @@ async function _showAddVarietyForm(container, farm, existingItems, period, allPe
   const sgSuggestions = knownSubgroups.length
     ? `<datalist id="sd-sg-list">${knownSubgroups.map(s => `<option value="${esc(s)}">`).join('')}</datalist>`
     : '';
-  const currentYear = new Date().getFullYear();
 
   openModal({
     title: 'Add seed variety',
@@ -477,12 +475,7 @@ async function _showAddVarietyForm(container, farm, existingItems, period, allPe
               placeholder="e.g. DP 1840 B3XF, Pacific Vigour">
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Season year <span style="color:var(--red)">*</span></label>
-            <input class="form-input" id="sv-year" type="number" min="2000" max="2099"
-              value="${currentYear}" placeholder="${currentYear}">
-          </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="form-group" style="margin:0">
             <label class="form-label">Unit <span style="color:var(--red)">*</span></label>
             <select class="form-select" id="sv-unit">
@@ -508,19 +501,17 @@ async function _showAddVarietyForm(container, farm, existingItems, period, allPe
     onConfirm: async (modal) => {
       const subgroup = modal.querySelector('#sv-subgroup')?.value?.trim();
       const variety  = modal.querySelector('#sv-variety')?.value?.trim();
-      const year     = modal.querySelector('#sv-year')?.value?.trim();
       const unit     = modal.querySelector('#sv-unit')?.value;
       const kpb      = parseFloat(modal.querySelector('#sv-kpb')?.value) || null;
       const notes    = modal.querySelector('#sv-notes')?.value?.trim() || null;
 
-      if (!subgroup || !variety || !year) {
-        toast('Crop type, variety and season year are required', 'error');
+      if (!subgroup || !variety) {
+        toast('Crop type and variety are required', 'error');
         return false;
       }
 
-      const name = `${variety} ${year}`;
+      const name = variety;
       const attrs = {
-        produced_year: year,
         variety,
         ...(kpb ? { kg_per_bag: kpb } : {}),
       };
@@ -536,7 +527,7 @@ async function _showAddVarietyForm(container, farm, existingItems, period, allPe
         active:       true,
         notes,
       });
-      toast(`${name} added`, 'success');
+      toast(`${variety} added`, 'success');
       await _render(container, farm, period, allPeriods);
     }
   });
