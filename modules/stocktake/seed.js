@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794786963265';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794786963265';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794786963265';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794786963265';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794787074907';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794787074907';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794787074907';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794787074907';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -496,18 +496,12 @@ function _buildUnallocatedPanel(pendingMovements, items, sessionById) {
       `</div>`,
       `<div style="font-weight:600;color:var(--ink)">${fQty(m)}</div>`,
       `<div style="color:var(--hint);font-size:11px">${esc(m.note || '')}</div>`,
-      `<div>`,
-        items.length
-          ? `<select class="form-select sd-alloc-item" data-movement-id="${m.id}" style="font-size:11px;width:100%">`,
-            `<option value="">Select variety…</option>${itemOpts}`,
-            `</select>`
-          : `<span style="font-size:11px;color:var(--hint)">Add a variety first</span>`,
-      `</div>`,
-      `<div>`,
-        items.length
-          ? `<button class="btn btn-sm btn-primary sd-alloc-btn" data-movement-id="${m.id}" style="font-size:11px;opacity:.4;pointer-events:none;white-space:nowrap">Allocate →</button>`
-          : '',
-      `</div>`,
+      items.length
+        ? `<div><select class="form-select sd-alloc-item" data-movement-id="${m.id}" style="font-size:11px;width:100%"><option value="">Select variety…</option>${itemOpts}</select></div>`
+        : `<div><span style="font-size:11px;color:var(--hint)">Add a variety first</span></div>`,
+      items.length
+        ? `<div><button class="btn btn-sm btn-primary sd-alloc-btn" data-movement-id="${m.id}" style="font-size:11px;opacity:.4;pointer-events:none;white-space:nowrap">Allocate →</button></div>`
+        : `<div></div>`,
       `</div>`,
     ].join('');
   }).join('');
