@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794780881134';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794780881134';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794780881134';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794780881134';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794781076907';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794781076907';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794781076907';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794781076907';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -314,6 +314,8 @@ async function _render(container, farm, period, allPeriods = []) {
           </div>
           ${canWrite() ? `
             <div style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm sd-edit-item" style="font-size:11px"
+                data-item-id="${item.id}">✎ Edit</button>
               <button class="btn btn-ghost btn-sm sd-record-delivery" style="font-size:11px"
                 data-item-id="${item.id}" data-item-name="${esc(item.name)}"
                 data-unit="${esc(unit)}" data-kpb="${kpb || ''}">+ Delivery</button>
@@ -434,6 +436,13 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
   wrap.querySelector('#sd-add-delivery')?.addEventListener('click',
     () => _showDeliveryForm(container, farm, items, locations, null, null, period, allPeriods));
 
+  wrap.querySelectorAll('.sd-edit-item').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const item = items.find(i => i.id === btn.dataset.itemId);
+      if (item) _showEditVarietyForm(container, farm, item, items, period, allPeriods);
+    });
+  });
+
   wrap.querySelectorAll('.sd-record-delivery').forEach(btn => {
     btn.addEventListener('click', () =>
       _showDeliveryForm(container, farm, items, locations,
@@ -528,6 +537,94 @@ async function _showAddVarietyForm(container, farm, existingItems, period, allPe
   setTimeout(() => {
     const unitEl  = document.getElementById('sv-unit');
     const kpbWrap = document.getElementById('sv-kpb-wrap');
+    const toggle = () => {
+      if (kpbWrap) kpbWrap.style.display = unitEl?.value === 'bags' ? '' : 'none';
+    };
+    unitEl?.addEventListener('change', toggle);
+    toggle();
+  }, 50);
+}
+
+// ── Edit seed variety form ────────────────────────────────────────────────
+async function _showEditVarietyForm(container, farm, item, allItems, period, allPeriods) {
+  await loadCommodities(farm.id);
+  const commodities = getCommodities();
+  const attrs = item.attributes || {};
+  const currentCrop = item.subgroup || '';
+  const currentVariety = attrs.variety || item.name;
+  const currentUnit = item.default_unit || 'bags';
+  const currentKpb = parseFloat(attrs.kg_per_bag) || '';
+
+  const cropOpts = commodities.map(c =>
+    `<option value="${esc(c.name)}"${c.name === currentCrop ? ' selected' : ''}>${esc(c.name)}</option>`
+  ).join('');
+
+  openModal({
+    title: 'Edit seed variety',
+    bodyHTML: `
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Crop <span style="color:var(--red)">*</span></label>
+            <select class="form-select" id="ev-crop">
+              <option value="">Select crop…</option>
+              ${cropOpts}
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Variety <span style="color:var(--red)">*</span></label>
+            <input class="form-input" id="ev-variety" type="text" value="${esc(currentVariety)}">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Unit <span style="color:var(--red)">*</span></label>
+            <select class="form-select" id="ev-unit">
+              <option value="bags"${currentUnit==='bags'?' selected':''}>Bags</option>
+              <option value="kg"${currentUnit==='kg'?' selected':''}>Kilograms</option>
+              <option value="t"${currentUnit==='t'?' selected':''}>Tonnes</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0" id="ev-kpb-wrap">
+            <label class="form-label">kg per bag</label>
+            <input class="form-input" id="ev-kpb" type="number" min="1" step="0.1"
+              value="${currentKpb}" placeholder="e.g. 20">
+            <div style="font-size:10px;color:var(--hint);margin-top:2px">For kg ↔ bags conversion</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Notes (optional)</label>
+          <input class="form-input" id="ev-notes" type="text" value="${esc(item.notes || '')}">
+        </div>
+      </div>`,
+    confirmLabel: 'Save changes',
+    onConfirm: async (modal) => {
+      const crop    = modal.querySelector('#ev-crop')?.value?.trim();
+      const variety = modal.querySelector('#ev-variety')?.value?.trim();
+      const unit    = modal.querySelector('#ev-unit')?.value;
+      const kpb     = parseFloat(modal.querySelector('#ev-kpb')?.value) || null;
+      const notes   = modal.querySelector('#ev-notes')?.value?.trim() || null;
+
+      if (!crop || !variety) {
+        toast('Crop and variety are required', 'error');
+        return false;
+      }
+
+      await dbUpdate('stock_items', item.id, {
+        name:         variety,
+        subgroup:     crop,
+        default_unit: unit,
+        attributes:   { ...attrs, variety, ...(kpb ? { kg_per_bag: kpb } : { kg_per_bag: null }) },
+        notes,
+      });
+      toast('Variety updated', 'success');
+      await _render(container, farm, period, allPeriods);
+    }
+  });
+
+  setTimeout(() => {
+    const unitEl  = document.getElementById('ev-unit');
+    const kpbWrap = document.getElementById('ev-kpb-wrap');
     const toggle = () => {
       if (kpbWrap) kpbWrap.style.display = unitEl?.value === 'bags' ? '' : 'none';
     };
