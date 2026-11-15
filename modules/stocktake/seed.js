@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794786086720';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794786086720';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794786086720';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794786086720';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794786529000';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794786529000';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794786529000';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794786529000';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -918,9 +918,9 @@ export async function writeSessionSeedUsage(farm, session) {
 
   if (!seedItems.length) return; // seed stock not set up — skip silently
 
-  // Match: prefer variety match, fall back to crop_type match
+  // Match: prefer variety match, fall back to commodity/crop_type match
   const variety   = (session.variety || '').toLowerCase().trim();
-  const cropType  = (session.crop_type || '').toLowerCase().trim();
+  const cropType  = (session.crop_type || session.commodity || '').toLowerCase().trim();
 
   const matched = seedItems.find(i => {
     const iVariety   = (i.attributes?.variety || i.name || '').toLowerCase();

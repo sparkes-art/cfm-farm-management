@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794786086720';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794786086720';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794786086720';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794786086720';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794786529000';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794786529000';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794786529000';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794786529000';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -1392,9 +1392,26 @@ function _showCloseSessionModal(session) {
       await dbUpdate('planting_sessions', session.id, updates);
       Object.assign(session, updates);
 
+      // Auto-update crop plan entry planted_ha (non-fatal)
+      try {
+        const cpId = session.crop_plan_entry_id;
+        if (cpId) {
+          // Sum ha across ALL closed sessions linked to this crop plan entry
+          const siblingHa = _sessions
+            .filter(s => s.crop_plan_entry_id === cpId && (s.id === session.id || s.status === 'closed'))
+            .reduce((t, s) => t + _sessionTotalHa(s.id), 0);
+          const plantedHa = siblingHa > 0 ? siblingHa : _sessionTotalHa(session.id) || null;
+          if (plantedHa != null) {
+            await dbUpdate('crop_plan_entries', cpId, { planted_ha: plantedHa, status: 'planted' });
+          }
+        }
+      } catch (e) {
+        console.warn('[CFM] Crop plan update skipped:', e.message);
+      }
+
       // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
       try {
-        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794786086720');
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794786529000');
         const farm = getActiveFarm();
         await writeSessionSeedUsage(farm, session);
       } catch (e) {
