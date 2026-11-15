@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794785238830';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794785238830';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794785238830';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794785238830';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794785697249';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794785697249';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794785697249';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794785697249';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -337,48 +337,37 @@ async function _render(container, farm, period, allPeriods = []) {
         data-item-id="${item.id}" data-item-name="${esc(item.name)}">+ Add first movement</button>` : ''}
     </td></tr>`;
 
+    // Item name row + data rows (no card wrapper, no repeated header — shared table)
+    const plantingSection = sessionRows ? `
+      <tr><td colspan="6" style="padding:0;border-top:1px solid var(--border)">
+        <div style="padding:5px 16px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--blue-text);background:var(--blue-light)">
+          🌱 Planting session usage
+        </div>
+        <table style="width:100%;border-collapse:collapse">${sessionRows}</table>
+      </td></tr>` : '';
+
     return `
-      <div class="card" style="margin-bottom:12px;overflow:hidden">
-        <!-- Item header -->
-        <div class="card-header" style="flex-wrap:wrap;gap:8px">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0">
-            <span style="font-size:14px;font-weight:600;color:var(--ink)">${esc(item.name)}</span>
+      <tr style="border-top:2px solid var(--border);background:var(--page-bg)">
+        <td colspan="6" style="padding:7px 16px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:13px;font-weight:600;color:var(--ink)">${esc(item.name)}</span>
             ${chips}
             <span style="font-size:12px;color:var(--muted)">${fN(totalClosing)} ${esc(unit)} on hand${kgStr}</span>
+            ${canWrite() ? `
+              <div style="display:flex;gap:4px;margin-left:auto">
+                <button class="btn btn-ghost btn-sm sd-edit-item"
+                  data-item-id="${item.id}" style="font-size:11px">✎ Edit</button>
+                <button class="btn btn-ghost btn-sm sd-record-delivery"
+                  data-item-id="${item.id}" data-item-name="${esc(item.name)}"
+                  data-unit="${esc(unit)}" data-kpb="${kpb || ''}" style="font-size:11px">+ Delivery</button>
+                <button class="btn btn-ghost btn-sm sd-add-move"
+                  data-item-id="${item.id}" data-item-name="${esc(item.name)}" style="font-size:11px">+ Movement</button>
+              </div>` : ''}
           </div>
-          ${canWrite() ? `
-            <div style="display:flex;gap:6px;flex-shrink:0">
-              <button class="btn btn-ghost btn-sm sd-edit-item"
-                data-item-id="${item.id}">✎ Edit</button>
-              <button class="btn btn-ghost btn-sm sd-record-delivery"
-                data-item-id="${item.id}" data-item-name="${esc(item.name)}"
-                data-unit="${esc(unit)}" data-kpb="${kpb || ''}">+ Delivery</button>
-              <button class="btn btn-ghost btn-sm sd-add-move"
-                data-item-id="${item.id}" data-item-name="${esc(item.name)}">+ Movement</button>
-            </div>` : ''}
-        </div>
-        <!-- Balance table -->
-        <table style="width:100%;border-collapse:collapse">
-          <thead>
-            <tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">
-              <th style="padding:7px 14px 7px 16px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Location</th>
-              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Opening</th>
-              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--green);text-align:center">In</th>
-              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--red);text-align:center">Used</th>
-              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Closing</th>
-              <th style="width:120px"></th>
-            </tr>
-          </thead>
-          <tbody>${locRows}</tbody>
-        </table>
-        ${sessionRows ? `
-          <div style="border-top:1px solid var(--border)">
-            <div style="padding:6px 16px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--blue-text);background:var(--blue-light)">
-              🌱 Planting session usage
-            </div>
-            ${sessionRows}
-          </div>` : ''}
-      </div>`;
+        </td>
+      </tr>
+      ${locRows}
+      ${plantingSection}`;
   };
 
   const subgroupHtml = Object.entries(subgroups).map(([sgName, sgItems]) => {
@@ -391,12 +380,24 @@ async function _render(container, farm, period, allPeriods = []) {
     const sgKg   = sgKpb && sgClosing ? ` · ${fKg(sgClosing * sgKpb)}` : '';
 
     return `
-      <div style="margin-bottom:28px">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--navy);border-radius:var(--radius-md);margin-bottom:10px">
+      <div class="card" style="margin-bottom:20px;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;background:var(--navy)">
           <span style="font-size:13px;font-weight:700;color:#fff;letter-spacing:.01em">${esc(sgName)}</span>
           <span style="font-size:12px;color:rgba(255,255,255,.55)">${fN(sgClosing)} ${esc(sgUnit)} total${sgKg}</span>
         </div>
-        ${sgItems.map(renderItemCard).join('')}
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">
+              <th style="padding:7px 14px 7px 16px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Location</th>
+              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Opening</th>
+              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--green);text-align:center">In</th>
+              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--red);text-align:center">Used</th>
+              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Closing</th>
+              <th style="width:120px"></th>
+            </tr>
+          </thead>
+          <tbody>${sgItems.map(renderItemCard).join('')}</tbody>
+        </table>
       </div>`;
   }).join('');
 
