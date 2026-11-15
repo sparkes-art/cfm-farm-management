@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794782762193';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794782762193';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794782762193';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794782762193';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794784865843';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794784865843';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794784865843';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794784865843';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -148,15 +148,15 @@ async function _render(container, farm, period, allPeriods = []) {
 
   // ── Header ───────────────────────────────────────────────────────────────
   const headerHtml = `
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+    <div class="page-header" style="margin-bottom:20px">
       <div>
-        <h2 style="font-size:18px;font-weight:700;color:var(--ink)">Seed</h2>
-        <p style="font-size:13px;color:var(--hint);margin-top:4px">${farm.name} · ${periodLabel}</p>
+        <h1>Seed</h1>
+        <p class="page-subtitle">${farm.name} · ${periodLabel}</p>
       </div>
       ${canWrite() ? `
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" id="sd-add-delivery">+ Delivery</button>
-          <button class="btn btn-secondary btn-sm" id="sd-add-item">+ Add seed variety</button>
+          <button class="btn btn-primary btn-sm" id="sd-add-item">+ Add variety</button>
         </div>` : ''}
     </div>`;
 
@@ -188,26 +188,32 @@ async function _render(container, farm, period, allPeriods = []) {
     }, 0);
 
   const tilesHtml = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
-      ${[
-        { label: 'Varieties tracked', value: totalItems, unit: '', color: 'var(--blue)' },
-        { label: 'On hand', value: fKg(totalKgOnHand), unit: '', color: 'var(--ink)' },
-        { label: 'Used this period', value: fKg(periodUsageKg), unit: '', color: 'var(--red)' },
-        { label: 'Delivered this period', value: fKg(periodDeliveryKg), unit: '', color: 'var(--green)' },
-      ].map(t => `
-        <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 16px">
-          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:6px">${t.label}</div>
-          <div style="font-size:22px;font-weight:700;color:${t.color}">${t.value}${t.unit ? `<span style="font-size:12px;font-weight:400;color:var(--hint);margin-left:4px">${t.unit}</span>` : ''}</div>
-        </div>`).join('')}
+    <div class="stats-strip" style="margin-bottom:20px">
+      <div class="stat-card">
+        <div class="stat-label">Varieties tracked</div>
+        <div class="stat-value blue">${totalItems}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">On hand</div>
+        <div class="stat-value">${fKg(totalKgOnHand)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Used this period</div>
+        <div class="stat-value red">${fKg(periodUsageKg)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Delivered this period</div>
+        <div class="stat-value green">${fKg(periodDeliveryKg)}</div>
+      </div>
     </div>`;
 
   // ── Empty state ──────────────────────────────────────────────────────────
   if (!items.length) {
     wrap.innerHTML = timelineHtml + headerHtml + tilesHtml + `
-      <div style="padding:40px;text-align:center;color:var(--hint);background:white;border-radius:10px;border:1px solid var(--border)">
+      <div class="card" style="padding:48px 24px;text-align:center">
         <div style="font-size:32px;margin-bottom:12px">🌱</div>
-        <p style="font-size:15px;font-weight:500;color:var(--ink);margin-bottom:6px">No seed varieties set up</p>
-        <p style="font-size:13px;margin-bottom:16px">Add a seed variety to track on-hand stock and link it to planting sessions.</p>
+        <p style="font-size:15px;font-weight:600;color:var(--ink);margin-bottom:6px">No seed varieties set up</p>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Add a seed variety to track on-hand stock and link it to planting sessions.</p>
         ${canWrite() ? `<button class="btn btn-primary" id="sd-add-item-empty">+ Add seed variety</button>` : ''}
       </div>`;
     _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById);
@@ -311,15 +317,15 @@ async function _render(container, farm, period, allPeriods = []) {
       const closingKg = closingKgVal ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(closingKgVal)}</span>` : '';
 
       return `<tr style="border-bottom:1px solid var(--border-light)">
-        <td style="padding:9px 14px 9px 20px;font-size:13px;color:var(--ink)">${esc(locName)}</td>
-        <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--hint)">${opening ? fN(opening) : '—'}</td>
-        <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--green)">${pIn ? '+' + fN(pIn) : '—'}</td>
-        <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--red)">${pOut ? fN(pOut) : '—'}</td>
+        <td style="padding:9px 14px 9px 16px;font-size:var(--text-sm);color:var(--ink)">${esc(locName)}</td>
+        <td style="padding:9px 14px;text-align:center;font-size:var(--text-sm);color:var(--muted)">${opening ? fN(opening) : '—'}</td>
+        <td style="padding:9px 14px;text-align:center;font-size:var(--text-sm);color:var(--green)">${pIn ? '+' + fN(pIn) : '—'}</td>
+        <td style="padding:9px 14px;text-align:center;font-size:var(--text-sm);color:var(--red)">${pOut ? fN(pOut) : '—'}</td>
         <td style="padding:9px 14px;text-align:center">
-          <span style="font-weight:700;color:var(--ink)">${fN(closing)}</span>${closingKg}
+          <span style="font-size:var(--text-sm);font-weight:700;color:var(--ink)">${fN(closing)}</span>${closingKg}
         </td>
         <td style="padding:9px 14px;text-align:right">
-          ${canWrite() ? `<button class="btn btn-ghost btn-sm sd-add-move" style="font-size:11px"
+          ${canWrite() ? `<button class="btn btn-ghost btn-sm sd-add-move"
             data-item-id="${item.id}" data-item-name="${esc(item.name)}"
             data-loc-id="${locId === 'none' ? '' : locId}"
             data-loc-name="${esc(locName)}">+ Movement</button>` : ''}
@@ -332,48 +338,46 @@ async function _render(container, farm, period, allPeriods = []) {
     </td></tr>`;
 
     return `
-      <div style="margin-bottom:14px">
+      <div class="card" style="margin-bottom:12px;overflow:hidden">
         <!-- Item header -->
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:var(--page-bg);border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;flex-wrap:wrap;gap:6px">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span style="font-size:13px;font-weight:600;color:var(--ink)">${esc(item.name)}</span>
+        <div class="card-header" style="flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0">
+            <span style="font-size:14px;font-weight:600;color:var(--ink)">${esc(item.name)}</span>
             ${chips}
-            <span style="font-size:12px;color:var(--hint)">${fN(totalClosing)} ${esc(unit)} on hand${kgStr}</span>
+            <span style="font-size:12px;color:var(--muted)">${fN(totalClosing)} ${esc(unit)} on hand${kgStr}</span>
           </div>
           ${canWrite() ? `
-            <div style="display:flex;gap:6px">
-              <button class="btn btn-ghost btn-sm sd-edit-item" style="font-size:11px"
+            <div style="display:flex;gap:6px;flex-shrink:0">
+              <button class="btn btn-ghost btn-sm sd-edit-item"
                 data-item-id="${item.id}">✎ Edit</button>
-              <button class="btn btn-ghost btn-sm sd-record-delivery" style="font-size:11px"
+              <button class="btn btn-ghost btn-sm sd-record-delivery"
                 data-item-id="${item.id}" data-item-name="${esc(item.name)}"
                 data-unit="${esc(unit)}" data-kpb="${kpb || ''}">+ Delivery</button>
-              <button class="btn btn-ghost btn-sm sd-add-move" style="font-size:11px"
+              <button class="btn btn-ghost btn-sm sd-add-move"
                 data-item-id="${item.id}" data-item-name="${esc(item.name)}">+ Movement</button>
             </div>` : ''}
         </div>
         <!-- Balance table -->
-        <div style="border:1px solid var(--border);border-radius:0 0 8px 8px;overflow:hidden">
-          <table style="width:100%;border-collapse:collapse">
-            <thead>
-              <tr style="background:#f8f9fa;border-bottom:1px solid var(--border)">
-                <th style="padding:6px 14px 6px 20px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Location</th>
-                <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Opening</th>
-                <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--green);text-align:center">In</th>
-                <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--red);text-align:center">Used</th>
-                <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Closing</th>
-                <th style="width:120px"></th>
-              </tr>
-            </thead>
-            <tbody>${locRows}</tbody>
-          </table>
-          ${sessionRows ? `
-            <div style="border-top:2px solid var(--border-light)">
-              <div style="padding:7px 14px 7px 20px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);background:#f0f7ff">
-                🌱 Planting session usage
-              </div>
-              ${sessionRows}
-            </div>` : ''}
-        </div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">
+              <th style="padding:7px 14px 7px 16px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Location</th>
+              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Opening</th>
+              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--green);text-align:center">In</th>
+              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--red);text-align:center">Used</th>
+              <th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Closing</th>
+              <th style="width:120px"></th>
+            </tr>
+          </thead>
+          <tbody>${locRows}</tbody>
+        </table>
+        ${sessionRows ? `
+          <div style="border-top:1px solid var(--border)">
+            <div style="padding:6px 16px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--blue-text);background:var(--blue-light)">
+              🌱 Planting session usage
+            </div>
+            ${sessionRows}
+          </div>` : ''}
       </div>`;
   };
 
@@ -387,10 +391,10 @@ async function _render(container, farm, period, allPeriods = []) {
     const sgKg   = sgKpb && sgClosing ? ` · ${fKg(sgClosing * sgKpb)}` : '';
 
     return `
-      <div style="margin-bottom:24px">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#1a2535;border-radius:8px;margin-bottom:8px">
-          <span style="font-size:14px;font-weight:700;color:white">${esc(sgName)}</span>
-          <span style="font-size:12px;color:rgba(255,255,255,.6)">${fN(sgClosing)} ${esc(sgUnit)} total${sgKg}</span>
+      <div style="margin-bottom:28px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--navy);border-radius:var(--radius-md);margin-bottom:10px">
+          <span style="font-size:13px;font-weight:700;color:#fff;letter-spacing:.01em">${esc(sgName)}</span>
+          <span style="font-size:12px;color:rgba(255,255,255,.55)">${fN(sgClosing)} ${esc(sgUnit)} total${sgKg}</span>
         </div>
         ${sgItems.map(renderItemCard).join('')}
       </div>`;
@@ -421,15 +425,15 @@ async function _render(container, farm, period, allPeriods = []) {
   }).join('');
 
   wrap.innerHTML = timelineHtml + headerHtml + tilesHtml + subgroupHtml + (periodMoves.length ? `
-    <div class="card" style="margin-top:16px;overflow:hidden">
-      <div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--page-bg)">
-        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Period movements</span>
+    <div class="card" style="margin-top:8px;overflow:hidden">
+      <div class="card-header">
+        <h2>Period movements</h2>
       </div>
       <table style="width:100%;border-collapse:collapse">
         <thead>
           <tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">
             ${['Date', 'Variety', 'Type', 'Location', 'Qty', 'Note'].map(h =>
-              `<th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:${h === 'Qty' ? 'right' : 'left'}">${h}</th>`
+              `<th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:${h === 'Qty' ? 'right' : 'left'}">${h}</th>`
             ).join('')}
           </tr>
         </thead>
@@ -441,7 +445,7 @@ async function _render(container, farm, period, allPeriods = []) {
   if (!document.getElementById('sd-chip-style')) {
     const s = document.createElement('style');
     s.id = 'sd-chip-style';
-    s.textContent = `.sd-chip{display:inline-block;font-size:10px;padding:2px 7px;border-radius:10px;background:var(--border-light,#e8ecf0);color:var(--hint);margin-right:3px}`;
+    s.textContent = `.sd-chip{display:inline-flex;align-items:center;font-size:11px;font-weight:500;padding:2px 8px;border-radius:10px;background:var(--blue-light);color:var(--blue-text);margin-right:3px}`;
     document.head.appendChild(s);
   }
 
