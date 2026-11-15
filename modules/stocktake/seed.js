@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794781076907';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794781076907';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794781076907';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794781076907';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794782762193';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794782762193';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794782762193';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794782762193';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -77,7 +77,7 @@ async function _render(container, farm, period, allPeriods = []) {
     dbSelect('stock_locations',
       `farm_id=eq.${farm.id}&active=eq.true&order=route_order,name`),
     dbSelect('stock_movements',
-      `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`),
+      `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,kg_per_bag,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`),
   ]);
 
   // Filter movements to seed items only
@@ -235,7 +235,20 @@ async function _render(container, farm, period, allPeriods = []) {
     ])];
 
     const totalClosing = allKeys.reduce((s, k) => s + (closingMap[k] || 0), 0);
-    const kgStr = kpb && totalClosing ? ` · ${fKg(totalClosing * kpb)}` : '';
+    // Total kg: sum each movement's own kg_per_bag, fall back to item kpb for opening balance
+    const totalKg = (() => {
+      if (!kpb && !periodMoves.some(m => m.item_id === item.id && m.kg_per_bag)) return null;
+      const openKg = allKeys.reduce((s, k) => s + (openingMap[k] || 0), 0) * (kpb || 0);
+      const periodKg = periodMoves
+        .filter(m => m.item_id === item.id)
+        .reduce((s, m) => {
+          const mKpb = parseFloat(m.kg_per_bag) || kpb || 0;
+          return s + (parseFloat(m.signed_qty) || 0) * mKpb;
+        }, 0);
+      const v = openKg + periodKg;
+      return v > 0 ? v : null;
+    })();
+    const kgStr = totalKg ? ` · ${fKg(totalKg)}` : '';
 
     // Chips
     const chips = [
@@ -248,8 +261,9 @@ async function _render(container, farm, period, allPeriods = []) {
     const sessionRows = itemUsageMoves
       .filter(m => m.source_system === 'operations' && m.source_ref)
       .map(m => {
-        const sess = sessionById[m.source_ref];
-        const qty  = Math.abs(parseFloat(m.signed_qty) || 0);
+        const sess    = sessionById[m.source_ref];
+        const qty     = Math.abs(parseFloat(m.signed_qty) || 0);
+        const mKpb    = parseFloat(m.kg_per_bag) || kpb; // movement-level first, item fallback
         const sessLabel = sess
           ? `${sess.field_name}${sess.sub_block ? ` · ${sess.sub_block}` : ''}`
           : `Session ${m.source_ref.slice(0, 8)}…`;
@@ -262,7 +276,7 @@ async function _render(container, farm, period, allPeriods = []) {
             </div>
             <div style="text-align:right;flex-shrink:0">
               <span style="font-weight:600;color:var(--red)">−${fN(qty)} ${esc(unit)}</span>
-              ${kpb ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(qty * kpb)}</span>` : ''}
+              ${mKpb ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(qty * mKpb)}</span>` : ''}
             </div>
             <span style="font-size:11px;color:var(--hint);flex-shrink:0">${m.occurred_on}</span>
           </div>`;
@@ -280,7 +294,21 @@ async function _render(container, farm, period, allPeriods = []) {
       const pOut = periodMoves
         .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty) || 0) < 0)
         .reduce((s, m) => s + (parseFloat(m.signed_qty) || 0), 0);
-      const closingKg = kpb && closing ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(closing * kpb)}</span>` : '';
+      // For closing kg: sum movements using each movement's own kg_per_bag (fall back to item kpb)
+      const closingKgVal = closing && (kpb || periodMoves.some(m => m.item_id === item.id && m.kg_per_bag))
+        ? (() => {
+            // Use opening kg (item kpb best effort) + period movement kgs
+            const openKg = (openingMap[k] || 0) * (kpb || 0);
+            const periodKg = periodMoves
+              .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId)
+              .reduce((s, m) => {
+                const mKpb = parseFloat(m.kg_per_bag) || kpb || 0;
+                return s + (parseFloat(m.signed_qty) || 0) * mKpb;
+              }, 0);
+            return openKg + periodKg;
+          })()
+        : null;
+      const closingKg = closingKgVal ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(closingKgVal)}</span>` : '';
 
       return `<tr style="border-bottom:1px solid var(--border-light)">
         <td style="padding:9px 14px 9px 20px;font-size:13px;color:var(--ink)">${esc(locName)}</td>
@@ -642,6 +670,11 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
   const locOpts = locations.map(l =>
     `<option value="${l.id}">${esc(l.name)}</option>`).join('');
 
+  // Pre-fill kg/bag from pre-selected item
+  const preItem = preItemId ? items.find(i => i.id === preItemId) : null;
+  const preKpb  = parseFloat(preItem?.attributes?.kg_per_bag) || '';
+  const preUnit = preItem?.default_unit || 'bags';
+
   openModal({
     title: 'Record seed delivery',
     bodyHTML: `
@@ -652,14 +685,18 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
             <option value="">Select variety…</option>${itemOpts}
           </select>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
           <div class="form-group" style="margin:0">
             <label class="form-label">Quantity <span style="color:var(--red)">*</span></label>
             <input class="form-input" type="number" id="sdel-qty" min="1" step="1" placeholder="0">
           </div>
           <div class="form-group" style="margin:0">
             <label class="form-label">Unit</label>
-            <div id="sdel-unit-display" style="padding:8px 10px;background:var(--page-bg);border:1px solid var(--border);border-radius:6px;font-size:14px;color:var(--hint)">bags</div>
+            <div id="sdel-unit-display" style="padding:8px 10px;background:var(--page-bg);border:1px solid var(--border);border-radius:6px;font-size:14px;color:var(--hint)">${preUnit}</div>
+          </div>
+          <div class="form-group" style="margin:0" id="sdel-kpb-wrap">
+            <label class="form-label">kg / bag <span style="font-size:10px;color:var(--hint)">(this delivery)</span></label>
+            <input class="form-input" type="number" id="sdel-kpb" min="0.1" step="0.1" value="${preKpb}" placeholder="e.g. 20">
           </div>
         </div>
         <div class="form-group">
@@ -686,6 +723,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
       const itemId   = modal.querySelector('#sdel-item')?.value;
       const locId    = modal.querySelector('#sdel-location')?.value || null;
       const qty      = parseFloat(modal.querySelector('#sdel-qty')?.value);
+      const kpb      = parseFloat(modal.querySelector('#sdel-kpb')?.value) || null;
       const date     = modal.querySelector('#sdel-date')?.value;
       const supplier = modal.querySelector('#sdel-supplier')?.value?.trim() || null;
       const note     = modal.querySelector('#sdel-note')?.value?.trim() || null;
@@ -702,6 +740,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         movement_type: 'delivery',
         qty,
         unit:          item?.default_unit || 'bags',
+        kg_per_bag:    kpb,
         occurred_on:   date,
         counterparty:  supplier,
         note:          note || (supplier ? `Delivery from ${supplier}` : 'Seed delivery'),
@@ -711,19 +750,27 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
     }
   });
 
-  // Wire unit display from item select
+  // Wire unit display + kg/bag from item select
   setTimeout(() => {
-    const itemEl    = document.getElementById('sdel-item');
-    const unitDisp  = document.getElementById('sdel-unit-display');
-    itemEl?.addEventListener('change', () => {
-      const opt = itemEl.options[itemEl.selectedIndex];
-      if (unitDisp) unitDisp.textContent = opt?.dataset?.unit || 'bags';
-    });
-    // Trigger for pre-selected item
-    if (preItemId) {
-      const opt = itemEl?.querySelector(`[value="${preItemId}"]`);
-      if (opt && unitDisp) unitDisp.textContent = opt.dataset?.unit || 'bags';
-    }
+    const itemEl   = document.getElementById('sdel-item');
+    const unitDisp = document.getElementById('sdel-unit-display');
+    const kpbInput = document.getElementById('sdel-kpb');
+    const kpbWrap  = document.getElementById('sdel-kpb-wrap');
+
+    const updateFromItem = () => {
+      const opt  = itemEl?.options[itemEl.selectedIndex];
+      const unit = opt?.dataset?.unit || 'bags';
+      if (unitDisp) unitDisp.textContent = unit;
+      // Pre-fill kg/bag from item if field is currently empty
+      if (kpbInput && !kpbInput.value && opt?.dataset?.kpb) {
+        kpbInput.value = opt.dataset.kpb;
+      }
+      // Hide kg/bag field for non-bag units
+      if (kpbWrap) kpbWrap.style.display = unit === 'bags' ? '' : 'none';
+    };
+
+    itemEl?.addEventListener('change', updateFromItem);
+    if (preItemId) updateFromItem();
   }, 60);
 }
 

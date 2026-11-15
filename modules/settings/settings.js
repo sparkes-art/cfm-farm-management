@@ -1,10 +1,11 @@
 // modules/settings/settings.js
 // Settings hub — Farm settings + Commodities + Users
 
-import { mountFarmSettings } from './farm-settings.js?v=1794781076907';
-import { mountCommoditySettings } from './commodities-settings.js?v=1794781076907';
-import { mountUsersSettings } from './users-settings.js?v=1794781076907';
-import { qs } from '../../js/ui.js?v=1794781076907';
+import { mountFarmSettings } from './farm-settings.js?v=1794782762193';
+import { mountCommoditySettings } from './commodities-settings.js?v=1794782762193';
+import { mountUsersSettings } from './users-settings.js?v=1794782762193';
+import { mountLocationsSettings } from './locations-settings.js?v=1794782762193';
+import { qs } from '../../js/ui.js?v=1794782762193';
 
 let _activeTab = 'farm';
 
@@ -23,6 +24,7 @@ export async function mountSettings(container, initialTab = 'farm') {
       <button class="tab-btn ${_activeTab === 'farm' ? 'active' : ''}" data-tab="farm">Farm settings</button>
       <button class="tab-btn ${_activeTab === 'commodities' ? 'active' : ''}" data-tab="commodities">Commodities & crop types</button>
       <button class="tab-btn ${_activeTab === 'users' ? 'active' : ''}" data-tab="users">Users</button>
+      <button class="tab-btn ${_activeTab === 'locations' ? 'active' : ''}" data-tab="locations">Locations</button>
     </div>
 
     <div id="settings-content"></div>
@@ -47,6 +49,8 @@ async function _loadTab(container) {
     await mountFarmSettings(content);
   } else if (_activeTab === 'users') {
     await mountUsersSettings(content);
+  } else if (_activeTab === 'locations') {
+    await mountLocationsSettings(content);
   } else {
     await mountCommoditySettings(content);
   }
