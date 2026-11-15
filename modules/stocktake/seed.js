@@ -26,9 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794780150469';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794780150469';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794780150469';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794780881134';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794780881134';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794780881134';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794780881134';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -449,25 +450,23 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
 
 // ── Add seed variety form ──────────────────────────────────────────────────
 async function _showAddVarietyForm(container, farm, existingItems, period, allPeriods) {
-  const knownSubgroups = [...new Set(existingItems.map(i => i.subgroup || i.name).filter(Boolean))];
-  const sgSuggestions = knownSubgroups.length
-    ? `<datalist id="sd-sg-list">${knownSubgroups.map(s => `<option value="${esc(s)}">`).join('')}</datalist>`
-    : '';
+  await loadCommodities(farm.id);
+  const commodities = getCommodities();
+  const cropOpts = commodities.map(c =>
+    `<option value="${esc(c.name)}">${esc(c.name)}</option>`
+  ).join('');
 
   openModal({
     title: 'Add seed variety',
     bodyHTML: `
       <div style="display:flex;flex-direction:column;gap:14px">
-        <p style="font-size:12px;color:var(--hint);margin:0">
-          Add one variety and season. Each combination is tracked separately.
-        </p>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="form-group" style="margin:0">
-            <label class="form-label">Crop type <span style="color:var(--red)">*</span></label>
-            <input class="form-input" id="sv-subgroup" type="text" list="sd-sg-list"
-              placeholder="e.g. Cotton Seed, Grain Sorghum Seed">
-            ${sgSuggestions}
-            <div style="font-size:10px;color:var(--hint);margin-top:2px">Groups varieties together</div>
+            <label class="form-label">Crop <span style="color:var(--red)">*</span></label>
+            <select class="form-select" id="sv-crop">
+              <option value="">Select crop…</option>
+              ${cropOpts}
+            </select>
           </div>
           <div class="form-group" style="margin:0">
             <label class="form-label">Variety <span style="color:var(--red)">*</span></label>
@@ -499,31 +498,25 @@ async function _showAddVarietyForm(container, farm, existingItems, period, allPe
       </div>`,
     confirmLabel: 'Add variety',
     onConfirm: async (modal) => {
-      const subgroup = modal.querySelector('#sv-subgroup')?.value?.trim();
-      const variety  = modal.querySelector('#sv-variety')?.value?.trim();
-      const unit     = modal.querySelector('#sv-unit')?.value;
-      const kpb      = parseFloat(modal.querySelector('#sv-kpb')?.value) || null;
-      const notes    = modal.querySelector('#sv-notes')?.value?.trim() || null;
+      const crop    = modal.querySelector('#sv-crop')?.value?.trim();
+      const variety = modal.querySelector('#sv-variety')?.value?.trim();
+      const unit    = modal.querySelector('#sv-unit')?.value;
+      const kpb     = parseFloat(modal.querySelector('#sv-kpb')?.value) || null;
+      const notes   = modal.querySelector('#sv-notes')?.value?.trim() || null;
 
-      if (!subgroup || !variety) {
-        toast('Crop type and variety are required', 'error');
+      if (!crop || !variety) {
+        toast('Crop and variety are required', 'error');
         return false;
       }
-
-      const name = variety;
-      const attrs = {
-        variety,
-        ...(kpb ? { kg_per_bag: kpb } : {}),
-      };
 
       await dbInsert('stock_items', {
         farm_id:      farm.id,
         category:     'grain',
         is_seed:      true,
-        name,
-        subgroup,
+        name:         variety,
+        subgroup:     crop,       // crop name used for grouping & filtering
         default_unit: unit,
-        attributes:   attrs,
+        attributes:   { variety, ...(kpb ? { kg_per_bag: kpb } : {}) },
         active:       true,
         notes,
       });
