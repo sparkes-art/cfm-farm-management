@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794786529000';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794786529000';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794786529000';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794786529000';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794786963265';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794786963265';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794786963265';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794786963265';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -1049,7 +1049,11 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
     : '';
   const statusDot   = entry ? _statusDot(entry.status) : '';
   const statusLabel = entry?.status ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:0.04em;color:var(--hint)">${CP_STATUS_LABELS[entry.status] || entry.status}</span>` : '';
-  const topInfo     = `${commodityLine}<div style="display:flex;align-items:center;justify-content:center;gap:3px;margin-bottom:3px">${statusDot}${statusLabel}</div>`;
+  // Show actual variety when planted/growing/harvested and it differs from implied
+  const varietyLine = entry?.variety && ACTUAL_STATUSES.has(entry.status)
+    ? `<div style="font-size:10px;color:var(--blue-text);margin-bottom:2px;font-weight:500">Var: ${esc(entry.variety)}</div>`
+    : '';
+  const topInfo     = `${commodityLine}${varietyLine}<div style="display:flex;align-items:center;justify-content:center;gap:3px;margin-bottom:3px">${statusDot}${statusLabel}</div>`;
 
   if (isCurrent) {
     // Current season: two columns — Planned | Planted (same as original design)
@@ -1080,6 +1084,7 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
       <td class="cp-matrix-cell" data-id="${id}" data-field="planned_ha" data-type="number"
         style="${baseStyle}${borderL}min-width:143px;text-align:right" title="Planned ha — click to edit">
         ${commodityLine}
+        ${entry.variety && ACTUAL_STATUSES.has(entry.status) ? `<div style="font-size:10px;color:var(--blue-text);margin-bottom:2px;font-weight:500;text-align:right">Var: ${esc(entry.variety)}</div>` : ''}
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:3px;margin-bottom:2px">${statusDot}${statusLabel}</div>
         ${plannedDisp}
       </td>

@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794786529000';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794786529000';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794786529000';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794786529000';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794786963265';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794786963265';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794786963265';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794786963265';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -70,7 +70,7 @@ export async function mountSeed(container, initialPeriod) {
 async function _render(container, farm, period, allPeriods = []) {
   const wrap = qs('#sd-wrap', container);
 
-  const [items, locations, movements] = await Promise.all([
+  const [items, locations, movements, pendingPlantingMovements] = await Promise.all([
     // Seed items only — is_seed=true
     dbSelect('stock_items',
       `farm_id=eq.${farm.id}&category=eq.grain&is_seed=eq.true&active=eq.true&order=subgroup,name`),
@@ -78,6 +78,9 @@ async function _render(container, farm, period, allPeriods = []) {
       `farm_id=eq.${farm.id}&active=eq.true&order=route_order,name`),
     dbSelect('stock_movements',
       `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,kg_per_bag,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`),
+    // Unallocated usage stubs from operations (item_id IS NULL)
+    dbSelect('stock_movements',
+      `farm_id=eq.${farm.id}&movement_type=eq.usage&source_system=eq.operations&item_id=is.null&select=id,movement_type,qty,unit,kg_per_bag,occurred_on,note,source_ref,source_system&order=occurred_on.desc`),
   ]);
 
   // Filter movements to seed items only
@@ -130,18 +133,21 @@ async function _render(container, farm, period, allPeriods = []) {
   });
 
   // ── Planting sessions linked to seed movements ───────────────────────────
-  // Fetch sessions referenced in usage movements so we can show session detail
-  const usageSessionIds = [...new Set(
-    periodMoves
+  // Fetch sessions referenced in both allocated and pending usage movements
+  const usageSessionIds = [...new Set([
+    ...periodMoves
       .filter(m => m.movement_type === 'usage' && m.source_system === 'operations' && m.source_ref)
-      .map(m => m.source_ref)
-  )];
+      .map(m => m.source_ref),
+    ...pendingPlantingMovements
+      .filter(m => m.source_ref)
+      .map(m => m.source_ref),
+  ])];
 
   let linkedSessions = [];
   if (usageSessionIds.length > 0) {
     try {
       linkedSessions = await dbSelect('planting_sessions',
-        `id=in.(${usageSessionIds.map(id => `"${id}"`).join(',')})&select=id,field_name,sub_block,crop_type,variety,seed_type,kg_per_bag,seed_in_bags,seed_in_kg,seed_out_bags,seed_out_kg,status,session_date`);
+        `id=in.(${usageSessionIds.map(id => `"${id}"`).join(',')})&select=id,field_name,sub_block,commodity,variety,seed_type,kg_per_bag,seed_in_bags,seed_in_kg,seed_out_bags,seed_out_kg,status,session_date`);
     } catch { /* graceful — session table may not be accessible */ }
   }
   const sessionById = Object.fromEntries(linkedSessions.map(s => [s.id, s]));
@@ -209,14 +215,15 @@ async function _render(container, farm, period, allPeriods = []) {
 
   // ── Empty state ──────────────────────────────────────────────────────────
   if (!items.length) {
-    wrap.innerHTML = timelineHtml + headerHtml + tilesHtml + `
+    const unallocatedHtmlEmpty = _buildUnallocatedPanel(pendingPlantingMovements, items, sessionById);
+    wrap.innerHTML = timelineHtml + headerHtml + tilesHtml + unallocatedHtmlEmpty + `
       <div class="card" style="padding:48px 24px;text-align:center">
         <div style="font-size:32px;margin-bottom:12px">🌱</div>
         <p style="font-size:15px;font-weight:600;color:var(--ink);margin-bottom:6px">No seed varieties set up</p>
         <p style="font-size:13px;color:var(--muted);margin-bottom:16px">Add a seed variety to track on-hand stock and link it to planting sessions.</p>
         ${canWrite() ? `<button class="btn btn-primary" id="sd-add-item-empty">+ Add seed variety</button>` : ''}
       </div>`;
-    _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById);
+    _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById, pendingPlantingMovements);
     return;
   }
 
@@ -425,7 +432,9 @@ async function _render(container, farm, period, allPeriods = []) {
     </tr>`;
   }).join('');
 
-  wrap.innerHTML = timelineHtml + headerHtml + tilesHtml + subgroupHtml + (periodMoves.length ? `
+  const unallocatedHtml = _buildUnallocatedPanel(pendingPlantingMovements, items, sessionById);
+
+  wrap.innerHTML = timelineHtml + headerHtml + tilesHtml + unallocatedHtml + subgroupHtml + (periodMoves.length ? `
     <div class="card" style="margin-top:8px;overflow:hidden">
       <div class="card-header">
         <h2>Period movements</h2>
@@ -450,11 +459,74 @@ async function _render(container, farm, period, allPeriods = []) {
     document.head.appendChild(s);
   }
 
-  _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById);
+  _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById, pendingPlantingMovements);
+}
+
+// ── Unallocated planting usages panel ─────────────────────────────────────
+function _buildUnallocatedPanel(pendingMovements, items, sessionById) {
+  if (!pendingMovements || !pendingMovements.length) return '';
+
+  const itemOpts = items.map(i =>
+    `<option value="${i.id}">${esc(i.name)}${i.attributes?.variety ? ' — ' + esc(i.attributes.variety) : ''}</option>`
+  ).join('');
+
+  const fQty = (m) => {
+    const q = parseFloat(m.qty) || 0;
+    if (m.unit === 'bags') {
+      const kgStr = m.kg_per_bag ? ` (${fN(q * m.kg_per_bag)} kg)` : '';
+      return `${fN(q)} bags${kgStr}`;
+    }
+    if (m.unit === 'kg') return `${fN(q)} kg`;
+    if (m.unit === 't') return `${fN(q)} t`;
+    return `${fN(q)} ${m.unit || ''}`;
+  };
+
+  const rows = pendingMovements.map(m => {
+    const session = sessionById[m.source_ref] || {};
+    const field   = session.field_name ? `${esc(session.field_name)}${session.sub_block ? ' · ' + esc(session.sub_block) : ''}` : '—';
+    const crop    = esc(session.commodity || '—');
+    const variety = esc(session.variety || '—');
+    return [
+      `<div style="display:grid;grid-template-columns:90px 1fr 80px 100px 1fr 110px;`,
+      `gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">`,
+      `<div style="color:var(--hint)">${m.occurred_on || '—'}</div>`,
+      `<div>`,
+        `<div style="font-weight:600;color:var(--ink)">${field}</div>`,
+        `<div style="font-size:11px;color:var(--hint)">${crop}${session.variety ? ' · ' + variety : ''}</div>`,
+      `</div>`,
+      `<div style="font-weight:600;color:var(--ink)">${fQty(m)}</div>`,
+      `<div style="color:var(--hint);font-size:11px">${esc(m.note || '')}</div>`,
+      `<div>`,
+        items.length
+          ? `<select class="form-select sd-alloc-item" data-movement-id="${m.id}" style="font-size:11px;width:100%">`,
+            `<option value="">Select variety…</option>${itemOpts}`,
+            `</select>`
+          : `<span style="font-size:11px;color:var(--hint)">Add a variety first</span>`,
+      `</div>`,
+      `<div>`,
+        items.length
+          ? `<button class="btn btn-sm btn-primary sd-alloc-btn" data-movement-id="${m.id}" style="font-size:11px;opacity:.4;pointer-events:none;white-space:nowrap">Allocate →</button>`
+          : '',
+      `</div>`,
+      `</div>`,
+    ].join('');
+  }).join('');
+
+  return [
+    `<div class="card" style="margin-bottom:16px;overflow:hidden;border:2px solid var(--amber)">`,
+    `<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:#fffbeb;`,
+    `display:flex;align-items:center;justify-content:space-between">`,
+    `<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#92400e">`,
+    `⚡ ${pendingMovements.length} planting session${pendingMovements.length !== 1 ? 's' : ''} awaiting seed allocation</span>`,
+    `<span style="font-size:11px;color:#92400e">Assign each to a seed variety to update the stocktake</span>`,
+    `</div>`,
+    rows,
+    `</div>`,
+  ].join('');
 }
 
 // ── Wire event listeners ───────────────────────────────────────────────────
-function _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById) {
+function _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById, pendingPlantingMovements) {
   wrap.querySelectorAll('.sd-period-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const p = allPeriods.find(x => x.id === btn.dataset.periodId);
@@ -487,6 +559,41 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
       _showMovementForm(container, farm, items, locations,
         btn.dataset.itemId, btn.dataset.itemName,
         btn.dataset.locId || null, period, allPeriods));
+  });
+
+  // Unallocated planting session allocation
+  wrap.querySelectorAll('.sd-alloc-item').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const btn = wrap.querySelector(`.sd-alloc-btn[data-movement-id="${sel.dataset.movementId}"]`);
+      if (!btn) return;
+      if (sel.value) {
+        btn.style.opacity = '1';
+        btn.style.pointerEvents = 'auto';
+      } else {
+        btn.style.opacity = '.4';
+        btn.style.pointerEvents = 'none';
+      }
+    });
+  });
+
+  wrap.querySelectorAll('.sd-alloc-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const movId = btn.dataset.movementId;
+      const sel   = wrap.querySelector(`.sd-alloc-item[data-movement-id="${movId}"]`);
+      const itemId = sel?.value;
+      if (!itemId) return;
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try {
+        await dbUpdate('stock_movements', movId, { item_id: itemId });
+        toast('Seed usage allocated', 'success');
+        _render(container, farm, period, allPeriods);
+      } catch (e) {
+        toast('Failed to allocate: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Allocate →';
+      }
+    });
   });
 }
 
@@ -889,6 +996,9 @@ async function _showMovementForm(container, farm, items, locations, preItemId, p
 // If no matching stock item exists yet, the movement is skipped (no error) so
 // closing a session never fails because seed stock isn't set up yet.
 export async function writeSessionSeedUsage(farm, session) {
+  // Writes a PENDING (item_id=null) stub movement when a planting session is closed.
+  // An admin/manager then allocates it to a specific seed stock item in the
+  // Seed Stocktake module (matching the livestock unallocated-sale pattern).
   if (!farm || !session || session.status !== 'closed') return;
 
   // Determine qty consumed
@@ -907,54 +1017,29 @@ export async function writeSessionSeedUsage(farm, session) {
     unit = 'bags';
   }
 
-  if (!qty || qty <= 0) return; // nothing consumed or no seed data recorded
+  if (!qty || qty <= 0) return; // nothing consumed — skip
 
-  // Find matching seed stock item by crop_type / variety
-  let seedItems = [];
-  try {
-    seedItems = await dbSelect('stock_items',
-      `farm_id=eq.${farm.id}&category=eq.grain&is_seed=eq.true&active=eq.true`);
-  } catch { return; }
-
-  if (!seedItems.length) return; // seed stock not set up — skip silently
-
-  // Match: prefer variety match, fall back to commodity/crop_type match
-  const variety   = (session.variety || '').toLowerCase().trim();
-  const cropType  = (session.crop_type || session.commodity || '').toLowerCase().trim();
-
-  const matched = seedItems.find(i => {
-    const iVariety   = (i.attributes?.variety || i.name || '').toLowerCase();
-    const iSubgroup  = (i.subgroup || '').toLowerCase();
-    if (variety   && iVariety.includes(variety))   return true;
-    if (variety   && variety.includes(iVariety))   return true;
-    if (cropType  && iSubgroup.includes(cropType)) return true;
-    if (cropType  && cropType.includes(iSubgroup)) return true;
-    return false;
-  });
-
-  if (!matched) return; // no match — skip silently, user can record manually
-
-  // Check if a usage movement for this session already exists (idempotent)
+  // Check if a pending or allocated movement for this session already exists (idempotent)
   let existing = [];
   try {
     existing = await dbSelect('stock_movements',
-      `farm_id=eq.${farm.id}&item_id=eq.${matched.id}&movement_type=eq.usage&source_system=eq.operations&source_ref=eq.${session.id}`);
+      `farm_id=eq.${farm.id}&movement_type=eq.usage&source_system=eq.operations&source_ref=eq.${session.id}`);
   } catch { /* ignore */ }
 
-  if (existing.length > 0) return; // already written
+  if (existing.length > 0) return; // already written (pending or allocated)
 
-  // Write the usage movement
   const sessionDate = session.session_date || new Date().toISOString().slice(0, 10);
   const fieldLabel  = `${session.field_name}${session.sub_block ? ' · ' + session.sub_block : ''}`;
 
   try {
     await dbInsert('stock_movements', {
       farm_id:       farm.id,
-      item_id:       matched.id,
+      item_id:       null,         // ← pending; admin allocates in Seed Stocktake
       location_id:   null,
       movement_type: 'usage',
       qty,
       unit,
+      kg_per_bag:    parseFloat(session.kg_per_bag) || null,
       occurred_on:   sessionDate,
       note:          `Planting — ${fieldLabel}`,
       source_system: 'operations',

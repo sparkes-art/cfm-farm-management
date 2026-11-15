@@ -98,6 +98,8 @@ body {
   background: var(--page-bg);
   -webkit-font-smoothing: antialiased;
   line-height: 1.5;
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: "lnum" 1, "tnum" 1;
 }
 
 /* ── App shell ───────────────────────────────────────────────── */

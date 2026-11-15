@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794786529000';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794786529000';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794786529000';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794786529000';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794786963265';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794786963265';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794786963265';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794786963265';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -1402,7 +1402,11 @@ function _showCloseSessionModal(session) {
             .reduce((t, s) => t + _sessionTotalHa(s.id), 0);
           const plantedHa = siblingHa > 0 ? siblingHa : _sessionTotalHa(session.id) || null;
           if (plantedHa != null) {
-            await dbUpdate('crop_plan_entries', cpId, { planted_ha: plantedHa, status: 'planted' });
+            const cpUpdates = { planted_ha: plantedHa, status: 'planted' };
+            // Write actual variety/commodity back so crop plan can show what was really planted
+            if (session.variety)   cpUpdates.variety   = session.variety;
+            if (session.commodity) cpUpdates.commodity = session.commodity;
+            await dbUpdate('crop_plan_entries', cpId, cpUpdates);
           }
         }
       } catch (e) {
@@ -1411,7 +1415,7 @@ function _showCloseSessionModal(session) {
 
       // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
       try {
-        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794786529000');
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794786963265');
         const farm = getActiveFarm();
         await writeSessionSeedUsage(farm, session);
       } catch (e) {
