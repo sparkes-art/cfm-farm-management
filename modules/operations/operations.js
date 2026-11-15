@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794547062354';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794547062354';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794547062354';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794547062354';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794779787010';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794779787010';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794779787010';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794779787010';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -1391,6 +1391,16 @@ function _showCloseSessionModal(session) {
       };
       await dbUpdate('planting_sessions', session.id, updates);
       Object.assign(session, updates);
+
+      // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
+      try {
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794779787010');
+        const farm = getActiveFarm();
+        await writeSessionSeedUsage(farm, session);
+      } catch (e) {
+        console.warn('[CFM] Seed usage auto-write skipped:', e.message);
+      }
+
       toast('Session closed', 'success');
       _view = 'list';
       _render();

@@ -1,9 +1,9 @@
 // modules/stocktake/stocktake-dashboard.js
 // Period dashboard — the control centre for the monthly stocktake
 
-import { dbSelect, dbInsert, dbUpdate } from '../../js/supabase-client.js?v=1794547062354';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794547062354';
-import { formatDate, qs, toast, openModal } from '../../js/ui.js?v=1794547062354';
+import { dbSelect, dbInsert, dbUpdate } from '../../js/supabase-client.js?v=1794779787010';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794779787010';
+import { formatDate, qs, toast, openModal } from '../../js/ui.js?v=1794779787010';
 
 export function unmountStocktakeDashboard() {}
 
@@ -79,8 +79,9 @@ async function _render(container) {
   const fuelItems = items.filter(i => i.category === 'fuel');
   const chemItems = items.filter(i => i.category === 'chemical');
   const fertItems = items.filter(i => i.category === 'fertiliser');
-  const lsItems   = items.filter(i => i.category === 'livestock');
-  const grainItems = items.filter(i => i.category === 'grain');
+  const lsItems    = items.filter(i => i.category === 'livestock');
+  const grainItems = items.filter(i => i.category === 'grain' && !i.is_seed);
+  const seedItems  = items.filter(i => i.category === 'grain' && i.is_seed);
 
   // Recent readings — this month
   const thisMonth = now.toISOString().slice(0,7);
@@ -103,6 +104,7 @@ async function _render(container) {
     { id: 'water', label: 'Bore meters', icon: '💧', done: new Set(recentReadings.filter(r=>r.reading_type==='water_meter').map(r=>r.location_id)).size, total: waterMeters.length, href: 'water' },
     { id: 'livestock', label: 'Livestock', icon: '🐄', done: 0, total: lsItems.length, href: 'livestock' },
     { id: 'grain', label: 'Grain & Hay', icon: '🌾', done: 0, total: grainItems.length, href: 'grain' },
+    { id: 'seed', label: 'Seed', icon: '🌱', done: 0, total: seedItems.length, href: 'seed' },
   ];
 
   const statusColor = openPeriod?.status === 'locked' ? 'var(--green)' : openPeriod?.status === 'review' ? 'var(--amber)' : 'var(--blue)';
@@ -499,7 +501,7 @@ async function _navigateTo(section, container) {
     const farm = getActiveFarm();
     const periods = await dbSelect('stock_periods', `farm_id=eq.${farm.id}&status=in.(open,review)&order=period_start.desc&limit=1`);
     const period = periods[0] || null;
-    const { mountLivestock } = await import('./livestock.js?v=1794547062354');
+    const { mountLivestock } = await import('./livestock.js?v=1794779787010');
 
     // Wrap with back button
     const wrap = qs('#stk-dash', container) || container;
@@ -519,7 +521,7 @@ async function _navigateTo(section, container) {
     const farm = getActiveFarm();
     const periods = await dbSelect('stock_periods', `farm_id=eq.${farm.id}&status=in.(open,review)&order=period_start.desc&limit=1`);
     const period = periods[0] || null;
-    const { mountGrain } = await import('./grain.js?v=1794547062354');
+    const { mountGrain } = await import('./grain.js?v=1794779787010');
 
     const wrap = qs('#stk-dash', container) || container;
     wrap.innerHTML = `
@@ -533,6 +535,25 @@ async function _navigateTo(section, container) {
     await mountGrain(grContainer, period);
 
     qs('#gr-back', container)?.addEventListener('click', () => _render(container));
+
+  } else if (section === 'seed') {
+    const farm = getActiveFarm();
+    const periods = await dbSelect('stock_periods', `farm_id=eq.${farm.id}&status=in.(open,review)&order=period_start.desc&limit=1`);
+    const period = periods[0] || null;
+    const { mountSeed } = await import('./seed.js?v=1794779787010');
+
+    const wrap = qs('#stk-dash', container) || container;
+    wrap.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
+        <button id="sd-back" class="btn btn-ghost btn-sm">← Stocktake</button>
+        <span style="font-size:13px;color:var(--hint)">Seed</span>
+      </div>
+      <div id="sd-content"></div>`;
+
+    const sdContainer = qs('#sd-content', container);
+    await mountSeed(sdContainer, period);
+
+    qs('#sd-back', container)?.addEventListener('click', () => _render(container));
 
   } else {
     toast(`${section} section coming soon`, 'info');

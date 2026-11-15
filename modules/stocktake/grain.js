@@ -22,9 +22,9 @@
 //          ├─ Paddock 12      ← location
 //          └─ Shed 3
 
-import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1794547062354';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794547062354';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794547062354';
+import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1794779787010';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794779787010';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794779787010';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString();
@@ -67,7 +67,7 @@ async function _render(container, farm, period, allPeriods = []) {
 
   const [items, locations, movements, periodInvoices] = await Promise.all([
     dbSelect('stock_items',
-      `farm_id=eq.${farm.id}&category=eq.grain&active=eq.true&order=subgroup,name`),
+      `farm_id=eq.${farm.id}&category=eq.grain&is_seed=eq.false&active=eq.true&order=subgroup,name`),
     dbSelect('stock_locations',
       `farm_id=eq.${farm.id}&active=eq.true&order=route_order,name`),
     dbSelect('stock_movements',

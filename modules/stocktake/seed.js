@@ -1,0 +1,834 @@
+// modules/stocktake/seed.js
+// Seed stocktake section
+//
+// Data model
+// ──────────
+// stock_items  (category='grain', is_seed=true)
+//   subgroup         = "Cotton Seed" / "Grain Sorghum Seed" etc.
+//   name             = "DP 1840 B3XF 2026"
+//   attributes = {
+//     variety:       "DP 1840 B3XF",
+//     produced_year: "2026",
+//     kg_per_bag:    20            -- for bag-based tracking
+//   }
+//
+// stock_movements
+//   movement_type = 'delivery'    -- seed purchase / delivery in
+//   movement_type = 'usage'       -- linked to a closed planting session
+//   movement_type = 'adjustment'  -- manual correction
+//   source_system = 'operations'  -- on usage movements written by this module
+//   source_ref    = session.id    -- UUID of the planting_session
+//
+// A usage movement is written automatically when a planting session closes
+// (see the hook in operations.js → _writeSessionSeedUsage).
+// This screen shows the balance and lets users:
+//   1. Add seed items (variety × season)
+//   2. Record manual deliveries
+//   3. See which sessions consumed what, with a link back to operations
+
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794779787010';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794779787010';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794779787010';
+
+// ── Formatters ────────────────────────────────────────────────────────────
+const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
+const fKg = n => (n == null || isNaN(n)) ? '—' : n >= 1000
+  ? `${(n / 1000).toFixed(2).replace(/\.?0+$/, '')} t`
+  : `${Math.round(n)} kg`;
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// ── Movement type display ──────────────────────────────────────────────────
+const MOVE_LABELS = {
+  delivery:   { label: 'Delivery',       color: 'var(--green)',   icon: '🚛' },
+  usage:      { label: 'Planting use',   color: 'var(--blue)',    icon: '🌱' },
+  adjustment: { label: 'Adjustment',     color: 'var(--amber)',   icon: '±'  },
+  write_off:  { label: 'Write-off',      color: 'var(--red)',     icon: '⚠' },
+  transfer_in:  { label: 'Transfer in',  color: 'var(--blue)',    icon: '→'  },
+  transfer_out: { label: 'Transfer out', color: 'var(--hint)',    icon: '←'  },
+};
+
+// ── Entry point ────────────────────────────────────────────────────────────
+export async function mountSeed(container, initialPeriod) {
+  const farm = getActiveFarm();
+  container.innerHTML = `
+    <div style="padding:20px 24px;max-width:1200px;margin:0 auto" id="sd-wrap">
+      <div style="padding:40px;text-align:center;color:var(--hint)">Loading seed…</div>
+    </div>`;
+
+  const allPeriods = await dbSelect('stock_periods',
+    `farm_id=eq.${farm.id}&order=period_start.asc`);
+  const defaultPeriod = initialPeriod
+    || allPeriods.find(p => p.status === 'open')
+    || allPeriods[allPeriods.length - 1]
+    || null;
+
+  await _render(container, farm, defaultPeriod, allPeriods);
+}
+
+// ── Main render ────────────────────────────────────────────────────────────
+async function _render(container, farm, period, allPeriods = []) {
+  const wrap = qs('#sd-wrap', container);
+
+  const [items, locations, movements] = await Promise.all([
+    // Seed items only — is_seed=true
+    dbSelect('stock_items',
+      `farm_id=eq.${farm.id}&category=eq.grain&is_seed=eq.true&active=eq.true&order=subgroup,name`),
+    dbSelect('stock_locations',
+      `farm_id=eq.${farm.id}&active=eq.true&order=route_order,name`),
+    dbSelect('stock_movements',
+      `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`),
+  ]);
+
+  // Filter movements to seed items only
+  const seedItemIds = new Set(items.map(i => i.id));
+  const seedMovements = movements.filter(m => seedItemIds.has(m.item_id));
+  const locById = Object.fromEntries(locations.map(l => [l.id, l]));
+
+  // ── Period timeline ──────────────────────────────────────────────────────
+  const timelineHtml = allPeriods.length > 1 ? `
+    <div style="display:flex;align-items:center;gap:2px;overflow-x:auto;padding-bottom:12px;margin-bottom:16px;border-bottom:1px solid var(--border-light)">
+      ${allPeriods.map(p => {
+        const isActive = period && p.id === period.id;
+        const label = new Date(p.period_start).toLocaleDateString('en-AU', { month: 'short', year: '2-digit' });
+        const dot = p.status === 'locked' ? '🔒' : p.status === 'review' ? '🔶' : '●';
+        const dotColor = p.status === 'locked' ? 'var(--hint)' : p.status === 'review' ? 'var(--amber)' : 'var(--green)';
+        return `<button class="sd-period-btn" data-period-id="${p.id}"
+          style="flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 14px;border:none;border-radius:8px;cursor:pointer;background:${isActive ? 'var(--blue)' : 'transparent'}">
+          <span style="font-size:11px;font-weight:${isActive ? 700 : 500};color:${isActive ? 'white' : 'var(--ink-mid)'}">${label}</span>
+          <span style="font-size:9px;color:${isActive ? 'rgba(255,255,255,.7)' : dotColor}">${dot} ${p.status}</span>
+        </button>`;
+      }).join('')}
+    </div>` : '';
+
+  // ── Period window ────────────────────────────────────────────────────────
+  const periodStart = period?.period_start;
+  const periodEnd   = period?.period_end;
+  const periodLabel = period
+    ? new Date(period.period_start).toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })
+    : 'All time';
+
+  // ── Balance calculations ─────────────────────────────────────────────────
+  const bKey = (itemId, locId) => `${itemId}||${locId || 'none'}`;
+
+  const openingMap = {};
+  seedMovements
+    .filter(m => !periodStart || m.occurred_on < periodStart)
+    .forEach(m => {
+      const k = bKey(m.item_id, m.location_id);
+      openingMap[k] = (openingMap[k] || 0) + (parseFloat(m.signed_qty) || 0);
+    });
+
+  const periodMoves = periodStart
+    ? seedMovements.filter(m => m.occurred_on >= periodStart && m.occurred_on <= periodEnd)
+    : seedMovements;
+
+  const closingMap = { ...openingMap };
+  periodMoves.forEach(m => {
+    const k = bKey(m.item_id, m.location_id);
+    closingMap[k] = (closingMap[k] || 0) + (parseFloat(m.signed_qty) || 0);
+  });
+
+  // ── Planting sessions linked to seed movements ───────────────────────────
+  // Fetch sessions referenced in usage movements so we can show session detail
+  const usageSessionIds = [...new Set(
+    periodMoves
+      .filter(m => m.movement_type === 'usage' && m.source_system === 'operations' && m.source_ref)
+      .map(m => m.source_ref)
+  )];
+
+  let linkedSessions = [];
+  if (usageSessionIds.length > 0) {
+    try {
+      linkedSessions = await dbSelect('planting_sessions',
+        `id=in.(${usageSessionIds.map(id => `"${id}"`).join(',')})&select=id,field_name,sub_block,crop_type,variety,seed_type,kg_per_bag,seed_in_bags,seed_in_kg,seed_out_bags,seed_out_kg,status,session_date`);
+    } catch { /* graceful — session table may not be accessible */ }
+  }
+  const sessionById = Object.fromEntries(linkedSessions.map(s => [s.id, s]));
+
+  // ── Header ───────────────────────────────────────────────────────────────
+  const headerHtml = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+      <div>
+        <h2 style="font-size:18px;font-weight:700;color:var(--ink)">Seed</h2>
+        <p style="font-size:13px;color:var(--hint);margin-top:4px">${farm.name} · ${periodLabel}</p>
+      </div>
+      ${canWrite() ? `
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" id="sd-add-delivery">+ Delivery</button>
+          <button class="btn btn-secondary btn-sm" id="sd-add-item">+ Add seed variety</button>
+        </div>` : ''}
+    </div>`;
+
+  // ── Summary tiles ────────────────────────────────────────────────────────
+  const totalItems = items.length;
+  const totalKgOnHand = Object.entries(closingMap)
+    .filter(([k]) => seedItemIds.has(k.split('||')[0]))
+    .reduce((s, [, v]) => s + v, 0);
+
+  const periodUsageKg = periodMoves
+    .filter(m => m.movement_type === 'usage')
+    .reduce((s, m) => s + Math.abs(parseFloat(m.signed_qty) || 0), 0);
+
+  // Convert bags to kg where we can
+  const toKg = (m, item) => {
+    const qty = Math.abs(parseFloat(m.signed_qty) || 0);
+    if (m.unit === 'kg') return qty;
+    if (m.unit === 't') return qty * 1000;
+    // bags — use item's kg_per_bag from attributes
+    const kpb = parseFloat(item?.attributes?.kg_per_bag) || null;
+    return kpb ? qty * kpb : qty; // fallback: treat as kg if no kpb
+  };
+
+  const periodDeliveryKg = periodMoves
+    .filter(m => m.movement_type === 'delivery')
+    .reduce((s, m) => {
+      const item = items.find(i => i.id === m.item_id);
+      return s + toKg(m, item);
+    }, 0);
+
+  const tilesHtml = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px">
+      ${[
+        { label: 'Varieties tracked', value: totalItems, unit: '', color: 'var(--blue)' },
+        { label: 'On hand', value: fKg(totalKgOnHand), unit: '', color: 'var(--ink)' },
+        { label: 'Used this period', value: fKg(periodUsageKg), unit: '', color: 'var(--red)' },
+        { label: 'Delivered this period', value: fKg(periodDeliveryKg), unit: '', color: 'var(--green)' },
+      ].map(t => `
+        <div style="background:white;border:1px solid var(--border);border-radius:10px;padding:14px 16px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:6px">${t.label}</div>
+          <div style="font-size:22px;font-weight:700;color:${t.color}">${t.value}${t.unit ? `<span style="font-size:12px;font-weight:400;color:var(--hint);margin-left:4px">${t.unit}</span>` : ''}</div>
+        </div>`).join('')}
+    </div>`;
+
+  // ── Empty state ──────────────────────────────────────────────────────────
+  if (!items.length) {
+    wrap.innerHTML = timelineHtml + headerHtml + tilesHtml + `
+      <div style="padding:40px;text-align:center;color:var(--hint);background:white;border-radius:10px;border:1px solid var(--border)">
+        <div style="font-size:32px;margin-bottom:12px">🌱</div>
+        <p style="font-size:15px;font-weight:500;color:var(--ink);margin-bottom:6px">No seed varieties set up</p>
+        <p style="font-size:13px;margin-bottom:16px">Add a seed variety to track on-hand stock and link it to planting sessions.</p>
+        ${canWrite() ? `<button class="btn btn-primary" id="sd-add-item-empty">+ Add seed variety</button>` : ''}
+      </div>`;
+    _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById);
+    return;
+  }
+
+  // ── Seed item cards ──────────────────────────────────────────────────────
+  // Group by subgroup (Cotton Seed, Grain Sorghum Seed, etc.)
+  const subgroups = {};
+  items.forEach(item => {
+    const sg = item.subgroup || item.name;
+    if (!subgroups[sg]) subgroups[sg] = [];
+    subgroups[sg].push(item);
+  });
+
+  const renderItemCard = item => {
+    const attrs    = item.attributes || {};
+    const unit     = item.default_unit || 'bags';
+    const kpb      = parseFloat(attrs.kg_per_bag) || null;
+
+    // All location keys for this item
+    const allKeys = [...new Set([
+      ...Object.keys(openingMap).filter(k => k.startsWith(item.id + '||')),
+      ...Object.keys(closingMap).filter(k => k.startsWith(item.id + '||')),
+    ])];
+
+    const totalClosing = allKeys.reduce((s, k) => s + (closingMap[k] || 0), 0);
+    const kgStr = kpb && totalClosing ? ` · ${fKg(totalClosing * kpb)}` : '';
+
+    // Chips
+    const chips = [
+      attrs.variety       ? `<span class="sd-chip">${esc(attrs.variety)}</span>` : '',
+      attrs.produced_year ? `<span class="sd-chip">${esc(attrs.produced_year)}</span>` : '',
+      kpb                 ? `<span class="sd-chip">${kpb} kg/bag</span>` : '',
+    ].filter(Boolean).join('');
+
+    // Linked planting session usage this period
+    const itemUsageMoves = periodMoves.filter(m => m.item_id === item.id && m.movement_type === 'usage');
+    const sessionRows = itemUsageMoves
+      .filter(m => m.source_system === 'operations' && m.source_ref)
+      .map(m => {
+        const sess = sessionById[m.source_ref];
+        const qty  = Math.abs(parseFloat(m.signed_qty) || 0);
+        const sessLabel = sess
+          ? `${sess.field_name}${sess.sub_block ? ` · ${sess.sub_block}` : ''}`
+          : `Session ${m.source_ref.slice(0, 8)}…`;
+        return `
+          <div style="display:flex;align-items:center;gap:10px;padding:7px 14px 7px 20px;border-bottom:1px solid var(--border-light);font-size:12px">
+            <span style="font-size:14px">🌱</span>
+            <div style="flex:1;min-width:0">
+              <span style="font-weight:500;color:var(--ink)">${esc(sessLabel)}</span>
+              ${sess ? `<span style="color:var(--hint);margin-left:6px">${esc(sess.crop_type || '')} ${esc(sess.variety || '')}</span>` : ''}
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <span style="font-weight:600;color:var(--red)">−${fN(qty)} ${esc(unit)}</span>
+              ${kpb ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(qty * kpb)}</span>` : ''}
+            </div>
+            <span style="font-size:11px;color:var(--hint);flex-shrink:0">${m.occurred_on}</span>
+          </div>`;
+      }).join('');
+
+    // Location balance rows
+    const locRows = allKeys.length ? allKeys.map(k => {
+      const locId   = k.split('||')[1];
+      const locName = locId === 'none' ? '— unassigned' : (locById[locId]?.name || locId);
+      const opening = openingMap[k] || 0;
+      const closing = closingMap[k] || 0;
+      const pIn  = periodMoves
+        .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty) || 0) > 0)
+        .reduce((s, m) => s + (parseFloat(m.signed_qty) || 0), 0);
+      const pOut = periodMoves
+        .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty) || 0) < 0)
+        .reduce((s, m) => s + (parseFloat(m.signed_qty) || 0), 0);
+      const closingKg = kpb && closing ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(closing * kpb)}</span>` : '';
+
+      return `<tr style="border-bottom:1px solid var(--border-light)">
+        <td style="padding:9px 14px 9px 20px;font-size:13px;color:var(--ink)">${esc(locName)}</td>
+        <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--hint)">${opening ? fN(opening) : '—'}</td>
+        <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--green)">${pIn ? '+' + fN(pIn) : '—'}</td>
+        <td style="padding:9px 14px;text-align:center;font-size:13px;color:var(--red)">${pOut ? fN(pOut) : '—'}</td>
+        <td style="padding:9px 14px;text-align:center">
+          <span style="font-weight:700;color:var(--ink)">${fN(closing)}</span>${closingKg}
+        </td>
+        <td style="padding:9px 14px;text-align:right">
+          ${canWrite() ? `<button class="btn btn-ghost btn-sm sd-add-move" style="font-size:11px"
+            data-item-id="${item.id}" data-item-name="${esc(item.name)}"
+            data-loc-id="${locId === 'none' ? '' : locId}"
+            data-loc-name="${esc(locName)}">+ Movement</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('') : `<tr><td colspan="6" style="padding:16px 20px;font-size:13px;color:var(--hint)">
+      No movements yet.
+      ${canWrite() ? `<button class="btn btn-ghost btn-sm sd-add-move" style="margin-left:6px;font-size:11px"
+        data-item-id="${item.id}" data-item-name="${esc(item.name)}">+ Add first movement</button>` : ''}
+    </td></tr>`;
+
+    return `
+      <div style="margin-bottom:14px">
+        <!-- Item header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:var(--page-bg);border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;flex-wrap:wrap;gap:6px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:13px;font-weight:600;color:var(--ink)">${esc(item.name)}</span>
+            ${chips}
+            <span style="font-size:12px;color:var(--hint)">${fN(totalClosing)} ${esc(unit)} on hand${kgStr}</span>
+          </div>
+          ${canWrite() ? `
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm sd-record-delivery" style="font-size:11px"
+                data-item-id="${item.id}" data-item-name="${esc(item.name)}"
+                data-unit="${esc(unit)}" data-kpb="${kpb || ''}">+ Delivery</button>
+              <button class="btn btn-ghost btn-sm sd-add-move" style="font-size:11px"
+                data-item-id="${item.id}" data-item-name="${esc(item.name)}">+ Movement</button>
+            </div>` : ''}
+        </div>
+        <!-- Balance table -->
+        <div style="border:1px solid var(--border);border-radius:0 0 8px 8px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="background:#f8f9fa;border-bottom:1px solid var(--border)">
+                <th style="padding:6px 14px 6px 20px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:left">Location</th>
+                <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Opening</th>
+                <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--green);text-align:center">In</th>
+                <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--red);text-align:center">Used</th>
+                <th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:center">Closing</th>
+                <th style="width:120px"></th>
+              </tr>
+            </thead>
+            <tbody>${locRows}</tbody>
+          </table>
+          ${sessionRows ? `
+            <div style="border-top:2px solid var(--border-light)">
+              <div style="padding:7px 14px 7px 20px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--blue);background:#f0f7ff">
+                🌱 Planting session usage
+              </div>
+              ${sessionRows}
+            </div>` : ''}
+        </div>
+      </div>`;
+  };
+
+  const subgroupHtml = Object.entries(subgroups).map(([sgName, sgItems]) => {
+    const sgClosing = sgItems.reduce((sum, item) => {
+      const ks = Object.keys(closingMap).filter(k => k.startsWith(item.id + '||'));
+      return sum + ks.reduce((s, k) => s + (closingMap[k] || 0), 0);
+    }, 0);
+    const sgUnit = sgItems[0]?.default_unit || 'bags';
+    const sgKpb  = parseFloat(sgItems[0]?.attributes?.kg_per_bag) || null;
+    const sgKg   = sgKpb && sgClosing ? ` · ${fKg(sgClosing * sgKpb)}` : '';
+
+    return `
+      <div style="margin-bottom:24px">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#1a2535;border-radius:8px;margin-bottom:8px">
+          <span style="font-size:14px;font-weight:700;color:white">${esc(sgName)}</span>
+          <span style="font-size:12px;color:rgba(255,255,255,.6)">${fN(sgClosing)} ${esc(sgUnit)} total${sgKg}</span>
+        </div>
+        ${sgItems.map(renderItemCard).join('')}
+      </div>`;
+  }).join('');
+
+  // ── Period movements log ─────────────────────────────────────────────────
+  const logRows = periodMoves.slice(0, 40).map(m => {
+    const item  = items.find(i => i.id === m.item_id);
+    const mt    = MOVE_LABELS[m.movement_type] || { label: m.movement_type, color: 'var(--hint)', icon: '·' };
+    const qty   = parseFloat(m.signed_qty) || 0;
+    const locName = m.location_id ? (locById[m.location_id]?.name || m.location_id) : '—';
+    const kpb   = parseFloat(item?.attributes?.kg_per_bag) || null;
+    const kgStr = kpb && qty ? ` (${fKg(Math.abs(qty) * kpb)})` : '';
+    const refNote = m.source_system === 'operations' && m.source_ref
+      ? `Planting: ${sessionById[m.source_ref]?.field_name || m.source_ref.slice(0, 8) + '…'}`
+      : (m.note || '');
+
+    return `<tr style="border-bottom:1px solid var(--border-light);font-size:12px">
+      <td style="padding:8px 14px;color:var(--hint)">${m.occurred_on}</td>
+      <td style="padding:8px 14px;font-weight:500;color:var(--ink)">${item?.name || '—'}</td>
+      <td style="padding:8px 14px;color:${mt.color}">${mt.icon} ${mt.label}</td>
+      <td style="padding:8px 14px;color:var(--hint);font-size:11px">${locName}</td>
+      <td style="padding:8px 14px;text-align:right;font-weight:600;color:${qty > 0 ? 'var(--green)' : 'var(--red)'}">
+        ${qty > 0 ? '+' : ''}${fN(qty)} ${item?.default_unit || ''}${kgStr}
+      </td>
+      <td style="padding:8px 14px;color:var(--hint)">${esc(refNote)}</td>
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = timelineHtml + headerHtml + tilesHtml + subgroupHtml + (periodMoves.length ? `
+    <div class="card" style="margin-top:16px;overflow:hidden">
+      <div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--page-bg)">
+        <span style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint)">Period movements</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">
+            ${['Date', 'Variety', 'Type', 'Location', 'Qty', 'Note'].map(h =>
+              `<th style="padding:6px 14px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:${h === 'Qty' ? 'right' : 'left'}">${h}</th>`
+            ).join('')}
+          </tr>
+        </thead>
+        <tbody>${logRows}</tbody>
+      </table>
+    </div>` : '');
+
+  // Inject chip styles
+  if (!document.getElementById('sd-chip-style')) {
+    const s = document.createElement('style');
+    s.id = 'sd-chip-style';
+    s.textContent = `.sd-chip{display:inline-block;font-size:10px;padding:2px 7px;border-radius:10px;background:var(--border-light,#e8ecf0);color:var(--hint);margin-right:3px}`;
+    document.head.appendChild(s);
+  }
+
+  _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById);
+}
+
+// ── Wire event listeners ───────────────────────────────────────────────────
+function _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById) {
+  wrap.querySelectorAll('.sd-period-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = allPeriods.find(x => x.id === btn.dataset.periodId);
+      if (p) _render(container, farm, p, allPeriods);
+    });
+  });
+
+  wrap.querySelector('#sd-add-item')?.addEventListener('click',
+    () => _showAddVarietyForm(container, farm, items, period, allPeriods));
+  wrap.querySelector('#sd-add-item-empty')?.addEventListener('click',
+    () => _showAddVarietyForm(container, farm, items, period, allPeriods));
+  wrap.querySelector('#sd-add-delivery')?.addEventListener('click',
+    () => _showDeliveryForm(container, farm, items, locations, null, null, period, allPeriods));
+
+  wrap.querySelectorAll('.sd-record-delivery').forEach(btn => {
+    btn.addEventListener('click', () =>
+      _showDeliveryForm(container, farm, items, locations,
+        btn.dataset.itemId, btn.dataset.itemName, period, allPeriods));
+  });
+
+  wrap.querySelectorAll('.sd-add-move').forEach(btn => {
+    btn.addEventListener('click', () =>
+      _showMovementForm(container, farm, items, locations,
+        btn.dataset.itemId, btn.dataset.itemName,
+        btn.dataset.locId || null, period, allPeriods));
+  });
+}
+
+// ── Add seed variety form ──────────────────────────────────────────────────
+async function _showAddVarietyForm(container, farm, existingItems, period, allPeriods) {
+  const knownSubgroups = [...new Set(existingItems.map(i => i.subgroup || i.name).filter(Boolean))];
+  const sgSuggestions = knownSubgroups.length
+    ? `<datalist id="sd-sg-list">${knownSubgroups.map(s => `<option value="${esc(s)}">`).join('')}</datalist>`
+    : '';
+  const currentYear = new Date().getFullYear();
+
+  openModal({
+    title: 'Add seed variety',
+    bodyHTML: `
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <p style="font-size:12px;color:var(--hint);margin:0">
+          Add one variety and season. Each combination is tracked separately.
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Crop type <span style="color:var(--red)">*</span></label>
+            <input class="form-input" id="sv-subgroup" type="text" list="sd-sg-list"
+              placeholder="e.g. Cotton Seed, Grain Sorghum Seed">
+            ${sgSuggestions}
+            <div style="font-size:10px;color:var(--hint);margin-top:2px">Groups varieties together</div>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Variety <span style="color:var(--red)">*</span></label>
+            <input class="form-input" id="sv-variety" type="text"
+              placeholder="e.g. DP 1840 B3XF, Pacific Vigour">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Season year <span style="color:var(--red)">*</span></label>
+            <input class="form-input" id="sv-year" type="number" min="2000" max="2099"
+              value="${currentYear}" placeholder="${currentYear}">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Unit <span style="color:var(--red)">*</span></label>
+            <select class="form-select" id="sv-unit">
+              <option value="bags">Bags</option>
+              <option value="kg">Kilograms</option>
+              <option value="t">Tonnes</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0" id="sv-kpb-wrap">
+            <label class="form-label">kg per bag</label>
+            <input class="form-input" id="sv-kpb" type="number" min="1" step="0.1"
+              placeholder="e.g. 20">
+            <div style="font-size:10px;color:var(--hint);margin-top:2px">For kg ↔ bags conversion</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Notes (optional)</label>
+          <input class="form-input" id="sv-notes" type="text"
+            placeholder="e.g. Treated with Gaucho, batch number">
+        </div>
+      </div>`,
+    confirmLabel: 'Add variety',
+    onConfirm: async (modal) => {
+      const subgroup = modal.querySelector('#sv-subgroup')?.value?.trim();
+      const variety  = modal.querySelector('#sv-variety')?.value?.trim();
+      const year     = modal.querySelector('#sv-year')?.value?.trim();
+      const unit     = modal.querySelector('#sv-unit')?.value;
+      const kpb      = parseFloat(modal.querySelector('#sv-kpb')?.value) || null;
+      const notes    = modal.querySelector('#sv-notes')?.value?.trim() || null;
+
+      if (!subgroup || !variety || !year) {
+        toast('Crop type, variety and season year are required', 'error');
+        return false;
+      }
+
+      const name = `${variety} ${year}`;
+      const attrs = {
+        produced_year: year,
+        variety,
+        ...(kpb ? { kg_per_bag: kpb } : {}),
+      };
+
+      await dbInsert('stock_items', {
+        farm_id:      farm.id,
+        category:     'grain',
+        is_seed:      true,
+        name,
+        subgroup,
+        default_unit: unit,
+        attributes:   attrs,
+        active:       true,
+        notes,
+      });
+      toast(`${name} added`, 'success');
+      await _render(container, farm, period, allPeriods);
+    }
+  });
+
+  setTimeout(() => {
+    const unitEl  = document.getElementById('sv-unit');
+    const kpbWrap = document.getElementById('sv-kpb-wrap');
+    const toggle = () => {
+      if (kpbWrap) kpbWrap.style.display = unitEl?.value === 'bags' ? '' : 'none';
+    };
+    unitEl?.addEventListener('change', toggle);
+    toggle();
+  }, 50);
+}
+
+// ── Delivery form ──────────────────────────────────────────────────────────
+async function _showDeliveryForm(container, farm, items, locations, preItemId, preItemName, period, allPeriods) {
+  const today = new Date().toISOString().slice(0, 10);
+  const itemOpts = items.map(i =>
+    `<option value="${i.id}" data-unit="${esc(i.default_unit || 'bags')}" data-kpb="${parseFloat(i.attributes?.kg_per_bag)||''}"
+      ${i.id === preItemId ? ' selected' : ''}>${esc(i.name)}</option>`).join('');
+  const locOpts = locations.map(l =>
+    `<option value="${l.id}">${esc(l.name)}</option>`).join('');
+
+  openModal({
+    title: 'Record seed delivery',
+    bodyHTML: `
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="form-group">
+          <label class="form-label">Seed variety <span style="color:var(--red)">*</span></label>
+          <select class="form-select" id="sdel-item">
+            <option value="">Select variety…</option>${itemOpts}
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Quantity <span style="color:var(--red)">*</span></label>
+            <input class="form-input" type="number" id="sdel-qty" min="1" step="1" placeholder="0">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Unit</label>
+            <div id="sdel-unit-display" style="padding:8px 10px;background:var(--page-bg);border:1px solid var(--border);border-radius:6px;font-size:14px;color:var(--hint)">bags</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Storage location</label>
+          <select class="form-select" id="sdel-location">
+            <option value="">No specific location</option>${locOpts}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Date <span style="color:var(--red)">*</span></label>
+          <input class="form-input" type="date" id="sdel-date" value="${today}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Supplier / docket</label>
+          <input class="form-input" type="text" id="sdel-supplier" placeholder="Supplier name or docket number">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Note</label>
+          <input class="form-input" type="text" id="sdel-note" placeholder="Optional">
+        </div>
+      </div>`,
+    confirmLabel: 'Record delivery',
+    onConfirm: async (modal) => {
+      const itemId   = modal.querySelector('#sdel-item')?.value;
+      const locId    = modal.querySelector('#sdel-location')?.value || null;
+      const qty      = parseFloat(modal.querySelector('#sdel-qty')?.value);
+      const date     = modal.querySelector('#sdel-date')?.value;
+      const supplier = modal.querySelector('#sdel-supplier')?.value?.trim() || null;
+      const note     = modal.querySelector('#sdel-note')?.value?.trim() || null;
+
+      if (!itemId || !qty || !date) {
+        toast('Variety, quantity and date are required', 'error');
+        return false;
+      }
+      const item = items.find(i => i.id === itemId);
+      await dbInsert('stock_movements', {
+        farm_id:       farm.id,
+        item_id:       itemId,
+        location_id:   locId,
+        movement_type: 'delivery',
+        qty,
+        unit:          item?.default_unit || 'bags',
+        occurred_on:   date,
+        counterparty:  supplier,
+        note:          note || (supplier ? `Delivery from ${supplier}` : 'Seed delivery'),
+      });
+      toast('Delivery recorded', 'success');
+      await _render(container, farm, period, allPeriods);
+    }
+  });
+
+  // Wire unit display from item select
+  setTimeout(() => {
+    const itemEl    = document.getElementById('sdel-item');
+    const unitDisp  = document.getElementById('sdel-unit-display');
+    itemEl?.addEventListener('change', () => {
+      const opt = itemEl.options[itemEl.selectedIndex];
+      if (unitDisp) unitDisp.textContent = opt?.dataset?.unit || 'bags';
+    });
+    // Trigger for pre-selected item
+    if (preItemId) {
+      const opt = itemEl?.querySelector(`[value="${preItemId}"]`);
+      if (opt && unitDisp) unitDisp.textContent = opt.dataset?.unit || 'bags';
+    }
+  }, 60);
+}
+
+// ── Movement form ──────────────────────────────────────────────────────────
+async function _showMovementForm(container, farm, items, locations, preItemId, preItemName, preLocId, period, allPeriods) {
+  const today = new Date().toISOString().slice(0, 10);
+  const itemOpts = items.map(i =>
+    `<option value="${i.id}" data-unit="${esc(i.default_unit || 'bags')}"
+      ${i.id === preItemId ? ' selected' : ''}>${esc(i.name)}</option>`).join('');
+  const locOpts = locations.map(l =>
+    `<option value="${l.id}"${l.id === preLocId ? ' selected' : ''}>${esc(l.name)}</option>`).join('');
+
+  openModal({
+    title: 'Record seed movement',
+    bodyHTML: `
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div class="form-group">
+          <label class="form-label">Movement type <span style="color:var(--red)">*</span></label>
+          <select class="form-select" id="sm-type">
+            <option value="adjustment">Adjustment (manual count / correction)</option>
+            <option value="transfer_out">Transfer out</option>
+            <option value="transfer_in">Transfer in</option>
+            <option value="write_off">Write-off (damaged / expired)</option>
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Variety <span style="color:var(--red)">*</span></label>
+            <select class="form-select" id="sm-item">
+              <option value="">Select…</option>${itemOpts}
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Location</label>
+            <select class="form-select" id="sm-location">
+              <option value="">No location</option>${locOpts}
+            </select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Quantity <span style="color:var(--red)">*</span></label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input class="form-input" type="number" id="sm-qty" min="1" step="1" placeholder="0">
+              <span id="sm-unit-label" style="font-size:13px;color:var(--hint);white-space:nowrap">bags</span>
+            </div>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Date <span style="color:var(--red)">*</span></label>
+            <input class="form-input" type="date" id="sm-date" value="${today}">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Note / reason <span id="sm-note-required" style="color:var(--red)">*</span></label>
+          <input class="form-input" type="text" id="sm-note"
+            placeholder="Required for adjustments and write-offs">
+        </div>
+      </div>`,
+    confirmLabel: 'Record movement',
+    onConfirm: async (modal) => {
+      const type  = modal.querySelector('#sm-type')?.value;
+      const itemId = modal.querySelector('#sm-item')?.value;
+      const locId  = modal.querySelector('#sm-location')?.value || null;
+      const qty    = parseFloat(modal.querySelector('#sm-qty')?.value);
+      const date   = modal.querySelector('#sm-date')?.value;
+      const note   = modal.querySelector('#sm-note')?.value?.trim() || null;
+
+      if (!itemId || !qty || !date) {
+        toast('Variety, quantity and date are required', 'error');
+        return false;
+      }
+      if ((type === 'adjustment' || type === 'write_off') && !note) {
+        toast('A reason is required for adjustments and write-offs', 'error');
+        return false;
+      }
+
+      const item = items.find(i => i.id === itemId);
+      await dbInsert('stock_movements', {
+        farm_id:       farm.id,
+        item_id:       itemId,
+        location_id:   locId,
+        movement_type: type,
+        qty,
+        unit:          item?.default_unit || 'bags',
+        occurred_on:   date,
+        note,
+        ...(type === 'adjustment' ? { reason_code: 'other', direction: 1 } : {}),
+      });
+      toast('Movement recorded', 'success');
+      await _render(container, farm, period, allPeriods);
+    }
+  });
+
+  setTimeout(() => {
+    const itemEl  = document.getElementById('sm-item');
+    const unitLbl = document.getElementById('sm-unit-label');
+    itemEl?.addEventListener('change', () => {
+      const opt = itemEl.options[itemEl.selectedIndex];
+      if (unitLbl) unitLbl.textContent = opt?.dataset?.unit || 'bags';
+    });
+  }, 50);
+}
+
+// ── Auto-write usage movement when a planting session closes ──────────────
+// Called from operations.js after dbUpdate('planting_sessions', session.id, { status: 'closed', ... })
+//
+// Logic:
+//   bags session:  qty = seed_in_bags − seed_out_bags  (net consumed)
+//   bulk session:  qty = seed_in_kg   − seed_out_kg    (net consumed, stored as kg)
+//
+// If no matching stock item exists yet, the movement is skipped (no error) so
+// closing a session never fails because seed stock isn't set up yet.
+export async function writeSessionSeedUsage(farm, session) {
+  if (!farm || !session || session.status !== 'closed') return;
+
+  // Determine qty consumed
+  const isBulk = session.seed_type === 'bulk';
+  let qty, unit;
+
+  if (isBulk) {
+    const inKg  = parseFloat(session.seed_in_kg) || 0;
+    const outKg = parseFloat(session.seed_out_kg) || 0;
+    qty  = inKg - outKg;
+    unit = 'kg';
+  } else {
+    const inBags  = parseFloat(session.seed_in_bags) || 0;
+    const outBags = parseFloat(session.seed_out_bags) || 0;
+    qty  = inBags - outBags;
+    unit = 'bags';
+  }
+
+  if (!qty || qty <= 0) return; // nothing consumed or no seed data recorded
+
+  // Find matching seed stock item by crop_type / variety
+  let seedItems = [];
+  try {
+    seedItems = await dbSelect('stock_items',
+      `farm_id=eq.${farm.id}&category=eq.grain&is_seed=eq.true&active=eq.true`);
+  } catch { return; }
+
+  if (!seedItems.length) return; // seed stock not set up — skip silently
+
+  // Match: prefer variety match, fall back to crop_type match
+  const variety   = (session.variety || '').toLowerCase().trim();
+  const cropType  = (session.crop_type || '').toLowerCase().trim();
+
+  const matched = seedItems.find(i => {
+    const iVariety   = (i.attributes?.variety || i.name || '').toLowerCase();
+    const iSubgroup  = (i.subgroup || '').toLowerCase();
+    if (variety   && iVariety.includes(variety))   return true;
+    if (variety   && variety.includes(iVariety))   return true;
+    if (cropType  && iSubgroup.includes(cropType)) return true;
+    if (cropType  && cropType.includes(iSubgroup)) return true;
+    return false;
+  });
+
+  if (!matched) return; // no match — skip silently, user can record manually
+
+  // Check if a usage movement for this session already exists (idempotent)
+  let existing = [];
+  try {
+    existing = await dbSelect('stock_movements',
+      `farm_id=eq.${farm.id}&item_id=eq.${matched.id}&movement_type=eq.usage&source_system=eq.operations&source_ref=eq.${session.id}`);
+  } catch { /* ignore */ }
+
+  if (existing.length > 0) return; // already written
+
+  // Write the usage movement
+  const sessionDate = session.session_date || new Date().toISOString().slice(0, 10);
+  const fieldLabel  = `${session.field_name}${session.sub_block ? ' · ' + session.sub_block : ''}`;
+
+  try {
+    await dbInsert('stock_movements', {
+      farm_id:       farm.id,
+      item_id:       matched.id,
+      location_id:   null,
+      movement_type: 'usage',
+      qty,
+      unit,
+      occurred_on:   sessionDate,
+      note:          `Planting — ${fieldLabel}`,
+      source_system: 'operations',
+      source_ref:    session.id,
+    });
+  } catch (e) {
+    // Failure is non-fatal — we never want seed stock to block closing a session
+    console.warn('[CFM] writeSessionSeedUsage failed (non-fatal):', e.message);
+  }
+}
