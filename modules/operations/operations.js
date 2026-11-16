@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794796662412';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794796662412';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794796662412';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794796662412';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794796796097';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794796796097';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794796796097';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794796796097';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -209,7 +209,7 @@ function _renderList() {
                 ${esc(s.field_name)}${s.sub_block ? ` <span style="font-size:12px;color:var(--hint);font-weight:400">· ${esc(s.sub_block)}</span>` : ''}
               </div>
               <div style="font-size:12px;color:var(--fg2);margin-top:2px">
-                ${[s.commodity, s.variety && `Var: ${s.variety}`, s.auslot_default && `Lot: ${s.auslot_default}`, s.operator_default].filter(Boolean).join(' · ')}
+                ${[s.commodity, s.crop_type, s.variety && `Var: ${s.variety}`, s.auslot_default && `Lot: ${s.auslot_default}`, s.operator_default].filter(Boolean).join(' · ')}
               </div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:5px">
                 <span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:20px;background:${isOpen ? 'var(--green-bg)' : 'var(--surface2)'};color:${isOpen ? 'var(--green)' : 'var(--hint)'}">
@@ -330,7 +330,7 @@ function _renderDetail() {
           <span style="font-size:12px;font-weight:600;padding:4px 10px;border-radius:20px;background:${isOpen ? 'var(--green-bg)' : 'var(--surface2)'};color:${isOpen ? 'var(--green)' : 'var(--hint)'}">
             ${isOpen ? '● Open' : 'Closed'}
           </span>
-          ${canWrite() && isOpen ? `<button id="ops-edit-header-btn" style="font-size:12px;font-weight:600;padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--fg2);cursor:pointer">Edit header</button>` : ''}
+          ${canWrite() ? `<button id="ops-edit-header-btn" style="font-size:12px;font-weight:600;padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--fg2);cursor:pointer">Edit header</button>` : ''}
         </div>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px">
@@ -343,7 +343,8 @@ function _renderDetail() {
           const displayCommodity = rowCommodities.length ? rowCommodities.join(', ') : (session.commodity || null);
           const totalBagsHdr = rowsForHeader.reduce((t, r) => t + (parseInt(r.cotton_bags) || 0), 0);
           return [
-            ['Crop', displayCommodity],
+            ['Commodity', displayCommodity],
+            ['Crop type', session.crop_type],
             ['Variety', displayVariety],
             ['Operator', session.operator_default],
             ['Seed in rows', totalBagsHdr > 0 ? `${totalBagsHdr} bags` : null],
@@ -1552,7 +1553,7 @@ function _showCloseSessionModal(session) {
 
       // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
       try {
-        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794796662412');
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794796796097');
         const farm = getActiveFarm();
         await writeSessionSeedUsage(farm, session);
       } catch (e) {
