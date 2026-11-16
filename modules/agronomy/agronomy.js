@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794794883316';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794794883316';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794794883316';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794794883316';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794795405717';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794795405717';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794795405717';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794795405717';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -1085,11 +1085,11 @@ function cpMatrixCell(entry, paddockName, subBlock, seasonLabel, isCurrent) {
         style="${baseStyle}${borderL}min-width:143px;text-align:right" title="Planned ha — click to edit">
         ${commodityLine}
         ${entry.variety && ACTUAL_STATUSES.has(entry.status) ? `<div style="font-size:10px;color:var(--blue-text);margin-bottom:2px;font-weight:500;text-align:right">Var: ${esc(entry.variety)}</div>` : ''}
-        <div style="display:flex;align-items:center;justify-content:flex-end;gap:3px;margin-bottom:2px">${statusDot}${statusLabel}</div>
         ${plannedDisp}
       </td>
       <td class="cp-matrix-cell" data-id="${id}" data-field="${entry.status === 'harvested' ? 'area_loss_ha' : 'planted_ha'}" data-type="number"
         style="${baseStyle}min-width:143px;text-align:right;border-left:1px dashed var(--border)" title="${entry.status === 'harvested' ? 'Loss ha — click to edit (harvested = planted − loss)' : 'Planted ha — click to edit'}">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:3px;margin-bottom:2px">${statusDot}${statusLabel}</div>
         ${plantedDisp}
       </td>`;
   }
