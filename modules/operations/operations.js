@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794796796097';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794796796097';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794796796097';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794796796097';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794796947862';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794796947862';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794796947862';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794796947862';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -393,7 +393,7 @@ function _renderDetail() {
                 `<span style="display:inline-flex;align-items:center;gap:3px;font-size:11px;padding:2px 7px;border-radius:20px;background:var(--blue-bg);color:var(--blue);margin:1px">${esc(c.name)} ${c.litres != null ? `${c.litres} L` : ''}</span>`
               ).join('') || '<span style="color:var(--hint)">—</span>'}
             </td>
-            ${canWrite() && isOpen ? `<td style="padding:10px 12px"><button class="ops-edit-row-btn" data-row-id="${esc(row.id)}" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--fg2);cursor:pointer">Edit</button></td>` : '<td></td>'}
+            ${canWrite() ? `<td style="padding:10px 12px"><button class="ops-edit-row-btn" data-row-id="${esc(row.id)}" style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--fg2);cursor:pointer">Edit</button></td>` : '<td></td>'}
           </tr>`;
         }).join('');
 
@@ -1553,7 +1553,7 @@ function _showCloseSessionModal(session) {
 
       // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
       try {
-        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794796796097');
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794796947862');
         const farm = getActiveFarm();
         await writeSessionSeedUsage(farm, session);
       } catch (e) {
