@@ -1,7 +1,7 @@
 // modules/agronomy/recommendations.js
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794796053673';
-import { getActiveFarm, getSession, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794796053673';
-import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, currentSeason } from '../../js/ui.js?v=1794796053673';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794796075862';
+import { getActiveFarm, getSession, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794796075862';
+import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, currentSeason } from '../../js/ui.js?v=1794796075862';
 
 let _recs = [];
 let _paddocks = [];
