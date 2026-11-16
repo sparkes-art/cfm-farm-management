@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794795952245';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794795952245';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794795952245';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794795952245';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794796053673';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794796053673';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794796053673';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794796053673';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -672,7 +672,8 @@ async function renderReporting() {
           </thead>
           <tbody>
             ${plantRows.map((r, i) => {
-              const kgHa = r.ha > 0 && r.kg > 0 ? (r.kg / r.ha).toFixed(1) : null;
+              const kgHaRaw = r.ha > 0 && r.kg > 0 ? r.kg / r.ha : null;
+              const kgHa = kgHaRaw != null ? (Number.isInteger(kgHaRaw) || kgHaRaw % 1 < 0.05 ? Math.round(kgHaRaw).toString() : kgHaRaw.toFixed(1)) : null;
               const kgHaColor = kgHa == null ? 'var(--hint)' : 'var(--fg)';
               const lastDate  = r.dates.length
                 ? new Date(Math.max(...r.dates.map(d => new Date(d)))).toLocaleDateString('en-AU', { day:'numeric', month:'short' })
@@ -694,7 +695,7 @@ async function renderReporting() {
               <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700">${fHa(totalHa)}</td>
               <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700;color:var(--hint)">${totalBags > 0 ? totalBags.toFixed(0) : '—'}</td>
               <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700">${fKg(totalKg)}</td>
-              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700">${totalHa > 0 && totalKg > 0 ? (totalKg / totalHa).toFixed(1) : '—'}</td>
+              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700">${(() => { if (!(totalHa > 0 && totalKg > 0)) return '—'; const v = totalKg / totalHa; return (Number.isInteger(v) || v % 1 < 0.05) ? Math.round(v).toString() : v.toFixed(1); })()}</td>
               <td></td>
             </tr>
           </tfoot>
