@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794795579561';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794795579561';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794795579561';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794795579561';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794795840116';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794795840116';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794795840116';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794795840116';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -596,7 +596,7 @@ async function renderReporting() {
   if (!el) return;
   el.innerHTML = `<div style="padding:24px 0;text-align:center;color:var(--hint)">Loading…</div>`;
 
-  const farm   = currentFarm;
+  const farm   = getActiveFarm();
   const season = getActiveSeason();
   if (!farm || !season) {
     el.innerHTML = `<div style="padding:32px;color:var(--hint)">Select a farm and season to view reports.</div>`;
