@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794794652131';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794794652131';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794794652131';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794794652131';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794794760419';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794794760419';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794794760419';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794794760419';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -466,10 +466,6 @@ async function _render(container, farm, period, allPeriods = []) {
 function _buildUnallocatedPanel(pendingMovements, items, sessionById, locations = []) {
   if (!pendingMovements || !pendingMovements.length) return '';
 
-  const itemOpts = items.map(i =>
-    `<option value="${i.id}">${esc(i.name)}${i.attributes?.variety ? ' — ' + esc(i.attributes.variety) : ''}</option>`
-  ).join('');
-
   const locOpts = locations.map(l =>
     `<option value="${l.id}">${esc(l.name)}</option>`
   ).join('');
@@ -490,8 +486,11 @@ function _buildUnallocatedPanel(pendingMovements, items, sessionById, locations 
     const field   = session.field_name ? `${esc(session.field_name)}${session.sub_block ? ' · ' + esc(session.sub_block) : ''}` : '—';
     const crop    = esc(session.commodity || '—');
     const variety = esc(session.variety || '—');
+    // item_id is already set via seed_item_id on the planting rows — just need location
+    const noteItem = items.find(i => m.note && m.note.includes(i.name));
+    const varietyLabel = noteItem ? esc(noteItem.name) : (session.variety ? esc(session.variety) : '—');
     return [
-      `<div style="display:grid;grid-template-columns:90px 1fr 80px 1fr 1fr 110px;`,
+      `<div style="display:grid;grid-template-columns:90px 1fr 80px 100px 1fr 110px;`,
       `gap:8px;padding:10px 14px;border-bottom:1px solid var(--border-light);align-items:center;font-size:12px">`,
       `<div style="color:var(--hint)">${m.occurred_on || '—'}</div>`,
       `<div>`,
@@ -499,14 +498,11 @@ function _buildUnallocatedPanel(pendingMovements, items, sessionById, locations 
         `<div style="font-size:11px;color:var(--hint)">${crop}${session.variety ? ' · ' + variety : ''}</div>`,
       `</div>`,
       `<div style="font-weight:600;color:var(--ink)">${fQty(m)}</div>`,
-      items.length
-        ? `<div style="display:flex;gap:6px">
-            <select class="form-select sd-alloc-item" data-movement-id="${m.id}" style="font-size:11px;flex:1"><option value="">Variety…</option>${itemOpts}</select>
-            <select class="form-select sd-alloc-loc" data-movement-id="${m.id}" style="font-size:11px;flex:1"><option value="">Location…</option>${locOpts}</select>
-           </div>`
-        : `<div><span style="font-size:11px;color:var(--hint)">Add a variety first</span></div>`,
-      `<div></div>`,
-      items.length
+      `<div style="font-size:11px;color:var(--hint)">${varietyLabel}</div>`,
+      locations.length
+        ? `<div><select class="form-select sd-alloc-loc" data-movement-id="${m.id}" style="font-size:11px;width:100%"><option value="">Select location…</option>${locOpts}</select></div>`
+        : `<div><span style="font-size:11px;color:var(--hint)">No locations set up</span></div>`,
+      locations.length
         ? `<div><button class="btn btn-sm btn-primary sd-alloc-btn" data-movement-id="${m.id}" style="font-size:11px;opacity:.4;pointer-events:none;white-space:nowrap">Allocate →</button></div>`
         : `<div></div>`,
       `</div>`,
@@ -563,32 +559,38 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
   });
 
   // Unallocated planting session allocation
-  const _refreshAllocBtn = (movId) => {
-    const btn     = wrap.querySelector(`.sd-alloc-btn[data-movement-id="${movId}"]`);
-    const itemSel = wrap.querySelector(`.sd-alloc-item[data-movement-id="${movId}"]`);
-    const locSel  = wrap.querySelector(`.sd-alloc-loc[data-movement-id="${movId}"]`);
-    if (!btn) return;
-    const ready = itemSel?.value && locSel?.value;
-    btn.style.opacity      = ready ? '1'    : '.4';
-    btn.style.pointerEvents = ready ? 'auto' : 'none';
-  };
-
-  wrap.querySelectorAll('.sd-alloc-item').forEach(sel => {
-    sel.addEventListener('change', () => _refreshAllocBtn(sel.dataset.movementId));
-  });
   wrap.querySelectorAll('.sd-alloc-loc').forEach(sel => {
-    sel.addEventListener('change', () => _refreshAllocBtn(sel.dataset.movementId));
+    sel.addEventListener('change', () => {
+      const btn = wrap.querySelector(`.sd-alloc-btn[data-movement-id="${sel.dataset.movementId}"]`);
+      if (!btn) return;
+      btn.style.opacity      = sel.value ? '1'    : '.4';
+      btn.style.pointerEvents = sel.value ? 'auto' : 'none';
+    });
   });
 
   wrap.querySelectorAll('.sd-alloc-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const movId  = btn.dataset.movementId;
-      const itemId = wrap.querySelector(`.sd-alloc-item[data-movement-id="${movId}"]`)?.value;
-      const locId  = wrap.querySelector(`.sd-alloc-loc[data-movement-id="${movId}"]`)?.value;
-      if (!itemId || !locId) return;
+      const movId   = btn.dataset.movementId;
+      const locId   = wrap.querySelector(`.sd-alloc-loc[data-movement-id="${movId}"]`)?.value;
+      if (!locId) return;
       btn.disabled = true;
       btn.textContent = 'Saving…';
       try {
+        // Derive item_id from the session's planting rows (seed_item_id)
+        const mov = pendingPlantingMovements.find(m => m.id === movId);
+        let itemId = null;
+        if (mov?.source_ref) {
+          const rows = await dbSelect('planting_rows',
+            `session_id=eq.${mov.source_ref}&seed_item_id=not.is.null&select=seed_item_id&limit=1`
+          ).catch(() => []);
+          itemId = rows[0]?.seed_item_id || null;
+        }
+        // Fall back to matching by variety name in note if no rows have seed_item_id
+        if (!itemId) {
+          const matched = items.find(i => mov?.note?.includes(i.name));
+          itemId = matched?.id || null;
+        }
+        if (!itemId) throw new Error('Could not determine seed variety — ensure planting rows have a variety selected.');
         await dbUpdate('stock_movements', movId, { item_id: itemId, location_id: locId });
         toast('Seed usage allocated', 'success');
         _render(container, farm, period, allPeriods);
