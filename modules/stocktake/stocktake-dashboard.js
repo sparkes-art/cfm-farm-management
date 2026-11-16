@@ -1,9 +1,9 @@
 // modules/stocktake/stocktake-dashboard.js
 // Period dashboard — the control centre for the monthly stocktake
 
-import { dbSelect, dbInsert, dbUpdate } from '../../js/supabase-client.js?v=1794795405717';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794795405717';
-import { formatDate, qs, toast, openModal } from '../../js/ui.js?v=1794795405717';
+import { dbSelect, dbInsert, dbUpdate } from '../../js/supabase-client.js?v=1794795579561';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794795579561';
+import { formatDate, qs, toast, openModal } from '../../js/ui.js?v=1794795579561';
 
 export function unmountStocktakeDashboard() {}
 
@@ -501,7 +501,7 @@ async function _navigateTo(section, container) {
     const farm = getActiveFarm();
     const periods = await dbSelect('stock_periods', `farm_id=eq.${farm.id}&status=in.(open,review)&order=period_start.desc&limit=1`);
     const period = periods[0] || null;
-    const { mountLivestock } = await import('./livestock.js?v=1794795405717');
+    const { mountLivestock } = await import('./livestock.js?v=1794795579561');
 
     // Wrap with back button
     const wrap = qs('#stk-dash', container) || container;
@@ -521,7 +521,7 @@ async function _navigateTo(section, container) {
     const farm = getActiveFarm();
     const periods = await dbSelect('stock_periods', `farm_id=eq.${farm.id}&status=in.(open,review)&order=period_start.desc&limit=1`);
     const period = periods[0] || null;
-    const { mountGrain } = await import('./grain.js?v=1794795405717');
+    const { mountGrain } = await import('./grain.js?v=1794795579561');
 
     const wrap = qs('#stk-dash', container) || container;
     wrap.innerHTML = `
@@ -540,7 +540,7 @@ async function _navigateTo(section, container) {
     const farm = getActiveFarm();
     const periods = await dbSelect('stock_periods', `farm_id=eq.${farm.id}&status=in.(open,review)&order=period_start.desc&limit=1`);
     const period = periods[0] || null;
-    const { mountSeed } = await import('./seed.js?v=1794795405717');
+    const { mountSeed } = await import('./seed.js?v=1794795579561');
 
     const wrap = qs('#stk-dash', container) || container;
     wrap.innerHTML = `

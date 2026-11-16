@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794795405717';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794795405717';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794795405717';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794795405717';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794795579561';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794795579561';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794795579561';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794795579561';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -124,9 +124,11 @@ function buildShell() {
     <div class="tab-strip" id="agronomy-tabs">
       <button class="tab-btn active" data-tab="scouting">Scouting</button>
       <button class="tab-btn" data-tab="cropplan">Crop Plan</button>
+      <button class="tab-btn" data-tab="reporting">Reporting</button>
     </div>
     <div id="agro-tab-scouting"></div>
     <div id="agro-tab-cropplan" style="display:none"></div>
+    <div id="agro-tab-reporting" style="display:none"></div>
     <div id="agro-paddock-detail" style="display:none"></div>
   `;
 }
@@ -172,8 +174,9 @@ function switchTab(tab) {
   document.querySelectorAll('#agronomy-tabs .tab-btn')
     .forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   document.getElementById('agro-paddock-detail').style.display = 'none';
-  document.getElementById('agro-tab-scouting').style.display   = tab === 'scouting'  ? '' : 'none';
-  document.getElementById('agro-tab-cropplan').style.display   = tab === 'cropplan'  ? '' : 'none';
+  document.getElementById('agro-tab-scouting').style.display   = tab === 'scouting'   ? '' : 'none';
+  document.getElementById('agro-tab-cropplan').style.display   = tab === 'cropplan'   ? '' : 'none';
+  document.getElementById('agro-tab-reporting').style.display  = tab === 'reporting'  ? '' : 'none';
   // Reset crop plan season when switching to it, so it re-reads the global season
   if (tab === 'cropplan') {
     const cpEl = document.getElementById('agro-tab-cropplan');
@@ -183,8 +186,9 @@ function switchTab(tab) {
 }
 
 function renderActiveTab() {
-  if (activeTab === 'scouting') renderBoard();
-  if (activeTab === 'cropplan') renderCropPlan();
+  if (activeTab === 'scouting')   renderBoard();
+  if (activeTab === 'cropplan')   renderCropPlan();
+  if (activeTab === 'reporting')  renderReporting();
 }
 
 // ── SCOUTING BOARD ─────────────────────────────────────────────────────────
@@ -584,6 +588,131 @@ function _parseSeason(label) {
              : label.startsWith('Annual') ? 'Annual'
              : label.startsWith('Winter') ? 'Winter' : 'Other';
   return { year, type };
+}
+
+// ── REPORTING TAB ──────────────────────────────────────────────────────────
+async function renderReporting() {
+  const el = document.getElementById('agro-tab-reporting');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:24px 0;text-align:center;color:var(--hint)">Loading…</div>`;
+
+  const farm   = currentFarm;
+  const season = getActiveSeason();
+  if (!farm || !season) {
+    el.innerHTML = `<div style="padding:32px;color:var(--hint)">Select a farm and season to view reports.</div>`;
+    return;
+  }
+
+  try {
+    // Fetch planting sessions + rows for this farm/season
+    const sessions = await dbSelect('planting_sessions',
+      `farm_id=eq.${farm.id}&season_label=eq.${encodeURIComponent(season)}&order=created_at.asc`
+    ).catch(() => []);
+
+    let allRows = [];
+    if (sessions.length) {
+      const rowSets = await Promise.all(
+        sessions.map(s => dbSelect('planting_rows', `session_id=eq.${s.id}&order=created_at.asc`).catch(() => []))
+      );
+      sessions.forEach((s, i) => { rowSets[i].forEach(r => { r._session = s; }); });
+      allRows = rowSets.flat();
+    }
+
+    const fHa  = v => v != null && !isNaN(v) ? (+v).toFixed(1) + ' ha' : '—';
+    const fKg  = v => v != null && !isNaN(v) && +v > 0 ? (+v).toFixed(0) + ' kg' : '—';
+    const fNum = (v, dp = 1) => v != null && !isNaN(v) ? (+v).toFixed(dp) : '—';
+
+    // ── Planting summary: group by paddock/field + variety ─────────────────
+    const plantMap = {};
+    allRows.forEach(r => {
+      const s       = r._session;
+      const field   = r.field_name || s.field_name || '—';
+      const variety = r.variety    || s.variety    || '—';
+      const key     = field + '||' + variety;
+      if (!plantMap[key]) plantMap[key] = {
+        field, variety,
+        commodity: r.commodity || s.commodity || '',
+        sessions: new Set(),
+        ha: 0, bags: 0, kg: 0,
+        dates: [],
+      };
+      const g = plantMap[key];
+      g.sessions.add(s.id);
+      g.ha   += parseFloat(r.hectares)   || 0;
+      g.bags += parseFloat(r.bags_used)  || 0;
+      g.kg   += (parseFloat(r.bags_used) || 0) * (parseFloat(r.kg_per_bag) || 0);
+      if (s.created_at) g.dates.push(s.created_at);
+    });
+
+    const plantRows = Object.values(plantMap).sort((a, b) =>
+      a.field.localeCompare(b.field) || a.variety.localeCompare(b.variety));
+
+    const totalHa  = plantRows.reduce((t, r) => t + r.ha,  0);
+    const totalKg  = plantRows.reduce((t, r) => t + r.kg,  0);
+    const totalBags= plantRows.reduce((t, r) => t + r.bags, 0);
+
+    const plantingTableHtml = plantRows.length === 0
+      ? `<div style="padding:32px;text-align:center;color:var(--hint)">No planting data recorded for ${esc(season)}.</div>`
+      : `
+      <div style="overflow-x:auto">
+        <table style="border-collapse:collapse;width:100%;font-size:0.84rem">
+          <thead>
+            <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
+              <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Paddock / Field</th>
+              <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Variety</th>
+              <th style="text-align:right;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Ha planted</th>
+              <th style="text-align:right;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Bags</th>
+              <th style="text-align:right;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Seed (kg)</th>
+              <th style="text-align:right;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">kg / ha</th>
+              <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Sessions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${plantRows.map((r, i) => {
+              const kgHa = r.ha > 0 && r.kg > 0 ? (r.kg / r.ha).toFixed(1) : null;
+              const kgHaColor = kgHa == null ? 'var(--hint)' : 'var(--fg)';
+              const lastDate  = r.dates.length
+                ? new Date(Math.max(...r.dates.map(d => new Date(d)))).toLocaleDateString('en-AU', { day:'numeric', month:'short' })
+                : '—';
+              return `<tr style="border-bottom:1px solid var(--border);background:${i % 2 === 1 ? 'var(--surface)' : 'var(--bg)'}">
+                <td style="padding:9px 14px;font-weight:600;color:var(--fg)">${esc(r.field)}</td>
+                <td style="padding:9px 14px;color:var(--fg)">${esc(r.variety)}</td>
+                <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace">${fHa(r.ha)}</td>
+                <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--hint)">${r.bags > 0 ? r.bags.toFixed(0) : '—'}</td>
+                <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace">${fKg(r.kg)}</td>
+                <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700;color:${kgHaColor}">${kgHa != null ? kgHa : '—'}</td>
+                <td style="padding:9px 14px;color:var(--hint);font-size:0.78rem">${r.sessions.size} · last ${lastDate}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--border);background:var(--surface)">
+              <td style="padding:9px 14px;font-weight:700;color:var(--fg)" colspan="2">Total</td>
+              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700">${fHa(totalHa)}</td>
+              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700;color:var(--hint)">${totalBags > 0 ? totalBags.toFixed(0) : '—'}</td>
+              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700">${fKg(totalKg)}</td>
+              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700">${totalHa > 0 && totalKg > 0 ? (totalKg / totalHa).toFixed(1) : '—'}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>`;
+
+    el.innerHTML = `
+      <div style="padding:20px 0 8px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+          <h2 style="font-size:1.1rem;font-weight:700;margin:0">Planting Summary</h2>
+          <span style="font-size:0.82rem;color:var(--hint)">${esc(season)} · ${esc(farm.name)}</span>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden;margin-bottom:32px">
+          ${plantingTableHtml}
+        </div>
+        <p style="font-size:0.78rem;color:var(--hint);margin:0">More reports coming — gross margin actuals, input usage by paddock, water use.</p>
+      </div>`;
+
+  } catch (e) {
+    el.innerHTML = `<div style="padding:32px;color:var(--red,#ef4444)">Failed to load reporting data: ${esc(e.message)}</div>`;
+  }
 }
 
 function renderCropPlan() {
