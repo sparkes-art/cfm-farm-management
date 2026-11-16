@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794796947862';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794796947862';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794796947862';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794796947862';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794797155736';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794797155736';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794797155736';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794797155736';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -702,12 +702,62 @@ async function renderReporting() {
         </table>
       </div>`;
 
+    // ── Variety summary tiles ─────────────────────────────────────────────
+    // Group by variety across all paddocks for the snapshot cards
+    const varietyMap = {};
+    plantRows.forEach(r => {
+      const v = r.variety || '—';
+      if (!varietyMap[v]) varietyMap[v] = { ha: 0, kg: 0 };
+      varietyMap[v].ha += r.ha;
+      varietyMap[v].kg += r.kg;
+    });
+    const varietySummary = Object.entries(varietyMap)
+      .sort(([,a],[,b]) => b.ha - a.ha);
+
+    const tileStyle = `background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 20px;min-width:140px;flex:1`;
+    const summaryTiles = varietySummary.length === 0 ? '' : `
+      <div style="margin-bottom:24px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">By Variety — ${esc(season)}</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          ${varietySummary.map(([variety, v]) => {
+            const kgHa = v.ha > 0 && v.kg > 0 ? v.kg / v.ha : null;
+            return `<div style="${tileStyle}">
+              <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--fg)">${esc(variety)}</div>
+              <div style="display:flex;gap:20px;flex-wrap:wrap">
+                <div>
+                  <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:2px">Ha planted</div>
+                  <div style="font-size:22px;font-weight:700;${mono}line-height:1">${v.ha > 0 ? v.ha.toFixed(1) : '—'}</div>
+                </div>
+                ${kgHa != null ? `<div>
+                  <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:2px">kg / ha</div>
+                  <div style="font-size:22px;font-weight:700;${mono}line-height:1">${kgHa.toFixed(2)}</div>
+                </div>` : ''}
+              </div>
+            </div>`;
+          }).join('')}
+          <div style="${tileStyle};border-style:dashed;opacity:0.7">
+            <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--fg)">Total</div>
+            <div style="display:flex;gap:20px;flex-wrap:wrap">
+              <div>
+                <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:2px">Ha planted</div>
+                <div style="font-size:22px;font-weight:700;${mono}line-height:1">${totalHa > 0 ? totalHa.toFixed(1) : '—'}</div>
+              </div>
+              ${totalHa > 0 && totalKg > 0 ? `<div>
+                <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:2px">kg / ha</div>
+                <div style="font-size:22px;font-weight:700;${mono}line-height:1">${(totalKg / totalHa).toFixed(2)}</div>
+              </div>` : ''}
+            </div>
+          </div>
+        </div>
+      </div>`;
+
     el.innerHTML = `
       <div style="padding:20px 0 8px">
         <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap">
           <h2 style="font-size:1.1rem;font-weight:700;margin:0">Planting Summary</h2>
           <span style="font-size:0.82rem;color:var(--hint)">${esc(season)} · ${esc(farm.name)}</span>
         </div>
+        ${summaryTiles}
         <div class="card" style="padding:0;overflow:hidden;margin-bottom:32px">
           ${plantingTableHtml}
         </div>
