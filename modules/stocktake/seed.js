@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794794335752';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794794335752';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794794335752';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794794335752';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794794478747';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794794478747';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794794478747';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794794478747';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -147,7 +147,7 @@ async function _render(container, farm, period, allPeriods = []) {
   if (usageSessionIds.length > 0) {
     try {
       linkedSessions = await dbSelect('planting_sessions',
-        `id=in.(${usageSessionIds.join(',')})&select=id,field_name,sub_block,commodity,variety,seed_type,kg_per_bag,seed_in_bags,seed_in_kg,seed_out_bags,seed_out_kg,status,session_date`);
+        `id=in.(${usageSessionIds.join(',')})&select=id,field_name,sub_block,commodity,variety,seed_type,kg_per_bag,seed_in_bags,seed_in_kg,seed_out_bags,seed_out_kg,status,created_at`);
     } catch { /* graceful — session table may not be accessible */ }
   }
   const sessionById = Object.fromEntries(linkedSessions.map(s => [s.id, s]));
