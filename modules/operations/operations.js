@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794796515062';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794796515062';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794796515062';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794796515062';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794796662412';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794796662412';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794796662412';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794796662412';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -924,7 +924,15 @@ function _showNewSessionModal() {
         </div>
         <div id="ns-cp-banner" style="grid-column:1/-1;display:none"></div>
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Water Type <span style="color:var(--red)">*</span></label>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Commodity</label>
+          <select id="ns-commodity-sel"
+            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            <option value="">Select commodity… (or pre-fills from crop plan)</option>
+            ${getCropTypes().map(ct => `<option value="${esc(ct.name)}">${esc(ct.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Crop Type</label>
           <select id="ns-crop-type"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
             <option value="">Select…</option>
@@ -969,15 +977,20 @@ function _showNewSessionModal() {
       </div>`,
     confirmLabel: 'Start Session →',
     onMounted: (modalEl) => {
-      const fieldSel = modalEl.querySelector('#ns-field');
-      const subBlk   = modalEl.querySelector('#ns-subblock');
-      const cpBanner = modalEl.querySelector('#ns-cp-banner');
+      const fieldSel   = modalEl.querySelector('#ns-field');
+      const subBlk     = modalEl.querySelector('#ns-subblock');
+      const cpBanner   = modalEl.querySelector('#ns-cp-banner');
+      const commSel    = modalEl.querySelector('#ns-commodity-sel');
 
       function checkCropPlan() {
         const field = fieldSel.value;
         const sub   = subBlk.value.trim();
         const cp    = field ? _findCropPlan(field, sub, season) : null;
         if (cp) {
+          // Pre-fill commodity from crop plan if not already set
+          if (cp.commodity && commSel && !commSel.value) {
+            commSel.value = cp.commodity;
+          }
           cpBanner.style.display = 'block';
           cpBanner.innerHTML = `
             <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-radius:8px;background:var(--blue-bg);border:1px solid var(--blue);font-size:12px;color:var(--blue)">
@@ -1009,7 +1022,7 @@ function _showNewSessionModal() {
         field_name:       field,
         sub_block:        sub,
         crop_type:        modalEl.querySelector('#ns-crop-type')?.value || null,
-        commodity:        cp?.commodity || null,   // from crop plan; rows will confirm/override
+        commodity:        modalEl.querySelector('#ns-commodity-sel')?.value || cp?.commodity || null,
         variety:          cp?.variety   || null,   // from crop plan; rows will confirm/override
         operator_default: modalEl.querySelector('#ns-operator')?.value?.trim() || null,
         seed_type:        'bags',                  // default; first row toggle overrides on session
@@ -1042,21 +1055,21 @@ function _showEditHeaderModal(session) {
     bodyHTML: `
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Water Type</label>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Commodity</label>
+          <select id="ns-commodity"
+            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            <option value="">Select commodity…</option>
+            ${getCropTypes().map(ct => `<option value="${esc(ct.name)}" ${ct.name === session.commodity ? 'selected' : ''}>${esc(ct.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Crop Type</label>
           <select id="eh-crop-type"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
             <option value="">Select…</option>
             <option value="Dryland" ${session.crop_type === 'Dryland' ? 'selected' : ''}>Dryland</option>
             <option value="Irrigated" ${session.crop_type === 'Irrigated' ? 'selected' : ''}>Irrigated</option>
             <option value="Pivot" ${session.crop_type === 'Pivot' ? 'selected' : ''}>Pivot</option>
-          </select>
-        </div>
-        <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Commodity</label>
-          <select id="ns-commodity"
-            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
-            <option value="">Select crop type…</option>
-            ${getCropTypes().map(ct => `<option value="${esc(ct.name)}" ${ct.name === session.commodity ? 'selected' : ''}>${esc(ct.name)}</option>`).join('')}
           </select>
         </div>
         ${[
@@ -1539,7 +1552,7 @@ function _showCloseSessionModal(session) {
 
       // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
       try {
-        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794796515062');
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794796662412');
         const farm = getActiveFarm();
         await writeSessionSeedUsage(farm, session);
       } catch (e) {

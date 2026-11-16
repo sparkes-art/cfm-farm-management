@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794796515062';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794796515062';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794796515062';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794796515062';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794796662412';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794796662412';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794796662412';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794796662412';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -669,7 +669,7 @@ async function renderReporting() {
             <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
               <th style="${THL}">Paddock / Field</th>
               <th style="${THL}">Variety</th>
-              <th style="${THL}">Water type</th>
+              <th style="${THL}">Crop type</th>
               <th style="${TH}">Map area</th>
               <th style="${TH}">Ha planted</th>
               <th style="${TH}">Seed (kg)</th>
