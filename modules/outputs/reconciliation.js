@@ -1,10 +1,10 @@
 // modules/outputs/reconciliation.js
 // Income Reconciliation — point-in-time position report for accounting
 
-import { dbSelect } from '../../js/supabase-client.js?v=1794794478747';
-import { getActiveFarm, getActiveSeason } from '../../js/app-state.js?v=1794794478747';
-import { formatCurrency, formatNumber, formatDate, qs, currentSeason, toast } from '../../js/ui.js?v=1794794478747';
-import { getCommodities } from '../../js/commodities.js?v=1794794478747';
+import { dbSelect } from '../../js/supabase-client.js?v=1794794652131';
+import { getActiveFarm, getActiveSeason } from '../../js/app-state.js?v=1794794652131';
+import { formatCurrency, formatNumber, formatDate, qs, currentSeason, toast } from '../../js/ui.js?v=1794794652131';
+import { getCommodities } from '../../js/commodities.js?v=1794794652131';
 
 export async function mountReconciliation(container) {
   const farm = getActiveFarm();
