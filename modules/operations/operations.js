@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794794760419';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794794760419';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794794760419';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794794760419';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794794883316';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794794883316';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794794883316';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794794883316';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -374,6 +374,8 @@ function _renderDetail() {
           const auslot   = row.auslot_override || session.auslot_default;
           const bulkKg   = parseFloat(row.bulk_kg) || 0;
           const rowKg    = (parseInt(row.cotton_bags) || 0) * kgPerBag + bulkKg;
+          const rowHa    = parseFloat(row.hectares) || 0;
+          const kgHa     = rowHa > 0 && rowKg > 0 ? (rowKg / rowHa).toFixed(1) : '—';
           return `<tr class="ops-row-tr" data-row-id="${esc(row.id)}">
             <td style="padding:10px 12px;white-space:nowrap">${_fmtDate(row.row_date)}</td>
             <td style="padding:10px 12px;color:var(--fg2)">${esc(row.row_time || '—')}</td>
@@ -383,6 +385,7 @@ function _renderDetail() {
             <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums">${row.cotton_bags != null ? row.cotton_bags : '—'}</td>
             <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;color:${bulkKg > 0 ? 'var(--fg)' : 'var(--hint)'}">${bulkKg > 0 ? bulkKg.toFixed(0) : '—'}</td>
             <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600">${rowKg > 0 ? rowKg.toFixed(0) : '—'}</td>
+            <td style="padding:10px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:${kgHa !== '—' ? 'var(--fg)' : 'var(--hint)'}">${kgHa !== '—' ? kgHa : '—'}</td>
             <td style="padding:10px 12px;color:var(--hint);font-size:12px">${esc(auslot || '—')}</td>
             <td style="padding:10px 12px">
               ${(row.chemicals || []).map(c =>
@@ -410,6 +413,7 @@ function _renderDetail() {
                     <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)">Bags</th>
                     <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)">Bulk kg</th>
                     <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)">Total kg</th>
+                    <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)">kg/ha</th>
                     <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:left;white-space:nowrap;border-bottom:1px solid var(--border)">AusLot</th>
                     <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);text-align:left;border-bottom:1px solid var(--border)">Chemicals</th>
                     <th style="border-bottom:1px solid var(--border)"></th>
@@ -423,6 +427,7 @@ function _renderDetail() {
                     <td style="padding:10px 12px;font-weight:700;text-align:right;border-top:2px solid var(--border);font-variant-numeric:tabular-nums">${totalBags}</td>
                     <td style="padding:10px 12px;font-weight:700;text-align:right;border-top:2px solid var(--border);font-variant-numeric:tabular-nums">${rows.reduce((t,r) => t + (parseFloat(r.bulk_kg)||0), 0).toFixed(0)}</td>
                     <td style="padding:10px 12px;font-weight:700;text-align:right;border-top:2px solid var(--border);font-variant-numeric:tabular-nums">${_sessionTotalKg(session.id, session).toFixed(0)} kg</td>
+                    <td style="padding:10px 12px;font-weight:700;text-align:right;border-top:2px solid var(--border);font-variant-numeric:tabular-nums">${totalHa > 0 && _sessionTotalKg(session.id, session) > 0 ? (_sessionTotalKg(session.id, session) / totalHa).toFixed(1) : '—'}</td>
                     <td colspan="2" style="border-top:2px solid var(--border)"></td>
                   </tr>
                 </tbody>
@@ -1398,7 +1403,7 @@ function _showCloseSessionModal(session) {
         <div>✓</div>
         <div>
           <strong>Total planted: ${totalHa.toFixed(2)} ha</strong> across ${rows.length} row${rows.length !== 1 ? 's' : ''}<br>
-          Seed used (from rows): <strong>${totalBags > 0 ? totalBags + ' bags' : ''}${totalRowKg > 0 ? ' · ' + totalRowKg.toFixed(0) + ' kg' : ''}</strong>
+          Seed used (from rows): <strong>${totalBags > 0 ? totalBags + ' bags' : ''}${totalRowKg > 0 ? ' · ' + totalRowKg.toFixed(0) + ' kg' : ''}${totalHa > 0 && totalRowKg > 0 ? ' · ' + (totalRowKg / totalHa).toFixed(1) + ' kg/ha' : ''}</strong>
           ${varietiesUsed.length ? ` · Var: <strong>${esc(varietyDisplay)}</strong>` : ''}
         </div>
       </div>
@@ -1512,7 +1517,7 @@ function _showCloseSessionModal(session) {
 
       // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
       try {
-        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794794760419');
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794794883316');
         const farm = getActiveFarm();
         await writeSessionSeedUsage(farm, session);
       } catch (e) {
