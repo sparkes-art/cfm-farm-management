@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794787074907';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794787074907';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794787074907';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794787074907';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794788028533';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794788028533';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794788028533';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794788028533';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -1022,8 +1022,9 @@ export async function writeSessionSeedUsage(farm, session) {
 
   if (existing.length > 0) return; // already written (pending or allocated)
 
-  const sessionDate = session.session_date || new Date().toISOString().slice(0, 10);
+  const sessionDate = session.session_date || session.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10);
   const fieldLabel  = `${session.field_name}${session.sub_block ? ' · ' + session.sub_block : ''}`;
+  const varLabel    = session.variety ? ` (${session.variety})` : '';
 
   try {
     await dbInsert('stock_movements', {
@@ -1035,7 +1036,7 @@ export async function writeSessionSeedUsage(farm, session) {
       unit,
       kg_per_bag:    parseFloat(session.kg_per_bag) || null,
       occurred_on:   sessionDate,
-      note:          `Planting — ${fieldLabel}`,
+      note:          `Planting — ${fieldLabel}${varLabel}`,
       source_system: 'operations',
       source_ref:    session.id,
     });
