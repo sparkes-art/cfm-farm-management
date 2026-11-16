@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794796075862';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794796075862';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794796075862';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794796075862';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794796382037';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794796382037';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794796382037';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794796382037';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -618,9 +618,15 @@ async function renderReporting() {
       allRows = rowSets.flat();
     }
 
-    const fHa  = v => v != null && !isNaN(v) ? (+v).toFixed(1) + ' ha' : '—';
+    const fHa  = v => v != null && !isNaN(v) && +v > 0 ? (+v).toFixed(1) + ' ha' : '—';
     const fKg  = v => v != null && !isNaN(v) && +v > 0 ? (+v).toFixed(0) + ' kg' : '—';
-    const fNum = (v, dp = 1) => v != null && !isNaN(v) ? (+v).toFixed(dp) : '—';
+    const fKgHa = v => v != null && !isNaN(v) && +v > 0 ? (+v).toFixed(2) : '—';
+    const mono = `font-family:'DM Mono',monospace;font-feature-settings:"tnum" 1,"zero" 0;`;
+
+    // Fetch paddocks for map area lookup
+    const paddocks = await dbSelect('paddocks', `farm_id=eq.${farm.id}`).catch(() => []);
+    const paddockAreaMap = {};
+    paddocks.forEach(p => { paddockAreaMap[p.name] = parseFloat(p.area_ha) || null; });
 
     // ── Planting summary: group by paddock/field + variety ─────────────────
     const plantMap = {};
@@ -632,27 +638,26 @@ async function renderReporting() {
       if (!plantMap[key]) plantMap[key] = {
         field, variety,
         commodity: r.commodity || s.commodity || '',
-        sessions: new Set(),
-        ha: 0, bags: 0, kg: 0,
-        dates: [],
+        mapArea: paddockAreaMap[field] || null,
+        ha: 0, kg: 0,
       };
       const g = plantMap[key];
-      g.sessions.add(s.id);
-      const kpb   = parseFloat(r.kg_per_bag) || parseFloat(s.kg_per_bag) || 0;
-      const bags  = parseFloat(r.cotton_bags) || 0;
+      const kpb    = parseFloat(r.kg_per_bag) || parseFloat(s.kg_per_bag) || 0;
+      const bags   = parseFloat(r.cotton_bags) || 0;
       const bulkKg = parseFloat(r.bulk_kg) || 0;
-      g.ha   += parseFloat(r.hectares) || 0;
-      g.bags += bags;
-      g.kg   += bulkKg > 0 ? bulkKg : (bags * kpb);
-      if (s.created_at) g.dates.push(s.created_at);
+      g.ha += parseFloat(r.hectares) || 0;
+      g.kg += bulkKg > 0 ? bulkKg : (bags * kpb);
     });
 
     const plantRows = Object.values(plantMap).sort((a, b) =>
       a.field.localeCompare(b.field) || a.variety.localeCompare(b.variety));
 
-    const totalHa  = plantRows.reduce((t, r) => t + r.ha,  0);
-    const totalKg  = plantRows.reduce((t, r) => t + r.kg,  0);
-    const totalBags= plantRows.reduce((t, r) => t + r.bags, 0);
+    const totalMapHa = plantRows.reduce((t, r) => t + (r.mapArea || 0), 0);
+    const totalHa    = plantRows.reduce((t, r) => t + r.ha, 0);
+    const totalKg    = plantRows.reduce((t, r) => t + r.kg, 0);
+
+    const TH = `text-align:right;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)`;
+    const THL = `text-align:left;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)`;
 
     const plantingTableHtml = plantRows.length === 0
       ? `<div style="padding:32px;text-align:center;color:var(--hint)">No planting data recorded for ${esc(season)}.</div>`
@@ -661,42 +666,34 @@ async function renderReporting() {
         <table style="border-collapse:collapse;width:100%;font-size:0.84rem">
           <thead>
             <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
-              <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Paddock / Field</th>
-              <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Variety</th>
-              <th style="text-align:right;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Ha planted</th>
-              <th style="text-align:right;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Bags</th>
-              <th style="text-align:right;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Seed (kg)</th>
-              <th style="text-align:right;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">kg / ha</th>
-              <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)">Sessions</th>
+              <th style="${THL}">Paddock / Field</th>
+              <th style="${THL}">Variety</th>
+              <th style="${TH}">Map area</th>
+              <th style="${TH}">Ha planted</th>
+              <th style="${TH}">Seed (kg)</th>
+              <th style="${TH}">kg / ha</th>
             </tr>
           </thead>
           <tbody>
             ${plantRows.map((r, i) => {
-              const kgHaRaw = r.ha > 0 && r.kg > 0 ? r.kg / r.ha : null;
-              const kgHa = kgHaRaw != null ? (Number.isInteger(kgHaRaw) || kgHaRaw % 1 < 0.05 ? Math.round(kgHaRaw).toString() : kgHaRaw.toFixed(1)) : null;
-              const kgHaColor = kgHa == null ? 'var(--hint)' : 'var(--fg)';
-              const lastDate  = r.dates.length
-                ? new Date(Math.max(...r.dates.map(d => new Date(d)))).toLocaleDateString('en-AU', { day:'numeric', month:'short' })
-                : '—';
+              const kgHa = r.ha > 0 && r.kg > 0 ? r.kg / r.ha : null;
               return `<tr style="border-bottom:1px solid var(--border);background:${i % 2 === 1 ? 'var(--surface)' : 'var(--bg)'}">
                 <td style="padding:9px 14px;font-weight:600;color:var(--fg)">${esc(r.field)}</td>
                 <td style="padding:9px 14px;color:var(--fg)">${esc(r.variety)}</td>
-                <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace">${fHa(r.ha)}</td>
-                <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;color:var(--hint)">${r.bags > 0 ? r.bags.toFixed(0) : '—'}</td>
-                <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace">${fKg(r.kg)}</td>
-                <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700;color:${kgHaColor}">${kgHa != null ? kgHa : '—'}</td>
-                <td style="padding:9px 14px;color:var(--hint);font-size:0.78rem">${r.sessions.size} · last ${lastDate}</td>
+                <td style="padding:9px 14px;text-align:right;${mono}color:var(--hint)">${r.mapArea != null ? r.mapArea.toFixed(1) + ' ha' : '—'}</td>
+                <td style="padding:9px 14px;text-align:right;${mono}">${fHa(r.ha)}</td>
+                <td style="padding:9px 14px;text-align:right;${mono}">${fKg(r.kg)}</td>
+                <td style="padding:9px 14px;text-align:right;${mono}font-weight:700;color:${kgHa != null ? 'var(--fg)' : 'var(--hint)'}">${fKgHa(kgHa)}</td>
               </tr>`;
             }).join('')}
           </tbody>
           <tfoot>
             <tr style="border-top:2px solid var(--border);background:var(--surface)">
               <td style="padding:9px 14px;font-weight:700;color:var(--fg)" colspan="2">Total</td>
-              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700">${fHa(totalHa)}</td>
-              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700;color:var(--hint)">${totalBags > 0 ? totalBags.toFixed(0) : '—'}</td>
-              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700">${fKg(totalKg)}</td>
-              <td style="padding:9px 14px;text-align:right;font-family:'DM Mono',monospace;font-weight:700">${(() => { if (!(totalHa > 0 && totalKg > 0)) return '—'; const v = totalKg / totalHa; return (Number.isInteger(v) || v % 1 < 0.05) ? Math.round(v).toString() : v.toFixed(1); })()}</td>
-              <td></td>
+              <td style="padding:9px 14px;text-align:right;${mono}font-weight:700;color:var(--hint)">${totalMapHa > 0 ? totalMapHa.toFixed(1) + ' ha' : '—'}</td>
+              <td style="padding:9px 14px;text-align:right;${mono}font-weight:700">${fHa(totalHa)}</td>
+              <td style="padding:9px 14px;text-align:right;${mono}font-weight:700">${fKg(totalKg)}</td>
+              <td style="padding:9px 14px;text-align:right;${mono}font-weight:700">${fKgHa(totalHa > 0 && totalKg > 0 ? totalKg / totalHa : null)}</td>
             </tr>
           </tfoot>
         </table>
