@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794796382037';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794796382037';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794796382037';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794796382037';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794796515062';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794796515062';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794796515062';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794796515062';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -637,7 +637,8 @@ async function renderReporting() {
       const key     = field + '||' + variety;
       if (!plantMap[key]) plantMap[key] = {
         field, variety,
-        commodity: r.commodity || s.commodity || '',
+        commodity:  r.commodity  || s.commodity  || '',
+        cropType:   s.crop_type  || null,
         mapArea: paddockAreaMap[field] || null,
         ha: 0, kg: 0,
       };
@@ -668,6 +669,7 @@ async function renderReporting() {
             <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
               <th style="${THL}">Paddock / Field</th>
               <th style="${THL}">Variety</th>
+              <th style="${THL}">Water type</th>
               <th style="${TH}">Map area</th>
               <th style="${TH}">Ha planted</th>
               <th style="${TH}">Seed (kg)</th>
@@ -680,6 +682,7 @@ async function renderReporting() {
               return `<tr style="border-bottom:1px solid var(--border);background:${i % 2 === 1 ? 'var(--surface)' : 'var(--bg)'}">
                 <td style="padding:9px 14px;font-weight:600;color:var(--fg)">${esc(r.field)}</td>
                 <td style="padding:9px 14px;color:var(--fg)">${esc(r.variety)}</td>
+                <td style="padding:9px 14px;color:var(--hint);font-size:0.8rem">${r.cropType ? esc(r.cropType) : '—'}</td>
                 <td style="padding:9px 14px;text-align:right;${mono}color:var(--hint)">${r.mapArea != null ? r.mapArea.toFixed(1) + ' ha' : '—'}</td>
                 <td style="padding:9px 14px;text-align:right;${mono}">${fHa(r.ha)}</td>
                 <td style="padding:9px 14px;text-align:right;${mono}">${fKg(r.kg)}</td>
@@ -689,7 +692,7 @@ async function renderReporting() {
           </tbody>
           <tfoot>
             <tr style="border-top:2px solid var(--border);background:var(--surface)">
-              <td style="padding:9px 14px;font-weight:700;color:var(--fg)" colspan="2">Total</td>
+              <td style="padding:9px 14px;font-weight:700;color:var(--fg)" colspan="3">Total</td>
               <td style="padding:9px 14px;text-align:right;${mono}font-weight:700;color:var(--hint)">${totalMapHa > 0 ? totalMapHa.toFixed(1) + ' ha' : '—'}</td>
               <td style="padding:9px 14px;text-align:right;${mono}font-weight:700">${fHa(totalHa)}</td>
               <td style="padding:9px 14px;text-align:right;${mono}font-weight:700">${fKg(totalKg)}</td>
