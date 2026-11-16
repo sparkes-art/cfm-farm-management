@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794797155736';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794797155736';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794797155736';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794797155736';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794797914869';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794797914869';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794797914869';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794797914869';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });

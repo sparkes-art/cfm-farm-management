@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794797155736';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794797155736';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794797155736';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794797155736';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794797914869';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794797914869';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794797914869';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794797914869';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -591,6 +591,26 @@ function _parseSeason(label) {
 }
 
 // ── REPORTING TAB ──────────────────────────────────────────────────────────
+
+// Assign a consistent colour palette index to a crop type string.
+// Uses a simple djb2-style hash so "Cotton Dryland" always gets the same colour.
+const _REPORT_PALETTES = [
+  { bg: '#dbeafe', text: '#1e3a8a', dot: '#3b82f6' }, // blue
+  { bg: '#d1fae5', text: '#065f46', dot: '#10b981' }, // green
+  { bg: '#ede9fe', text: '#3b0764', dot: '#8b5cf6' }, // purple
+  { bg: '#ffedd5', text: '#7c2d12', dot: '#f97316' }, // orange
+  { bg: '#fce7f3', text: '#831843', dot: '#ec4899' }, // pink
+  { bg: '#ccfbf1', text: '#134e4a', dot: '#14b8a6' }, // teal
+  { bg: '#fef9c3', text: '#713f12', dot: '#eab308' }, // yellow
+  { bg: '#f3e8ff', text: '#581c87', dot: '#a855f7' }, // violet
+];
+function _ctPalette(cropType) {
+  if (!cropType) return { bg: 'var(--surface)', text: 'var(--hint)', dot: 'var(--border)' };
+  let h = 5381;
+  for (let i = 0; i < cropType.length; i++) h = ((h << 5) + h) ^ cropType.charCodeAt(i);
+  return _REPORT_PALETTES[Math.abs(h) % _REPORT_PALETTES.length];
+}
+
 async function renderReporting() {
   const el = document.getElementById('agro-tab-reporting');
   if (!el) return;
@@ -604,7 +624,6 @@ async function renderReporting() {
   }
 
   try {
-    // Fetch planting sessions + rows for this farm/season
     const sessions = await dbSelect('planting_sessions',
       `farm_id=eq.${farm.id}&season_label=eq.${encodeURIComponent(season)}&order=created_at.asc`
     ).catch(() => []);
@@ -618,17 +637,16 @@ async function renderReporting() {
       allRows = rowSets.flat();
     }
 
-    const fHa  = v => v != null && !isNaN(v) && +v > 0 ? (+v).toFixed(1) + ' ha' : '—';
-    const fKg  = v => v != null && !isNaN(v) && +v > 0 ? (+v).toFixed(0) + ' kg' : '—';
+    const fHa   = v => v != null && !isNaN(v) && +v > 0 ? (+v).toFixed(1) + ' ha' : '—';
+    const fKg   = v => v != null && !isNaN(v) && +v > 0 ? (+v).toFixed(0) + ' kg' : '—';
     const fKgHa = v => v != null && !isNaN(v) && +v > 0 ? (+v).toFixed(2) : '—';
-    const mono = `font-family:'DM Mono',monospace;font-feature-settings:"tnum" 1,"zero" 0;`;
+    const mono  = `font-family:'DM Mono',monospace;font-feature-settings:"tnum" 1,"zero" 0;`;
 
-    // Fetch paddocks for map area lookup
     const paddocks = await dbSelect('paddocks', `farm_id=eq.${farm.id}`).catch(() => []);
     const paddockAreaMap = {};
     paddocks.forEach(p => { paddockAreaMap[p.name] = parseFloat(p.area_ha) || null; });
 
-    // ── Planting summary: group by paddock/field + variety ─────────────────
+    // ── Build row-level data (field + variety grain) ───────────────────────
     const plantMap = {};
     allRows.forEach(r => {
       const s       = r._session;
@@ -637,12 +655,11 @@ async function renderReporting() {
       const key     = field + '||' + variety;
       if (!plantMap[key]) plantMap[key] = {
         field, variety,
-        commodity:  r.commodity  || s.commodity  || '',
-        cropType:   s.crop_type  || null,
-        mapArea: paddockAreaMap[field] || null,
+        cropType: s.crop_type || null,
+        mapArea:  paddockAreaMap[field] || null,
         ha: 0, kg: 0,
       };
-      const g = plantMap[key];
+      const g      = plantMap[key];
       const kpb    = parseFloat(r.kg_per_bag) || parseFloat(s.kg_per_bag) || 0;
       const bags   = parseFloat(r.cotton_bags) || 0;
       const bulkKg = parseFloat(r.bulk_kg) || 0;
@@ -651,104 +668,113 @@ async function renderReporting() {
     });
 
     const plantRows = Object.values(plantMap).sort((a, b) =>
-      a.field.localeCompare(b.field) || a.variety.localeCompare(b.variety));
+      (a.cropType || '').localeCompare(b.cropType || '') ||
+      a.field.localeCompare(b.field) ||
+      a.variety.localeCompare(b.variety)
+    );
 
-    const totalMapHa = plantRows.reduce((t, r) => t + (r.mapArea || 0), 0);
-    const totalHa    = plantRows.reduce((t, r) => t + r.ha, 0);
-    const totalKg    = plantRows.reduce((t, r) => t + r.kg, 0);
-
-    const TH = `text-align:right;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)`;
-    const THL = `text-align:left;padding:9px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint)`;
-
-    const plantingTableHtml = plantRows.length === 0
-      ? `<div style="padding:32px;text-align:center;color:var(--hint)">No planting data recorded for ${esc(season)}.</div>`
-      : `
-      <div style="overflow-x:auto">
-        <table style="border-collapse:collapse;width:100%;font-size:0.84rem">
-          <thead>
-            <tr style="background:var(--surface);border-bottom:2px solid var(--border)">
-              <th style="${THL}">Paddock / Field</th>
-              <th style="${THL}">Variety</th>
-              <th style="${THL}">Crop type</th>
-              <th style="${TH}">Map area</th>
-              <th style="${TH}">Ha planted</th>
-              <th style="${TH}">Seed (kg)</th>
-              <th style="${TH}">kg / ha</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${plantRows.map((r, i) => {
-              const kgHa = r.ha > 0 && r.kg > 0 ? r.kg / r.ha : null;
-              return `<tr style="border-bottom:1px solid var(--border);background:${i % 2 === 1 ? 'var(--surface)' : 'var(--bg)'}">
-                <td style="padding:9px 14px;font-weight:600;color:var(--fg)">${esc(r.field)}</td>
-                <td style="padding:9px 14px;color:var(--fg)">${esc(r.variety)}</td>
-                <td style="padding:9px 14px;color:var(--hint);font-size:0.8rem">${r.cropType ? esc(r.cropType) : '—'}</td>
-                <td style="padding:9px 14px;text-align:right;${mono}color:var(--hint)">${r.mapArea != null ? r.mapArea.toFixed(1) + ' ha' : '—'}</td>
-                <td style="padding:9px 14px;text-align:right;${mono}">${fHa(r.ha)}</td>
-                <td style="padding:9px 14px;text-align:right;${mono}">${fKg(r.kg)}</td>
-                <td style="padding:9px 14px;text-align:right;${mono}font-weight:700;color:${kgHa != null ? 'var(--fg)' : 'var(--hint)'}">${fKgHa(kgHa)}</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-          <tfoot>
-            <tr style="border-top:2px solid var(--border);background:var(--surface)">
-              <td style="padding:9px 14px;font-weight:700;color:var(--fg)" colspan="3">Total</td>
-              <td style="padding:9px 14px;text-align:right;${mono}font-weight:700;color:var(--hint)">${totalMapHa > 0 ? totalMapHa.toFixed(1) + ' ha' : '—'}</td>
-              <td style="padding:9px 14px;text-align:right;${mono}font-weight:700">${fHa(totalHa)}</td>
-              <td style="padding:9px 14px;text-align:right;${mono}font-weight:700">${fKg(totalKg)}</td>
-              <td style="padding:9px 14px;text-align:right;${mono}font-weight:700">${fKgHa(totalHa > 0 && totalKg > 0 ? totalKg / totalHa : null)}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>`;
-
-    // ── Variety summary tiles ─────────────────────────────────────────────
-    // Group by variety across all paddocks for the snapshot cards
-    const varietyMap = {};
+    // ── Group by crop type ─────────────────────────────────────────────────
+    const ctMap = {};
     plantRows.forEach(r => {
-      const v = r.variety || '—';
-      if (!varietyMap[v]) varietyMap[v] = { ha: 0, kg: 0 };
-      varietyMap[v].ha += r.ha;
-      varietyMap[v].kg += r.kg;
+      const ct = r.cropType || '(No crop type)';
+      if (!ctMap[ct]) ctMap[ct] = { ha: 0, kg: 0, varieties: new Set(), rows: [] };
+      ctMap[ct].ha += r.ha;
+      ctMap[ct].kg += r.kg;
+      if (r.variety && r.variety !== '—') ctMap[ct].varieties.add(r.variety);
+      ctMap[ct].rows.push(r);
     });
-    const varietySummary = Object.entries(varietyMap)
-      .sort(([,a],[,b]) => b.ha - a.ha);
 
-    const tileStyle = `background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 20px;min-width:140px;flex:1`;
-    const summaryTiles = varietySummary.length === 0 ? '' : `
-      <div style="margin-bottom:24px">
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:10px">By Variety — ${esc(season)}</div>
-        <div style="display:flex;gap:12px;flex-wrap:wrap">
-          ${varietySummary.map(([variety, v]) => {
-            const kgHa = v.ha > 0 && v.kg > 0 ? v.kg / v.ha : null;
-            return `<div style="${tileStyle}">
-              <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--fg)">${esc(variety)}</div>
-              <div style="display:flex;gap:20px;flex-wrap:wrap">
-                <div>
-                  <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:2px">Ha planted</div>
-                  <div style="font-size:22px;font-weight:700;${mono}line-height:1">${v.ha > 0 ? v.ha.toFixed(1) : '—'}</div>
-                </div>
-                ${kgHa != null ? `<div>
-                  <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:2px">kg / ha</div>
-                  <div style="font-size:22px;font-weight:700;${mono}line-height:1">${kgHa.toFixed(2)}</div>
-                </div>` : ''}
+    // Sort crop types by total ha descending
+    const ctEntries = Object.entries(ctMap).sort(([,a],[,b]) => b.ha - a.ha);
+
+    const totalHa = plantRows.reduce((t, r) => t + r.ha, 0);
+    const totalKg = plantRows.reduce((t, r) => t + r.kg, 0);
+
+    const TH  = `text-align:right;padding:7px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);white-space:nowrap`;
+    const THL = `text-align:left;padding:7px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--hint);white-space:nowrap`;
+
+    const noData = plantRows.length === 0;
+
+    // ── Render crop-type cards ─────────────────────────────────────────────
+    const ctCards = noData ? '' : ctEntries.map(([ct, g], cardIdx) => {
+      const pal   = _ctPalette(ct);
+      const kgHa  = g.ha > 0 && g.kg > 0 ? g.kg / g.ha : null;
+      const varCount = g.varieties.size;
+      const tableId  = `rpt-vt-${cardIdx}`;
+
+      // Variety breakdown table rows (sorted by ha desc within this crop type)
+      const tableRows = g.rows.sort((a, b) => b.ha - a.ha).map((r, ri) => {
+        const rkgHa = r.ha > 0 && r.kg > 0 ? r.kg / r.ha : null;
+        return `<tr style="border-top:1px solid var(--border);${ri % 2 === 1 ? 'background:var(--bg)' : ''}">
+          <td style="padding:7px 12px;font-weight:600;color:var(--fg)">${esc(r.variety)}</td>
+          <td style="padding:7px 12px;color:var(--fg)">
+            <span style="display:inline-flex;align-items:center;gap:5px">
+              <span style="width:7px;height:7px;border-radius:50%;background:${pal.dot};display:inline-block;flex-shrink:0"></span>
+              <span style="font-size:0.8rem;padding:1px 7px;border-radius:12px;background:${pal.bg};color:${pal.text};font-weight:600">${esc(ct)}</span>
+            </span>
+          </td>
+          <td style="padding:7px 12px;text-align:right;${mono}color:var(--hint);font-size:0.82rem">${r.mapArea != null ? r.mapArea.toFixed(1) + ' ha' : '—'}</td>
+          <td style="padding:7px 12px;text-align:right;${mono}font-size:0.82rem">${fHa(r.ha)}</td>
+          <td style="padding:7px 12px;text-align:right;${mono}font-size:0.82rem">${fKg(r.kg)}</td>
+          <td style="padding:7px 12px;text-align:right;${mono}font-weight:700;font-size:0.82rem;color:${rkgHa != null ? 'var(--fg)' : 'var(--hint)'}">${fKgHa(rkgHa)}</td>
+        </tr>`;
+      }).join('');
+
+      return `
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:8px">
+          <!-- Card header -->
+          <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border)">
+            <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:${pal.bg};color:${pal.text};font-size:0.82rem;font-weight:600;white-space:nowrap">
+              <span style="width:7px;height:7px;border-radius:50%;background:${pal.dot};display:inline-block;flex-shrink:0"></span>
+              ${esc(ct)}
+            </span>
+            <div style="display:flex;gap:0;margin-left:auto">
+              <div style="text-align:right;padding:0 14px;border-left:1px solid var(--border)">
+                <span style="display:block;${mono}font-size:0.9rem;font-weight:500;line-height:1.2">${g.ha > 0 ? g.ha.toFixed(1) : '—'}</span>
+                <span style="font-size:10px;color:var(--hint);letter-spacing:0.04em">HA PLANTED</span>
               </div>
-            </div>`;
-          }).join('')}
-          <div style="${tileStyle};border-style:dashed;opacity:0.7">
-            <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:var(--fg)">Total</div>
-            <div style="display:flex;gap:20px;flex-wrap:wrap">
-              <div>
-                <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:2px">Ha planted</div>
-                <div style="font-size:22px;font-weight:700;${mono}line-height:1">${totalHa > 0 ? totalHa.toFixed(1) : '—'}</div>
+              <div style="text-align:right;padding:0 14px;border-left:1px solid var(--border)">
+                <span style="display:block;${mono}font-size:0.9rem;font-weight:500;line-height:1.2">${kgHa != null ? kgHa.toFixed(2) : '—'}</span>
+                <span style="font-size:10px;color:var(--hint);letter-spacing:0.04em">KG / HA AVG</span>
               </div>
-              ${totalHa > 0 && totalKg > 0 ? `<div>
-                <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:2px">kg / ha</div>
-                <div style="font-size:22px;font-weight:700;${mono}line-height:1">${(totalKg / totalHa).toFixed(2)}</div>
-              </div>` : ''}
+              <div style="text-align:right;padding:0 14px;border-left:1px solid var(--border)">
+                <span style="display:block;${mono}font-size:0.9rem;font-weight:500;line-height:1.2;color:var(--hint)">${varCount}</span>
+                <span style="font-size:10px;color:var(--hint);letter-spacing:0.04em">VARIETIES</span>
+              </div>
             </div>
           </div>
-        </div>
+          <!-- Toggle -->
+          <button class="rpt-variety-toggle" data-target="${tableId}"
+            style="display:flex;align-items:center;gap:6px;padding:6px 14px;width:100%;border:none;border-top:none;background:none;cursor:pointer;color:var(--hint);font-size:0.72rem;font-family:inherit;text-align:left"
+            aria-expanded="false">
+            <span class="rpt-toggle-icon" style="display:inline-block;transition:transform 0.15s">›</span>
+            Show variety breakdown
+          </button>
+          <!-- Variety table (hidden) -->
+          <div id="${tableId}" style="display:none;overflow-x:auto;border-top:1px solid var(--border)">
+            <table style="border-collapse:collapse;width:100%;font-size:0.84rem">
+              <thead>
+                <tr style="background:var(--bg)">
+                  <th style="${THL}">Variety</th>
+                  <th style="${THL}">Crop type</th>
+                  <th style="${TH}">Map area</th>
+                  <th style="${TH}">Ha planted</th>
+                  <th style="${TH}">Seed (kg)</th>
+                  <th style="${TH}">kg / ha</th>
+                </tr>
+              </thead>
+              <tbody>${tableRows}</tbody>
+            </table>
+          </div>
+        </div>`;
+    }).join('');
+
+    // ── Season total strip ─────────────────────────────────────────────────
+    const totalStrip = noData ? '' : `
+      <div style="margin-top:4px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;display:flex;gap:24px;align-items:center;flex-wrap:wrap">
+        <span style="font-size:0.82rem;font-weight:600;color:var(--hint);flex:1">Season total — ${esc(season)}</span>
+        <span style="${mono}font-size:0.9rem;font-weight:500">${totalHa > 0 ? totalHa.toFixed(1) : '—'} <span style="font-size:0.72rem;color:var(--hint)">ha</span></span>
+        <span style="${mono}font-size:0.9rem;font-weight:500">${totalHa > 0 && totalKg > 0 ? (totalKg / totalHa).toFixed(2) : '—'} <span style="font-size:0.72rem;color:var(--hint)">kg/ha avg</span></span>
       </div>`;
 
     el.innerHTML = `
@@ -757,12 +783,28 @@ async function renderReporting() {
           <h2 style="font-size:1.1rem;font-weight:700;margin:0">Planting Summary</h2>
           <span style="font-size:0.82rem;color:var(--hint)">${esc(season)} · ${esc(farm.name)}</span>
         </div>
-        ${summaryTiles}
-        <div class="card" style="padding:0;overflow:hidden;margin-bottom:32px">
-          ${plantingTableHtml}
-        </div>
-        <p style="font-size:0.78rem;color:var(--hint);margin:0">More reports coming — gross margin actuals, input usage by paddock, water use.</p>
+        ${noData
+          ? `<div style="padding:32px;text-align:center;color:var(--hint)">No planting data recorded for ${esc(season)}.</div>`
+          : ctCards + totalStrip
+        }
+        <p style="font-size:0.78rem;color:var(--hint);margin:${noData ? '0' : '16px 0 0'}">More reports coming — gross margin actuals, input usage by paddock, water use.</p>
       </div>`;
+
+    // Wire collapse toggles
+    el.querySelectorAll('.rpt-variety-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const targetId = btn.dataset.target;
+        const panel    = document.getElementById(targetId);
+        if (!panel) return;
+        const expanded = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', !expanded);
+        panel.style.display = expanded ? 'none' : '';
+        const icon = btn.querySelector('.rpt-toggle-icon');
+        if (icon) icon.style.transform = expanded ? '' : 'rotate(90deg)';
+        btn.childNodes[btn.childNodes.length - 1].textContent = expanded
+          ? ' Show variety breakdown' : ' Hide variety breakdown';
+      });
+    });
 
   } catch (e) {
     el.innerHTML = `<div style="padding:32px;color:var(--red,#ef4444)">Failed to load reporting data: ${esc(e.message)}</div>`;
