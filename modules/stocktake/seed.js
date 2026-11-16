@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794788028533';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794788028533';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794788028533';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794788028533';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794790509004';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794790509004';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794790509004';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794790509004';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -634,18 +634,24 @@ async function _showAddVarietyForm(container, farm, existingItems, period, allPe
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">Notes (optional)</label>
+          <label class="form-label">Supplier item description <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--hint)">— raw invoice text, for reference</span></label>
+          <input class="form-input" id="sv-supplier-desc" type="text"
+            placeholder="e.g. SEED COTTON SIC 711RRF V2C 20KG AGENCY CS">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Internal notes (optional)</label>
           <input class="form-input" id="sv-notes" type="text"
             placeholder="e.g. Treated with Gaucho, batch number">
         </div>
       </div>`,
     confirmLabel: 'Add variety',
     onConfirm: async (modal) => {
-      const crop    = modal.querySelector('#sv-crop')?.value?.trim();
-      const variety = modal.querySelector('#sv-variety')?.value?.trim();
-      const unit    = modal.querySelector('#sv-unit')?.value;
-      const kpb     = parseFloat(modal.querySelector('#sv-kpb')?.value) || null;
-      const notes   = modal.querySelector('#sv-notes')?.value?.trim() || null;
+      const crop         = modal.querySelector('#sv-crop')?.value?.trim();
+      const variety      = modal.querySelector('#sv-variety')?.value?.trim();
+      const unit         = modal.querySelector('#sv-unit')?.value;
+      const kpb          = parseFloat(modal.querySelector('#sv-kpb')?.value) || null;
+      const supplierDesc = modal.querySelector('#sv-supplier-desc')?.value?.trim() || null;
+      const notes        = modal.querySelector('#sv-notes')?.value?.trim() || null;
 
       if (!crop || !variety) {
         toast('Crop and variety are required', 'error');
@@ -659,7 +665,7 @@ async function _showAddVarietyForm(container, farm, existingItems, period, allPe
         name:         variety,
         subgroup:     crop,       // crop name used for grouping & filtering
         default_unit: unit,
-        attributes:   { variety, ...(kpb ? { kg_per_bag: kpb } : {}) },
+        attributes:   { variety, supplier_description: supplierDesc, ...(kpb ? { kg_per_bag: kpb } : {}) },
         active:       true,
         notes,
       });
@@ -684,10 +690,11 @@ async function _showEditVarietyForm(container, farm, item, allItems, period, all
   await loadCommodities(farm.id);
   const commodities = getCommodities();
   const attrs = item.attributes || {};
-  const currentCrop = item.subgroup || '';
-  const currentVariety = attrs.variety || item.name;
-  const currentUnit = item.default_unit || 'bags';
-  const currentKpb = parseFloat(attrs.kg_per_bag) || '';
+  const currentCrop         = item.subgroup || '';
+  const currentVariety      = attrs.variety || item.name;
+  const currentUnit         = item.default_unit || 'bags';
+  const currentKpb          = parseFloat(attrs.kg_per_bag) || '';
+  const currentSupplierDesc = attrs.supplier_description || '';
 
   const cropOpts = commodities.map(c =>
     `<option value="${esc(c.name)}"${c.name === currentCrop ? ' selected' : ''}>${esc(c.name)}</option>`
@@ -727,17 +734,24 @@ async function _showEditVarietyForm(container, farm, item, allItems, period, all
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">Notes (optional)</label>
+          <label class="form-label">Supplier item description <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--hint)">— raw invoice text, for reference</span></label>
+          <input class="form-input" id="ev-supplier-desc" type="text"
+            value="${esc(currentSupplierDesc)}"
+            placeholder="e.g. SEED COTTON SIC 711RRF V2C 20KG AGENCY CS">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Internal notes (optional)</label>
           <input class="form-input" id="ev-notes" type="text" value="${esc(item.notes || '')}">
         </div>
       </div>`,
     confirmLabel: 'Save changes',
     onConfirm: async (modal) => {
-      const crop    = modal.querySelector('#ev-crop')?.value?.trim();
-      const variety = modal.querySelector('#ev-variety')?.value?.trim();
-      const unit    = modal.querySelector('#ev-unit')?.value;
-      const kpb     = parseFloat(modal.querySelector('#ev-kpb')?.value) || null;
-      const notes   = modal.querySelector('#ev-notes')?.value?.trim() || null;
+      const crop         = modal.querySelector('#ev-crop')?.value?.trim();
+      const variety      = modal.querySelector('#ev-variety')?.value?.trim();
+      const unit         = modal.querySelector('#ev-unit')?.value;
+      const kpb          = parseFloat(modal.querySelector('#ev-kpb')?.value) || null;
+      const supplierDesc = modal.querySelector('#ev-supplier-desc')?.value?.trim() || null;
+      const notes        = modal.querySelector('#ev-notes')?.value?.trim() || null;
 
       if (!crop || !variety) {
         toast('Crop and variety are required', 'error');
@@ -748,7 +762,7 @@ async function _showEditVarietyForm(container, farm, item, allItems, period, all
         name:         variety,
         subgroup:     crop,
         default_unit: unit,
-        attributes:   { ...attrs, variety, ...(kpb ? { kg_per_bag: kpb } : { kg_per_bag: null }) },
+        attributes:   { ...attrs, variety, supplier_description: supplierDesc, ...(kpb ? { kg_per_bag: kpb } : { kg_per_bag: null }) },
         notes,
       });
       toast('Variety updated', 'success');
@@ -771,8 +785,8 @@ async function _showEditVarietyForm(container, farm, item, allItems, period, all
 async function _showDeliveryForm(container, farm, items, locations, preItemId, preItemName, period, allPeriods) {
   const today = new Date().toISOString().slice(0, 10);
   const itemOpts = items.map(i =>
-    `<option value="${i.id}" data-unit="${esc(i.default_unit || 'bags')}" data-kpb="${parseFloat(i.attributes?.kg_per_bag)||''}"
-      ${i.id === preItemId ? ' selected' : ''}>${esc(i.name)}</option>`).join('');
+    `<option value="${i.id}" data-unit="${esc(i.default_unit || 'bags')}" data-kpb="${parseFloat(i.attributes?.kg_per_bag)||''}" data-supplier-desc="${esc(i.attributes?.supplier_description || '')}"
+      ${i.id === preItemId ? ' selected' : ''}>${esc(i.subgroup || '')} — ${esc(i.name)}</option>`).join('');
   const locOpts = locations.map(l =>
     `<option value="${l.id}">${esc(l.name)}</option>`).join('');
 
@@ -820,25 +834,36 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
           <input class="form-input" type="text" id="sdel-supplier" placeholder="Supplier name or docket number">
         </div>
         <div class="form-group">
-          <label class="form-label">Note</label>
+          <label class="form-label">Supplier item description <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--hint)">— raw invoice text, saved to variety record</span></label>
+          <input class="form-input" type="text" id="sdel-supplier-desc" placeholder="e.g. SEED COTTON SIC 711RRF V2C 20KG AGENCY CS">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Internal note</label>
           <input class="form-input" type="text" id="sdel-note" placeholder="Optional">
         </div>
       </div>`,
     confirmLabel: 'Record delivery',
     onConfirm: async (modal) => {
-      const itemId   = modal.querySelector('#sdel-item')?.value;
-      const locId    = modal.querySelector('#sdel-location')?.value || null;
-      const qty      = parseFloat(modal.querySelector('#sdel-qty')?.value);
-      const kpb      = parseFloat(modal.querySelector('#sdel-kpb')?.value) || null;
-      const date     = modal.querySelector('#sdel-date')?.value;
-      const supplier = modal.querySelector('#sdel-supplier')?.value?.trim() || null;
-      const note     = modal.querySelector('#sdel-note')?.value?.trim() || null;
+      const itemId       = modal.querySelector('#sdel-item')?.value;
+      const locId        = modal.querySelector('#sdel-location')?.value || null;
+      const qty          = parseFloat(modal.querySelector('#sdel-qty')?.value);
+      const kpb          = parseFloat(modal.querySelector('#sdel-kpb')?.value) || null;
+      const date         = modal.querySelector('#sdel-date')?.value;
+      const supplier     = modal.querySelector('#sdel-supplier')?.value?.trim() || null;
+      const supplierDesc = modal.querySelector('#sdel-supplier-desc')?.value?.trim() || null;
+      const note         = modal.querySelector('#sdel-note')?.value?.trim() || null;
 
       if (!itemId || !qty || !date) {
         toast('Variety, quantity and date are required', 'error');
         return false;
       }
       const item = items.find(i => i.id === itemId);
+      // If a supplier description was entered and the item doesn't have one yet, save it
+      if (supplierDesc && !item?.attributes?.supplier_description) {
+        await dbUpdate('stock_items', itemId, {
+          attributes: { ...(item?.attributes || {}), supplier_description: supplierDesc },
+        }).catch(() => {});
+      }
       await dbInsert('stock_movements', {
         farm_id:       farm.id,
         item_id:       itemId,
@@ -856,12 +881,13 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
     }
   });
 
-  // Wire unit display + kg/bag from item select
+  // Wire unit display + kg/bag + supplier description from item select
   setTimeout(() => {
-    const itemEl   = document.getElementById('sdel-item');
-    const unitDisp = document.getElementById('sdel-unit-display');
-    const kpbInput = document.getElementById('sdel-kpb');
-    const kpbWrap  = document.getElementById('sdel-kpb-wrap');
+    const itemEl      = document.getElementById('sdel-item');
+    const unitDisp    = document.getElementById('sdel-unit-display');
+    const kpbInput    = document.getElementById('sdel-kpb');
+    const kpbWrap     = document.getElementById('sdel-kpb-wrap');
+    const suppDescEl  = document.getElementById('sdel-supplier-desc');
 
     const updateFromItem = () => {
       const opt  = itemEl?.options[itemEl.selectedIndex];
@@ -870,6 +896,10 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
       // Pre-fill kg/bag from item if field is currently empty
       if (kpbInput && !kpbInput.value && opt?.dataset?.kpb) {
         kpbInput.value = opt.dataset.kpb;
+      }
+      // Show existing supplier description as placeholder hint
+      if (suppDescEl && opt?.dataset?.supplierDesc) {
+        suppDescEl.placeholder = opt.dataset.supplierDesc;
       }
       // Hide kg/bag field for non-bag units
       if (kpbWrap) kpbWrap.style.display = unit === 'bags' ? '' : 'none';

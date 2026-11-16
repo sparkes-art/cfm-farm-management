@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794788028533';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794788028533';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794788028533';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794788028533';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794790509004';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794790509004';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794790509004';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794790509004';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -15,6 +15,7 @@ let _sessions        = [];    // planting_sessions for active farm+season
 let _allRows         = {};    // { [sessionId]: planting_rows[] }
 let _paddocks        = [];    // from paddocks table
 let _cropPlan        = [];    // from crop_plan_entries for active farm+season
+let _seedItems       = [];    // stock_items where is_seed=true for active farm
 let _knownChems      = [];    // distinct chemical names from all rows — for autocomplete
 let _activeSessionId = null;  // which session is open in detail view
 let _view            = 'list'; // 'list' | 'detail'
@@ -35,17 +36,21 @@ async function _loadAll() {
 
   await loadCommodities().catch(() => {});
 
-  const [sessions, paddocks, cropPlan] = await Promise.all([
+  const [sessions, paddocks, cropPlan, seedItems] = await Promise.all([
     dbSelect('planting_sessions',
       `farm_id=eq.${farmId}&season_label=eq.${encodeURIComponent(season)}&order=created_at.desc`
     ).catch(() => []),
     dbSelect('paddocks', `farm_id=eq.${farmId}&order=name.asc`).catch(() => []),
     dbSelect('crop_plan_entries', `farm_id=eq.${farmId}&order=paddock_name.asc`).catch(() => []),
+    dbSelect('stock_items',
+      `farm_id=eq.${farmId}&is_seed=eq.true&active=eq.true&order=subgroup.asc,name.asc`
+    ).catch(() => []),
   ]);
 
   _sessions  = sessions;
   _paddocks  = paddocks;
   _cropPlan  = cropPlan;
+  _seedItems = seedItems;
 
   // Load rows for all sessions in parallel
   _allRows = {};
@@ -465,22 +470,37 @@ function _renderAddRowForm(session) {
         + Add Row
       </div>
 
-      <!-- Crop type + variety + seed detail — this is where seed is linked, not at session creation -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;padding:12px 14px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);grid-column:1/-1;margin-bottom:2px">What is being planted this fill</div>
+      <!-- Seed item link — this is where seed stock is linked, not at session creation -->
+      <div style="margin-bottom:12px;padding:12px 14px;background:var(--surface2);border-radius:8px;border:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:8px">Seed being used this fill</div>
+        ${_seedItems.length ? `
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);display:block;margin-bottom:4px">Crop Type</label>
-          <select id="ops-row-commodity"
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);display:block;margin-bottom:4px">Seed variety <span style="color:var(--red)">*</span></label>
+          <select id="ops-row-seed-item"
             style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
-            <option value="">Select…</option>
-            ${getCropTypes().map(ct => `<option value="${esc(ct.name)}" ${ct.name === (session.commodity || '') ? 'selected' : ''}>${esc(ct.name)}</option>`).join('')}
+            <option value="">Select seed variety…</option>
+            ${_seedItems.map(i => {
+              const label = `${esc(i.subgroup || '')} — ${esc(i.name)}${i.attributes?.supplier_description ? ' (' + esc(i.attributes.supplier_description.slice(0, 40)) + (i.attributes.supplier_description.length > 40 ? '…' : '') + ')' : ''}`;
+              const preSelected = session.seed_item_id === i.id || (!session.seed_item_id && i.name === session.variety && i.subgroup === session.commodity);
+              return `<option value="${esc(i.id)}"
+                data-variety="${esc(i.name)}"
+                data-commodity="${esc(i.subgroup || '')}"
+                data-kpb="${parseFloat(i.attributes?.kg_per_bag) || ''}"
+                data-unit="${esc(i.default_unit || 'bags')}"
+                ${preSelected ? 'selected' : ''}>${label}</option>`;
+            }).join('')}
           </select>
         </div>
-        <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);display:block;margin-bottom:4px">Variety</label>
-          <input id="ops-row-variety" type="text" value="${esc(session.variety || '')}" placeholder="e.g. 606"
-            style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;width:100%;box-sizing:border-box;outline:none">
+        <div id="ops-row-seed-preview" style="margin-top:8px;font-size:12px;color:var(--hint)"></div>
+        ` : `
+        <div style="font-size:13px;color:var(--hint);padding:8px 0">
+          No seed varieties set up yet. <a href="#" onclick="event.preventDefault()" style="color:var(--blue);text-decoration:none;font-weight:600">Go to Seed Stocktake to add a variety first.</a>
         </div>
+        `}
+        <!-- Hidden fields populated by seed item selection -->
+        <input type="hidden" id="ops-row-seed-item-id" value="">
+        <input type="hidden" id="ops-row-commodity" value="${esc(session.commodity || '')}">
+        <input type="hidden" id="ops-row-variety" value="${esc(session.variety || '')}">
       </div>
 
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px;margin-bottom:16px">
@@ -653,6 +673,7 @@ function _readRowForm() {
     operator:        _container.querySelector('#ops-row-operator')?.value?.trim() || null,
     auslot_override: isBulk ? null : (_container.querySelector('#ops-row-auslot')?.value?.trim() || null),
     hectares:        parseFloat(_container.querySelector('#ops-row-ha')?.value) || null,
+    seed_item_id:    _container.querySelector('#ops-row-seed-item-id')?.value || null,
     variety:         _container.querySelector('#ops-row-variety')?.value?.trim() || null,
     commodity:       _container.querySelector('#ops-row-commodity')?.value?.trim() || null,
     cotton_bags,
@@ -695,6 +716,41 @@ function _wireEvents() {
   // Ha field focus (auto-select for quick entry)
   const haInput = _container.querySelector('#ops-row-ha');
   if (haInput) haInput.addEventListener('focus', () => haInput.select());
+
+  // Seed item dropdown — populate hidden fields when selection changes
+  const seedItemEl = _container.querySelector('#ops-row-seed-item');
+  if (seedItemEl) {
+    const previewEl    = _container.querySelector('#ops-row-seed-preview');
+    const hiddenItemId = _container.querySelector('#ops-row-seed-item-id');
+    const hiddenComm   = _container.querySelector('#ops-row-commodity');
+    const hiddenVar    = _container.querySelector('#ops-row-variety');
+    const kpbEl        = _container.querySelector('#ops-row-kg-per-bag');
+
+    const updateSeedPreview = () => {
+      const opt = seedItemEl.options[seedItemEl.selectedIndex];
+      if (!opt?.value) {
+        if (previewEl) previewEl.textContent = '';
+        if (hiddenItemId) hiddenItemId.value = '';
+        return;
+      }
+      const variety   = opt.dataset.variety   || '';
+      const commodity = opt.dataset.commodity || '';
+      const kpb       = opt.dataset.kpb       || '';
+      const unit      = opt.dataset.unit       || 'bags';
+      if (hiddenItemId) hiddenItemId.value = opt.value;
+      if (hiddenComm)   hiddenComm.value   = commodity;
+      if (hiddenVar)    hiddenVar.value     = variety;
+      // Pre-fill kg/bag from seed item
+      if (kpbEl && kpb) kpbEl.value = kpb;
+      if (previewEl) previewEl.innerHTML =
+        `<span style="color:var(--fg2)">${esc(commodity)} · ${esc(variety)}</span>` +
+        (unit === 'bags' && kpb ? ` <span style="color:var(--hint)">· ${kpb} kg/bag</span>` : '');
+    };
+
+    seedItemEl.addEventListener('change', updateSeedPreview);
+    // Fire immediately if pre-selected
+    if (seedItemEl.value) updateSeedPreview();
+  }
 
   // Row seed type toggle
   _container.querySelectorAll('input[name="ops-row-seed-type"]').forEach(r =>
@@ -782,6 +838,7 @@ async function _saveRow() {
       row_time:        data.row_time,
       operator:        data.operator || null,
       hectares:        data.hectares,
+      seed_item_id:    data.seed_item_id || null,
       variety:         data.variety   || null,
       commodity:       data.commodity || null,
       cotton_bags:     data.cotton_bags,
@@ -1128,7 +1185,27 @@ function _showEditRowModal(row, session) {
     wide: true,
     bodyHTML: `
       <div style="background:var(--surface2,#f8f8f8);border-radius:8px;padding:12px;margin-bottom:14px;border:1px solid var(--border)">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:10px">What was planted this fill</div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-bottom:10px">Seed used this fill</div>
+        ${_seedItems.length ? `
+        <div>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Seed variety</label>
+          <select id="er-seed-item" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
+            <option value="">Select seed variety…</option>
+            ${_seedItems.map(i => {
+              const label = `${esc(i.subgroup || '')} — ${esc(i.name)}`;
+              const preSelected = row.seed_item_id === i.id || (!row.seed_item_id && i.name === (row.variety || session.variety) && i.subgroup === (row.commodity || session.commodity));
+              return `<option value="${esc(i.id)}"
+                data-variety="${esc(i.name)}"
+                data-commodity="${esc(i.subgroup || '')}"
+                data-kpb="${parseFloat(i.attributes?.kg_per_bag) || ''}"
+                ${preSelected ? 'selected' : ''}>${label}</option>`;
+            }).join('')}
+          </select>
+          <div id="er-seed-preview" style="margin-top:6px;font-size:12px;color:var(--hint)">
+            ${row.variety || session.variety ? `${esc(row.commodity || session.commodity || '')} · ${esc(row.variety || session.variety || '')}` : ''}
+          </div>
+        </div>
+        ` : `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div>
             <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Crop Type</label>
@@ -1142,6 +1219,11 @@ function _showEditRowModal(row, session) {
               style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
           </div>
         </div>
+        `}
+        <!-- Hidden fields for seed item data -->
+        <input type="hidden" id="er-seed-item-id" value="${esc(row.seed_item_id || '')}">
+        <input type="hidden" id="er-variety" value="${esc(row.variety || session.variety || '')}">
+        <input type="hidden" id="er-commodity" value="${esc(row.commodity || session.commodity || '')}">
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
         <div>
@@ -1202,6 +1284,37 @@ function _showEditRowModal(row, session) {
         modalEl.closest('.modal-overlay')?.querySelector('[data-action="cancel"]')?.click();
         _render();
       });
+      // Wire seed item dropdown → hidden fields
+      const erSeedEl    = modalEl.querySelector('#er-seed-item');
+      const erItemIdEl  = modalEl.querySelector('#er-seed-item-id');
+      const erVarEl     = modalEl.querySelector('#er-variety');
+      const erCommEl    = modalEl.querySelector('#er-commodity');
+      const erPreviewEl = modalEl.querySelector('#er-seed-preview');
+      if (erSeedEl) {
+        const updateFromSeed = () => {
+          const opt = erSeedEl.options[erSeedEl.selectedIndex];
+          if (!opt?.value) {
+            if (erItemIdEl) erItemIdEl.value = '';
+            if (erVarEl)    erVarEl.value    = '';
+            if (erCommEl)   erCommEl.value   = '';
+            if (erPreviewEl) erPreviewEl.textContent = '';
+            return;
+          }
+          if (erItemIdEl) erItemIdEl.value = opt.value;
+          if (erVarEl)    erVarEl.value    = opt.dataset.variety   || '';
+          if (erCommEl)   erCommEl.value   = opt.dataset.commodity || '';
+          const kpb = opt.dataset.kpb;
+          if (erPreviewEl) {
+            erPreviewEl.textContent = [
+              opt.dataset.commodity,
+              opt.dataset.variety,
+              kpb ? `${kpb} kg/bag` : '',
+            ].filter(Boolean).join(' · ');
+          }
+        };
+        erSeedEl.addEventListener('change', updateFromSeed);
+        if (erSeedEl.value) updateFromSeed();
+      }
     },
     onConfirm: async (modalEl) => {
       const chemicals = [];
@@ -1218,6 +1331,7 @@ function _showEditRowModal(row, session) {
         hectares:        parseFloat(modalEl.querySelector('#er-ha')?.value) || null,
         cotton_bags:     parseInt(modalEl.querySelector('#er-bags')?.value) || null,
         bulk_kg:         parseFloat(modalEl.querySelector('#er-bulk-kg')?.value) || null,
+        seed_item_id:    modalEl.querySelector('#er-seed-item-id')?.value || null,
         variety:         modalEl.querySelector('#er-variety')?.value?.trim() || null,
         commodity:       modalEl.querySelector('#er-commodity')?.value?.trim() || null,
         chemicals,
@@ -1398,7 +1512,7 @@ function _showCloseSessionModal(session) {
 
       // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
       try {
-        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794788028533');
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794790509004');
         const farm = getActiveFarm();
         await writeSessionSeedUsage(farm, session);
       } catch (e) {
