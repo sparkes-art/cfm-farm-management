@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794795840116';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794795840116';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794795840116';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794795840116';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794795952245';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794795952245';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794795952245';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794795952245';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.
@@ -638,9 +638,12 @@ async function renderReporting() {
       };
       const g = plantMap[key];
       g.sessions.add(s.id);
-      g.ha   += parseFloat(r.hectares)   || 0;
-      g.bags += parseFloat(r.bags_used)  || 0;
-      g.kg   += (parseFloat(r.bags_used) || 0) * (parseFloat(r.kg_per_bag) || 0);
+      const kpb   = parseFloat(r.kg_per_bag) || parseFloat(s.kg_per_bag) || 0;
+      const bags  = parseFloat(r.cotton_bags) || 0;
+      const bulkKg = parseFloat(r.bulk_kg) || 0;
+      g.ha   += parseFloat(r.hectares) || 0;
+      g.bags += bags;
+      g.kg   += bulkKg > 0 ? bulkKg : (bags * kpb);
       if (s.created_at) g.dates.push(s.created_at);
     });
 
