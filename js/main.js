@@ -2,81 +2,81 @@
 // App bootstrap — auth, navigation, module loading
 // No localStorage. No caching. Pure Supabase.
 
-import { login, logout, onSessionChange } from './supabase-client.js?v=1794874824754';
-import { on, setActiveFarm, setActiveModule, getFarms, getState, getActiveFarm, getActiveSeason, setActiveSeason } from './app-state.js?v=1794874824754';
-import { toast, show, hide, qs } from './ui.js?v=1794874824754';
+import { login, logout, onSessionChange } from './supabase-client.js?v=1794875007502';
+import { on, setActiveFarm, setActiveModule, getFarms, getState, getActiveFarm, getActiveSeason, setActiveSeason, getSeasons } from './app-state.js?v=1794875007502';
+import { toast, show, hide, qs } from './ui.js?v=1794875007502';
 
 // Module loaders (lazy — only imported when navigated to)
 const MODULE_LOADERS = {
   outputs: async () => {
-    const m = await import('../modules/outputs/outputs.js?v=1794874824754');
+    const m = await import('../modules/outputs/outputs.js?v=1794875007502');
     return { mount: m.mountOutputs, unmount: m.unmountOutputs };
   },
   inputs: async () => {
-    const m = await import('../modules/inputs/inputs.js?v=1794874824754');
+    const m = await import('../modules/inputs/inputs.js?v=1794875007502');
     return { mount: m.mountInputs, unmount: m.unmountInputs };
   },
   water: async () => {
-    const m = await import('../modules/water/water.js?v=1794874824754');
+    const m = await import('../modules/water/water.js?v=1794875007502');
     return { mount: m.mountWater, unmount: m.unmountWater };
   },
   'meter-readings': async () => {
-    const m = await import('../modules/meter-readings/meter-readings.js?v=1794874824754');
+    const m = await import('../modules/meter-readings/meter-readings.js?v=1794875007502');
     return { mount: m.mountMeterReadings, unmount: m.unmountMeterReadings };
   },
   'gross-margin': async () => {
-    const m = await import('../modules/gross-margin/gross-margin.js?v=1794874824754');
+    const m = await import('../modules/gross-margin/gross-margin.js?v=1794875007502');
     return { mount: m.mountGrossMargin };
   },
   'farm-map': async () => {
-    const m = await import('../modules/paddocks/paddocks.js?v=1794874824754');
+    const m = await import('../modules/paddocks/paddocks.js?v=1794875007502');
     return {
       mount: (container) => m.mountFarmMap(container),
       unmount: () => m.unmountPaddocks()
     };
   },
   stocktake: async () => {
-    const m = await import('../modules/stocktake/stocktake-dashboard.js?v=1794874824754');
+    const m = await import('../modules/stocktake/stocktake-dashboard.js?v=1794875007502');
     return { mount: m.mountStocktakeDashboard, unmount: m.unmountStocktakeDashboard };
   },
 
   recommendations: async () => {
-    const m = await import('../modules/agronomy/recommendations.js?v=1794874824754');
+    const m = await import('../modules/agronomy/recommendations.js?v=1794875007502');
     return { mount: m.mountRecommendations, unmount: m.unmountRecommendations };
   },
   agronomy: async () => {
-    const m = await import('../modules/agronomy/agronomy.js?v=1794874824754');
+    const m = await import('../modules/agronomy/agronomy.js?v=1794875007502');
     return { mount: m.mountAgronomy, unmount: m.unmountAgronomy };
   },
   operations: async () => {
-    const m = await import('../modules/operations/operations.js?v=1794874824754');
+    const m = await import('../modules/operations/operations.js?v=1794875007502');
     return {
       mount: (container) => m.mount(container),
       unmount: () => {}
     };
   },
   weather: async () => {
-    const m = await import('../modules/weather/weather.js?v=1794874824754');
+    const m = await import('../modules/weather/weather.js?v=1794875007502');
     return { mount: m.mountWeather };
   },
   budget: async () => {
-    const m = await import('../modules/budget/budget.js?v=1794874824754');
+    const m = await import('../modules/budget/budget.js?v=1794875007502');
     return { mount: m.mountBudget, unmount: m.unmountBudget };
   },
   'management-report': async () => {
-    const m = await import('../modules/management-report/mgmt-report.js?v=1794874824754');
+    const m = await import('../modules/management-report/mgmt-report.js?v=1794875007502');
     return { mount: m.mountManagementReport, unmount: m.unmountManagementReport };
   },
   acquisitions: async () => {
-    const m = await import('../modules/acquisitions/acquisitions.js?v=1794874824754');
+    const m = await import('../modules/acquisitions/acquisitions.js?v=1794875007502');
     return { mount: m.mountAcquisitions, unmount: m.unmountAcquisitions };
   },
   paddocks: async () => {
-    const m = await import('../modules/paddocks/paddocks.js?v=1794874824754');
+    const m = await import('../modules/paddocks/paddocks.js?v=1794875007502');
     return { mount: m.mountPaddocks, unmount: m.unmountPaddocks };
   },
   settings: async () => {
-    const m = await import('../modules/settings/settings.js?v=1794874824754');
+    const m = await import('../modules/settings/settings.js?v=1794875007502');
     return { mount: m.mountSettings };
   },
 };
@@ -100,6 +100,8 @@ onSessionChange((session) => {
       _updateUserDisplay(session);
       _navigateTo('outputs');
       setTimeout(async () => { await _populateSeasonSelector(); _updateXeroIndicator(); }, 500);
+      // Re-populate once seasons table has loaded (may arrive after the timeout fires)
+      on('seasons', () => _populateSeasonSelector());
     }
     _updateUserDisplay(session);
   } else {
@@ -553,26 +555,22 @@ async function _populateSeasonSelector() {
   const sel = document.getElementById('season-select');
   if (!sel) return;
 
-  const now = new Date();
-  const y = now.getFullYear();
-  const seasons = Array.from({length: 6}, (_, i) => {
-    const sy = y + 1 - i;
-    return `${sy}-${String(sy+1).slice(2)}`;
-  });
+  // Use canonical list from seasons table; fall back to rolling window
+  let seasons = getSeasons();
+  if (!seasons.length) {
+    const now = new Date();
+    const y = now.getFullYear();
+    seasons = Array.from({length: 6}, (_, i) => {
+      const sy = y + 1 - i;
+      return { id: `${sy}-${String(sy+1).slice(2)}`, label: `${sy}-${String(sy+1).slice(2)}`, is_active: i === 1 };
+    });
+  }
 
-  let defaultSeason = seasons[1];
-  try {
-    const farm = getActiveFarm();
-    if (farm) {
-      const { dbSelect } = await import('./supabase-client.js?v=1794874824754');
-      const rows = await dbSelect('budgets', 'farm_id=eq.' + farm.id + '&select=season&order=season.desc&limit=1');
-      if (rows[0]?.season) defaultSeason = rows[0].season;
-    }
-  } catch {}
+  // Default to active season from table, then app-state, then first in list
+  const current = getActiveSeason() || seasons.find(s => s.is_active)?.id || seasons[0]?.id;
 
-  const current = getActiveSeason() || defaultSeason;
   sel.innerHTML = seasons.map(s =>
-    `<option value="${s}" ${s === current ? 'selected' : ''}>${s}</option>`
+    `<option value="${s.id}" ${s.id === current ? 'selected' : ''}>${s.label}</option>`
   ).join('');
 
   if (!getActiveSeason()) setActiveSeason(sel.value);
@@ -594,7 +592,7 @@ window._updateXeroIndicator = async function _updateXeroIndicator() {
   const farm = getActiveFarm();
   if (!farm) { el.style.display = 'none'; return; }
   try {
-    const { dbSelect } = await import('./supabase-client.js?v=1794874824754');
+    const { dbSelect } = await import('./supabase-client.js?v=1794875007502');
     const rows = await dbSelect('xero_tokens', 'farm_id=eq.' + farm.id + '&select=tenant_name,expires_at');
     const token = rows[0];
     el.style.display = 'flex';

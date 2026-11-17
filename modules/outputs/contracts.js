@@ -1,10 +1,10 @@
 // modules/outputs/contracts.js
 // Forward Contracts — list, add, edit, delete, PDF AI extraction
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable, uploadFile } from '../../js/supabase-client.js?v=1794874824754';
-import { getActiveFarm, getSession, canWrite, getActiveSeason, getSeasons } from '../../js/app-state.js?v=1794874824754';
-import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, setContent, currentSeason } from '../../js/ui.js?v=1794874824754';
-import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js?v=1794874824754';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable, uploadFile } from '../../js/supabase-client.js?v=1794875007502';
+import { getActiveFarm, getSession, canWrite, getActiveSeason, getSeasons } from '../../js/app-state.js?v=1794875007502';
+import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, setContent, currentSeason } from '../../js/ui.js?v=1794875007502';
+import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js?v=1794875007502';
 
 let _contracts = [];
 let _invoices = [];
