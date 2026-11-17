@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794898946615';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794898946615';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794898946615';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794898946615';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794899135504';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794899135504';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794899135504';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794899135504';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -865,28 +865,28 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         </div>
 
         <!-- Quantity — bags or direct kg -->
-        <div class="form-group">
-          <label class="form-label">Total weight (kg) <span style="color:var(--red)">*</span></label>
-          <input class="form-input" type="number" id="sdel-qty" min="0.1" step="0.1" placeholder="0.0">
-        </div>
-        <div style="margin-top:-8px">
-          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--hint)">
+        <div>
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;font-weight:600;color:var(--ink-mid);margin-bottom:8px">
             <input type="checkbox" id="sdel-use-bags" style="accent-color:var(--blue);width:13px;height:13px">
-            Calculate from bags × avg weight
+            Delivery in bags
           </label>
         </div>
         <div id="sdel-bags-panel" style="display:none;background:var(--page-bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
             <div class="form-group" style="margin:0">
-              <label class="form-label">Number of bags</label>
+              <label class="form-label">Number of bags <span style="color:var(--red)">*</span></label>
               <input class="form-input" type="number" id="sdel-bags" min="1" step="1" placeholder="e.g. 200">
             </div>
             <div class="form-group" style="margin:0">
-              <label class="form-label">Avg kg / bag</label>
+              <label class="form-label">Avg kg / bag <span style="color:var(--red)">*</span></label>
               <input class="form-input" type="number" id="sdel-kpb" min="0.1" step="0.1" placeholder="e.g. 20">
             </div>
           </div>
           <div id="sdel-bags-preview" style="font-size:12px;color:var(--hint);margin-top:8px"></div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Total weight (kg) <span style="color:var(--red)">*</span></label>
+          <input class="form-input" type="number" id="sdel-qty" min="0.1" step="0.1" placeholder="0.0">
         </div>
         <div class="form-group">
           <label class="form-label">Storage location</label>
@@ -1048,7 +1048,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
           // Upload attachment to Supabase Storage if provided
           if (invAttachment && invoice.id) {
-            const { supabase } = await import('../../js/supabase-client.js?v=1794898946615');
+            const { supabase } = await import('../../js/supabase-client.js?v=1794899135504');
             const ext  = invAttachment.name.split('.').pop();
             const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
             await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
