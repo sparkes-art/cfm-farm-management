@@ -5,9 +5,9 @@
 // Revenue actuals from CFM invoices; cost actuals from Xero P&L.
 // Line-level comments per row + month, tracked by user and timestamp.
 
-import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794956887941';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794956887941';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794956887941';
+import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794957315820';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794957315820';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794957315820';
 
 // Module-level state — persists across re-renders within a session
 let _selectedMonth = null;   // 'YYYY-MM' or null = full YTD
@@ -198,16 +198,17 @@ async function _render(container) {
   // ── Seed delivery movements (non-blocking) ───────────────────────────────
   let seedMovements = [];
   try {
+    // Fetch both delivery and usage movements so we can show on-hand vs used
     seedMovements = await dbSelect('stock_movements',
-      'farm_id=eq.' + farm.id + '&movement_type=eq.delivery&direction=eq.1&order=occurred_on.asc' +
-      '&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,item_id,stock_items(id,name,subgroup,attributes,is_seed),delivery_costs(id,total_cost,unit_cost,procurement_line_id)'
+      'farm_id=eq.' + farm.id + '&order=occurred_on.asc' +
+      '&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,movement_type,item_id,stock_items(id,name,subgroup,attributes,is_seed),delivery_costs(id,total_cost,unit_cost,procurement_line_id)'
     );
   } catch(e) {
     console.warn('[MgmtReport] seed movements with cost join failed, retrying:', e.message);
     try {
       seedMovements = await dbSelect('stock_movements',
-        'farm_id=eq.' + farm.id + '&movement_type=eq.delivery&direction=eq.1&order=occurred_on.asc' +
-        '&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,item_id,stock_items(id,name,subgroup,attributes,is_seed)'
+        'farm_id=eq.' + farm.id + '&order=occurred_on.asc' +
+        '&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,movement_type,item_id,stock_items(id,name,subgroup,attributes,is_seed)'
       );
     } catch(e2) { console.warn('[MgmtReport] seed movements fallback failed:', e2.message); }
   }
@@ -574,7 +575,23 @@ async function _render(container) {
   const td   = 'padding:6px 10px;font-size:12px;border-bottom:1px solid var(--border-light)';
   const tdR  = td + ';text-align:right;font-variant-numeric:tabular-nums';
 
-  const secRow  = label => '<tr style="background:#1e3a5f"><td colspan="' + COLS + '" style="padding:7px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:white">' + label + '</td></tr>';
+  const secId   = label => 'sec-' + label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const secRow  = label => {
+    const id = secId(label);
+    return '<tr class="sec-header" data-sec="' + id + '" style="background:#1e3a5f;cursor:pointer" onclick="(function(el){' +
+      'var id=el.dataset.sec;' +
+      'var rows=document.querySelectorAll(\'[data-secbody=\"\'+id+\'\"]\');' +
+      'var collapsed=el.dataset.collapsed===\'1\';' +
+      'rows.forEach(function(r){r.style.display=collapsed?\'\':\'none\';});' +
+      'el.dataset.collapsed=collapsed?\'0\':\'1\';' +
+      'el.querySelector(\'.sec-toggle\').textContent=collapsed?\'▾\':\'▸\';' +
+      '})(this)">' +
+      '<td colspan="' + COLS + '" style="padding:7px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:white;user-select:none">' +
+      '<span class="sec-toggle" style="margin-right:6px;font-size:10px">▾</span>' + label +
+      '</td></tr>';
+  };
+  // Wrap data rows so they can be toggled; call after secRow for same label
+  const secBody = (label, html) => html.replace(/<tr/g, '<tr data-secbody="' + secId(label) + '"');
   const commRow = label => '<tr style="background:#e8f0fe"><td colspan="' + COLS + '" style="padding:5px 12px;font-size:11px;font-weight:600;color:#1e3a5f">' + label + '</td></tr>';
 
   // ── Line comment helpers ───────────────────────────────────────────────────
@@ -850,7 +867,7 @@ async function _render(container) {
         <td style="${tdR};color:#92400e;font-weight:600">${secHasStc ? fC(secStillToCome) : '—'}</td>
         <td style="${tdR};color:#1e40af;font-weight:700">${secHasStc ? fC(secActual + secStillToCome) : '—'}</td>
       </tr>`;
-    return secRow(label) + rowsHtml + subtotal;
+    return secRow(label) + secBody(label, rowsHtml + subtotal);
   };
 
   const sortedGroups    = Object.values(groups).sort((a, b) => a.name.toUpperCase().localeCompare(b.name.toUpperCase()));
@@ -874,22 +891,23 @@ async function _render(container) {
     return wb.filter(w => wa.has(w)).length / Math.max(wa.size, wb.length);
   };
 
-  const seedMovsAll = (seedMovements || []).filter(m => m.stock_items?.is_seed);
+  // Usage movements = seed that has been planted (not purchases/deliveries)
+  const seedUsageMoves = (seedMovements || []).filter(m => m.stock_items?.is_seed && m.movement_type === 'usage');
   const seedActualByItem = new Map();
-  for (const mv of seedMovsAll) {
+  for (const mv of seedUsageMoves) {
     const item = mv.stock_items;
     if (!item) continue;
     const kpb = mv.kg_per_bag || item.attributes?.kg_per_bag || 0;
     const kg  = Math.abs(mv.signed_qty) || (mv.qty * kpb);
+    // Cost from delivery_costs if available; for usage movements cost comes via procurement link
     const dcArr = Array.isArray(mv.delivery_costs) ? mv.delivery_costs : (mv.delivery_costs ? [mv.delivery_costs] : []);
     const cost = dcArr.reduce((s, dc) => s + (dc.total_cost || 0), 0);
     if (!seedActualByItem.has(item.id)) {
-      seedActualByItem.set(item.id, { name: item.name, subgroup: item.subgroup || '', totalKg: 0, totalBags: 0, totalCost: 0 });
+      seedActualByItem.set(item.id, { name: item.name, subgroup: item.subgroup || '', totalKg: 0, totalCost: 0 });
     }
     const row = seedActualByItem.get(item.id);
     row.totalKg   += kg;
     row.totalCost += cost;
-    if (kpb > 0) row.totalBags += mv.qty || 0;
   }
 
   const varCosts    = (budgetCosts || []).filter(c => c.category === 'variable');
@@ -900,12 +918,13 @@ async function _render(container) {
     const ent = bc.enterprise || '';
     if (!budgetEntMap.has(ent)) {
       const areaHa = bc.area_ha || budgets.find(b => wordScore(b.commodity, ent) >= 0.4)?.area_ha || 0;
-      budgetEntMap.set(ent, { lines: [], area_ha: areaHa, totalBudget: 0, totalCostPerHa: 0 });
+      budgetEntMap.set(ent, { lines: [], area_ha: areaHa, totalBudget: 0, totalCostPerHa: 0, unitPrice: 0 });
     }
     const e = budgetEntMap.get(ent);
     e.lines.push(bc);
     e.totalBudget    += bc.budget_amount || (bc.cost_per_ha * e.area_ha) || 0;
     e.totalCostPerHa += bc.cost_per_ha || 0;
+    if (bc.unit_price) e.unitPrice = bc.unit_price; // $/kg from budget spreadsheet
   }
 
   const budgetEnts = [...budgetEntMap.keys()];
@@ -930,43 +949,49 @@ async function _render(container) {
   let totalDirectActual = 0;
   let directCostsSectionHtml = '';
 
-  console.log('[DirectCosts] seedMovements:', seedMovements.length, '| seedMovsAll:', seedMovsAll.length, '| seedActuals:', seedActuals.length, '| seedBudgets:', seedBudgets.length, '| varCosts:', varCosts.length, '| budgetCosts:', budgetCosts.length);
-
   const buildDirectCosts = () => {
-    console.log('[DirectCosts] buildDirectCosts called — seedActuals:', seedActuals.length, 'seedBudgets:', seedBudgets.length);
     if (!seedActuals.length && !seedBudgets.length) return '';
     let rows = '';
-    // Rows from actual deliveries grouped by subgroup (crop)
+    // Rows from actual usage grouped by subgroup (crop)
     for (const [sg, grp] of seedBySubgroup) {
       const sgTotalKg   = grp.items.reduce((s, r) => s + r.totalKg, 0);
       const sgTotalCost = grp.items.reduce((s, r) => s + r.totalCost, 0);
-      const budgEnt  = grp.budgetEnt ? budgetEntMap.get(grp.budgetEnt) : null;
-      const areaHa   = budgEnt?.area_ha || 0;
-      const kgPerHa  = areaHa ? (sgTotalKg / areaHa).toFixed(1) : '—';
-      const costPerKg = sgTotalKg ? fC(sgTotalCost / sgTotalKg) : '—';
+      const budgEnt    = grp.budgetEnt ? budgetEntMap.get(grp.budgetEnt) : null;
+      const areaHa     = budgEnt?.area_ha || 0;
+      // Budget kg/ha = cost_per_ha ÷ unit_price (applications adjustment already baked in)
+      const budgKgPerHa = budgEnt?.unitPrice && budgEnt?.totalCostPerHa ? (budgEnt.totalCostPerHa / budgEnt.unitPrice).toFixed(1) : null;
+      const actKgPerHa  = areaHa && sgTotalKg ? (sgTotalKg / areaHa).toFixed(1) : null;
+      const costPerKg   = sgTotalKg && sgTotalCost ? '$' + (sgTotalCost / sgTotalKg).toFixed(2) : null;
+      const rateHint    = budgKgPerHa
+        ? (actKgPerHa ? actKgPerHa + '/' + budgKgPerHa + ' kg/ha' : budgKgPerHa + ' kg/ha budget')
+        : (actKgPerHa ? actKgPerHa + ' kg/ha' : '');
       const budgetTotal = budgEnt ? budgEnt.totalBudget : 0;
       const budgetYTD   = budgetTotal * ytdFraction;
       totalDirectBudget += budgetTotal;
       totalDirectActual += sgTotalCost;
-      const vAmt = sgTotalCost && budgetYTD ? sgTotalCost - budgetYTD : null;
       rows += '<tr>' +
-        '<td style="' + td + '">' + sg + (areaHa ? ' <span style="color:var(--hint);font-size:10px">(' + kgPerHa + ' kg/ha · ' + costPerKg + '/kg)</span>' : '') + '</td>' +
+        '<td style="' + td + '">' + sg +
+          (rateHint ? ' <span style="color:var(--hint);font-size:10px">(' + rateHint + (costPerKg ? ' · ' + costPerKg + '/kg' : '') + ')</span>' : '') +
+        '</td>' +
         (typeof _selectedMonth === 'number' ? '<td style="' + tdR + '">—</td><td style="' + tdR + '">—</td>' : '') +
         '<td style="' + tdR + ';color:var(--red)">' + (sgTotalCost ? '-' + fC(sgTotalCost) : '—') + '</td>' +
         '<td style="' + tdR + ';color:var(--red)">' + (budgetYTD ? '-' + fC(budgetYTD) : '—') + '</td>' +
-        '<td style="' + tdR + '">' + (vAmt !== null ? varCell(budgetYTD - sgTotalCost, budgetYTD) : '—') + '</td>' +
+        '<td style="' + tdR + '">' + (sgTotalCost || budgetYTD ? varCell(budgetYTD - sgTotalCost, budgetYTD) : '—') + '</td>' +
         '<td style="' + tdR + ';color:var(--red)">' + (budgetTotal ? '-' + fC(budgetTotal) : '—') + '</td>' +
         '</tr>';
     }
-    // Budget-only rows (enterprises with budget but no actuals yet)
+    // Budget-only rows (enterprises with budget but no usage recorded yet)
     for (const [ent, budgEnt] of budgetEntMap) {
       const matched = [...seedBySubgroup.values()].some(g => g.budgetEnt === ent);
       if (matched) continue;
       const budgetTotal = budgEnt.totalBudget;
       const budgetYTD   = budgetTotal * ytdFraction;
+      const budgKgPerHa = budgEnt.unitPrice && budgEnt.totalCostPerHa ? (budgEnt.totalCostPerHa / budgEnt.unitPrice).toFixed(1) + ' kg/ha budget' : '';
       totalDirectBudget += budgetTotal;
       rows += '<tr>' +
-        '<td style="' + td + '">' + ent + ' <span style="color:var(--hint);font-size:10px">(budget only)</span></td>' +
+        '<td style="' + td + '">' + ent +
+          ' <span style="color:var(--hint);font-size:10px">(budget only' + (budgKgPerHa ? ' · ' + budgKgPerHa : '') + ')</span>' +
+        '</td>' +
         (typeof _selectedMonth === 'number' ? '<td style="' + tdR + '">—</td><td style="' + tdR + '">—</td>' : '') +
         '<td style="' + tdR + '">—</td>' +
         '<td style="' + tdR + ';color:var(--red)">' + (budgetYTD ? '-' + fC(budgetYTD) : '—') + '</td>' +
@@ -980,10 +1005,10 @@ async function _render(container) {
       (typeof _selectedMonth === 'number' ? '<td style="' + tdR + '">—</td><td style="' + tdR + '">—</td>' : '') +
       '<td style="' + tdR + ';color:var(--red);font-weight:700">' + (totalDirectActual ? '-' + fC(totalDirectActual) : '—') + '</td>' +
       '<td style="' + tdR + ';color:var(--red);font-weight:700">' + (totalDirectBudget ? '-' + fC(totalDirectBudget * ytdFraction) : '—') + '</td>' +
-      '<td style="' + tdR + ';font-weight:700">' + (totalDirectActual && totalDirectBudget ? varCell(totalDirectBudget * ytdFraction - totalDirectActual, totalDirectBudget * ytdFraction) : '—') + '</td>' +
+      '<td style="' + tdR + ';font-weight:700">' + (totalDirectBudget ? varCell(totalDirectBudget * ytdFraction - totalDirectActual, totalDirectBudget * ytdFraction) : '—') + '</td>' +
       '<td style="' + tdR + ';color:var(--red);font-weight:700">' + (totalDirectBudget ? '-' + fC(totalDirectBudget) : '—') + '</td>' +
       '</tr>';
-    return secRow('Direct costs — Seed') + rows + totalRow;
+    return secRow('Direct costs — Seed') + secBody('Direct costs — Seed', rows + totalRow);
   };
   directCostsSectionHtml = buildDirectCosts();
 
@@ -1209,7 +1234,7 @@ async function _render(container) {
       '<td style="' + tdR + ';color:var(--hint)">—</td>' +
       '<td style="' + tdR + ';color:var(--hint)">—</td>' +
       '</tr>';
-    fixedCostsSectionHtml = secRow('Fixed costs') + fixedRows + totalFixed;
+    fixedCostsSectionHtml = secRow('Fixed costs') + secBody('Fixed costs', fixedRows + totalFixed);
   }
 
   // CAPEX section
@@ -1218,7 +1243,7 @@ async function _render(container) {
     const capexMonthTotals = _selectedMonth
       ? '<td style="' + tdR + ';color:var(--hint)">—</td><td style="' + tdR + ';color:var(--red);font-weight:700">-' + fC(Math.abs(totalCapexBudget) / 12) + '</td>'
       : '';
-    capexSectionHtml = secRow('Capital expenditure') + capexRows +
+    const capexBody = capexRows +
       '<tr style="background:#fff5f5;border-top:2px solid var(--border)">' +
       '<td style="' + td + ';font-weight:700">Total capex</td>' +
       capexMonthTotals +
@@ -1229,6 +1254,7 @@ async function _render(container) {
       '<td style="' + tdR + ';color:var(--hint)">—</td>' +
       '<td style="' + tdR + ';color:var(--hint)">—</td>' +
       '</tr>';
+    capexSectionHtml = secRow('Capital expenditure') + secBody('Capital expenditure', capexBody);
   }
 
   // Net income row
@@ -1670,11 +1696,11 @@ window._mgmtOpenInvoice = async function(invoiceId) {
   document.querySelectorAll('[style*="position:fixed"]').forEach(el => {
     if (el.style.zIndex >= 9999) el.remove();
   });
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794956887941');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794957315820');
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   setTimeout(async () => {
     try {
-      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794956887941');
+      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794957315820');
       const rows = await ds('invoices', 'id=eq.' + invoiceId + '&select=*');
       const inv  = rows?.[0];
       if (!inv) return;
