@@ -1,9 +1,9 @@
 // modules/settings/locations-settings.js
 // Farm locations — central list used by Stocktake (grain, seed) and other modules
 
-import { dbSelect, dbInsert, dbUpdate } from '../../js/supabase-client.js?v=1794899289358';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794899289358';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794899289358';
+import { dbSelect, dbInsert, dbUpdate } from '../../js/supabase-client.js?v=1794899556905';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794899556905';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794899556905';
 
 const LOCATION_KINDS = ['Shed', 'Silo', 'Cool room', 'Paddock', 'Yard', 'Other'];
 
