@@ -5,9 +5,9 @@
 // Revenue actuals from CFM invoices; cost actuals from Xero P&L.
 // Line-level comments per row + month, tracked by user and timestamp.
 
-import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794956277176';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794956277176';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794956277176';
+import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794956479264';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794956479264';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794956479264';
 
 // Module-level state — persists across re-renders within a session
 let _selectedMonth = null;   // 'YYYY-MM' or null = full YTD
@@ -175,7 +175,7 @@ async function _render(container) {
     dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
     dbSelect('budget_costs', 'farm_id=eq.' + farm.id + '&financial_year=eq.' + season + '&select=*').catch(() => []),
     // Load ALL comments for this farm+season (both season-level and line-level, all months)
-    dbSelect('management_comments', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*,user_profiles(full_name)&order=created_at.desc').catch(() => []),
+    dbSelect('management_comments', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=created_at.desc').catch(() => []),
     // Xero account mappings for this farm + season (explicit cost-line → Xero account UUID)
     dbSelect('xero_account_mappings', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*').catch(() => []),
     // Grain stocktake items for this farm
@@ -1448,7 +1448,7 @@ window._mgmtLineComment = async function(rowKey) {
     const monthFilter = _selectedMonth ? '&month=eq.' + _selectedMonth : '&month=is.null';
     existing = await dbSelect(
       'management_comments',
-      'farm_id=eq.' + farm.id + '&season=eq.' + season + '&row_key=eq.' + encodeURIComponent(rowKey) + monthFilter + '&select=*,user_profiles(full_name)&order=created_at.asc'
+      'farm_id=eq.' + farm.id + '&season=eq.' + season + '&row_key=eq.' + encodeURIComponent(rowKey) + monthFilter + '&select=*&order=created_at.asc'
     );
   } catch (e) { console.error('[mgmt line comment] load:', e); }
 
@@ -1531,11 +1531,11 @@ window._mgmtOpenInvoice = async function(invoiceId) {
   document.querySelectorAll('[style*="position:fixed"]').forEach(el => {
     if (el.style.zIndex >= 9999) el.remove();
   });
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794956277176');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794956479264');
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   setTimeout(async () => {
     try {
-      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794956277176');
+      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794956479264');
       const rows = await ds('invoices', 'id=eq.' + invoiceId + '&select=*');
       const inv  = rows?.[0];
       if (!inv) return;
