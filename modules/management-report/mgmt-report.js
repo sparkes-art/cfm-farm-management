@@ -5,9 +5,9 @@
 // Revenue actuals from CFM invoices; cost actuals from Xero P&L.
 // Line-level comments per row + month, tracked by user and timestamp.
 
-import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794956764176';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794956764176';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794956764176';
+import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794956887941';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794956887941';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794956887941';
 
 // Module-level state — persists across re-renders within a session
 let _selectedMonth = null;   // 'YYYY-MM' or null = full YTD
@@ -881,7 +881,8 @@ async function _render(container) {
     if (!item) continue;
     const kpb = mv.kg_per_bag || item.attributes?.kg_per_bag || 0;
     const kg  = Math.abs(mv.signed_qty) || (mv.qty * kpb);
-    const cost = mv.delivery_costs?.reduce((s, dc) => s + (dc.total_cost || 0), 0) || 0;
+    const dcArr = Array.isArray(mv.delivery_costs) ? mv.delivery_costs : (mv.delivery_costs ? [mv.delivery_costs] : []);
+    const cost = dcArr.reduce((s, dc) => s + (dc.total_cost || 0), 0);
     if (!seedActualByItem.has(item.id)) {
       seedActualByItem.set(item.id, { name: item.name, subgroup: item.subgroup || '', totalKg: 0, totalBags: 0, totalCost: 0 });
     }
@@ -1669,11 +1670,11 @@ window._mgmtOpenInvoice = async function(invoiceId) {
   document.querySelectorAll('[style*="position:fixed"]').forEach(el => {
     if (el.style.zIndex >= 9999) el.remove();
   });
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794956764176');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794956887941');
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   setTimeout(async () => {
     try {
-      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794956764176');
+      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794956887941');
       const rows = await ds('invoices', 'id=eq.' + invoiceId + '&select=*');
       const inv  = rows?.[0];
       if (!inv) return;
