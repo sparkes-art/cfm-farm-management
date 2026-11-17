@@ -166,6 +166,22 @@ export async function dbDeleteWhere(table, params) {
   if (!res.ok) throw new Error(`DELETE ${table} failed: ${await res.text()}`);
 }
 
+// ── Storage ───────────────────────────────────────────────────────────────────
+// Upload a file to Supabase Storage. Returns the storage path on success.
+export async function dbStorageUpload(bucket, path, file) {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
+    method: 'POST',
+    headers: {
+      'apikey':        SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${_session?.access_token || SUPABASE_ANON_KEY}`,
+      'x-upsert':      'true',
+    },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`Storage upload failed: ${await res.text()}`);
+  return path;
+}
+
 // ── Realtime ─────────────────────────────────────────────────────────────────
 // Lightweight WebSocket wrapper around Supabase Realtime.
 // Each subscription returns an unsubscribe function.

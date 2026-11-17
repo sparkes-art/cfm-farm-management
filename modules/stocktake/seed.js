@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession } from '../../js/supabase-client.js?v=1794952332848';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794952332848';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794952332848';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794952332848';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession, dbStorageUpload } from '../../js/supabase-client.js?v=1794953377358';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794953377358';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794953377358';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794953377358';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -1099,10 +1099,9 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
           // Upload attachment to Supabase Storage if provided
           if (invAttachment && invoice.id) {
-            const { supabase } = await import('../../js/supabase-client.js?v=1794952332848');
             const ext  = invAttachment.name.split('.').pop();
             const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
-            await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
+            await dbStorageUpload('procurement-attachments', path, invAttachment).catch(() => {});
             await dbUpdate('procurement_invoices', invoice.id, { attachment_path: path }).catch(() => {});
           }
         }
