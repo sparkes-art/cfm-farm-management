@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794897154474';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794897154474';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794897154474';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794897154474';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, getSession } from '../../js/supabase-client.js?v=1794897921223';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794897921223';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794897921223';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794897921223';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -1397,7 +1397,43 @@ async function _confirmDeleteSession(session) {
   if (!confirm(msg)) return;
 
   try {
-    // planting_rows cascade-delete via FK, so just delete the session
+    const farm = getActiveFarm();
+
+    // 1. Remove any seed usage stock_movement written when this session was closed
+    //    (movement_type = 'usage', source_ref = session.id)
+    if (session.status === 'closed' && farm?.id) {
+      const usageMoves = await dbSelect('stock_movements',
+        `farm_id=eq.${farm.id}&movement_type=eq.usage&source_ref=eq.${session.id}&select=id`
+      ).catch(() => []);
+      for (const m of usageMoves) {
+        await dbDelete('delivery_costs', `movement_id=eq.${m.id}`).catch(() => {});
+        await dbDelete('stock_movements', `id=eq.${m.id}`).catch(() => {});
+      }
+    }
+
+    // 2. Recalculate crop_plan_entries planted_ha for the linked entry (non-fatal)
+    try {
+      const cpId = session.crop_plan_entry_id;
+      if (cpId) {
+        // Sibling sessions that are still closed (excluding the one being deleted)
+        const siblings = _sessions.filter(s =>
+          s.id !== session.id &&
+          s.crop_plan_entry_id === cpId &&
+          s.status === 'closed'
+        );
+        const siblingHa = siblings.reduce((t, s) => t + _sessionTotalHa(s.id), 0);
+        if (siblings.length === 0) {
+          // No more closed sessions — revert to planned status with no planted_ha
+          await dbUpdate('crop_plan_entries', cpId, { planted_ha: null, status: 'planned' });
+        } else {
+          await dbUpdate('crop_plan_entries', cpId, { planted_ha: siblingHa });
+        }
+      }
+    } catch (e) {
+      console.warn('[CFM] Crop plan revert skipped:', e.message);
+    }
+
+    // 3. Delete the session (planting_rows cascade via FK)
     await dbDelete('planting_sessions', session.id);
     _sessions = _sessions.filter(s => s.id !== session.id);
     delete _allRows[session.id];
@@ -1553,7 +1589,7 @@ function _showCloseSessionModal(session) {
 
       // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
       try {
-        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794897154474');
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794897921223');
         const farm = getActiveFarm();
         await writeSessionSeedUsage(farm, session);
       } catch (e) {
