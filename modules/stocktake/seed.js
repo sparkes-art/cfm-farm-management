@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794896296214';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794896296214';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794896296214';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794896296214';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794897154474';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794897154474';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794897154474';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794897154474';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -895,6 +895,38 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
           <label class="form-label">Internal note</label>
           <input class="form-input" type="text" id="sdel-note" placeholder="Optional">
         </div>
+
+        <!-- Invoice section -->
+        <div style="border-top:1px solid var(--border);padding-top:12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:500;color:var(--ink-mid)">
+            <input type="checkbox" id="sdel-has-invoice" style="accent-color:var(--blue);width:15px;height:15px">
+            Invoice received with this delivery
+          </label>
+        </div>
+        <div id="sdel-invoice-panel" style="display:none;background:var(--page-bg);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:12px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.04em">Invoice details</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Invoice number</label>
+              <input class="form-input" id="sinv-number" type="text" placeholder="e.g. INV-00123">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Invoice date</label>
+              <input class="form-input" id="sinv-date" type="date" value="${today}">
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Unit cost ($ per unit) <span style="color:var(--red)">*</span></label>
+              <input class="form-input num" id="sinv-unit-cost" type="number" step="0.0001" placeholder="e.g. 1.4200">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Invoice total (incl. GST)</label>
+              <input class="form-input num" id="sinv-total" type="number" step="0.01" placeholder="auto-calculated">
+            </div>
+          </div>
+          <div id="sinv-cost-preview" style="font-size:12px;color:var(--hint)"></div>
+        </div>
       </div>`,
     confirmLabel: 'Record delivery',
     onConfirm: async (modal) => {
@@ -907,6 +939,18 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
       const supplier     = modal.querySelector('#sdel-supplier')?.value?.trim() || null;
       const supplierDesc = modal.querySelector('#sdel-supplier-desc')?.value?.trim() || null;
       const note         = modal.querySelector('#sdel-note')?.value?.trim() || null;
+      const hasInvoice   = modal.querySelector('#sdel-has-invoice')?.checked;
+
+      // Invoice fields
+      const invNumber   = modal.querySelector('#sinv-number')?.value?.trim() || null;
+      const invDate     = modal.querySelector('#sinv-date')?.value || date;
+      const invUnitCost = parseFloat(modal.querySelector('#sinv-unit-cost')?.value) || null;
+      const invTotal    = parseFloat(modal.querySelector('#sinv-total')?.value) || null;
+
+      if (hasInvoice && !invUnitCost) {
+        toast('Unit cost is required when recording an invoice', 'error');
+        return false;
+      }
 
       // If creating a new variety inline, insert it first
       if (itemId === '__new__') {
@@ -930,7 +974,6 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         });
         itemId = newItem?.id;
         if (!itemId) { toast('Failed to create variety', 'error'); return false; }
-        // Add to items array so the movement insert can read it
         items.push(newItem);
         toast(`${variety} added`, 'success');
       }
@@ -940,13 +983,16 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         return false;
       }
       const item = items.find(i => i.id === itemId);
-      // If a supplier description was entered and the item doesn't have one yet, save it
+
+      // Save supplier description to variety record if new
       if (supplierDesc && !item?.attributes?.supplier_description) {
         await dbUpdate('stock_items', itemId, {
           attributes: { ...(item?.attributes || {}), supplier_description: supplierDesc },
         }).catch(() => {});
       }
-      await dbInsert('stock_movements', {
+
+      // Record the delivery movement
+      const [movement] = await dbInsert('stock_movements', {
         farm_id:       farm.id,
         item_id:       itemId,
         location_id:   locId,
@@ -956,9 +1002,51 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         kg_per_bag:    kpb,
         occurred_on:   date,
         counterparty:  supplier,
+        source_ref:    invNumber || null,
         note:          note || (supplier ? `Delivery from ${supplier}` : 'Seed delivery'),
       });
-      toast('Delivery recorded', 'success');
+
+      // If invoice was provided, create invoice → line → cost match atomically
+      if (hasInvoice && movement?.id) {
+        const lineTotal = invTotal || (invUnitCost && qty ? parseFloat((invUnitCost * qty).toFixed(2)) : null);
+        const totalCost = parseFloat((invUnitCost * qty).toFixed(2));
+
+        const [invoice] = await dbInsert('procurement_invoices', {
+          farm_id:        farm.id,
+          supplier:       supplier || 'Unknown supplier',
+          invoice_number: invNumber,
+          invoice_date:   invDate,
+          total_amount:   invTotal || lineTotal,
+          created_by:     null,   // set by RLS/session context
+        });
+
+        if (invoice?.id) {
+          const [line] = await dbInsert('procurement_lines', {
+            procurement_invoice_id: invoice.id,
+            farm_id:                farm.id,
+            item_id:                itemId,
+            description:            supplierDesc || item?.name || 'Seed',
+            unit_cost:              invUnitCost,
+            unit:                   item?.default_unit || 'bags',
+            quantity_invoiced:      qty,
+            line_total:             lineTotal,
+          });
+
+          if (line?.id) {
+            await dbInsert('delivery_costs', {
+              farm_id:              farm.id,
+              movement_id:          movement.id,
+              procurement_line_id:  line.id,
+              unit_cost:            invUnitCost,
+              total_cost:           totalCost,
+            });
+          }
+        }
+        toast('Delivery + invoice recorded — cost matched ✓', 'success');
+      } else {
+        toast('Delivery recorded', 'success');
+      }
+
       await _render(container, farm, period, allPeriods);
     }
   });
@@ -1011,6 +1099,40 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
     itemEl?.addEventListener('change', updateFromItem);
     if (preItemId) updateFromItem();
+
+    // Invoice panel toggle
+    const hasInvCb    = document.getElementById('sdel-has-invoice');
+    const invPanel    = document.getElementById('sdel-invoice-panel');
+    const invUnitCost = document.getElementById('sinv-unit-cost');
+    const invTotal    = document.getElementById('sinv-total');
+    const costPreview = document.getElementById('sinv-cost-preview');
+
+    const updateCostPreview = () => {
+      const uc  = parseFloat(invUnitCost?.value || 0);
+      const q   = parseFloat(document.getElementById('sdel-qty')?.value || 0);
+      if (uc && q) {
+        const total = (uc * q).toFixed(2);
+        if (costPreview) costPreview.textContent = `${q} × $${uc} = $${total} total cost`;
+        if (invTotal && !invTotal.value) invTotal.value = total;
+      } else {
+        if (costPreview) costPreview.textContent = '';
+      }
+    };
+
+    hasInvCb?.addEventListener('change', () => {
+      if (invPanel) invPanel.style.display = hasInvCb.checked ? 'flex' : 'none';
+      // Auto-fill supplier name into invoice if already typed
+      if (hasInvCb.checked) {
+        const suppEl = document.getElementById('sdel-supplier');
+        if (suppEl?.value) {
+          // Supplier field is on the delivery side — just focus unit cost
+          invUnitCost?.focus();
+        }
+      }
+    });
+
+    invUnitCost?.addEventListener('input', updateCostPreview);
+    document.getElementById('sdel-qty')?.addEventListener('input', updateCostPreview);
   }, 60);
 }
 
