@@ -158,7 +158,7 @@ ob AS (
     SUM(obc.total_value)    AS ob_value
   FROM opening_balance_costs obc
   JOIN stock_movements sm ON sm.id = obc.movement_id
-  WHERE sm.movement_type = 'opening_balance'
+  WHERE sm.movement_type = 'adjustment'
   GROUP BY obc.farm_id, obc.season_id, sm.item_id
 ),
 
@@ -175,7 +175,7 @@ deliveries AS (
   JOIN season_boundaries sb
     ON sm.occurred_on BETWEEN sb.season_start AND sb.season_end
   WHERE sm.movement_type = 'delivery'
-    AND sm.direction = 'in'
+    AND sm.direction = 1
   GROUP BY dc.farm_id, sb.season_id, sm.item_id
 ),
 
@@ -192,7 +192,7 @@ unmatched AS (
     ON sm.occurred_on BETWEEN sb.season_start AND sb.season_end
   LEFT JOIN delivery_costs dc ON dc.movement_id = sm.id
   WHERE sm.movement_type = 'delivery'
-    AND sm.direction = 'in'
+    AND sm.direction = 1
     AND dc.id IS NULL
   GROUP BY sm.farm_id, sb.season_id, sm.item_id
 )
@@ -277,7 +277,7 @@ LEFT JOIN v_stock_wac w
   AND w.season_id = sb.season_id
   AND w.item_id  = sm.item_id
 WHERE sm.movement_type = 'usage'
-  AND sm.direction = 'out';
+  AND sm.direction = -1;
 
 -- ── 7. Trigger: auto-update procurement_invoices.status ───────────────────────
 -- After each insert/update/delete on delivery_costs, recalculate whether the
