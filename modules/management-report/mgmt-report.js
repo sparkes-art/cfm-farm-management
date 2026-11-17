@@ -5,9 +5,9 @@
 // Revenue actuals from CFM invoices; cost actuals from Xero P&L.
 // Line-level comments per row + month, tracked by user and timestamp.
 
-import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794956683876';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794956683876';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794956683876';
+import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794956764176';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794956764176';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794956764176';
 
 // Module-level state — persists across re-renders within a session
 let _selectedMonth = null;   // 'YYYY-MM' or null = full YTD
@@ -929,7 +929,10 @@ async function _render(container) {
   let totalDirectActual = 0;
   let directCostsSectionHtml = '';
 
+  console.log('[DirectCosts] seedMovements:', seedMovements.length, '| seedMovsAll:', seedMovsAll.length, '| seedActuals:', seedActuals.length, '| seedBudgets:', seedBudgets.length, '| varCosts:', varCosts.length, '| budgetCosts:', budgetCosts.length);
+
   const buildDirectCosts = () => {
+    console.log('[DirectCosts] buildDirectCosts called — seedActuals:', seedActuals.length, 'seedBudgets:', seedBudgets.length);
     if (!seedActuals.length && !seedBudgets.length) return '';
     let rows = '';
     // Rows from actual deliveries grouped by subgroup (crop)
@@ -1666,11 +1669,11 @@ window._mgmtOpenInvoice = async function(invoiceId) {
   document.querySelectorAll('[style*="position:fixed"]').forEach(el => {
     if (el.style.zIndex >= 9999) el.remove();
   });
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794956683876');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794956764176');
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   setTimeout(async () => {
     try {
-      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794956683876');
+      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794956764176');
       const rows = await ds('invoices', 'id=eq.' + invoiceId + '&select=*');
       const inv  = rows?.[0];
       if (!inv) return;
