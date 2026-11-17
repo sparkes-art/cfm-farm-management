@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794899556905';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794899556905';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794899556905';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794899556905';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794900175829';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794900175829';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794900175829';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794900175829';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -977,7 +977,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         }
         let newItem;
         try {
-          [newItem] = await dbInsert('stock_items', {
+          newItem = await dbInsert('stock_items', {
             farm_id:      farm.id,
             category:     'grain',
             is_seed:      true,
@@ -1011,7 +1011,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
       const item = items.find(i => i.id === itemId);
 
       // Record the delivery movement
-      const [movement] = await dbInsert('stock_movements', {
+      const movement = await dbInsert('stock_movements', {
         farm_id:       farm.id,
         item_id:       itemId,
         location_id:   locId,
@@ -1027,7 +1027,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
       // If invoice was provided, create invoice → line → cost match atomically
       if (hasInvoice && movement?.id) {
-        const [invoice] = await dbInsert('procurement_invoices', {
+        const invoice = await dbInsert('procurement_invoices', {
           farm_id:        farm.id,
           supplier:       supplier || 'Unknown supplier',
           invoice_number: invNumber,
@@ -1037,7 +1037,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         });
 
         if (invoice?.id) {
-          const [line] = await dbInsert('procurement_lines', {
+          const line = await dbInsert('procurement_lines', {
             procurement_invoice_id: invoice.id,
             farm_id:                farm.id,
             item_id:                itemId,
@@ -1061,7 +1061,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
           // Upload attachment to Supabase Storage if provided
           if (invAttachment && invoice.id) {
-            const { supabase } = await import('../../js/supabase-client.js?v=1794899556905');
+            const { supabase } = await import('../../js/supabase-client.js?v=1794900175829');
             const ext  = invAttachment.name.split('.').pop();
             const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
             await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
