@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794898736898';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794898736898';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794898736898';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794898736898';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794898946615';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794898946615';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794898946615';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794898946615';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -864,9 +864,29 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
           </div>
         </div>
 
+        <!-- Quantity — bags or direct kg -->
         <div class="form-group">
           <label class="form-label">Total weight (kg) <span style="color:var(--red)">*</span></label>
           <input class="form-input" type="number" id="sdel-qty" min="0.1" step="0.1" placeholder="0.0">
+        </div>
+        <div style="margin-top:-8px">
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--hint)">
+            <input type="checkbox" id="sdel-use-bags" style="accent-color:var(--blue);width:13px;height:13px">
+            Calculate from bags × avg weight
+          </label>
+        </div>
+        <div id="sdel-bags-panel" style="display:none;background:var(--page-bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Number of bags</label>
+              <input class="form-input" type="number" id="sdel-bags" min="1" step="1" placeholder="e.g. 200">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Avg kg / bag</label>
+              <input class="form-input" type="number" id="sdel-kpb" min="0.1" step="0.1" placeholder="e.g. 20">
+            </div>
+          </div>
+          <div id="sdel-bags-preview" style="font-size:12px;color:var(--hint);margin-top:8px"></div>
         </div>
         <div class="form-group">
           <label class="form-label">Storage location</label>
@@ -928,6 +948,11 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
       const note       = modal.querySelector('#sdel-note')?.value?.trim() || null;
       const hasInvoice = modal.querySelector('#sdel-has-invoice')?.checked;
 
+      // Bags breakdown (optional — stored for reference)
+      const useBags = modal.querySelector('#sdel-use-bags')?.checked;
+      const bags    = useBags ? (parseFloat(modal.querySelector('#sdel-bags')?.value) || null) : null;
+      const kpb     = useBags ? (parseFloat(modal.querySelector('#sdel-kpb')?.value) || null) : null;
+
       // Invoice fields
       const invNumber      = modal.querySelector('#sinv-number')?.value?.trim() || null;
       const invDate        = modal.querySelector('#sinv-date')?.value || date;
@@ -980,10 +1005,11 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         movement_type: 'delivery',
         qty,
         unit:          'kg',
+        kg_per_bag:    kpb || null,
         occurred_on:   date,
         counterparty:  supplier,
         source_ref:    invNumber || null,
-        note:          note || (supplier ? `Delivery from ${supplier}` : 'Seed delivery'),
+        note:          note || (bags ? `${bags} bags @ ${kpb} kg/bag` : '') || (supplier ? `Delivery from ${supplier}` : 'Seed delivery'),
       });
 
       // If invoice was provided, create invoice → line → cost match atomically
@@ -1022,7 +1048,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
           // Upload attachment to Supabase Storage if provided
           if (invAttachment && invoice.id) {
-            const { supabase } = await import('../../js/supabase-client.js?v=1794898736898');
+            const { supabase } = await import('../../js/supabase-client.js?v=1794898946615');
             const ext  = invAttachment.name.split('.').pop();
             const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
             await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
@@ -1038,7 +1064,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
     }
   });
 
-  // Wire new-variety panel toggle + invoice panel
+  // Wire new-variety panel, bags calculator, invoice panel
   setTimeout(() => {
     const itemEl   = document.getElementById('sdel-item');
     const newPanel = document.getElementById('sdel-new-variety-panel');
@@ -1050,6 +1076,33 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
     itemEl?.addEventListener('change', updateFromItem);
     if (preItemId) updateFromItem();
+
+    // Bags calculator
+    const useBagsCb   = document.getElementById('sdel-use-bags');
+    const bagsPanel   = document.getElementById('sdel-bags-panel');
+    const bagsInput   = document.getElementById('sdel-bags');
+    const kpbInput    = document.getElementById('sdel-kpb');
+    const qtyInput    = document.getElementById('sdel-qty');
+    const bagsPreview = document.getElementById('sdel-bags-preview');
+
+    const calcFromBags = () => {
+      const bags = parseFloat(bagsInput?.value || 0);
+      const kpb  = parseFloat(kpbInput?.value || 0);
+      if (bags && kpb) {
+        const totalKg = parseFloat((bags * kpb).toFixed(1));
+        if (qtyInput) qtyInput.value = totalKg;
+        if (bagsPreview) bagsPreview.textContent = `${bags} bags × ${kpb} kg = ${totalKg} kg total`;
+      } else {
+        if (bagsPreview) bagsPreview.textContent = '';
+      }
+    };
+
+    useBagsCb?.addEventListener('change', () => {
+      if (bagsPanel) bagsPanel.style.display = useBagsCb.checked ? 'block' : 'none';
+      if (useBagsCb.checked) bagsInput?.focus();
+    });
+    bagsInput?.addEventListener('input', calcFromBags);
+    kpbInput?.addEventListener('input', calcFromBags);
 
     // Invoice panel toggle
     const hasInvCb    = document.getElementById('sdel-has-invoice');
