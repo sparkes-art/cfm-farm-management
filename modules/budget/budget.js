@@ -1,12 +1,12 @@
 // modules/budget/budget.js
 // Budget & Forecast — inline editable table per crop type per season
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794797914869';
-import { getActiveFarm, getSession, canWrite, getFarms, getActiveSeason } from '../../js/app-state.js?v=1794797914869';
-import { loadCommodities, getCommodities, getCropTypes, commoditySelectHTML, initCommoditySelect, cropTypeSelectHTML, initCropTypeSelect, refreshCropTypeSelect } from '../../js/commodities.js?v=1794797914869';
-import { toast, openModal, formatNumber, formatCurrency, qs, currentSeason } from '../../js/ui.js?v=1794797914869';
-import { parseHarvestExcel, resolveCropTypes, diffHarvestImport, commitHarvestImport } from './harvest-import.js?v=1794797914869';
-import { parseBudgetExcel, showBudgetImportPreview } from './budget-import.js?v=1794797914869';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794874824754';
+import { getActiveFarm, getSession, canWrite, getFarms, getActiveSeason, getSeasons } from '../../js/app-state.js?v=1794874824754';
+import { loadCommodities, getCommodities, getCropTypes, commoditySelectHTML, initCommoditySelect, cropTypeSelectHTML, initCropTypeSelect, refreshCropTypeSelect } from '../../js/commodities.js?v=1794874824754';
+import { toast, openModal, formatNumber, formatCurrency, qs, currentSeason } from '../../js/ui.js?v=1794874824754';
+import { parseHarvestExcel, resolveCropTypes, diffHarvestImport, commitHarvestImport } from './harvest-import.js?v=1794874824754';
+import { parseBudgetExcel, showBudgetImportPreview } from './budget-import.js?v=1794874824754';
 
 let _budgets = [];
 let _forecasts = [];
@@ -273,6 +273,13 @@ export function unmountBudget() {
 }
 
 function _seasonOptions() {
+  const seasons = getSeasons();
+  if (seasons.length) {
+    return seasons.map(s =>
+      `<option value="${s.id}" ${s.id === _season ? 'selected' : ''}>${s.label}</option>`
+    ).join('');
+  }
+  // Fallback: rolling 6-year window
   const current = currentSeason();
   const [y] = current.split('-').map(Number);
   return Array.from({ length: 6 }, (_, i) => {

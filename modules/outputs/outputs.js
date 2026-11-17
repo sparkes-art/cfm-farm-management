@@ -1,18 +1,18 @@
 // modules/outputs/outputs.js
 // Outputs module — Dashboard, Contracts, Market Prices, Invoices
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert, subscribeTable } from '../../js/supabase-client.js?v=1794797914869';
-import { getActiveFarm, getSession, canWrite, getActiveSeason, getRole } from '../../js/app-state.js?v=1794797914869';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert, subscribeTable } from '../../js/supabase-client.js?v=1794874824754';
+import { getActiveFarm, getSession, canWrite, getActiveSeason, getSeasons, getRole } from '../../js/app-state.js?v=1794874824754';
 import {
   toast, openModal, formatCurrency, formatDate,
   commodityBadge, statusBadge, qs, setContent, currentSeason, formatNumber
-} from '../../js/ui.js?v=1794797914869';
-import { mountContracts, unmountContracts } from './contracts.js?v=1794797914869';
-import { mountInvoices, unmountInvoices, openInvoiceForm } from './invoices.js?v=1794797914869';
-import { mountReconciliation, unmountReconciliation } from './reconciliation.js?v=1794797914869';
-import { mountMarketPrices, unmountMarketPrices } from './market-prices.js?v=1794797914869';
-import { buildCommodityCards, drawMiniCharts, buildContractPosition, buildOperationsSummary, buildLivestockPosition } from './commodity-card.js?v=1794797914869';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794797914869';
+} from '../../js/ui.js?v=1794874824754';
+import { mountContracts, unmountContracts } from './contracts.js?v=1794874824754';
+import { mountInvoices, unmountInvoices, openInvoiceForm } from './invoices.js?v=1794874824754';
+import { mountReconciliation, unmountReconciliation } from './reconciliation.js?v=1794874824754';
+import { mountMarketPrices, unmountMarketPrices } from './market-prices.js?v=1794874824754';
+import { buildCommodityCards, drawMiniCharts, buildContractPosition, buildOperationsSummary, buildLivestockPosition } from './commodity-card.js?v=1794874824754';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794874824754';
 
 let _invoices = [];
 let _contracts = [];
@@ -78,10 +78,17 @@ export function unmountOutputs() {
 }
 
 function _seasonOptions(selected = null) {
+  const active = selected || getActiveSeason() || currentSeason();
+  const seasons = getSeasons();
+  if (seasons.length) {
+    // Use the canonical list from the seasons table (already sorted newest first)
+    return seasons.map(s =>
+      `<option value="${s.id}" ${s.id === active ? 'selected' : ''}>${s.label}</option>`
+    ).join('');
+  }
+  // Fallback: rolling 5-year window if table hasn't loaded yet
   const current = currentSeason();
   const [y] = current.split('-').map(Number);
-  // Use selected season if provided, otherwise current
-  const active = selected || current;
   return Array.from({ length: 5 }, (_, i) => {
     const s = `${y + 1 - i}-${String(y + 2 - i).slice(2)}`;
     return `<option value="${s}" ${s === active ? 'selected' : ''}>${s}</option>`;

@@ -1,10 +1,10 @@
 // modules/outputs/contracts.js
 // Forward Contracts — list, add, edit, delete, PDF AI extraction
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable, uploadFile } from '../../js/supabase-client.js?v=1794797914869';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794797914869';
-import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, setContent, currentSeason } from '../../js/ui.js?v=1794797914869';
-import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js?v=1794797914869';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable, uploadFile } from '../../js/supabase-client.js?v=1794874824754';
+import { getActiveFarm, getSession, canWrite, getActiveSeason, getSeasons } from '../../js/app-state.js?v=1794874824754';
+import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, setContent, currentSeason } from '../../js/ui.js?v=1794874824754';
+import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js?v=1794874824754';
 
 let _contracts = [];
 let _invoices = [];
@@ -727,8 +727,8 @@ export function openContractModal(existing = null) {
         <div class="form-group">
           <label class="form-label" style="color:var(--red);font-weight:600">Crop year ⚠ verify after extraction</label>
           <select class="form-select" id="f-crop-year" style="border-color:var(--red)">
-            ${['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s =>
-              `<option value="${s}" ${(existing?.crop_year || getActiveSeason() || currentSeason()) === s ? 'selected' : ''}>${s}</option>`
+            ${(getSeasons().length ? getSeasons() : ['2023-24','2024-25','2025-26','2026-27','2027-28'].map(s => ({id:s,label:s}))).map(s =>
+              `<option value="${s.id}" ${(existing?.crop_year || getActiveSeason() || currentSeason()) === s.id ? 'selected' : ''}>${s.label}</option>`
             ).join('')}
           </select>
         </div>

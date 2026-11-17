@@ -2,7 +2,7 @@
 // Central in-memory state for the running session.
 // Nothing is persisted to localStorage. State rebuilds from Supabase on each load.
 
-import { getSession, onSessionChange, dbSelect, closeAllSubscriptions } from './supabase-client.js?v=1794797914869';
+import { getSession, onSessionChange, dbSelect, closeAllSubscriptions } from './supabase-client.js?v=1794874824754';
 export { getSession };
 
 const _state = {
@@ -11,6 +11,7 @@ const _state = {
   farms: [],
   activeFarm: null,
   activeModule: 'outputs',
+  seasons: [],          // loaded from seasons table, sorted newest first
 };
 
 const _listeners = new Map();
@@ -19,6 +20,7 @@ export function getState() { return { ..._state }; }
 
 export function getActiveFarm() { return _state.activeFarm; }
 export function getActiveSeason() { return _state.activeSeason; }
+export function getSeasons() { return _state.seasons; }  // sorted newest first
 export function setActiveSeason(season) {
   _state.activeSeason = season;
   // Dispatch event so modules can react
@@ -58,7 +60,7 @@ onSessionChange(async (session) => {
   _emit('session', session);
 
   if (session) {
-    await _loadFarms(session);
+    await Promise.all([_loadFarms(session), _loadSeasons()]);
   } else {
     _state.farms = [];
     _state.activeFarm = null;
@@ -105,3 +107,18 @@ export function setActiveModule(module) {
 }
 
 export function getFarms() { return _state.farms; }
+
+async function _loadSeasons() {
+  try {
+    const rows = await dbSelect('seasons', 'select=id,label,is_active&order=sort_order.desc');
+    _state.seasons = rows;
+    // Auto-set active season from table if not already set
+    if (!_state.activeSeason) {
+      const active = rows.find(s => s.is_active) || rows[0];
+      if (active) setActiveSeason(active.id);
+    }
+    _emit('seasons', rows);
+  } catch (err) {
+    console.warn('Failed to load seasons from table, falling back to derived list:', err);
+  }
+}
