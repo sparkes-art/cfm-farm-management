@@ -3,9 +3,9 @@
 // Revenue actuals from CFM invoices; cost budgets from budget_costs table.
 // Fixed cost actuals pulled from Xero P&L when the farm has a Xero connection.
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794953780511';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794953780511';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794953780511';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794954347500';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794954347500';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794954347500';
 
 export function unmountManagementReport() {}
 
@@ -55,12 +55,22 @@ async function _render(container) {
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--hint)">Loading...</div>';
 
   console.log('[MgmtReport] Loading data for farm:', farm.id, 'season:', season);
-  const [contracts, allInvoices, budgets, budgetCosts, comments] = await Promise.all([
+  const [contracts, allInvoices, budgets, budgetCosts, comments, seedMovements, seedProcurement] = await Promise.all([
     dbSelect('forward_contracts', `farm_id=eq.${farm.id}&crop_year=eq.${season}&select=*`),
     dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`),
     dbSelect('budgets', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`),
     dbSelect('budget_costs', `farm_id=eq.${farm.id}&financial_year=eq.${season}&select=*`).catch(()=>[]),
     dbSelect('management_comments', `farm_id=eq.${farm.id}&season=eq.${season}&select=*,user_profiles(full_name)&order=created_at.desc`).catch(()=>[]),
+    // Seed delivery movements with their cost matching and stock item detail
+    dbSelect('stock_movements',
+      `farm_id=eq.${farm.id}&movement_type=eq.delivery&direction=eq.1` +
+      `&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,item_id,` +
+      `stock_items(id,name,subgroup,attributes,is_seed),delivery_costs(id,total_cost,unit_cost,procurement_line_id)` +
+      `&order=occurred_on.asc`).catch(()=>[]),
+    // Procurement invoices for the season (seed only — filter client-side)
+    dbSelect('procurement_invoices',
+      `farm_id=eq.${farm.id}&select=*,procurement_lines(id,item_id,description,quantity_invoiced,unit,unit_cost,line_total,stock_items(id,name,subgroup,attributes,is_seed))` +
+      `&order=invoice_date.asc`).catch(()=>[]),
   ]);
   console.log('[MgmtReport] budgets rows:', budgets.length, '| budgetCosts rows:', budgetCosts.length);
 
@@ -342,6 +352,212 @@ async function _render(container) {
     buildSection('Carry-over income', carryOverGroups, { carryOver: true }),
   ].join('');
 
+  // ── Direct costs — seed actuals vs budget ──────────────────────────────────
+  // Seed delivery movements matched to procurement invoices give us:
+  //   actual qty (bags / kg), actual cost (total_cost), actual $/bag
+  // Budget from budget_costs where category='variable' and budget_code contains 'SEED'
+  // Fits the 5-column table: Item | Actual YTD | Budget YTD | Variance | Full yr budget
+  // Sub-line tooltip shows: qty, $/bag, bags/ha
+
+  // 1. Filter to seed movements only
+  const seedMovsAll = (seedMovements || []).filter(m => m.stock_items?.is_seed);
+
+  // 2. Build a map: item_id → { name, subgroup, kpb, totalKg, totalBags, totalCost }
+  const seedActualByItem = new Map();
+  for (const m of seedMovsAll) {
+    const item = m.stock_items;
+    if (!item) continue;
+    const kpb  = parseFloat(m.kg_per_bag) || parseFloat(item.attributes?.kg_per_bag) || null;
+    const qty  = Math.abs(parseFloat(m.signed_qty) || 0);  // kg
+    const bags = kpb ? qty / kpb : null;
+    const cost = (m.delivery_costs || []).reduce((s, dc) => s + (parseFloat(dc.total_cost) || 0), 0);
+
+    if (!seedActualByItem.has(item.id)) {
+      seedActualByItem.set(item.id, {
+        itemId:    item.id,
+        name:      item.name,
+        subgroup:  item.subgroup || 'Seed',
+        kpb,
+        totalKg:   0,
+        totalBags: 0,
+        totalCost: 0,
+        hasCost:   false,
+      });
+    }
+    const row = seedActualByItem.get(item.id);
+    row.totalKg   += qty;
+    if (kpb && bags !== null) row.totalBags += bags;
+    row.totalCost += cost;
+    if (cost > 0) row.hasCost = true;
+  }
+
+  // 3. Budget seed lines — category='variable', budget_code or description contains 'SEED'
+  const varCosts    = budgetCosts.filter(c => c.category === 'variable');
+  const seedBudgets = varCosts.filter(c => {
+    const code = (c.budget_code || '').toUpperCase();
+    const desc = (c.description || '').toUpperCase();
+    return code.includes('SEED') || desc.includes('SEED');
+  });
+
+  // Group budget seed lines by enterprise
+  const budgetByEnterprise = new Map();
+  for (const bc of seedBudgets) {
+    const ent = bc.enterprise || 'Unallocated';
+    if (!budgetByEnterprise.has(ent)) budgetByEnterprise.set(ent, []);
+    budgetByEnterprise.get(ent).push(bc);
+  }
+
+  // 4. Budgeted area per enterprise (from budgets table or budget_costs.area_ha)
+  const budgetAreaByEnterprise = new Map();
+  for (const b of budgets) {
+    const ent = (b.enterprise || b.commodity || '').toUpperCase();
+    if (ent) budgetAreaByEnterprise.set(ent, (budgetAreaByEnterprise.get(ent) || 0) + (parseFloat(b.area_ha) || 0));
+  }
+  for (const bc of varCosts) {
+    if (bc.area_ha && bc.enterprise) {
+      const ent = bc.enterprise.toUpperCase();
+      if (!budgetAreaByEnterprise.has(ent)) budgetAreaByEnterprise.set(ent, parseFloat(bc.area_ha) || 0);
+    }
+  }
+
+  // 5. Helpers
+  const fBags = n => (n == null || isNaN(n) || n === 0) ? '—' : `${Math.round(n).toLocaleString('en-AU')} bags`;
+  const fKgDC = n => (n == null || isNaN(n)) ? '—' : `${Math.round(n).toLocaleString('en-AU')} kg`;
+
+  let totalDirectBudget = 0;
+  let totalDirectActual = 0;
+
+  // 6. Group actuals by subgroup (enterprise/crop label)
+  const seedActuals = [...seedActualByItem.values()];
+  const seedBySubgroup = new Map();
+  for (const row of seedActuals) {
+    const sg = row.subgroup || 'Seed';
+    if (!seedBySubgroup.has(sg)) seedBySubgroup.set(sg, []);
+    seedBySubgroup.get(sg).push(row);
+  }
+
+  const directRows = (() => {
+    if (!seedActuals.length && !seedBudgets.length) return '';
+
+    // Helper: find budget area for a subgroup name
+    const getArea = (sgName) => {
+      const entKey = sgName.toUpperCase();
+      // exact match
+      if (budgetAreaByEnterprise.has(entKey)) return budgetAreaByEnterprise.get(entKey);
+      // partial — first word of budget key inside sgName
+      for (const [ent, area] of budgetAreaByEnterprise.entries()) {
+        const firstWord = ent.split(' ')[0];
+        if (firstWord.length > 3 && entKey.includes(firstWord)) return area;
+      }
+      return null;
+    };
+
+    // Helper: find budget lines for a subgroup name
+    const getBudgetLines = (sgName) => {
+      if (budgetByEnterprise.has(sgName)) return budgetByEnterprise.get(sgName);
+      const entKey = sgName.toUpperCase();
+      for (const [ent, lines] of budgetByEnterprise.entries()) {
+        if (ent.toUpperCase() === entKey) return lines;
+        const firstWord = ent.toUpperCase().split(' ')[0];
+        if (firstWord.length > 3 && entKey.includes(firstWord)) return lines;
+      }
+      return [];
+    };
+
+    // Rows for each enterprise/subgroup that has actuals
+    const enterpriseRows = [...seedBySubgroup.entries()].map(([sgName, items]) => {
+      const budgetLines  = getBudgetLines(sgName);
+      const budgetTotal  = budgetLines.reduce((s, bc) => s + (parseFloat(bc.budget_amount)||0), 0);
+      const budgetArea   = getArea(sgName);
+      const budgetCostPH = budgetLines.reduce((s, bc) => s + (parseFloat(bc.cost_per_ha)||0), 0) || null;
+
+      totalDirectBudget += budgetTotal;
+
+      const sgTotalKg   = items.reduce((s, i) => s + i.totalKg, 0);
+      const sgTotalBags = items.reduce((s, i) => s + i.totalBags, 0);
+      const sgTotalCost = items.reduce((s, i) => s + i.totalCost, 0);
+      totalDirectActual += sgTotalCost;
+
+      const actPerBag   = (sgTotalBags > 0 && sgTotalCost) ? sgTotalCost / sgTotalBags : null;
+      const actPerHa    = (budgetArea && sgTotalCost) ? sgTotalCost / budgetArea : null;
+      const bagsPerHa   = (budgetArea && sgTotalBags > 0) ? sgTotalBags / budgetArea : null;
+      const budgetYTD   = budgetTotal * ytdFraction;
+      const variance    = sgTotalCost ? sgTotalCost - budgetYTD : null;
+      const varStyle    = variance !== null
+        ? (variance <= 0 ? 'color:var(--green)' : 'color:var(--red)')
+        : '';
+
+      // Detail sub-rows per variety (seed type)
+      const varietyRows = items.map(item => {
+        const iPerBag = (item.totalBags > 0 && item.totalCost) ? item.totalCost / item.totalBags : null;
+        const iPerHa  = (budgetArea && item.totalCost) ? item.totalCost / budgetArea : null;
+        const iBagsHa = (budgetArea && item.totalBags > 0) ? item.totalBags / budgetArea : null;
+        // Sub-line: qty + unit metrics
+        const detail = [
+          item.totalBags > 0 ? fBags(item.totalBags) : fKgDC(item.totalKg),
+          iPerBag ? `${fC(iPerBag)}/bag` : null,
+          iBagsHa ? `${iBagsHa.toFixed(1)} bags/ha` : null,
+        ].filter(Boolean).join(' · ');
+        return `
+        <tr>
+          <td style="${td};padding-left:40px">
+            <span style="font-size:12px">${esc(item.name)}</span>
+            ${detail ? `<span style="font-size:10px;color:var(--hint);display:block;margin-top:1px">${detail}</span>` : ''}
+          </td>
+          <td style="${tdR};color:var(--red);font-size:12px">${item.hasCost ? '-'+fC(item.totalCost) : '<span style="color:var(--amber);font-size:11px">uncosted</span>'}</td>
+          <td style="${tdR};color:var(--hint);font-size:11px">—</td>
+          <td style="${tdR};font-size:11px;color:var(--hint)">—</td>
+          <td style="${tdR};font-size:11px;color:var(--hint)">—</td>
+        </tr>`;
+      }).join('');
+
+      // Sub-label with key metrics
+      const sgDetail = [
+        sgTotalBags > 0 ? fBags(sgTotalBags) : fKgDC(sgTotalKg),
+        actPerBag   ? `${fC(actPerBag)}/bag` : null,
+        bagsPerHa   ? `${bagsPerHa.toFixed(1)} bags/ha` : (actPerHa ? `${fC(actPerHa)}/ha` : null),
+        budgetCostPH ? `budget ${fC(budgetCostPH)}/ha` : null,
+      ].filter(Boolean).join(' · ');
+
+      return `
+        ${varietyRows}
+        <tr style="border-top:1px solid var(--border-light)">
+          <td style="${td};padding-left:28px;font-weight:600">
+            ${esc(sgName)}
+            ${sgDetail ? `<span style="font-size:10px;color:var(--hint);font-weight:400;display:block;margin-top:1px">${sgDetail}</span>` : ''}
+          </td>
+          <td style="${tdR};color:var(--red);font-weight:600">${sgTotalCost ? '-'+fC(sgTotalCost) : '—'}</td>
+          <td style="${tdR};color:var(--red);font-weight:600">${budgetYTD ? '-'+fC(budgetYTD) : '—'}</td>
+          <td style="${tdR}">${variance !== null ? `<span style="${varStyle};font-weight:600">${variance<=0?'+':''}${fC(-variance)}</span>` : '—'}</td>
+          <td style="${tdR};color:var(--red);font-weight:600">${budgetTotal ? '-'+fC(budgetTotal) : '—'}</td>
+        </tr>`;
+    }).join('');
+
+    // Budget-only enterprise lines (no actuals yet)
+    const coveredSubgroups = new Set([...seedBySubgroup.keys()].map(s => s.toUpperCase()));
+    const budgetOnlyRows = [...budgetByEnterprise.entries()]
+      .filter(([ent]) => !coveredSubgroups.has(ent.toUpperCase()))
+      .map(([ent, lines]) => {
+        const budgetTotal = lines.reduce((s, bc) => s + (parseFloat(bc.budget_amount)||0), 0);
+        const costPH      = lines.reduce((s, bc) => s + (parseFloat(bc.cost_per_ha)||0), 0);
+        totalDirectBudget += budgetTotal;
+        return `
+        <tr>
+          <td style="${td};padding-left:28px;color:var(--hint)">
+            <span style="font-size:12px">${esc(ent)}</span>
+            ${costPH ? `<span style="font-size:10px;display:block;margin-top:1px">budget ${fC(costPH)}/ha</span>` : ''}
+          </td>
+          <td style="${tdR};color:var(--hint)">—</td>
+          <td style="${tdR};color:var(--red);font-size:12px">-${fC(budgetTotal * ytdFraction)}</td>
+          <td style="${tdR};color:var(--hint)">—</td>
+          <td style="${tdR};color:var(--red);font-size:12px">-${fC(budgetTotal)}</td>
+        </tr>`;
+      }).join('');
+
+    if (!enterpriseRows && !budgetOnlyRows) return '';
+    return enterpriseRows + budgetOnlyRows;
+  })();
+
   // ── Fixed costs from budget_costs ──────────────────────────────────────────
   const fixedCats = [
     { key: 'labour',    label: 'Labour & Farm Management' },
@@ -516,6 +732,18 @@ async function _render(container) {
               <td style="${tdR};font-weight:700">${fC(grandBudget)}</td>
             </tr>
 
+            ${directRows ? `
+              ${secRow('Direct costs — Seed')}
+              ${directRows}
+              <tr style="background:#fff5f5;border-top:2px solid var(--border)">
+                <td style="${td};font-weight:700">Total direct costs (seed)</td>
+                <td style="${tdR};color:var(--red);font-weight:700">${totalDirectActual ? '-'+fC(totalDirectActual) : '—'}</td>
+                <td style="${tdR};color:var(--red);font-weight:700">${totalDirectBudget ? '-'+fC(totalDirectBudget * ytdFraction) : '—'}</td>
+                <td style="${tdR};font-weight:700">${totalDirectActual && totalDirectBudget ? (() => { const v = totalDirectActual - totalDirectBudget * ytdFraction; const pct = totalDirectBudget * ytdFraction ? v / (totalDirectBudget * ytdFraction) * 100 : null; return `<span style="color:${v<=0?'var(--green)':'var(--red)'};font-weight:700">${v<=0?'+':''}${fC(-v)}${pct!=null?` (${Math.abs(pct).toFixed(0)}%)`:''}</span>`; })() : '—'}</td>
+                <td style="${tdR};color:var(--red);font-weight:700">${totalDirectBudget ? '-'+fC(totalDirectBudget) : '—'}</td>
+              </tr>
+            ` : ''}
+
             ${budgetCosts.length ? `
               ${fixedRows.trim() ? `
                 ${secRow('Fixed costs')}
@@ -541,10 +769,10 @@ async function _render(container) {
 
               <!-- Net income -->
               ${(() => {
-                const budgetNetYTD = grandBudgetYTD - totalFixedBudget * ytdFraction - Math.abs(totalCapexBudget) * ytdFraction;
-                const budgetNetFY  = grandBudget - totalFixedBudget - Math.abs(totalCapexBudget);
-                // If Xero actuals available, compute actual net: income - fixed costs (CAPEX actuals not yet available)
-                const actualNet    = xeroActuals ? grandActual - totalFixedActual : null;
+                const budgetNetYTD = grandBudgetYTD - totalFixedBudget * ytdFraction - Math.abs(totalCapexBudget) * ytdFraction - totalDirectBudget * ytdFraction;
+                const budgetNetFY  = grandBudget - totalFixedBudget - Math.abs(totalCapexBudget) - totalDirectBudget;
+                // If Xero actuals available, compute actual net: income - fixed costs - direct costs
+                const actualNet    = xeroActuals ? grandActual - totalFixedActual - totalDirectActual : (totalDirectActual ? grandActual - totalDirectActual : null);
                 const netVariance  = actualNet !== null ? actualNet - budgetNetYTD : null;
                 const netLabel     = xeroActuals ? 'Net income (Xero costs YTD)' : 'Net income (budget)';
                 return `<tr style="background:#eff6ff;border-top:2px solid var(--border)">
@@ -745,8 +973,8 @@ window._mgmtOpenInvoice = async function(invoiceId) {
     if (el.style.zIndex >= 9999) el.remove();
   });
   // Switch to outputs module
-  const { dbSelect } = await import('../../js/supabase-client.js?v=1794953780511');
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794953780511');
+  const { dbSelect } = await import('../../js/supabase-client.js?v=1794954347500');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794954347500');
   // Navigate to outputs tab
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   // Wait briefly for module to mount, then open the invoice
