@@ -3,9 +3,9 @@
 //   Procurement: supplier invoices → matched to stock delivery movements → WAC
 //   Purchases:   simple cost entry for items not going through stocktake
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794895290371';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794895290371';
-import { toast, openModal, formatCurrency, formatDate, qs, setContent } from '../../js/ui.js?v=1794895290371';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794896296214';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794896296214';
+import { toast, openModal, formatCurrency, formatDate, qs, setContent } from '../../js/ui.js?v=1794896296214';
 
 // ── module state ──────────────────────────────────────────────────────────────
 let _tab        = 'procurement';   // 'procurement' | 'purchases'
@@ -29,7 +29,7 @@ export async function mountInputs(container) {
       </div>
     </div>
 
-    <div class="tab-bar" id="inp-tabs">
+    <div class="tab-strip" id="inp-tabs">
       <button class="tab-btn active" data-tab="procurement">🧾 Procurement</button>
       <button class="tab-btn" data-tab="purchases">📦 Purchases</button>
     </div>

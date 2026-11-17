@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794895290371';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794895290371';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794895290371';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794895290371';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794896296214';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794896296214';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794896296214';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794896296214';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -807,16 +807,58 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
   const preKpb  = parseFloat(preItem?.attributes?.kg_per_bag) || '';
   const preUnit = preItem?.default_unit || 'bags';
 
+  // Crop options for the inline new-variety panel
+  await loadCommodities(farm.id);
+  const commodities = getCommodities();
+  const cropOpts = commodities.map(c =>
+    `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
+
   openModal({
     title: 'Record seed delivery',
     bodyHTML: `
       <div style="display:flex;flex-direction:column;gap:14px">
         <div class="form-group">
           <label class="form-label">Seed variety <span style="color:var(--red)">*</span></label>
-          <select class="form-select" id="sdel-item">
-            <option value="">Select variety…</option>${itemOpts}
-          </select>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select class="form-select" id="sdel-item" style="flex:1">
+              <option value="">Select variety…</option>
+              ${itemOpts}
+              <option value="__new__" style="color:var(--blue);font-weight:500">＋ New variety…</option>
+            </select>
+          </div>
         </div>
+
+        <!-- Inline new-variety panel (hidden until __new__ selected) -->
+        <div id="sdel-new-variety-panel" style="display:none;background:var(--page-bg);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:12px;font-weight:600;color:var(--blue);text-transform:uppercase;letter-spacing:.04em">New variety</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Crop <span style="color:var(--red)">*</span></label>
+              <select class="form-select" id="snv-crop">
+                <option value="">Select crop…</option>${cropOpts}
+              </select>
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Variety name <span style="color:var(--red)">*</span></label>
+              <input class="form-input" id="snv-variety" type="text" placeholder="e.g. DP 1840 B3XF">
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Unit</label>
+              <select class="form-select" id="snv-unit">
+                <option value="bags">Bags</option>
+                <option value="kg">Kilograms</option>
+                <option value="t">Tonnes</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin:0" id="snv-kpb-wrap">
+              <label class="form-label">kg per bag</label>
+              <input class="form-input" id="snv-kpb" type="number" min="1" step="0.1" placeholder="e.g. 20">
+            </div>
+          </div>
+        </div>
+
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
           <div class="form-group" style="margin:0">
             <label class="form-label">Quantity <span style="color:var(--red)">*</span></label>
@@ -856,7 +898,8 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
       </div>`,
     confirmLabel: 'Record delivery',
     onConfirm: async (modal) => {
-      const itemId       = modal.querySelector('#sdel-item')?.value;
+      const itemSel      = modal.querySelector('#sdel-item');
+      let   itemId       = itemSel?.value;
       const locId        = modal.querySelector('#sdel-location')?.value || null;
       const qty          = parseFloat(modal.querySelector('#sdel-qty')?.value);
       const kpb          = parseFloat(modal.querySelector('#sdel-kpb')?.value) || null;
@@ -864,6 +907,33 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
       const supplier     = modal.querySelector('#sdel-supplier')?.value?.trim() || null;
       const supplierDesc = modal.querySelector('#sdel-supplier-desc')?.value?.trim() || null;
       const note         = modal.querySelector('#sdel-note')?.value?.trim() || null;
+
+      // If creating a new variety inline, insert it first
+      if (itemId === '__new__') {
+        const crop    = modal.querySelector('#snv-crop')?.value?.trim();
+        const variety = modal.querySelector('#snv-variety')?.value?.trim();
+        const unit    = modal.querySelector('#snv-unit')?.value || 'bags';
+        const nkpb    = parseFloat(modal.querySelector('#snv-kpb')?.value) || null;
+        if (!crop || !variety) {
+          toast('New variety requires crop and variety name', 'error');
+          return false;
+        }
+        const [newItem] = await dbInsert('stock_items', {
+          farm_id:      farm.id,
+          category:     'grain',
+          is_seed:      true,
+          name:         variety,
+          subgroup:     crop,
+          default_unit: unit,
+          attributes:   { variety, supplier_description: supplierDesc || null, ...(nkpb ? { kg_per_bag: nkpb } : {}) },
+          active:       true,
+        });
+        itemId = newItem?.id;
+        if (!itemId) { toast('Failed to create variety', 'error'); return false; }
+        // Add to items array so the movement insert can read it
+        items.push(newItem);
+        toast(`${variety} added`, 'success');
+      }
 
       if (!itemId || !qty || !date) {
         toast('Variety, quantity and date are required', 'error');
@@ -900,21 +970,43 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
     const kpbInput    = document.getElementById('sdel-kpb');
     const kpbWrap     = document.getElementById('sdel-kpb-wrap');
     const suppDescEl  = document.getElementById('sdel-supplier-desc');
+    const newPanel    = document.getElementById('sdel-new-variety-panel');
+    const snvUnit     = document.getElementById('snv-unit');
+    const snvKpbWrap  = document.getElementById('snv-kpb-wrap');
+
+    // Toggle kg/bag in new-variety panel
+    snvUnit?.addEventListener('change', () => {
+      if (snvKpbWrap) snvKpbWrap.style.display = snvUnit.value === 'bags' ? '' : 'none';
+    });
 
     const updateFromItem = () => {
       const opt  = itemEl?.options[itemEl.selectedIndex];
-      const unit = opt?.dataset?.unit || 'bags';
-      if (unitDisp) unitDisp.textContent = unit;
-      // Pre-fill kg/bag from item if field is currently empty
-      if (kpbInput && !kpbInput.value && opt?.dataset?.kpb) {
-        kpbInput.value = opt.dataset.kpb;
+      const isNew = itemEl?.value === '__new__';
+
+      // Show/hide new variety panel
+      if (newPanel) newPanel.style.display = isNew ? 'flex' : 'none';
+
+      if (!isNew) {
+        const unit = opt?.dataset?.unit || 'bags';
+        if (unitDisp) unitDisp.textContent = unit;
+        // Pre-fill kg/bag from item if field is currently empty
+        if (kpbInput && !kpbInput.value && opt?.dataset?.kpb) {
+          kpbInput.value = opt.dataset.kpb;
+        }
+        // Show existing supplier description as placeholder hint
+        if (suppDescEl && opt?.dataset?.supplierDesc) {
+          suppDescEl.placeholder = opt.dataset.supplierDesc;
+        }
+        // Hide kg/bag field for non-bag units
+        if (kpbWrap) kpbWrap.style.display = unit === 'bags' ? '' : 'none';
+      } else {
+        // New variety — unit will be driven by snv-unit
+        if (unitDisp) unitDisp.textContent = snvUnit?.value || 'bags';
+        snvUnit?.addEventListener('change', () => {
+          if (unitDisp) unitDisp.textContent = snvUnit.value;
+          if (kpbWrap) kpbWrap.style.display = snvUnit.value === 'bags' ? '' : 'none';
+        });
       }
-      // Show existing supplier description as placeholder hint
-      if (suppDescEl && opt?.dataset?.supplierDesc) {
-        suppDescEl.placeholder = opt.dataset.supplierDesc;
-      }
-      // Hide kg/bag field for non-bag units
-      if (kpbWrap) kpbWrap.style.display = unit === 'bags' ? '' : 'none';
     };
 
     itemEl?.addEventListener('change', updateFromItem);
