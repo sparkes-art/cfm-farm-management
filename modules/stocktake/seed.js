@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794900175829';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794900175829';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794900175829';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794900175829';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession } from '../../js/supabase-client.js?v=1794900295511';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794900295511';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794900295511';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794900295511';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -1027,13 +1027,15 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
       // If invoice was provided, create invoice → line → cost match atomically
       if (hasInvoice && movement?.id) {
+        const session    = getSession();
+        const userId     = session?.user?.id ?? null;
         const invoice = await dbInsert('procurement_invoices', {
           farm_id:        farm.id,
           supplier:       supplier || 'Unknown supplier',
           invoice_number: invNumber,
           invoice_date:   invDate,
           total_amount:   invTotalExGst,
-          created_by:     null,
+          created_by:     userId,
         });
 
         if (invoice?.id) {
@@ -1061,7 +1063,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
           // Upload attachment to Supabase Storage if provided
           if (invAttachment && invoice.id) {
-            const { supabase } = await import('../../js/supabase-client.js?v=1794900175829');
+            const { supabase } = await import('../../js/supabase-client.js?v=1794900295511');
             const ext  = invAttachment.name.split('.').pop();
             const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
             await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
