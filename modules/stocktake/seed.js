@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794899135504';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794899135504';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794899135504';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794899135504';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794899289358';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794899289358';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794899289358';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794899289358';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -975,19 +975,32 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
           toast('New variety requires crop and variety name', 'error');
           return false;
         }
-        const [newItem] = await dbInsert('stock_items', {
-          farm_id:      farm.id,
-          category:     'grain',
-          is_seed:      true,
-          name:         variety,
-          subgroup:     crop,
-          default_unit: 'kg',
-          attributes:   { variety },
-          active:       true,
-        });
+        let newItem;
+        try {
+          [newItem] = await dbInsert('stock_items', {
+            farm_id:      farm.id,
+            category:     'seed',
+            is_seed:      true,
+            name:         variety,
+            subgroup:     crop,
+            default_unit: 'kg',
+            attributes:   { variety },
+            active:       true,
+          });
+        } catch (e) {
+          // Duplicate name — look up the existing item and use it
+          if (e.message?.includes('23505') || e.message?.includes('duplicate key')) {
+            const existing = await dbSelect('stock_items',
+              `farm_id=eq.${farm.id}&name=eq.${encodeURIComponent(variety)}&is_seed=eq.true&limit=1`
+            ).catch(() => []);
+            newItem = existing[0];
+            if (newItem) toast(`Using existing variety: ${variety}`, 'info');
+          }
+          if (!newItem) throw e;
+        }
         itemId = newItem?.id;
         if (!itemId) { toast('Failed to create variety', 'error'); return false; }
-        items.push(newItem);
+        if (!items.find(i => i.id === itemId)) items.push(newItem);
         toast(`${variety} added`, 'success');
       }
 
@@ -1048,7 +1061,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
           // Upload attachment to Supabase Storage if provided
           if (invAttachment && invoice.id) {
-            const { supabase } = await import('../../js/supabase-client.js?v=1794899135504');
+            const { supabase } = await import('../../js/supabase-client.js?v=1794899289358');
             const ext  = invAttachment.name.split('.').pop();
             const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
             await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
