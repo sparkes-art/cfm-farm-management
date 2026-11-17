@@ -3,9 +3,9 @@
 // Revenue actuals from CFM invoices; cost budgets from budget_costs table.
 // Fixed cost actuals pulled from Xero P&L when the farm has a Xero connection.
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794954347500';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794954347500';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794954347500';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794954561065';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794954561065';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794954561065';
 
 export function unmountManagementReport() {}
 
@@ -355,21 +355,38 @@ async function _render(container) {
   // ── Direct costs — seed actuals vs budget ──────────────────────────────────
   // Seed delivery movements matched to procurement invoices give us:
   //   actual qty (bags / kg), actual cost (total_cost), actual $/bag
-  // Budget from budget_costs where category='variable' and budget_code contains 'SEED'
-  // Fits the 5-column table: Item | Actual YTD | Budget YTD | Variance | Full yr budget
-  // Sub-line tooltip shows: qty, $/bag, bags/ha
+  //
+  // Budget source: budget_costs where category='variable' and budget_code or
+  // description contains 'SEED'. Enterprise name on those rows is the GM sheet
+  // name (e.g. "CAVALCADE HAY"), while stock_items.subgroup is free-text crop
+  // name set by the user (e.g. "Cavalcade" or "Cavalcade Hay").
+  //
+  // Matching strategy (normalise → token overlap):
+  //   1. Normalise both sides to uppercase, remove punctuation, split to words
+  //   2. For each budget enterprise, score overlap with each seed subgroup
+  //   3. Best match above a threshold wins; unmatched shown separately
+  //
+  // Area for per-ha calcs: budget_costs.area_ha (most reliable — set per GM sheet)
+  // Fallback: budgets.area_ha keyed by commodity (same value, different table)
 
-  // 1. Filter to seed movements only
+  // ── Normalise helper ──────────────────────────────────────────────────────
+  const normWords = s => (s || '').toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+  const wordScore = (a, b) => {
+    const wa = new Set(normWords(a));
+    const wb = normWords(b);
+    if (!wa.size || !wb.length) return 0;
+    return wb.filter(w => wa.has(w)).length / Math.max(wa.size, wb.length);
+  };
+
+  // ── 1. Build seed actual map: item_id → aggregated totals ────────────────
   const seedMovsAll = (seedMovements || []).filter(m => m.stock_items?.is_seed);
-
-  // 2. Build a map: item_id → { name, subgroup, kpb, totalKg, totalBags, totalCost }
   const seedActualByItem = new Map();
   for (const m of seedMovsAll) {
     const item = m.stock_items;
     if (!item) continue;
     const kpb  = parseFloat(m.kg_per_bag) || parseFloat(item.attributes?.kg_per_bag) || null;
-    const qty  = Math.abs(parseFloat(m.signed_qty) || 0);  // kg
-    const bags = kpb ? qty / kpb : null;
+    const qty  = Math.abs(parseFloat(m.signed_qty) || 0);  // always kg
+    const bags = (kpb && qty) ? qty / kpb : 0;
     const cost = (m.delivery_costs || []).reduce((s, dc) => s + (parseFloat(dc.total_cost) || 0), 0);
 
     if (!seedActualByItem.has(item.id)) {
@@ -386,12 +403,13 @@ async function _render(container) {
     }
     const row = seedActualByItem.get(item.id);
     row.totalKg   += qty;
-    if (kpb && bags !== null) row.totalBags += bags;
+    row.totalBags += bags;
     row.totalCost += cost;
     if (cost > 0) row.hasCost = true;
   }
 
-  // 3. Budget seed lines — category='variable', budget_code or description contains 'SEED'
+  // ── 2. Budget seed lines from budget_costs ────────────────────────────────
+  // budget_code in spreadsheet is e.g. "SEED", "SEED COST", "PLANTING SEED"
   const varCosts    = budgetCosts.filter(c => c.category === 'variable');
   const seedBudgets = varCosts.filter(c => {
     const code = (c.budget_code || '').toUpperCase();
@@ -399,77 +417,77 @@ async function _render(container) {
     return code.includes('SEED') || desc.includes('SEED');
   });
 
-  // Group budget seed lines by enterprise
-  const budgetByEnterprise = new Map();
+  // Group by enterprise (GM sheet name, e.g. "CAVALCADE HAY")
+  // Each enterprise may have multiple seed lines (e.g. different rates/passes)
+  const budgetEntMap = new Map();  // enterprise → { lines[], area_ha, totalBudget, costPerHa }
   for (const bc of seedBudgets) {
-    const ent = bc.enterprise || 'Unallocated';
-    if (!budgetByEnterprise.has(ent)) budgetByEnterprise.set(ent, []);
-    budgetByEnterprise.get(ent).push(bc);
-  }
-
-  // 4. Budgeted area per enterprise (from budgets table or budget_costs.area_ha)
-  const budgetAreaByEnterprise = new Map();
-  for (const b of budgets) {
-    const ent = (b.enterprise || b.commodity || '').toUpperCase();
-    if (ent) budgetAreaByEnterprise.set(ent, (budgetAreaByEnterprise.get(ent) || 0) + (parseFloat(b.area_ha) || 0));
-  }
-  for (const bc of varCosts) {
-    if (bc.area_ha && bc.enterprise) {
-      const ent = bc.enterprise.toUpperCase();
-      if (!budgetAreaByEnterprise.has(ent)) budgetAreaByEnterprise.set(ent, parseFloat(bc.area_ha) || 0);
+    const ent = (bc.enterprise || 'Unallocated').trim();
+    if (!budgetEntMap.has(ent)) {
+      // area_ha: prefer budget_costs row's own area (most accurate — matches GM sheet)
+      // also cross-check budgets table by commodity name
+      const bcArea   = parseFloat(bc.area_ha) || null;
+      const budgetRow = budgets.find(b => wordScore(b.commodity, ent) >= 0.4);
+      const area_ha  = bcArea || (budgetRow ? parseFloat(budgetRow.area_ha) || null : null);
+      budgetEntMap.set(ent, { lines: [], area_ha, totalBudget: 0, totalCostPerHa: 0 });
     }
+    const e = budgetEntMap.get(ent);
+    e.lines.push(bc);
+    e.totalBudget    += parseFloat(bc.budget_amount) || 0;
+    e.totalCostPerHa += parseFloat(bc.cost_per_ha)   || 0;
+    // Prefer area from budget_costs row if not yet set
+    if (!e.area_ha && bc.area_ha) e.area_ha = parseFloat(bc.area_ha) || null;
   }
 
-  // 5. Helpers
-  const fBags = n => (n == null || isNaN(n) || n === 0) ? '—' : `${Math.round(n).toLocaleString('en-AU')} bags`;
+  // ── 3. Fuzzy-match: group seed actuals to budget enterprises ─────────────
+  // Seed subgroup (e.g. "Cavalcade") ↔ budget enterprise (e.g. "CAVALCADE HAY")
+  // Build an ordered list of budget enterprises for matching
+  const budgetEnts = [...budgetEntMap.keys()];
+
+  const matchBudgetEnt = (sgName) => {
+    // Try exact normalised match first
+    const sgU = sgName.toUpperCase().trim();
+    for (const ent of budgetEnts) {
+      if (ent.toUpperCase() === sgU) return ent;
+    }
+    // Score-based: pick best scoring enterprise above threshold 0.3
+    let best = null, bestScore = 0.3;
+    for (const ent of budgetEnts) {
+      const s = wordScore(sgName, ent);
+      if (s > bestScore) { bestScore = s; best = ent; }
+    }
+    return best;  // null if no match
+  };
+
+  // ── 4. Group seed actuals by subgroup, resolve budget enterprise ──────────
+  const seedActuals = [...seedActualByItem.values()];
+  const seedBySubgroup = new Map();
+  for (const row of seedActuals) {
+    const sg = row.subgroup || 'Seed';
+    if (!seedBySubgroup.has(sg)) seedBySubgroup.set(sg, { items: [], budgetEnt: matchBudgetEnt(sg) });
+    seedBySubgroup.get(sg).items.push(row);
+  }
+
+  // ── 5. Display helpers ────────────────────────────────────────────────────
+  const fBags = n => (n == null || isNaN(n) || n <= 0) ? '—' : `${Math.round(n).toLocaleString('en-AU')} bags`;
   const fKgDC = n => (n == null || isNaN(n)) ? '—' : `${Math.round(n).toLocaleString('en-AU')} kg`;
 
   let totalDirectBudget = 0;
   let totalDirectActual = 0;
 
-  // 6. Group actuals by subgroup (enterprise/crop label)
-  const seedActuals = [...seedActualByItem.values()];
-  const seedBySubgroup = new Map();
-  for (const row of seedActuals) {
-    const sg = row.subgroup || 'Seed';
-    if (!seedBySubgroup.has(sg)) seedBySubgroup.set(sg, []);
-    seedBySubgroup.get(sg).push(row);
-  }
-
+  // ── 6. Render ─────────────────────────────────────────────────────────────
   const directRows = (() => {
     if (!seedActuals.length && !seedBudgets.length) return '';
 
-    // Helper: find budget area for a subgroup name
-    const getArea = (sgName) => {
-      const entKey = sgName.toUpperCase();
-      // exact match
-      if (budgetAreaByEnterprise.has(entKey)) return budgetAreaByEnterprise.get(entKey);
-      // partial — first word of budget key inside sgName
-      for (const [ent, area] of budgetAreaByEnterprise.entries()) {
-        const firstWord = ent.split(' ')[0];
-        if (firstWord.length > 3 && entKey.includes(firstWord)) return area;
-      }
-      return null;
-    };
+    // Track which budget enterprises are matched so we can show unmatched budget lines
+    const matchedBudgetEnts = new Set();
 
-    // Helper: find budget lines for a subgroup name
-    const getBudgetLines = (sgName) => {
-      if (budgetByEnterprise.has(sgName)) return budgetByEnterprise.get(sgName);
-      const entKey = sgName.toUpperCase();
-      for (const [ent, lines] of budgetByEnterprise.entries()) {
-        if (ent.toUpperCase() === entKey) return lines;
-        const firstWord = ent.toUpperCase().split(' ')[0];
-        if (firstWord.length > 3 && entKey.includes(firstWord)) return lines;
-      }
-      return [];
-    };
+    const enterpriseRows = [...seedBySubgroup.entries()].map(([sgName, { items, budgetEnt }]) => {
+      const budgEnt = budgetEnt ? budgetEntMap.get(budgetEnt) : null;
+      if (budgetEnt) matchedBudgetEnts.add(budgetEnt);
 
-    // Rows for each enterprise/subgroup that has actuals
-    const enterpriseRows = [...seedBySubgroup.entries()].map(([sgName, items]) => {
-      const budgetLines  = getBudgetLines(sgName);
-      const budgetTotal  = budgetLines.reduce((s, bc) => s + (parseFloat(bc.budget_amount)||0), 0);
-      const budgetArea   = getArea(sgName);
-      const budgetCostPH = budgetLines.reduce((s, bc) => s + (parseFloat(bc.cost_per_ha)||0), 0) || null;
+      const budgetTotal  = budgEnt?.totalBudget    || 0;
+      const budgetCostPH = budgEnt?.totalCostPerHa || null;
+      const area_ha      = budgEnt?.area_ha         || null;
 
       totalDirectBudget += budgetTotal;
 
@@ -478,25 +496,25 @@ async function _render(container) {
       const sgTotalCost = items.reduce((s, i) => s + i.totalCost, 0);
       totalDirectActual += sgTotalCost;
 
-      const actPerBag   = (sgTotalBags > 0 && sgTotalCost) ? sgTotalCost / sgTotalBags : null;
-      const actPerHa    = (budgetArea && sgTotalCost) ? sgTotalCost / budgetArea : null;
-      const bagsPerHa   = (budgetArea && sgTotalBags > 0) ? sgTotalBags / budgetArea : null;
-      const budgetYTD   = budgetTotal * ytdFraction;
-      const variance    = sgTotalCost ? sgTotalCost - budgetYTD : null;
-      const varStyle    = variance !== null
+      const actPerBag  = (sgTotalBags > 0 && sgTotalCost) ? sgTotalCost / sgTotalBags : null;
+      const actPerHa   = (area_ha && sgTotalCost) ? sgTotalCost / area_ha : null;
+      const bagsPerHa  = (area_ha && sgTotalBags > 0) ? sgTotalBags / area_ha : null;
+      const budgetYTD  = budgetTotal * ytdFraction;
+      // Variance: negative = over budget (more cost = bad), positive = under budget (good)
+      const variance   = sgTotalCost ? sgTotalCost - budgetYTD : null;
+      const varStyle   = variance !== null
         ? (variance <= 0 ? 'color:var(--green)' : 'color:var(--red)')
         : '';
 
-      // Detail sub-rows per variety (seed type)
+      // Per-variety detail rows
       const varietyRows = items.map(item => {
-        const iPerBag = (item.totalBags > 0 && item.totalCost) ? item.totalCost / item.totalBags : null;
-        const iPerHa  = (budgetArea && item.totalCost) ? item.totalCost / budgetArea : null;
-        const iBagsHa = (budgetArea && item.totalBags > 0) ? item.totalBags / budgetArea : null;
-        // Sub-line: qty + unit metrics
+        const iPerBag  = (item.totalBags > 0 && item.totalCost) ? item.totalCost / item.totalBags  : null;
+        const iBagsHa  = (area_ha && item.totalBags > 0) ? item.totalBags / area_ha : null;
         const detail = [
           item.totalBags > 0 ? fBags(item.totalBags) : fKgDC(item.totalKg),
-          iPerBag ? `${fC(iPerBag)}/bag` : null,
-          iBagsHa ? `${iBagsHa.toFixed(1)} bags/ha` : null,
+          item.totalKg && item.totalBags > 0 ? fKgDC(item.totalKg) : null,
+          iPerBag  ? `${fC(iPerBag)}/bag` : null,
+          iBagsHa  ? `${iBagsHa.toFixed(1)} bags/ha` : null,
         ].filter(Boolean).join(' · ');
         return `
         <tr>
@@ -511,12 +529,14 @@ async function _render(container) {
         </tr>`;
       }).join('');
 
-      // Sub-label with key metrics
+      // Enterprise subtotal sub-label
       const sgDetail = [
         sgTotalBags > 0 ? fBags(sgTotalBags) : fKgDC(sgTotalKg),
-        actPerBag   ? `${fC(actPerBag)}/bag` : null,
-        bagsPerHa   ? `${bagsPerHa.toFixed(1)} bags/ha` : (actPerHa ? `${fC(actPerHa)}/ha` : null),
+        actPerBag  ? `${fC(actPerBag)}/bag` : null,
+        bagsPerHa  ? `${bagsPerHa.toFixed(1)} bags/ha`
+                   : (actPerHa ? `${fC(actPerHa)}/ha` : null),
         budgetCostPH ? `budget ${fC(budgetCostPH)}/ha` : null,
+        area_ha    ? `${area_ha.toLocaleString('en-AU')} ha` : null,
       ].filter(Boolean).join(' · ');
 
       return `
@@ -533,19 +553,24 @@ async function _render(container) {
         </tr>`;
     }).join('');
 
-    // Budget-only enterprise lines (no actuals yet)
-    const coveredSubgroups = new Set([...seedBySubgroup.keys()].map(s => s.toUpperCase()));
-    const budgetOnlyRows = [...budgetByEnterprise.entries()]
-      .filter(([ent]) => !coveredSubgroups.has(ent.toUpperCase()))
-      .map(([ent, lines]) => {
-        const budgetTotal = lines.reduce((s, bc) => s + (parseFloat(bc.budget_amount)||0), 0);
-        const costPH      = lines.reduce((s, bc) => s + (parseFloat(bc.cost_per_ha)||0), 0);
+    // Budget enterprises with no matching actuals yet
+    const budgetOnlyRows = budgetEnts
+      .filter(ent => !matchedBudgetEnts.has(ent))
+      .map(ent => {
+        const budgEnt    = budgetEntMap.get(ent);
+        const budgetTotal = budgEnt.totalBudget;
+        const costPH     = budgEnt.totalCostPerHa;
+        const area_ha    = budgEnt.area_ha;
         totalDirectBudget += budgetTotal;
+        const detail = [
+          costPH   ? `budget ${fC(costPH)}/ha` : null,
+          area_ha  ? `${area_ha.toLocaleString('en-AU')} ha` : null,
+        ].filter(Boolean).join(' · ');
         return `
         <tr>
           <td style="${td};padding-left:28px;color:var(--hint)">
             <span style="font-size:12px">${esc(ent)}</span>
-            ${costPH ? `<span style="font-size:10px;display:block;margin-top:1px">budget ${fC(costPH)}/ha</span>` : ''}
+            ${detail ? `<span style="font-size:10px;display:block;margin-top:1px">${detail}</span>` : ''}
           </td>
           <td style="${tdR};color:var(--hint)">—</td>
           <td style="${tdR};color:var(--red);font-size:12px">-${fC(budgetTotal * ytdFraction)}</td>
@@ -973,8 +998,8 @@ window._mgmtOpenInvoice = async function(invoiceId) {
     if (el.style.zIndex >= 9999) el.remove();
   });
   // Switch to outputs module
-  const { dbSelect } = await import('../../js/supabase-client.js?v=1794954347500');
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794954347500');
+  const { dbSelect } = await import('../../js/supabase-client.js?v=1794954561065');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794954561065');
   // Navigate to outputs tab
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   // Wait briefly for module to mount, then open the invoice

@@ -2,12 +2,12 @@
 // Manual market price entry + Excel import (col A: date, col B: price)
 // Price history chart per commodity
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794954347500';
-import { getActiveFarm } from '../../js/app-state.js?v=1794954347500';
-import { getSession, canWrite } from '../../js/app-state.js?v=1794954347500';
-import { loadCommodities, getCommodities, commodityOptions } from '../../js/commodities.js?v=1794954347500';
-import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js?v=1794954347500';
-import { getActiveSeason } from '../../js/app-state.js?v=1794954347500';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794954561065';
+import { getActiveFarm } from '../../js/app-state.js?v=1794954561065';
+import { getSession, canWrite } from '../../js/app-state.js?v=1794954561065';
+import { loadCommodities, getCommodities, commodityOptions } from '../../js/commodities.js?v=1794954561065';
+import { toast, openModal, formatCurrency, formatDate, qs, setContent, currentSeason } from '../../js/ui.js?v=1794954561065';
+import { getActiveSeason } from '../../js/app-state.js?v=1794954561065';
 
 let _prices = [];
 let _contracts = [];
