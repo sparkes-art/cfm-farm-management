@@ -3,9 +3,9 @@
 // Revenue actuals from CFM invoices; cost budgets from budget_costs table.
 // Fixed cost actuals pulled from Xero P&L when the farm has a Xero connection.
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794954561065';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794954561065';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794954561065';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794955248512';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794955248512';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794955248512';
 
 export function unmountManagementReport() {}
 
@@ -72,7 +72,7 @@ async function _render(container) {
       `farm_id=eq.${farm.id}&select=*,procurement_lines(id,item_id,description,quantity_invoiced,unit,unit_cost,line_total,stock_items(id,name,subgroup,attributes,is_seed))` +
       `&order=invoice_date.asc`).catch(()=>[]),
   ]);
-  console.log('[MgmtReport] budgets rows:', budgets.length, '| budgetCosts rows:', budgetCosts.length);
+  console.log('[MgmtReport] budgets rows:', budgets.length, '| budgetCosts rows:', budgetCosts.length, '| seedMovements:', seedMovements.length);
 
   // ── Xero fixed-cost actuals (non-blocking — shows — if Xero not connected) ─
   // Pulls YTD expense totals from Xero P&L via /.netlify/functions/xero-pull
@@ -379,7 +379,9 @@ async function _render(container) {
   };
 
   // ── 1. Build seed actual map: item_id → aggregated totals ────────────────
+  console.log('[MgmtReport] seedMovements raw:', seedMovements.length, seedMovements[0]);
   const seedMovsAll = (seedMovements || []).filter(m => m.stock_items?.is_seed);
+  console.log('[MgmtReport] seedMovsAll (is_seed=true):', seedMovsAll.length);
   const seedActualByItem = new Map();
   for (const m of seedMovsAll) {
     const item = m.stock_items;
@@ -416,6 +418,7 @@ async function _render(container) {
     const desc = (c.description || '').toUpperCase();
     return code.includes('SEED') || desc.includes('SEED');
   });
+  console.log('[MgmtReport] varCosts:', varCosts.length, '| seedBudgets:', seedBudgets.length, seedBudgets[0]);
 
   // Group by enterprise (GM sheet name, e.g. "CAVALCADE HAY")
   // Each enterprise may have multiple seed lines (e.g. different rates/passes)
@@ -998,8 +1001,8 @@ window._mgmtOpenInvoice = async function(invoiceId) {
     if (el.style.zIndex >= 9999) el.remove();
   });
   // Switch to outputs module
-  const { dbSelect } = await import('../../js/supabase-client.js?v=1794954561065');
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794954561065');
+  const { dbSelect } = await import('../../js/supabase-client.js?v=1794955248512');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794955248512');
   // Navigate to outputs tab
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   // Wait briefly for module to mount, then open the invoice
