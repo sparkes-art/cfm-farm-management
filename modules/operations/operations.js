@@ -4,10 +4,10 @@
 // Chemicals stored as JSONB array [{name, litres}] on each row — free-text, autocompleted from history.
 // Crop plan link: informational only — no auto-write back to crop_plan_entries.
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession } from '../../js/supabase-client.js?v=1794953377358';
-import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794953377358';
-import { toast, openModal, formatDate } from '../../js/ui.js?v=1794953377358';
-import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794953377358';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession } from '../../js/supabase-client.js?v=1794953780511';
+import { getActiveFarm, getActiveSeason, canWrite } from '../../js/app-state.js?v=1794953780511';
+import { toast, openModal, formatDate } from '../../js/ui.js?v=1794953780511';
+import { loadCommodities, getCommodities, getCropTypes } from '../../js/commodities.js?v=1794953780511';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _container       = null;
@@ -900,7 +900,7 @@ function _showNewSessionModal() {
     wide: true,
     bodyHTML: `
       <div style="font-size:12px;color:var(--fg2);margin-bottom:12px">
-        One session per field planting run. Record the paddock and where you came from — crop type, variety and seed details go on each row as you fill.
+        One session per field planting run. Record the paddock and where you came from — variety and seed details go on each row as you fill.
       </div>
 
       <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-radius:8px;margin-bottom:14px;background:var(--blue-bg);font-size:12px;color:var(--blue)">
@@ -925,21 +925,11 @@ function _showNewSessionModal() {
         </div>
         <div id="ns-cp-banner" style="grid-column:1/-1;display:none"></div>
         <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Commodity</label>
+          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Crop Type</label>
           <select id="ns-commodity-sel"
             style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
-            <option value="">Select commodity… (or pre-fills from crop plan)</option>
+            <option value="">Select crop type… (or pre-fills from crop plan)</option>
             ${getCropTypes().map(ct => `<option value="${esc(ct.name)}">${esc(ct.name)}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <label style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--hint);display:block;margin-bottom:4px">Crop Type</label>
-          <select id="ns-crop-type"
-            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:14px;font-family:inherit;box-sizing:border-box">
-            <option value="">Select…</option>
-            <option value="Dryland">Dryland</option>
-            <option value="Irrigated">Irrigated</option>
-            <option value="Pivot">Pivot</option>
           </select>
         </div>
         <div>
@@ -1022,7 +1012,7 @@ function _showNewSessionModal() {
         season_label:     season,
         field_name:       field,
         sub_block:        sub,
-        crop_type:        modalEl.querySelector('#ns-crop-type')?.value || null,
+        crop_type:        null,
         commodity:        modalEl.querySelector('#ns-commodity-sel')?.value || cp?.commodity || null,
         variety:          cp?.variety   || null,   // from crop plan; rows will confirm/override
         operator_default: modalEl.querySelector('#ns-operator')?.value?.trim() || null,
@@ -1589,7 +1579,7 @@ function _showCloseSessionModal(session) {
 
       // Auto-write seed usage movement to stocktake (non-fatal if seed not set up)
       try {
-        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794953377358');
+        const { writeSessionSeedUsage } = await import('../stocktake/seed.js?v=1794953780511');
         const farm = getActiveFarm();
         await writeSessionSeedUsage(farm, session);
       } catch (e) {

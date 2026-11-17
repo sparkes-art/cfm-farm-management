@@ -26,16 +26,14 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession, dbStorageUpload } from '../../js/supabase-client.js?v=1794953377358';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794953377358';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794953377358';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794953377358';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession, dbStorageUpload } from '../../js/supabase-client.js?v=1794953780511';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794953780511';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794953780511';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794953780511';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
-const fKg = n => (n == null || isNaN(n)) ? '—' : n >= 1000
-  ? `${(n / 1000).toFixed(2).replace(/\.?0+$/, '')} t`
-  : `${Math.round(n)} kg`;
+const fKg = n => (n == null || isNaN(n)) ? '—' : `${Math.round(n).toLocaleString('en-AU')} kg`;
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 // ── Movement type display ──────────────────────────────────────────────────
@@ -343,10 +341,13 @@ async function _render(container, farm, period, allPeriods = []) {
         ? `<span style="font-size:var(--text-sm);font-weight:700;color:var(--ink)">${fN(closingBags)} bags</span>${closingKgStr}`
         : `<span style="font-size:var(--text-sm);font-weight:700;color:var(--ink)">${fKg(closing)}</span>`;
 
-      // Opening display (also kg, convert to bags)
+      // Opening display (also kg, convert to bags) — same style as closing
       const openingBags = (kpb && opening) ? Math.round(opening / kpb) : null;
+      const openingKgStr = openingBags ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(opening)}</span>` : '';
       const openingDisplay = opening
-        ? (openingBags !== null ? `${fN(openingBags)} bags` : fKg(opening))
+        ? (openingBags !== null
+            ? `<span style="font-weight:700;color:var(--ink)">${fN(openingBags)} bags</span>${openingKgStr}`
+            : fKg(opening))
         : '—';
 
       return `<tr style="border-bottom:1px solid var(--border-light)">
