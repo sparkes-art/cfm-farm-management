@@ -5,9 +5,9 @@
 // Revenue actuals from CFM invoices; cost actuals from Xero P&L.
 // Line-level comments per row + month, tracked by user and timestamp.
 
-import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794957315820';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794957315820';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794957315820';
+import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794959174770';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794959174770';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794959174770';
 
 // Module-level state — persists across re-renders within a session
 let _selectedMonth = null;   // 'YYYY-MM' or null = full YTD
@@ -578,16 +578,9 @@ async function _render(container) {
   const secId   = label => 'sec-' + label.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const secRow  = label => {
     const id = secId(label);
-    return '<tr class="sec-header" data-sec="' + id + '" style="background:#1e3a5f;cursor:pointer" onclick="(function(el){' +
-      'var id=el.dataset.sec;' +
-      'var rows=document.querySelectorAll(\'[data-secbody=\"\'+id+\'\"]\');' +
-      'var collapsed=el.dataset.collapsed===\'1\';' +
-      'rows.forEach(function(r){r.style.display=collapsed?\'\':\'none\';});' +
-      'el.dataset.collapsed=collapsed?\'0\':\'1\';' +
-      'el.querySelector(\'.sec-toggle\').textContent=collapsed?\'▾\':\'▸\';' +
-      '})(this)">' +
+    return '<tr class="sec-header" data-sec="' + id + '" style="background:#1e3a5f;cursor:pointer">' +
       '<td colspan="' + COLS + '" style="padding:7px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:white;user-select:none">' +
-      '<span class="sec-toggle" style="margin-right:6px;font-size:10px">▾</span>' + label +
+      '<span class="sec-toggle" style="margin-right:6px;font-size:10px;display:inline-block;width:10px">▾</span>' + label +
       '</td></tr>';
   };
   // Wrap data rows so they can be toggled; call after secRow for same label
@@ -1445,6 +1438,20 @@ async function _render(container) {
     if (span) window._mgmtCapexDetail(span.dataset.capexKey);
   });
 
+  // Collapsible section headers
+  body.addEventListener('click', e => {
+    const hdr = e.target.closest('.sec-header');
+    if (!hdr) return;
+    const id = hdr.dataset.sec;
+    const collapsed = hdr.dataset.collapsed === '1';
+    body.querySelectorAll('[data-secbody="' + id + '"]').forEach(r => {
+      r.style.display = collapsed ? '' : 'none';
+    });
+    hdr.dataset.collapsed = collapsed ? '0' : '1';
+    const toggle = hdr.querySelector('.sec-toggle');
+    if (toggle) toggle.textContent = collapsed ? '▾' : '▸';
+  });
+
 }
 
 // ── CAPEX line-item detail modal ──────────────────────────────────────────────
@@ -1696,11 +1703,11 @@ window._mgmtOpenInvoice = async function(invoiceId) {
   document.querySelectorAll('[style*="position:fixed"]').forEach(el => {
     if (el.style.zIndex >= 9999) el.remove();
   });
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794957315820');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794959174770');
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   setTimeout(async () => {
     try {
-      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794957315820');
+      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794959174770');
       const rows = await ds('invoices', 'id=eq.' + invoiceId + '&select=*');
       const inv  = rows?.[0];
       if (!inv) return;
