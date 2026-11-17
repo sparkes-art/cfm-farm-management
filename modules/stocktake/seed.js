@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession } from '../../js/supabase-client.js?v=1794900345948';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794900345948';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794900345948';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794900345948';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession } from '../../js/supabase-client.js?v=1794900620160';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794900620160';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794900620160';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794900620160';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -306,35 +306,56 @@ async function _render(container, farm, period, allPeriods = []) {
       const locName = locId === 'none' ? '— unassigned' : (locById[locId]?.name || locId);
       const opening = openingMap[k] || 0;
       const closing = closingMap[k] || 0;
-      const pIn  = periodMoves
-        .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty) || 0) > 0)
-        .reduce((s, m) => s + (parseFloat(m.signed_qty) || 0), 0);
-      const pOut = periodMoves
-        .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty) || 0) < 0)
-        .reduce((s, m) => s + (parseFloat(m.signed_qty) || 0), 0);
-      // For closing kg: sum movements using each movement's own kg_per_bag (fall back to item kpb)
-      const closingKgVal = closing && (kpb || periodMoves.some(m => m.item_id === item.id && m.kg_per_bag))
-        ? (() => {
-            // Use opening kg (item kpb best effort) + period movement kgs
-            const openKg = (openingMap[k] || 0) * (kpb || 0);
-            const periodKg = periodMoves
-              .filter(m => m.item_id === item.id && (m.location_id || 'none') === locId)
-              .reduce((s, m) => {
-                const mKpb = parseFloat(m.kg_per_bag) || kpb || 0;
-                return s + (parseFloat(m.signed_qty) || 0) * mKpb;
-              }, 0);
-            return openKg + periodKg;
-          })()
-        : null;
-      const closingKg = closingKgVal ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(closingKgVal)}</span>` : '';
+      // pIn/pOut in kg (canonical storage unit)
+      const inMoves  = periodMoves.filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty) || 0) > 0);
+      const outMoves = periodMoves.filter(m => m.item_id === item.id && (m.location_id || 'none') === locId && (parseFloat(m.signed_qty) || 0) < 0);
+      const pInKg    = inMoves.reduce((s, m) => s + (parseFloat(m.signed_qty) || 0), 0);
+      const pOutKg   = Math.abs(outMoves.reduce((s, m) => s + (parseFloat(m.signed_qty) || 0), 0));
+
+      // Convert kg movements to bags using per-movement kpb, falling back to item kpb
+      const toBags = (moves, totalKg) => {
+        if (!totalKg || !moves.length) return null;
+        let bags = 0;
+        for (const m of moves) {
+          const mk = parseFloat(m.kg_per_bag) || kpb;
+          if (!mk) return null; // can't convert without kpb
+          bags += Math.abs(parseFloat(m.signed_qty) || 0) / mk;
+        }
+        return Math.round(bags);
+      };
+      const pInBags  = toBags(inMoves,  pInKg);
+      const pOutBags = toBags(outMoves, pOutKg);
+
+      // Display: bags primary (with kg hint) when bags known, else kg
+      const fQtyCell = (kg, bags, sign, color) => {
+        if (!kg) return '—';
+        if (bags !== null) {
+          const kgHint = `<span style="font-size:10px;color:var(--hint);display:block">${fKg(kg)}</span>`;
+          return `<span style="font-weight:600;color:${color}">${sign}${fN(bags)} bags</span>${kgHint}`;
+        }
+        return `<span style="font-weight:600;color:${color}">${sign}${fKg(kg)}</span>`;
+      };
+
+      // closing is in kg. Convert to bags for display when kpb known.
+      const closingBags = (kpb && closing) ? Math.round(closing / kpb) : null;
+      const closingKgStr = closingBags ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(closing)}</span>` : '';
+      const closingDisplay = closingBags !== null
+        ? `<span style="font-size:var(--text-sm);font-weight:700;color:var(--ink)">${fN(closingBags)} bags</span>${closingKgStr}`
+        : `<span style="font-size:var(--text-sm);font-weight:700;color:var(--ink)">${fKg(closing)}</span>`;
+
+      // Opening display (also kg, convert to bags)
+      const openingBags = (kpb && opening) ? Math.round(opening / kpb) : null;
+      const openingDisplay = opening
+        ? (openingBags !== null ? `${fN(openingBags)} bags` : fKg(opening))
+        : '—';
 
       return `<tr style="border-bottom:1px solid var(--border-light)">
         <td style="padding:9px 14px 9px 16px;font-size:var(--text-sm);color:var(--ink)">${esc(locName)}</td>
-        <td style="padding:9px 14px;text-align:center;font-size:var(--text-sm);color:var(--muted)">${opening ? fN(opening) : '—'}</td>
-        <td style="padding:9px 14px;text-align:center;font-size:var(--text-sm);color:var(--green)">${pIn ? '+' + fN(pIn) : '—'}</td>
-        <td style="padding:9px 14px;text-align:center;font-size:var(--text-sm);color:var(--red)">${pOut ? fN(pOut) : '—'}</td>
+        <td style="padding:9px 14px;text-align:center;font-size:var(--text-sm);color:var(--muted)">${openingDisplay}</td>
+        <td style="padding:9px 14px;text-align:center;font-size:var(--text-sm)">${fQtyCell(pInKg, pInBags, '+', 'var(--green)')}</td>
+        <td style="padding:9px 14px;text-align:center;font-size:var(--text-sm)">${fQtyCell(pOutKg, pOutBags, '−', 'var(--red)')}</td>
         <td style="padding:9px 14px;text-align:center">
-          <span style="font-size:var(--text-sm);font-weight:700;color:var(--ink)">${fN(closing)}</span>${closingKg}
+          ${closingDisplay}
         </td>
         <td style="padding:9px 14px;text-align:right">
           ${canWrite() ? `<button class="btn btn-ghost btn-sm sd-add-move"
@@ -364,7 +385,7 @@ async function _render(container, farm, period, allPeriods = []) {
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             <span style="font-size:13px;font-weight:600;color:var(--ink)">${esc(item.name)}</span>
             ${chips}
-            <span style="font-size:12px;color:var(--muted)">${fN(totalClosing)} ${esc(unit)} on hand${kgStr}</span>
+            <span style="font-size:12px;color:var(--muted)">${kpb ? `${fN(Math.round(totalClosing / kpb))} bags on hand · ${fKg(totalClosing)}` : `${fKg(totalClosing)} on hand`}</span>
             ${canWrite() ? `
               <div style="display:flex;gap:4px;margin-left:auto">
                 <button class="btn btn-ghost btn-sm sd-edit-item"
@@ -387,15 +408,17 @@ async function _render(container, farm, period, allPeriods = []) {
       const ks = Object.keys(closingMap).filter(k => k.startsWith(item.id + '||'));
       return sum + ks.reduce((s, k) => s + (closingMap[k] || 0), 0);
     }, 0);
-    const sgUnit = sgItems[0]?.default_unit || 'bags';
+    // sgClosing is in kg; convert to bags for display when kpb known
     const sgKpb  = parseFloat(sgItems[0]?.attributes?.kg_per_bag) || null;
-    const sgKg   = sgKpb && sgClosing ? ` · ${fKg(sgClosing * sgKpb)}` : '';
+    const sgTotalStr = sgKpb && sgClosing
+      ? `${fN(Math.round(sgClosing / sgKpb))} bags · ${fKg(sgClosing)}`
+      : fKg(sgClosing);
 
     return `
       <div class="card" style="margin-bottom:20px;overflow:hidden">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;background:var(--navy)">
           <span style="font-size:13px;font-weight:700;color:#fff;letter-spacing:.01em">${esc(sgName)}</span>
-          <span style="font-size:12px;color:rgba(255,255,255,.55)">${fN(sgClosing)} ${esc(sgUnit)} total${sgKg}</span>
+          <span style="font-size:12px;color:rgba(255,255,255,.55)">${sgTotalStr} total</span>
         </div>
         <table style="width:100%;border-collapse:collapse">
           <thead>
@@ -415,12 +438,17 @@ async function _render(container, farm, period, allPeriods = []) {
 
   // ── Period movements log ─────────────────────────────────────────────────
   const logRows = periodMoves.slice(0, 40).map(m => {
-    const item  = items.find(i => i.id === m.item_id);
-    const mt    = MOVE_LABELS[m.movement_type] || { label: m.movement_type, color: 'var(--hint)', icon: '·' };
-    const qty   = parseFloat(m.signed_qty) || 0;
+    const item    = items.find(i => i.id === m.item_id);
+    const mt      = MOVE_LABELS[m.movement_type] || { label: m.movement_type, color: 'var(--hint)', icon: '·' };
+    const qty     = parseFloat(m.signed_qty) || 0;   // always kg
     const locName = m.location_id ? (locById[m.location_id]?.name || m.location_id) : '—';
-    const kpb   = parseFloat(item?.attributes?.kg_per_bag) || null;
-    const kgStr = kpb && qty ? ` (${fKg(Math.abs(qty) * kpb)})` : '';
+    // Use movement-level kg_per_bag first, fall back to item attribute
+    const mKpb   = parseFloat(m.kg_per_bag) || parseFloat(item?.attributes?.kg_per_bag) || null;
+    const bags    = mKpb ? Math.round(Math.abs(qty) / mKpb) : null;
+    // Qty cell: bags primary + kg secondary when bags known
+    const qtyDisplay = bags !== null
+      ? `${qty > 0 ? '+' : '−'}${fN(bags)} bags<br><span style="font-size:10px;color:var(--hint)">${fKg(Math.abs(qty))}</span>`
+      : `${qty > 0 ? '+' : ''}${fKg(qty)}`;
     const refNote = m.source_system === 'operations' && m.source_ref
       ? `Planting: ${sessionById[m.source_ref]?.field_name || m.source_ref.slice(0, 8) + '…'}`
       : (m.note || '');
@@ -433,7 +461,7 @@ async function _render(container, farm, period, allPeriods = []) {
       <td style="padding:8px 14px;color:${mt.color}">${mt.icon} ${mt.label}</td>
       <td style="padding:8px 14px;color:var(--hint);font-size:11px">${locName}</td>
       <td style="padding:8px 14px;text-align:right;font-weight:600;color:${qty > 0 ? 'var(--green)' : 'var(--red)'}">
-        ${qty > 0 ? '+' : ''}${fN(qty)} ${item?.default_unit || ''}${kgStr}
+        ${qtyDisplay}
       </td>
       <td style="padding:8px 14px;color:var(--hint)">${esc(refNote)}</td>
       <td style="padding:8px 6px;text-align:right">
@@ -991,7 +1019,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
             is_seed:      true,
             name:         variety,
             subgroup:     crop,
-            default_unit: 'kg',
+            default_unit: 'bags',
             attributes:   { variety },
             active:       true,
           });
@@ -1071,7 +1099,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
           // Upload attachment to Supabase Storage if provided
           if (invAttachment && invoice.id) {
-            const { supabase } = await import('../../js/supabase-client.js?v=1794900345948');
+            const { supabase } = await import('../../js/supabase-client.js?v=1794900620160');
             const ext  = invAttachment.name.split('.').pop();
             const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
             await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
