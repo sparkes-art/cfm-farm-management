@@ -22,9 +22,9 @@
 //          ├─ Paddock 12      ← location
 //          └─ Shed 3
 
-import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1794955776968';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794955776968';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794955776968';
+import { dbSelect, dbInsert, dbDelete } from '../../js/supabase-client.js?v=1794955916768';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794955916768';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794955916768';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Math.round(n).toLocaleString();

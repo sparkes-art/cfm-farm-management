@@ -3,9 +3,9 @@
 // Revenue actuals from CFM invoices; cost budgets from budget_costs table.
 // Fixed cost actuals pulled from Xero P&L when the farm has a Xero connection.
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794955776968';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794955776968';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794955776968';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794955916768';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794955916768';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794955916768';
 
 export function unmountManagementReport() {}
 
@@ -56,11 +56,11 @@ async function _render(container) {
 
   console.log('[MgmtReport] Loading data for farm:', farm.id, 'season:', season);
   const [contracts, allInvoices, budgets, budgetCosts, comments] = await Promise.all([
-    dbSelect('forward_contracts', `farm_id=eq.${farm.id}&crop_year=eq.${season}&select=*`),
-    dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`),
-    dbSelect('budgets', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`),
-    dbSelect('budget_costs', `farm_id=eq.${farm.id}&financial_year=eq.${season}&select=*`).catch(()=>[]),
-    dbSelect('management_comments', `farm_id=eq.${farm.id}&season=eq.${season}&select=*,user_profiles(full_name)&order=created_at.desc`).catch(()=>[]),
+    dbSelect('forward_contracts', `farm_id=eq.${farm.id}&crop_year=eq.${season}&select=*`).catch(e=>{console.error('[MgmtReport] forward_contracts 400:', e.message); return [];}),
+    dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`).catch(e=>{console.error('[MgmtReport] invoices 400:', e.message); return [];}),
+    dbSelect('budgets', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`).catch(e=>{console.error('[MgmtReport] budgets 400:', e.message); return [];}),
+    dbSelect('budget_costs', `farm_id=eq.${farm.id}&financial_year=eq.${season}&select=*`).catch(e=>{console.error('[MgmtReport] budget_costs 400:', e.message); return [];}),
+    dbSelect('management_comments', `farm_id=eq.${farm.id}&season=eq.${season}&select=*,user_profiles(full_name)&order=created_at.desc`).catch(e=>{console.error('[MgmtReport] comments 400:', e.message); return [];}),
   ]);
 
   // Seed data — fetched separately so errors don't block core report
@@ -1024,8 +1024,8 @@ window._mgmtOpenInvoice = async function(invoiceId) {
     if (el.style.zIndex >= 9999) el.remove();
   });
   // Switch to outputs module
-  const { dbSelect } = await import('../../js/supabase-client.js?v=1794955776968');
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794955776968');
+  const { dbSelect } = await import('../../js/supabase-client.js?v=1794955916768');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794955916768');
   // Navigate to outputs tab
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   // Wait briefly for module to mount, then open the invoice
