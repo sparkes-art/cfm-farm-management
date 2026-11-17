@@ -1,12 +1,12 @@
 // modules/budget/budget.js
 // Budget & Forecast — inline editable table per crop type per season
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794955916768';
-import { getActiveFarm, getSession, canWrite, getFarms, getActiveSeason, getSeasons } from '../../js/app-state.js?v=1794955916768';
-import { loadCommodities, getCommodities, getCropTypes, commoditySelectHTML, initCommoditySelect, cropTypeSelectHTML, initCropTypeSelect, refreshCropTypeSelect } from '../../js/commodities.js?v=1794955916768';
-import { toast, openModal, formatNumber, formatCurrency, qs, currentSeason } from '../../js/ui.js?v=1794955916768';
-import { parseHarvestExcel, resolveCropTypes, diffHarvestImport, commitHarvestImport } from './harvest-import.js?v=1794955916768';
-import { parseBudgetExcel, showBudgetImportPreview } from './budget-import.js?v=1794955916768';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794956277176';
+import { getActiveFarm, getSession, canWrite, getFarms, getActiveSeason, getSeasons } from '../../js/app-state.js?v=1794956277176';
+import { loadCommodities, getCommodities, getCropTypes, commoditySelectHTML, initCommoditySelect, cropTypeSelectHTML, initCropTypeSelect, refreshCropTypeSelect } from '../../js/commodities.js?v=1794956277176';
+import { toast, openModal, formatNumber, formatCurrency, qs, currentSeason } from '../../js/ui.js?v=1794956277176';
+import { parseHarvestExcel, resolveCropTypes, diffHarvestImport, commitHarvestImport } from './harvest-import.js?v=1794956277176';
+import { parseBudgetExcel, showBudgetImportPreview } from './budget-import.js?v=1794956277176';
 
 let _budgets = [];
 let _forecasts = [];
