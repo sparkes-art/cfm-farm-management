@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794897921223';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794897921223';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794897921223';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794897921223';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794898736898';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794898736898';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794898736898';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794898736898';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -572,8 +572,8 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
       btn.disabled = true;
       try {
         // Remove linked delivery_costs first (FK constraint)
-        await dbDelete('delivery_costs', `movement_id=eq.${moveId}`).catch(() => {});
-        await dbDelete('stock_movements', `id=eq.${moveId}`);
+        await dbDeleteWhere('delivery_costs', `movement_id=eq.${moveId}`).catch(() => {});
+        await dbDelete('stock_movements', moveId);
         toast('Movement deleted', 'success');
         _render(container, farm, period, allPeriods);
       } catch (e) {
@@ -1022,7 +1022,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
           // Upload attachment to Supabase Storage if provided
           if (invAttachment && invoice.id) {
-            const { supabase } = await import('../../js/supabase-client.js?v=1794897921223');
+            const { supabase } = await import('../../js/supabase-client.js?v=1794898736898');
             const ext  = invAttachment.name.split('.').pop();
             const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
             await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
