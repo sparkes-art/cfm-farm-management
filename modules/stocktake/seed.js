@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794899289358';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794899289358';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794899289358';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794899289358';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere } from '../../js/supabase-client.js?v=1794899556905';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794899556905';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794899556905';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794899556905';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -979,7 +979,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         try {
           [newItem] = await dbInsert('stock_items', {
             farm_id:      farm.id,
-            category:     'seed',
+            category:     'grain',
             is_seed:      true,
             name:         variety,
             subgroup:     crop,
@@ -1061,7 +1061,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
           // Upload attachment to Supabase Storage if provided
           if (invAttachment && invoice.id) {
-            const { supabase } = await import('../../js/supabase-client.js?v=1794899289358');
+            const { supabase } = await import('../../js/supabase-client.js?v=1794899556905');
             const ext  = invAttachment.name.split('.').pop();
             const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
             await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
