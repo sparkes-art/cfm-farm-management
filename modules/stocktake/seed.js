@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794897154474';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794897154474';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794897154474';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794897154474';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794897870321';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794897870321';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794897870321';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794897870321';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -292,6 +292,11 @@ async function _render(container, farm, period, allPeriods = []) {
               ${mKpb ? `<span style="font-size:10px;color:var(--hint);display:block">${fKg(qty * mKpb)}</span>` : ''}
             </div>
             <span style="font-size:11px;color:var(--hint);flex-shrink:0">${m.occurred_on}</span>
+            ${canWrite() ? `<button class="btn btn-ghost btn-sm sd-delete-move"
+              data-move-id="${m.id}"
+              data-label="${esc(sessLabel)}"
+              title="Delete this usage movement"
+              style="font-size:11px;color:var(--red);padding:2px 6px;flex-shrink:0">✕</button>` : ''}
           </div>`;
       }).join('');
 
@@ -558,6 +563,26 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
         btn.dataset.locId || null, period, allPeriods));
   });
 
+  // Delete usage/delivery movement
+  wrap.querySelectorAll('.sd-delete-move').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const moveId = btn.dataset.moveId;
+      const label  = btn.dataset.label || 'this movement';
+      if (!confirm(`Delete movement: ${label}?\n\nThis will also remove any linked cost records. This cannot be undone.`)) return;
+      btn.disabled = true;
+      try {
+        // Remove linked delivery_costs first (FK constraint)
+        await dbDelete('delivery_costs', `movement_id=eq.${moveId}`).catch(() => {});
+        await dbDelete('stock_movements', `id=eq.${moveId}`);
+        toast('Movement deleted', 'success');
+        _render(container, farm, period, allPeriods);
+      } catch (e) {
+        toast('Failed to delete: ' + e.message, 'error');
+        btn.disabled = false;
+      }
+    });
+  });
+
   // Unallocated planting session allocation
   wrap.querySelectorAll('.sd-alloc-loc').forEach(sel => {
     sel.addEventListener('change', () => {
@@ -797,15 +822,9 @@ async function _showEditVarietyForm(container, farm, item, allItems, period, all
 async function _showDeliveryForm(container, farm, items, locations, preItemId, preItemName, period, allPeriods) {
   const today = new Date().toISOString().slice(0, 10);
   const itemOpts = items.map(i =>
-    `<option value="${i.id}" data-unit="${esc(i.default_unit || 'bags')}" data-kpb="${parseFloat(i.attributes?.kg_per_bag)||''}" data-supplier-desc="${esc(i.attributes?.supplier_description || '')}"
-      ${i.id === preItemId ? ' selected' : ''}>${esc(i.subgroup || '')} — ${esc(i.name)}</option>`).join('');
+    `<option value="${i.id}"${i.id === preItemId ? ' selected' : ''}>${esc(i.subgroup || '')} — ${esc(i.name)}</option>`).join('');
   const locOpts = locations.map(l =>
     `<option value="${l.id}">${esc(l.name)}</option>`).join('');
-
-  // Pre-fill kg/bag from pre-selected item
-  const preItem = preItemId ? items.find(i => i.id === preItemId) : null;
-  const preKpb  = parseFloat(preItem?.attributes?.kg_per_bag) || '';
-  const preUnit = preItem?.default_unit || 'bags';
 
   // Crop options for the inline new-variety panel
   await loadCommodities(farm.id);
@@ -843,35 +862,11 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
               <input class="form-input" id="snv-variety" type="text" placeholder="e.g. DP 1840 B3XF">
             </div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div class="form-group" style="margin:0">
-              <label class="form-label">Unit</label>
-              <select class="form-select" id="snv-unit">
-                <option value="bags">Bags</option>
-                <option value="kg">Kilograms</option>
-                <option value="t">Tonnes</option>
-              </select>
-            </div>
-            <div class="form-group" style="margin:0" id="snv-kpb-wrap">
-              <label class="form-label">kg per bag</label>
-              <input class="form-input" id="snv-kpb" type="number" min="1" step="0.1" placeholder="e.g. 20">
-            </div>
-          </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Quantity <span style="color:var(--red)">*</span></label>
-            <input class="form-input" type="number" id="sdel-qty" min="1" step="1" placeholder="0">
-          </div>
-          <div class="form-group" style="margin:0">
-            <label class="form-label">Unit</label>
-            <div id="sdel-unit-display" style="padding:8px 10px;background:var(--page-bg);border:1px solid var(--border);border-radius:6px;font-size:14px;color:var(--hint)">${preUnit}</div>
-          </div>
-          <div class="form-group" style="margin:0" id="sdel-kpb-wrap">
-            <label class="form-label">kg / bag <span style="font-size:10px;color:var(--hint)">(this delivery)</span></label>
-            <input class="form-input" type="number" id="sdel-kpb" min="0.1" step="0.1" value="${preKpb}" placeholder="e.g. 20">
-          </div>
+        <div class="form-group">
+          <label class="form-label">Total weight (kg) <span style="color:var(--red)">*</span></label>
+          <input class="form-input" type="number" id="sdel-qty" min="0.1" step="0.1" placeholder="0.0">
         </div>
         <div class="form-group">
           <label class="form-label">Storage location</label>
@@ -880,16 +875,12 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Date <span style="color:var(--red)">*</span></label>
+          <label class="form-label">Delivery Date <span style="color:var(--red)">*</span></label>
           <input class="form-input" type="date" id="sdel-date" value="${today}">
         </div>
         <div class="form-group">
           <label class="form-label">Supplier / docket</label>
           <input class="form-input" type="text" id="sdel-supplier" placeholder="Supplier name or docket number">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Supplier item description <span style="font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:var(--hint)">— raw invoice text, saved to variety record</span></label>
-          <input class="form-input" type="text" id="sdel-supplier-desc" placeholder="e.g. SEED COTTON SIC 711RRF V2C 20KG AGENCY CS">
         </div>
         <div class="form-group">
           <label class="form-label">Internal note</label>
@@ -915,40 +906,39 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
               <input class="form-input" id="sinv-date" type="date" value="${today}">
             </div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div class="form-group" style="margin:0">
-              <label class="form-label">Unit cost ($ per unit) <span style="color:var(--red)">*</span></label>
-              <input class="form-input num" id="sinv-unit-cost" type="number" step="0.0001" placeholder="e.g. 1.4200">
-            </div>
-            <div class="form-group" style="margin:0">
-              <label class="form-label">Invoice total (incl. GST)</label>
-              <input class="form-input num" id="sinv-total" type="number" step="0.01" placeholder="auto-calculated">
-            </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Invoice total (ex. GST) <span style="color:var(--red)">*</span></label>
+            <input class="form-input num" id="sinv-total" type="number" step="0.01" placeholder="e.g. 4250.00">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Attach invoice <span style="font-size:10px;font-weight:400;color:var(--hint)">(PDF, JPG or PNG)</span></label>
+            <input class="form-input" id="sinv-attachment" type="file" accept=".pdf,.jpg,.jpeg,.png" style="padding:6px 10px">
           </div>
           <div id="sinv-cost-preview" style="font-size:12px;color:var(--hint)"></div>
         </div>
       </div>`,
     confirmLabel: 'Record delivery',
     onConfirm: async (modal) => {
-      const itemSel      = modal.querySelector('#sdel-item');
-      let   itemId       = itemSel?.value;
-      const locId        = modal.querySelector('#sdel-location')?.value || null;
-      const qty          = parseFloat(modal.querySelector('#sdel-qty')?.value);
-      const kpb          = parseFloat(modal.querySelector('#sdel-kpb')?.value) || null;
-      const date         = modal.querySelector('#sdel-date')?.value;
-      const supplier     = modal.querySelector('#sdel-supplier')?.value?.trim() || null;
-      const supplierDesc = modal.querySelector('#sdel-supplier-desc')?.value?.trim() || null;
-      const note         = modal.querySelector('#sdel-note')?.value?.trim() || null;
-      const hasInvoice   = modal.querySelector('#sdel-has-invoice')?.checked;
+      const itemSel    = modal.querySelector('#sdel-item');
+      let   itemId     = itemSel?.value;
+      const locId      = modal.querySelector('#sdel-location')?.value || null;
+      const qty        = parseFloat(modal.querySelector('#sdel-qty')?.value);
+      const date       = modal.querySelector('#sdel-date')?.value;
+      const supplier   = modal.querySelector('#sdel-supplier')?.value?.trim() || null;
+      const note       = modal.querySelector('#sdel-note')?.value?.trim() || null;
+      const hasInvoice = modal.querySelector('#sdel-has-invoice')?.checked;
 
       // Invoice fields
-      const invNumber   = modal.querySelector('#sinv-number')?.value?.trim() || null;
-      const invDate     = modal.querySelector('#sinv-date')?.value || date;
-      const invUnitCost = parseFloat(modal.querySelector('#sinv-unit-cost')?.value) || null;
-      const invTotal    = parseFloat(modal.querySelector('#sinv-total')?.value) || null;
+      const invNumber      = modal.querySelector('#sinv-number')?.value?.trim() || null;
+      const invDate        = modal.querySelector('#sinv-date')?.value || date;
+      const invTotalExGst  = parseFloat(modal.querySelector('#sinv-total')?.value) || null;
+      const invAttachment  = modal.querySelector('#sinv-attachment')?.files?.[0] || null;
 
-      if (hasInvoice && !invUnitCost) {
-        toast('Unit cost is required when recording an invoice', 'error');
+      // Derive unit cost from total ÷ qty
+      const invUnitCost = (invTotalExGst && qty) ? parseFloat((invTotalExGst / qty).toFixed(4)) : null;
+
+      if (hasInvoice && !invTotalExGst) {
+        toast('Invoice total (ex. GST) is required', 'error');
         return false;
       }
 
@@ -956,8 +946,6 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
       if (itemId === '__new__') {
         const crop    = modal.querySelector('#snv-crop')?.value?.trim();
         const variety = modal.querySelector('#snv-variety')?.value?.trim();
-        const unit    = modal.querySelector('#snv-unit')?.value || 'bags';
-        const nkpb    = parseFloat(modal.querySelector('#snv-kpb')?.value) || null;
         if (!crop || !variety) {
           toast('New variety requires crop and variety name', 'error');
           return false;
@@ -968,8 +956,8 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
           is_seed:      true,
           name:         variety,
           subgroup:     crop,
-          default_unit: unit,
-          attributes:   { variety, supplier_description: supplierDesc || null, ...(nkpb ? { kg_per_bag: nkpb } : {}) },
+          default_unit: 'kg',
+          attributes:   { variety },
           active:       true,
         });
         itemId = newItem?.id;
@@ -984,13 +972,6 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
       }
       const item = items.find(i => i.id === itemId);
 
-      // Save supplier description to variety record if new
-      if (supplierDesc && !item?.attributes?.supplier_description) {
-        await dbUpdate('stock_items', itemId, {
-          attributes: { ...(item?.attributes || {}), supplier_description: supplierDesc },
-        }).catch(() => {});
-      }
-
       // Record the delivery movement
       const [movement] = await dbInsert('stock_movements', {
         farm_id:       farm.id,
@@ -998,8 +979,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         location_id:   locId,
         movement_type: 'delivery',
         qty,
-        unit:          item?.default_unit || 'bags',
-        kg_per_bag:    kpb,
+        unit:          'kg',
         occurred_on:   date,
         counterparty:  supplier,
         source_ref:    invNumber || null,
@@ -1008,16 +988,13 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
       // If invoice was provided, create invoice → line → cost match atomically
       if (hasInvoice && movement?.id) {
-        const lineTotal = invTotal || (invUnitCost && qty ? parseFloat((invUnitCost * qty).toFixed(2)) : null);
-        const totalCost = parseFloat((invUnitCost * qty).toFixed(2));
-
         const [invoice] = await dbInsert('procurement_invoices', {
           farm_id:        farm.id,
           supplier:       supplier || 'Unknown supplier',
           invoice_number: invNumber,
           invoice_date:   invDate,
-          total_amount:   invTotal || lineTotal,
-          created_by:     null,   // set by RLS/session context
+          total_amount:   invTotalExGst,
+          created_by:     null,
         });
 
         if (invoice?.id) {
@@ -1025,11 +1002,12 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
             procurement_invoice_id: invoice.id,
             farm_id:                farm.id,
             item_id:                itemId,
-            description:            supplierDesc || item?.name || 'Seed',
+            description:            item?.name || 'Seed',
             unit_cost:              invUnitCost,
-            unit:                   item?.default_unit || 'bags',
+            unit:                   'kg',
             quantity_invoiced:      qty,
-            line_total:             lineTotal,
+            line_total:             invTotalExGst,
+            gst_rate:               0,
           });
 
           if (line?.id) {
@@ -1038,8 +1016,17 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
               movement_id:          movement.id,
               procurement_line_id:  line.id,
               unit_cost:            invUnitCost,
-              total_cost:           totalCost,
+              total_cost:           invTotalExGst,
             });
+          }
+
+          // Upload attachment to Supabase Storage if provided
+          if (invAttachment && invoice.id) {
+            const { supabase } = await import('../../js/supabase-client.js?v=1794897870321');
+            const ext  = invAttachment.name.split('.').pop();
+            const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
+            await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
+            await dbUpdate('procurement_invoices', invoice.id, { attachment_path: path }).catch(() => {});
           }
         }
         toast('Delivery + invoice recorded — cost matched ✓', 'success');
@@ -1051,50 +1038,14 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
     }
   });
 
-  // Wire unit display + kg/bag + supplier description from item select
+  // Wire new-variety panel toggle + invoice panel
   setTimeout(() => {
-    const itemEl      = document.getElementById('sdel-item');
-    const unitDisp    = document.getElementById('sdel-unit-display');
-    const kpbInput    = document.getElementById('sdel-kpb');
-    const kpbWrap     = document.getElementById('sdel-kpb-wrap');
-    const suppDescEl  = document.getElementById('sdel-supplier-desc');
-    const newPanel    = document.getElementById('sdel-new-variety-panel');
-    const snvUnit     = document.getElementById('snv-unit');
-    const snvKpbWrap  = document.getElementById('snv-kpb-wrap');
-
-    // Toggle kg/bag in new-variety panel
-    snvUnit?.addEventListener('change', () => {
-      if (snvKpbWrap) snvKpbWrap.style.display = snvUnit.value === 'bags' ? '' : 'none';
-    });
+    const itemEl   = document.getElementById('sdel-item');
+    const newPanel = document.getElementById('sdel-new-variety-panel');
 
     const updateFromItem = () => {
-      const opt  = itemEl?.options[itemEl.selectedIndex];
       const isNew = itemEl?.value === '__new__';
-
-      // Show/hide new variety panel
       if (newPanel) newPanel.style.display = isNew ? 'flex' : 'none';
-
-      if (!isNew) {
-        const unit = opt?.dataset?.unit || 'bags';
-        if (unitDisp) unitDisp.textContent = unit;
-        // Pre-fill kg/bag from item if field is currently empty
-        if (kpbInput && !kpbInput.value && opt?.dataset?.kpb) {
-          kpbInput.value = opt.dataset.kpb;
-        }
-        // Show existing supplier description as placeholder hint
-        if (suppDescEl && opt?.dataset?.supplierDesc) {
-          suppDescEl.placeholder = opt.dataset.supplierDesc;
-        }
-        // Hide kg/bag field for non-bag units
-        if (kpbWrap) kpbWrap.style.display = unit === 'bags' ? '' : 'none';
-      } else {
-        // New variety — unit will be driven by snv-unit
-        if (unitDisp) unitDisp.textContent = snvUnit?.value || 'bags';
-        snvUnit?.addEventListener('change', () => {
-          if (unitDisp) unitDisp.textContent = snvUnit.value;
-          if (kpbWrap) kpbWrap.style.display = snvUnit.value === 'bags' ? '' : 'none';
-        });
-      }
     };
 
     itemEl?.addEventListener('change', updateFromItem);
@@ -1103,36 +1054,28 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
     // Invoice panel toggle
     const hasInvCb    = document.getElementById('sdel-has-invoice');
     const invPanel    = document.getElementById('sdel-invoice-panel');
-    const invUnitCost = document.getElementById('sinv-unit-cost');
     const invTotal    = document.getElementById('sinv-total');
     const costPreview = document.getElementById('sinv-cost-preview');
 
     const updateCostPreview = () => {
-      const uc  = parseFloat(invUnitCost?.value || 0);
-      const q   = parseFloat(document.getElementById('sdel-qty')?.value || 0);
-      if (uc && q) {
-        const total = (uc * q).toFixed(2);
-        if (costPreview) costPreview.textContent = `${q} × $${uc} = $${total} total cost`;
-        if (invTotal && !invTotal.value) invTotal.value = total;
+      const total = parseFloat(invTotal?.value || 0);
+      const q     = parseFloat(document.getElementById('sdel-qty')?.value || 0);
+      if (total && q) {
+        const unitCost = (total / q).toFixed(4);
+        if (costPreview) costPreview.textContent = `$${total.toFixed(2)} ÷ ${q} kg = $${unitCost}/kg (ex. GST)`;
       } else {
         if (costPreview) costPreview.textContent = '';
       }
     };
 
+    invTotal?.addEventListener('input', updateCostPreview);
+    document.getElementById('sdel-qty')?.addEventListener('input', updateCostPreview);
+
     hasInvCb?.addEventListener('change', () => {
       if (invPanel) invPanel.style.display = hasInvCb.checked ? 'flex' : 'none';
-      // Auto-fill supplier name into invoice if already typed
-      if (hasInvCb.checked) {
-        const suppEl = document.getElementById('sdel-supplier');
-        if (suppEl?.value) {
-          // Supplier field is on the delivery side — just focus unit cost
-          invUnitCost?.focus();
-        }
-      }
+      if (hasInvCb.checked) invTotal?.focus();
     });
 
-    invUnitCost?.addEventListener('input', updateCostPreview);
-    document.getElementById('sdel-qty')?.addEventListener('input', updateCostPreview);
   }, 60);
 }
 
