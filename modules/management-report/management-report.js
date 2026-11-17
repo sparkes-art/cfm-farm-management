@@ -3,9 +3,9 @@
 // Revenue actuals from CFM invoices; cost budgets from budget_costs table.
 // Fixed cost actuals pulled from Xero P&L when the farm has a Xero connection.
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794955248512';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794955248512';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794955248512';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794955660473';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794955660473';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794955660473';
 
 export function unmountManagementReport() {}
 
@@ -61,16 +61,16 @@ async function _render(container) {
     dbSelect('budgets', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`),
     dbSelect('budget_costs', `farm_id=eq.${farm.id}&financial_year=eq.${season}&select=*`).catch(()=>[]),
     dbSelect('management_comments', `farm_id=eq.${farm.id}&season=eq.${season}&select=*,user_profiles(full_name)&order=created_at.desc`).catch(()=>[]),
-    // Seed delivery movements with their cost matching and stock item detail
+    // Seed delivery movements — joined to stock_items and delivery_costs
     dbSelect('stock_movements',
-      `farm_id=eq.${farm.id}&movement_type=eq.delivery&direction=eq.1` +
-      `&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,item_id,` +
-      `stock_items(id,name,subgroup,attributes,is_seed),delivery_costs(id,total_cost,unit_cost,procurement_line_id)` +
-      `&order=occurred_on.asc`).catch(()=>[]),
-    // Procurement invoices for the season (seed only — filter client-side)
+      `farm_id=eq.${farm.id}&movement_type=eq.delivery&direction=eq.1&order=occurred_on.asc` +
+      `&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,item_id,stock_items(id,name,subgroup,attributes,is_seed),delivery_costs(id,total_cost,unit_cost,procurement_line_id)`
+    ).catch(()=>[]),
+    // Procurement invoices
     dbSelect('procurement_invoices',
-      `farm_id=eq.${farm.id}&select=*,procurement_lines(id,item_id,description,quantity_invoiced,unit,unit_cost,line_total,stock_items(id,name,subgroup,attributes,is_seed))` +
-      `&order=invoice_date.asc`).catch(()=>[]),
+      `farm_id=eq.${farm.id}&order=invoice_date.asc` +
+      `&select=id,invoice_date,supplier,total_amount,procurement_lines(id,item_id,description,quantity_invoiced,unit,unit_cost,line_total,stock_items(id,name,subgroup,attributes,is_seed))`
+    ).catch(()=>[]),
   ]);
   console.log('[MgmtReport] budgets rows:', budgets.length, '| budgetCosts rows:', budgetCosts.length, '| seedMovements:', seedMovements.length);
 
@@ -1001,8 +1001,8 @@ window._mgmtOpenInvoice = async function(invoiceId) {
     if (el.style.zIndex >= 9999) el.remove();
   });
   // Switch to outputs module
-  const { dbSelect } = await import('../../js/supabase-client.js?v=1794955248512');
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794955248512');
+  const { dbSelect } = await import('../../js/supabase-client.js?v=1794955660473');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794955660473');
   // Navigate to outputs tab
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   // Wait briefly for module to mount, then open the invoice
