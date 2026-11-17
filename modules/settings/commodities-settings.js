@@ -5,9 +5,9 @@ import {
   loadCommodities, getCommodities, getCropTypes,
   addCommodity, addCropType, deleteCommodity, deleteCropType,
   invalidateCache
-} from '../../js/commodities.js?v=1794900295511';
-import { toast, openModal, qs, setContent } from '../../js/ui.js?v=1794900295511';
-import { canWrite } from '../../js/app-state.js?v=1794900295511';
+} from '../../js/commodities.js?v=1794900345948';
+import { toast, openModal, qs, setContent } from '../../js/ui.js?v=1794900345948';
+import { canWrite } from '../../js/app-state.js?v=1794900345948';
 
 export async function mountCommoditySettings(container) {
   container.innerHTML = `

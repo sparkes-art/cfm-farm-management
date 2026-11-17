@@ -26,10 +26,10 @@
 //   2. Record manual deliveries
 //   3. See which sessions consumed what, with a link back to operations
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession } from '../../js/supabase-client.js?v=1794900295511';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794900295511';
-import { toast, openModal, qs } from '../../js/ui.js?v=1794900295511';
-import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794900295511';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbDeleteWhere, getSession } from '../../js/supabase-client.js?v=1794900345948';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794900345948';
+import { toast, openModal, qs } from '../../js/ui.js?v=1794900345948';
+import { loadCommodities, getCommodities } from '../../js/commodities.js?v=1794900345948';
 
 // ── Formatters ────────────────────────────────────────────────────────────
 const fN = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('en-AU', { maximumFractionDigits: 1 });
@@ -425,6 +425,8 @@ async function _render(container, farm, period, allPeriods = []) {
       ? `Planting: ${sessionById[m.source_ref]?.field_name || m.source_ref.slice(0, 8) + '…'}`
       : (m.note || '');
 
+    const canDel = canWrite() && m.movement_type !== 'usage'; // usage deletions go via planting session
+    const delLabel = `${mt.label} ${item?.name || ''} ${m.occurred_on}`;
     return `<tr style="border-bottom:1px solid var(--border-light);font-size:12px">
       <td style="padding:8px 14px;color:var(--hint)">${m.occurred_on}</td>
       <td style="padding:8px 14px;font-weight:500;color:var(--ink)">${item?.name || '—'}</td>
@@ -434,6 +436,12 @@ async function _render(container, farm, period, allPeriods = []) {
         ${qty > 0 ? '+' : ''}${fN(qty)} ${item?.default_unit || ''}${kgStr}
       </td>
       <td style="padding:8px 14px;color:var(--hint)">${esc(refNote)}</td>
+      <td style="padding:8px 6px;text-align:right">
+        ${canDel ? `<button class="btn btn-ghost btn-sm sd-delete-move"
+          data-move-id="${m.id}" data-label="${esc(delLabel)}"
+          title="Delete this movement"
+          style="font-size:11px;color:var(--red);padding:2px 6px">✕</button>` : ''}
+      </td>
     </tr>`;
   }).join('');
 
@@ -447,7 +455,7 @@ async function _render(container, farm, period, allPeriods = []) {
       <table style="width:100%;border-collapse:collapse">
         <thead>
           <tr style="background:var(--page-bg);border-bottom:1px solid var(--border)">
-            ${['Date', 'Variety', 'Type', 'Location', 'Qty', 'Note'].map(h =>
+            ${['Date', 'Variety', 'Type', 'Location', 'Qty', 'Note', ''].map(h =>
               `<th style="padding:7px 14px;font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);text-align:${h === 'Qty' ? 'right' : 'left'}">${h}</th>`
             ).join('')}
           </tr>
@@ -1063,7 +1071,7 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
 
           // Upload attachment to Supabase Storage if provided
           if (invAttachment && invoice.id) {
-            const { supabase } = await import('../../js/supabase-client.js?v=1794900295511');
+            const { supabase } = await import('../../js/supabase-client.js?v=1794900345948');
             const ext  = invAttachment.name.split('.').pop();
             const path = `invoices/${farm.id}/${invoice.id}.${ext}`;
             await supabase.storage.from('procurement-attachments').upload(path, invAttachment, { upsert: true }).catch(() => {});
