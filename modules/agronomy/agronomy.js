@@ -2,10 +2,10 @@
 // CFM Agronomy Module — Scouting visits & Crop Plan
 // Updated 2026-11-12
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794953780511';
-import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794953780511';
-import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794953780511';
-import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794953780511';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, dbUpsert } from '../../js/supabase-client.js?v=1794954347500';
+import { getActiveFarm, getActiveSeason }         from '../../js/app-state.js?v=1794954347500';
+import { toast, openModal, formatDate }            from '../../js/ui.js?v=1794954347500';
+import { loadCommodities, getCropTypes }           from '../../js/commodities.js?v=1794954347500';
 
 // Deduplicated crop type names across all commodities — for the crop plan dropdown.
 // Cotton Irrigated appears once even though it may exist under both Cotton Lint and Cotton Seed.

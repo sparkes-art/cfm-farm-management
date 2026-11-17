@@ -2,7 +2,7 @@
 // Shared commodity and crop type data layer
 // Loads once per session, provides dynamic lists to all modules
 
-import { dbSelect, dbInsert, dbDelete } from './supabase-client.js?v=1794953780511';
+import { dbSelect, dbInsert, dbDelete } from './supabase-client.js?v=1794954347500';
 
 let _commodities = [];
 let _cropTypes = [];
