@@ -5,9 +5,9 @@
 // Revenue actuals from CFM invoices; cost actuals from Xero P&L.
 // Line-level comments per row + month, tracked by user and timestamp.
 
-import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794956479264';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794956479264';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794956479264';
+import { dbSelect, dbInsert, dbUpsert, dbDeleteWhere } from '../../js/supabase-client.js?v=1794956683876';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794956683876';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794956683876';
 
 // Module-level state — persists across re-renders within a session
 let _selectedMonth = null;   // 'YYYY-MM' or null = full YTD
@@ -194,6 +194,23 @@ async function _render(container) {
       '&select=id,item_id,signed_qty,unit,movement_type'
     ).catch(() => []),
   ]);
+
+  // ── Seed delivery movements (non-blocking) ───────────────────────────────
+  let seedMovements = [];
+  try {
+    seedMovements = await dbSelect('stock_movements',
+      'farm_id=eq.' + farm.id + '&movement_type=eq.delivery&direction=eq.1&order=occurred_on.asc' +
+      '&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,item_id,stock_items(id,name,subgroup,attributes,is_seed),delivery_costs(id,total_cost,unit_cost,procurement_line_id)'
+    );
+  } catch(e) {
+    console.warn('[MgmtReport] seed movements with cost join failed, retrying:', e.message);
+    try {
+      seedMovements = await dbSelect('stock_movements',
+        'farm_id=eq.' + farm.id + '&movement_type=eq.delivery&direction=eq.1&order=occurred_on.asc' +
+        '&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,item_id,stock_items(id,name,subgroup,attributes,is_seed)'
+      );
+    } catch(e2) { console.warn('[MgmtReport] seed movements fallback failed:', e2.message); }
+  }
 
   // Index mappings by cfm_description for O(1) lookup
   // key: description → { xero_account_id, xero_account_name }
@@ -848,6 +865,124 @@ async function _render(container) {
     buildSection('Carry-over income', carryOverGroups, { carryOver: true }),
   ].join('');
 
+  // ── Direct costs — Seed ────────────────────────────────────────────────────
+  const normWords = s => (s || '').toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+  const wordScore = (a, b) => {
+    const wa = new Set(normWords(a));
+    const wb = normWords(b);
+    if (!wa.size || !wb.length) return 0;
+    return wb.filter(w => wa.has(w)).length / Math.max(wa.size, wb.length);
+  };
+
+  const seedMovsAll = (seedMovements || []).filter(m => m.stock_items?.is_seed);
+  const seedActualByItem = new Map();
+  for (const mv of seedMovsAll) {
+    const item = mv.stock_items;
+    if (!item) continue;
+    const kpb = mv.kg_per_bag || item.attributes?.kg_per_bag || 0;
+    const kg  = Math.abs(mv.signed_qty) || (mv.qty * kpb);
+    const cost = mv.delivery_costs?.reduce((s, dc) => s + (dc.total_cost || 0), 0) || 0;
+    if (!seedActualByItem.has(item.id)) {
+      seedActualByItem.set(item.id, { name: item.name, subgroup: item.subgroup || '', totalKg: 0, totalBags: 0, totalCost: 0 });
+    }
+    const row = seedActualByItem.get(item.id);
+    row.totalKg   += kg;
+    row.totalCost += cost;
+    if (kpb > 0) row.totalBags += mv.qty || 0;
+  }
+
+  const varCosts    = (budgetCosts || []).filter(c => c.category === 'variable');
+  const seedBudgets = varCosts.filter(c => (c.budget_code || '').toUpperCase().includes('SEED'));
+
+  const budgetEntMap = new Map();
+  for (const bc of seedBudgets) {
+    const ent = bc.enterprise || '';
+    if (!budgetEntMap.has(ent)) {
+      const areaHa = bc.area_ha || budgets.find(b => wordScore(b.commodity, ent) >= 0.4)?.area_ha || 0;
+      budgetEntMap.set(ent, { lines: [], area_ha: areaHa, totalBudget: 0, totalCostPerHa: 0 });
+    }
+    const e = budgetEntMap.get(ent);
+    e.lines.push(bc);
+    e.totalBudget    += bc.budget_amount || (bc.cost_per_ha * e.area_ha) || 0;
+    e.totalCostPerHa += bc.cost_per_ha || 0;
+  }
+
+  const budgetEnts = [...budgetEntMap.keys()];
+  const matchBudgetEnt = sg => {
+    const norm = (sg || '').toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').trim();
+    const exact = budgetEnts.find(e => e.toUpperCase().replace(/[^A-Z0-9\s]/g, ' ').trim() === norm);
+    if (exact) return exact;
+    let best = null, bestS = 0;
+    for (const e of budgetEnts) { const s = wordScore(sg, e); if (s > bestS) { bestS = s; best = e; } }
+    return bestS >= 0.3 ? best : null;
+  };
+
+  const seedActuals = [...seedActualByItem.values()];
+  const seedBySubgroup = new Map();
+  for (const row of seedActuals) {
+    const sg = row.subgroup || row.name;
+    if (!seedBySubgroup.has(sg)) seedBySubgroup.set(sg, { items: [], budgetEnt: matchBudgetEnt(sg) });
+    seedBySubgroup.get(sg).items.push(row);
+  }
+
+  let totalDirectBudget = 0;
+  let totalDirectActual = 0;
+  let directCostsSectionHtml = '';
+
+  const buildDirectCosts = () => {
+    if (!seedActuals.length && !seedBudgets.length) return '';
+    let rows = '';
+    // Rows from actual deliveries grouped by subgroup (crop)
+    for (const [sg, grp] of seedBySubgroup) {
+      const sgTotalKg   = grp.items.reduce((s, r) => s + r.totalKg, 0);
+      const sgTotalCost = grp.items.reduce((s, r) => s + r.totalCost, 0);
+      const budgEnt  = grp.budgetEnt ? budgetEntMap.get(grp.budgetEnt) : null;
+      const areaHa   = budgEnt?.area_ha || 0;
+      const kgPerHa  = areaHa ? (sgTotalKg / areaHa).toFixed(1) : '—';
+      const costPerKg = sgTotalKg ? fC(sgTotalCost / sgTotalKg) : '—';
+      const budgetTotal = budgEnt ? budgEnt.totalBudget : 0;
+      const budgetYTD   = budgetTotal * ytdFraction;
+      totalDirectBudget += budgetTotal;
+      totalDirectActual += sgTotalCost;
+      const vAmt = sgTotalCost && budgetYTD ? sgTotalCost - budgetYTD : null;
+      rows += '<tr>' +
+        '<td style="' + td + '">' + sg + (areaHa ? ' <span style="color:var(--hint);font-size:10px">(' + kgPerHa + ' kg/ha · ' + costPerKg + '/kg)</span>' : '') + '</td>' +
+        (typeof _selectedMonth === 'number' ? '<td style="' + tdR + '">—</td><td style="' + tdR + '">—</td>' : '') +
+        '<td style="' + tdR + ';color:var(--red)">' + (sgTotalCost ? '-' + fC(sgTotalCost) : '—') + '</td>' +
+        '<td style="' + tdR + ';color:var(--red)">' + (budgetYTD ? '-' + fC(budgetYTD) : '—') + '</td>' +
+        '<td style="' + tdR + '">' + (vAmt !== null ? varCell(budgetYTD - sgTotalCost, budgetYTD) : '—') + '</td>' +
+        '<td style="' + tdR + ';color:var(--red)">' + (budgetTotal ? '-' + fC(budgetTotal) : '—') + '</td>' +
+        '</tr>';
+    }
+    // Budget-only rows (enterprises with budget but no actuals yet)
+    for (const [ent, budgEnt] of budgetEntMap) {
+      const matched = [...seedBySubgroup.values()].some(g => g.budgetEnt === ent);
+      if (matched) continue;
+      const budgetTotal = budgEnt.totalBudget;
+      const budgetYTD   = budgetTotal * ytdFraction;
+      totalDirectBudget += budgetTotal;
+      rows += '<tr>' +
+        '<td style="' + td + '">' + ent + ' <span style="color:var(--hint);font-size:10px">(budget only)</span></td>' +
+        (typeof _selectedMonth === 'number' ? '<td style="' + tdR + '">—</td><td style="' + tdR + '">—</td>' : '') +
+        '<td style="' + tdR + '">—</td>' +
+        '<td style="' + tdR + ';color:var(--red)">' + (budgetYTD ? '-' + fC(budgetYTD) : '—') + '</td>' +
+        '<td style="' + tdR + '">—</td>' +
+        '<td style="' + tdR + ';color:var(--red)">' + (budgetTotal ? '-' + fC(budgetTotal) : '—') + '</td>' +
+        '</tr>';
+    }
+    if (!rows) return '';
+    const totalRow = '<tr style="background:#fff5f5;border-top:2px solid var(--border)">' +
+      '<td style="' + td + ';font-weight:600">Total direct costs</td>' +
+      (typeof _selectedMonth === 'number' ? '<td style="' + tdR + '">—</td><td style="' + tdR + '">—</td>' : '') +
+      '<td style="' + tdR + ';color:var(--red);font-weight:700">' + (totalDirectActual ? '-' + fC(totalDirectActual) : '—') + '</td>' +
+      '<td style="' + tdR + ';color:var(--red);font-weight:700">' + (totalDirectBudget ? '-' + fC(totalDirectBudget * ytdFraction) : '—') + '</td>' +
+      '<td style="' + tdR + ';font-weight:700">' + (totalDirectActual && totalDirectBudget ? varCell(totalDirectBudget * ytdFraction - totalDirectActual, totalDirectBudget * ytdFraction) : '—') + '</td>' +
+      '<td style="' + tdR + ';color:var(--red);font-weight:700">' + (totalDirectBudget ? '-' + fC(totalDirectBudget) : '—') + '</td>' +
+      '</tr>';
+    return secRow('Direct costs — Seed') + rows + totalRow;
+  };
+  directCostsSectionHtml = buildDirectCosts();
+
   // ── Fixed costs ────────────────────────────────────────────────────────────
   const fixedCats = [
     { key: 'labour',    label: 'Labour & Farm Management' },
@@ -1093,10 +1228,10 @@ async function _render(container) {
   }
 
   // Net income row
-  const budgetNetYTD  = grandBudgetYTD - totalFixedBudget * ytdFraction - Math.abs(totalCapexBudget) * ytdFraction;
-  const budgetNetFY   = grandBudget    - totalFixedBudget                - Math.abs(totalCapexBudget);
+  const budgetNetYTD  = grandBudgetYTD - totalFixedBudget * ytdFraction - Math.abs(totalCapexBudget) * ytdFraction - totalDirectBudget * ytdFraction;
+  const budgetNetFY   = grandBudget    - totalFixedBudget                - Math.abs(totalCapexBudget)               - totalDirectBudget;
   const budgetNetMonth = grandBudgetMonth - totalFixedBudget / 12        - Math.abs(totalCapexBudget) / 12;
-  const actualNet     = xeroActuals ? grandActual - totalFixedActual : null;
+  const actualNet     = xeroActuals ? grandActual - totalFixedActual - totalDirectActual : (totalDirectActual ? grandActual - totalDirectActual : null);
   const actualNetMonth = xeroMonthActuals ? grandActualMonth - totalFixedActualMonth : null;
   const netVariance   = actualNet !== null ? actualNet - budgetNetYTD : null;
   const netLabel      = xeroActuals ? 'Net income (Xero costs YTD)' : 'Net income (budget)';
@@ -1140,8 +1275,8 @@ async function _render(container) {
     '</tr>';
 
   const costsAndNetHtml = budgetCosts.length
-    ? fixedCostsSectionHtml + capexSectionHtml + netIncomeRowWithCosts
-    : netIncomeRowIncomeOnly;
+    ? directCostsSectionHtml + fixedCostsSectionHtml + capexSectionHtml + netIncomeRowWithCosts
+    : (directCostsSectionHtml || '') + netIncomeRowIncomeOnly;
 
   // ── Income total row ───────────────────────────────────────────────────────
   const incomeTotalMonthCols = _selectedMonth
@@ -1531,11 +1666,11 @@ window._mgmtOpenInvoice = async function(invoiceId) {
   document.querySelectorAll('[style*="position:fixed"]').forEach(el => {
     if (el.style.zIndex >= 9999) el.remove();
   });
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794956479264');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794956683876');
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   setTimeout(async () => {
     try {
-      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794956479264');
+      const { dbSelect: ds } = await import('../../js/supabase-client.js?v=1794956683876');
       const rows = await ds('invoices', 'id=eq.' + invoiceId + '&select=*');
       const inv  = rows?.[0];
       if (!inv) return;

@@ -1,11 +1,11 @@
 // modules/settings/settings.js
 // Settings hub — Farm settings + Commodities + Users
 
-import { mountFarmSettings } from './farm-settings.js?v=1794956479264';
-import { mountCommoditySettings } from './commodities-settings.js?v=1794956479264';
-import { mountUsersSettings } from './users-settings.js?v=1794956479264';
-import { mountLocationsSettings } from './locations-settings.js?v=1794956479264';
-import { qs } from '../../js/ui.js?v=1794956479264';
+import { mountFarmSettings } from './farm-settings.js?v=1794956683876';
+import { mountCommoditySettings } from './commodities-settings.js?v=1794956683876';
+import { mountUsersSettings } from './users-settings.js?v=1794956683876';
+import { mountLocationsSettings } from './locations-settings.js?v=1794956683876';
+import { qs } from '../../js/ui.js?v=1794956683876';
 
 let _activeTab = 'farm';
 
