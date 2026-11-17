@@ -3,9 +3,9 @@
 // Revenue actuals from CFM invoices; cost budgets from budget_costs table.
 // Fixed cost actuals pulled from Xero P&L when the farm has a Xero connection.
 
-import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794955660473';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794955660473';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794955660473';
+import { dbSelect, dbInsert } from '../../js/supabase-client.js?v=1794955776968';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794955776968';
+import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js?v=1794955776968';
 
 export function unmountManagementReport() {}
 
@@ -55,23 +55,46 @@ async function _render(container) {
   body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--hint)">Loading...</div>';
 
   console.log('[MgmtReport] Loading data for farm:', farm.id, 'season:', season);
-  const [contracts, allInvoices, budgets, budgetCosts, comments, seedMovements, seedProcurement] = await Promise.all([
+  const [contracts, allInvoices, budgets, budgetCosts, comments] = await Promise.all([
     dbSelect('forward_contracts', `farm_id=eq.${farm.id}&crop_year=eq.${season}&select=*`),
     dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`),
     dbSelect('budgets', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`),
     dbSelect('budget_costs', `farm_id=eq.${farm.id}&financial_year=eq.${season}&select=*`).catch(()=>[]),
     dbSelect('management_comments', `farm_id=eq.${farm.id}&season=eq.${season}&select=*,user_profiles(full_name)&order=created_at.desc`).catch(()=>[]),
-    // Seed delivery movements — joined to stock_items and delivery_costs
-    dbSelect('stock_movements',
+  ]);
+
+  // Seed data — fetched separately so errors don't block core report
+  // Try with delivery_costs join; if Supabase FK not set up, falls back to movements without cost join
+  let seedMovements = [];
+  try {
+    seedMovements = await dbSelect('stock_movements',
       `farm_id=eq.${farm.id}&movement_type=eq.delivery&direction=eq.1&order=occurred_on.asc` +
       `&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,item_id,stock_items(id,name,subgroup,attributes,is_seed),delivery_costs(id,total_cost,unit_cost,procurement_line_id)`
-    ).catch(()=>[]),
-    // Procurement invoices
-    dbSelect('procurement_invoices',
+    );
+    console.log('[MgmtReport] seedMovements with delivery_costs join OK:', seedMovements.length);
+  } catch(e) {
+    console.warn('[MgmtReport] delivery_costs join failed, retrying without it:', e.message || e);
+    try {
+      seedMovements = await dbSelect('stock_movements',
+        `farm_id=eq.${farm.id}&movement_type=eq.delivery&direction=eq.1&order=occurred_on.asc` +
+        `&select=id,occurred_on,qty,unit,kg_per_bag,signed_qty,item_id,stock_items(id,name,subgroup,attributes,is_seed)`
+      );
+      console.log('[MgmtReport] seedMovements fallback (no cost):', seedMovements.length);
+    } catch(e2) {
+      console.warn('[MgmtReport] seedMovements fallback also failed:', e2.message || e2);
+    }
+  }
+
+  let seedProcurement = [];
+  try {
+    seedProcurement = await dbSelect('procurement_invoices',
       `farm_id=eq.${farm.id}&order=invoice_date.asc` +
       `&select=id,invoice_date,supplier,total_amount,procurement_lines(id,item_id,description,quantity_invoiced,unit,unit_cost,line_total,stock_items(id,name,subgroup,attributes,is_seed))`
-    ).catch(()=>[]),
-  ]);
+    );
+    console.log('[MgmtReport] seedProcurement OK:', seedProcurement.length);
+  } catch(e) {
+    console.log('[MgmtReport] procurement_invoices not available (migration 019 pending?):', e.message || e);
+  }
   console.log('[MgmtReport] budgets rows:', budgets.length, '| budgetCosts rows:', budgetCosts.length, '| seedMovements:', seedMovements.length);
 
   // ── Xero fixed-cost actuals (non-blocking — shows — if Xero not connected) ─
@@ -1001,8 +1024,8 @@ window._mgmtOpenInvoice = async function(invoiceId) {
     if (el.style.zIndex >= 9999) el.remove();
   });
   // Switch to outputs module
-  const { dbSelect } = await import('../../js/supabase-client.js?v=1794955660473');
-  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794955660473');
+  const { dbSelect } = await import('../../js/supabase-client.js?v=1794955776968');
+  const { openInvoiceForm } = await import('../outputs/invoices.js?v=1794955776968');
   // Navigate to outputs tab
   document.querySelector('#sidebar a[data-module="outputs"]')?.click();
   // Wait briefly for module to mount, then open the invoice
