@@ -1,10 +1,10 @@
 // modules/outputs/contracts.js
 // Forward Contracts — list, add, edit, delete, PDF AI extraction
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable, uploadFile } from '../../js/supabase-client.js?v=1794964462914';
-import { getActiveFarm, getSession, canWrite, getActiveSeason, getSeasons } from '../../js/app-state.js?v=1794964462914';
-import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, setContent, currentSeason } from '../../js/ui.js?v=1794964462914';
-import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js?v=1794964462914';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable, uploadFile } from '../../js/supabase-client.js?v=1794965146726';
+import { getActiveFarm, getSession, canWrite, getActiveSeason, getSeasons } from '../../js/app-state.js?v=1794965146726';
+import { toast, openModal, formatCurrency, formatNumber, formatDate, qs, setContent, currentSeason } from '../../js/ui.js?v=1794965146726';
+import { loadCommodities, getCommodities, getCropTypes, commodityOptions, isLivestock, commoditySelectHTML, initCommoditySelect } from '../../js/commodities.js?v=1794965146726';
 
 let _contracts = [];
 let _invoices = [];
@@ -250,8 +250,26 @@ function _renderStats() {
     const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id && _invoiceInSeason(i));
     return s + contractInvoices.reduce((ss, i) => ss + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0), 0);
   }, 0);
-  const totalStillToGo = Math.max(0, totalUnits - totalInvoicedUnits);
-  const totalValueToGo = Math.max(0, totalValue - totalInvoicedValue);
+  // Complete contracts contribute 0 to "still to go"
+  const totalStillToGo = rows.reduce((s, c) => {
+    if (c.is_complete) return s;
+    const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id && _invoiceInSeason(i));
+    const inv = contractInvoices.reduce((ss, i) => {
+      if (i.batches && i.batches.length) {
+        const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
+        return ss + b.filter(bt => (bt.lines||[]).some(l => l.type==='income' && l.line_type!=='qa'))
+                      .reduce((bss, bt) => bss + (parseFloat(bt.qty)||0), 0);
+      }
+      return ss + (parseFloat(i.qty)||0);
+    }, 0);
+    return s + Math.max(0, (parseFloat(c.quantity)||0) - inv);
+  }, 0);
+  const totalValueToGo = rows.reduce((s, c) => {
+    if (c.is_complete) return s;
+    const contractInvoices = _invoices.filter(i => i.forward_contract_id === c.id && _invoiceInSeason(i));
+    const inv = contractInvoices.reduce((ss, i) => ss + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0), 0);
+    return s + Math.max(0, ((parseFloat(c.quantity)||0) * (parseFloat(c.price_per_unit)||0)) - inv);
+  }, 0);
 
   setContent('#con-stats', `
     <div class="stat-card">
@@ -499,8 +517,8 @@ function _renderTable() {
               <td class="num">${c.price_per_unit ? formatCurrency(c.price_per_unit, 0) : '—'}</td>
               <td class="num"><strong>${value ? formatCurrency(value, 0) : '—'}</strong></td>
               <td class="num">${invoicedQty ? formatNumber(invoicedQty, 0) + ' ' + (c.unit||'') : '—'}</td>
-              <td class="num" style="color:${(parseFloat(c.quantity)||0)-invoicedQty>0?'var(--amber)':'var(--green)'};font-weight:600">
-                ${formatNumber(Math.max(0,(parseFloat(c.quantity)||0)-invoicedQty),0)} ${c.unit||''}
+              <td class="num" style="color:${c.is_complete||((parseFloat(c.quantity)||0)-invoicedQty<=0)?'var(--green)':'var(--amber)'};font-weight:600">
+                ${c.is_complete ? '0' : formatNumber(Math.max(0,(parseFloat(c.quantity)||0)-invoicedQty),0)} ${c.unit||''}
               </td>
               <td class="num"><strong>${invoicedValue ? formatCurrency(invoicedValue, 0) : '—'}</strong></td>
               <!-- avg price hidden -->
