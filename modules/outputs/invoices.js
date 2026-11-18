@@ -1,10 +1,10 @@
 // modules/outputs/invoices.js
 // Full invoice management — contract sales, cash sales, line items, deductions
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794960497341';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794960497341';
-import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1794960497341';
-import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1794960497341';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794960944958';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794960944958';
+import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1794960944958';
+import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1794960944958';
 
 let _invoices = [];
 let _contracts = [];
@@ -1114,7 +1114,7 @@ export async function openInvoiceForm(container, existing = null) {
             ' — ' + formatNumber(matchedContract.quantity,0) + ' ' + (matchedContract.unit||'') +
             ' @ ' + formatCurrency(matchedContract.price_per_unit,2);
           updateContractSummary();
-        _updateGradeVisibility(c?.commodity);
+          _updateGradeVisibility(matchedContract?.commodity);
           const buyerEl = modal.querySelector('#f-buyer');
           if (buyerEl && !buyerEl.value) buyerEl.value = matchedContract.counterparty || matchedContract.buyer || '';
         }

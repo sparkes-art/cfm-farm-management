@@ -3,9 +3,9 @@
 //   Procurement: supplier invoices → matched to stock delivery movements → WAC
 //   Purchases:   simple cost entry for items not going through stocktake
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794960497341';
-import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794960497341';
-import { toast, openModal, formatCurrency, formatDate, qs, setContent } from '../../js/ui.js?v=1794960497341';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794960944958';
+import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js?v=1794960944958';
+import { toast, openModal, formatCurrency, formatDate, qs, setContent } from '../../js/ui.js?v=1794960944958';
 
 // ── module state ──────────────────────────────────────────────────────────────
 let _tab        = 'procurement';   // 'procurement' | 'purchases'
