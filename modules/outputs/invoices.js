@@ -1,10 +1,10 @@
 // modules/outputs/invoices.js
 // Full invoice management — contract sales, cash sales, line items, deductions
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794959174770';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794959174770';
-import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1794959174770';
-import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1794959174770';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794960342978';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794960342978';
+import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1794960342978';
+import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1794960342978';
 
 let _invoices = [];
 let _contracts = [];
@@ -826,11 +826,15 @@ export async function openInvoiceForm(container, existing = null) {
   // - plus the invoice's own season if editing a historical record (e.g. 2019/20)
   const [curY] = (activeSeason || '').split('-').map(Number);
   const recentSeasons = curY ? [0,1,2,3].map(n => `${curY-n}-${String(curY-n+1).slice(-2)}`) : (activeSeason ? [activeSeason] : []);
-  // Also include season from any existing line items (historical invoice editing)
-  const existingSeasons = (existing?.batches
+  // Also include season from the invoice itself and its batches (historical invoice editing)
+  const _existingBatchesRaw = existing?.batches
     ? (typeof existing.batches === 'string' ? JSON.parse(existing.batches) : existing.batches)
-    : []
-  ).flatMap(b => (b.lines||[]).map(l => l.crop_year)).filter(Boolean);
+    : [];
+  const existingSeasons = [
+    existing?.season,                                               // invoice-level season
+    ..._existingBatchesRaw.map(b => b.crop_year),                  // batch-level crop_year
+    ..._existingBatchesRaw.flatMap(b => (b.lines||[]).map(l => l.crop_year)), // line-level crop_year
+  ].filter(Boolean);
   const allSeasons = [...new Set([...recentSeasons, ...existingSeasons])];
   let seasonBudgets = {}; // { season: [commodity,...] }
   if (allSeasons.length && farm) {
