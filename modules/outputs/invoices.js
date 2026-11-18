@@ -1,10 +1,10 @@
 // modules/outputs/invoices.js
 // Full invoice management — contract sales, cash sales, line items, deductions
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794960342978';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794960342978';
-import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1794960342978';
-import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1794960342978';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794960497341';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794960497341';
+import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1794960497341';
+import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1794960497341';
 
 let _invoices = [];
 let _contracts = [];
@@ -821,31 +821,10 @@ export async function openInvoiceForm(container, existing = null) {
   const isEdit = !!existing;
   const activeSeason = getActiveSeason() || '';
 
-  // Pre-fetch budgets for all seasons the user might need in this modal:
-  // - 4 seasons back from the UI's active season
-  // - plus the invoice's own season if editing a historical record (e.g. 2019/20)
-  const [curY] = (activeSeason || '').split('-').map(Number);
-  const recentSeasons = curY ? [0,1,2,3].map(n => `${curY-n}-${String(curY-n+1).slice(-2)}`) : (activeSeason ? [activeSeason] : []);
-  // Also include season from the invoice itself and its batches (historical invoice editing)
-  const _existingBatchesRaw = existing?.batches
-    ? (typeof existing.batches === 'string' ? JSON.parse(existing.batches) : existing.batches)
-    : [];
-  const existingSeasons = [
-    existing?.season,                                               // invoice-level season
-    ..._existingBatchesRaw.map(b => b.crop_year),                  // batch-level crop_year
-    ..._existingBatchesRaw.flatMap(b => (b.lines||[]).map(l => l.crop_year)), // line-level crop_year
-  ].filter(Boolean);
-  const allSeasons = [...new Set([...recentSeasons, ...existingSeasons])];
-  let seasonBudgets = {}; // { season: [commodity,...] }
-  if (allSeasons.length && farm) {
-    try {
-      const rows = await dbSelect('budgets', `farm_id=eq.${farm.id}&season=in.(${allSeasons.map(s=>`"${s}"`).join(',')})&select=commodity,season`);
-      allSeasons.forEach(s => {
-        const crops = [...new Set(rows.filter(r=>r.season===s&&r.commodity).map(r=>r.commodity.trim()))].sort();
-        seasonBudgets[s] = crops;
-      });
-    } catch(e) { /* silently skip — free text still works */ }
-  }
+  // Commodity list comes from the farm's configured commodities — season-independent
+  // so historical invoices (2019/20 etc.) always see the full list
+  await loadCommodities();
+  const farmCommodities = getCommodities().map(c => c.name);
 
   const formEl = document.createElement('div');
   formEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;overflow-y:auto;padding:20px';
@@ -1261,6 +1240,15 @@ export async function openInvoiceForm(container, existing = null) {
         // Pre-fill buyer from contract if empty
         const buyerEl = modal.querySelector('#f-buyer');
         if (buyerEl && !buyerEl.value) buyerEl.value = c?.counterparty || c?.buyer || '';
+        // Auto-fill commodity on first crop line if not yet set
+        if (c?.commodity) {
+          const firstLineSel = linesWrap.querySelector('.cl-commodity');
+          if (firstLineSel && !firstLineSel.value) {
+            const existing_opt = [...firstLineSel.options].find(o => o.value === c.commodity);
+            if (existing_opt) { firstLineSel.value = c.commodity; }
+            else { firstLineSel.insertAdjacentHTML('beforeend', `<option value="${c.commodity}" selected>${c.commodity}</option>`); }
+          }
+        }
         updateContractSummary();
         _updateGradeVisibility(c?.commodity);
       });
@@ -1298,12 +1286,19 @@ export async function openInvoiceForm(container, existing = null) {
   // ── Multi-line crop sale lines ──────────────────────────────
   const linesWrap = modal.querySelector('#f-lines');
 
-  // Build crop options for a given season from pre-fetched budgets
-  const cropOptsForSeason = (season, selectedCrop = '') => {
-    const crops = seasonBudgets[season] || [];
-    const opts = crops.map(c => `<option value="${c}"${c===selectedCrop?' selected':''}>${c}</option>`).join('');
-    return `<option value="">— select or type —</option>${opts}`;
+  // Build crop/commodity options from the farm's configured commodity list (season-independent)
+  // If the existing value isn't in the list (legacy data), add it so it's preserved
+  const cropOpts = (selectedCrop = '') => {
+    const inList = !selectedCrop || farmCommodities.includes(selectedCrop);
+    const extras = inList ? [] : [selectedCrop];
+    const all = [...farmCommodities, ...extras];
+    const opts = all.map(c => `<option value="${c}"${c===selectedCrop?' selected':''}>${c}</option>`).join('');
+    return `<option value="">— select commodity —</option>${opts}`;
   };
+
+  // Build a season list for the season dropdown — still useful for crop_year labelling
+  const [curY] = (activeSeason || '').split('-').map(Number);
+  const allSeasons = curY ? [0,1,2,3,4,5,6,7].map(n => `${curY-n}-${String(curY-n+1).slice(-2)}`) : (activeSeason ? [activeSeason] : []);
 
   const buildCropLine = (data = {}) => {
     const lineDiv = document.createElement('div');
@@ -1323,7 +1318,7 @@ export async function openInvoiceForm(container, existing = null) {
     lineDiv.innerHTML = `
       <select class="form-select cl-season" style="font-size:11px;padding:4px 6px">${seasonOpts}</select>
       <select class="form-select cl-commodity" style="font-size:12px;padding:5px 6px">
-        ${cropOptsForSeason(selectedSeason, data.commodity||'')}
+        ${cropOpts(data.commodity||'')}
       </select>
       <select class="form-select cl-unit" style="font-size:11px;padding:4px 6px">${['bale','t','kg','head','each'].map(u=>`<option value="${u}"${(data.unit||'bale')===u?' selected':''}>${u}</option>`).join('')}</select>
       <input class="form-input cl-qty" type="number" step="any" min="0" placeholder="0" value="${data.qty||''}" style="font-size:12px;padding:6px 8px">
@@ -1335,12 +1330,7 @@ export async function openInvoiceForm(container, existing = null) {
 
     lineDiv._incomeFiles = data.income_files || [];
 
-    // When season changes, repopulate the crop dropdown preserving current selection
-    lineDiv.querySelector('.cl-season').addEventListener('change', function() {
-      const commoditySel = lineDiv.querySelector('.cl-commodity');
-      const current = commoditySel.value;
-      commoditySel.innerHTML = cropOptsForSeason(this.value, current);
-    });
+    // Season change — commodity list is farm-wide, no repopulation needed
 
     // Two-way price ↔ gross calculation
     // Gross typed → recalc price; Price typed → recalc gross
