@@ -1,9 +1,9 @@
 // modules/meter-readings/meter-readings.js
 // Water meter readings — extraction sites and cumulative meter logs
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794965146726';
-import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794965146726';
-import { toast, openModal, formatNumber, formatDate, qs } from '../../js/ui.js?v=1794965146726';
+import { dbSelect, dbInsert, dbUpdate, dbDelete } from '../../js/supabase-client.js?v=1794969436166';
+import { getActiveFarm, canWrite } from '../../js/app-state.js?v=1794969436166';
+import { toast, openModal, formatNumber, formatDate, qs } from '../../js/ui.js?v=1794969436166';
 
 let _activeTab = 'sites';
 let _sites = [];

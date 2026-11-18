@@ -1,10 +1,10 @@
 // modules/outputs/invoices.js
 // Full invoice management — contract sales, cash sales, line items, deductions
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794965146726';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794965146726';
-import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1794965146726';
-import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1794965146726';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794969436166';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794969436166';
+import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1794969436166';
+import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1794969436166';
 
 let _invoices = [];
 let _contracts = [];
@@ -514,12 +514,13 @@ function _openDetail(inv, container) {
       <p style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);font-weight:600;margin-bottom:6px">Income — Line Items</p>
       <table class="data-table" style="margin-bottom:16px">
         <thead><tr>
-          <th>Commodity</th><th>Docket</th><th class="num">Qty</th><th>Unit</th>
+          <th>Commodity</th><th>Grade</th><th>Docket</th><th class="num">Qty</th><th>Unit</th>
           <th class="num">Price/unit ($)</th><th class="num">Quality adj ($)</th><th class="num">Line total ($)</th>
         </tr></thead>
         <tbody>
           ${lines.map(l => `<tr>
             <td>${l.commodity || '—'}</td>
+            <td class="muted">${l.grade || '—'}</td>
             <td class="muted">${l.docket || '—'}</td>
             <td class="num">${formatNumber(l.qty, 0)}</td>
             <td class="muted">${l.unit || '—'}</td>
@@ -849,6 +850,7 @@ export async function openInvoiceForm(container, existing = null) {
         const qaLine   = (b.lines||[]).find(l => l.type==='income' && l.line_type==='qa');
         return {
           commodity:  saleLine?.description || '',
+          grade:      b.grade || '',
           crop_year:  b.crop_year || activeSeason,
           qty:        parseFloat(b.qty) || '',
           unit:       b.unit || existing?.master_unit || 'bale',
@@ -976,8 +978,8 @@ export async function openInvoiceForm(container, existing = null) {
         </div>
 
         <!-- Line headers -->
-        <div style="display:grid;grid-template-columns:100px 1fr 60px 80px 90px 110px 80px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
-          ${['Season','Crop','Unit','Qty','Price ($/u)','Gross ($)','Adj ($)',''].map(h =>
+        <div style="display:grid;grid-template-columns:100px 1fr 70px 60px 80px 90px 110px 80px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
+          ${['Season','Crop','Grade','Unit','Qty','Price ($/u)','Gross ($)','Adj ($)',''].map(h =>
             `<div style="font-size:9px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${h}</div>`
           ).join('')}
         </div>
@@ -1302,7 +1304,7 @@ export async function openInvoiceForm(container, existing = null) {
 
   const buildCropLine = (data = {}) => {
     const lineDiv = document.createElement('div');
-    lineDiv.style.cssText = 'display:grid;grid-template-columns:100px 1fr 60px 80px 90px 110px 80px 30px;gap:6px;margin-bottom:6px;align-items:center';
+    lineDiv.style.cssText = 'display:grid;grid-template-columns:100px 1fr 70px 60px 80px 90px 110px 80px 30px;gap:6px;margin-bottom:6px;align-items:center';
 
     const selectedSeason = data.crop_year || activeSeason;
     const seasonOpts = allSeasons.map(s =>
@@ -1320,6 +1322,7 @@ export async function openInvoiceForm(container, existing = null) {
       <select class="form-select cl-commodity" style="font-size:12px;padding:5px 6px">
         ${cropOpts(data.commodity||'')}
       </select>
+      <input class="form-input cl-grade" type="text" placeholder="e.g. APH1" value="${esc(data.grade||'')}" style="font-size:11px;padding:4px 6px" title="Grade (e.g. APH1, H2, HPS1)">
       <select class="form-select cl-unit" style="font-size:11px;padding:4px 6px">${['bale','t','kg','head','each'].map(u=>`<option value="${u}"${(data.unit||'bale')===u?' selected':''}>${u}</option>`).join('')}</select>
       <input class="form-input cl-qty" type="number" step="any" min="0" placeholder="0" value="${data.qty||''}" style="font-size:12px;padding:6px 8px">
       <input class="form-input cl-price" type="number" step="0.0001" placeholder="0.0000" value="${initPrice||''}" style="font-size:12px;padding:6px 8px">
@@ -1424,6 +1427,7 @@ export async function openInvoiceForm(container, existing = null) {
         if (!gross && !qty) return; // skip empty lines
         saleLines.push({
           commodity:    div.querySelector('.cl-commodity')?.value?.trim() || selectedContract?.commodity || 'Sale',
+          grade:        div.querySelector('.cl-grade')?.value?.trim() || '',
           crop_year:    div.querySelector('.cl-season')?.value || activeSeason,
           unit:         div.querySelector('.cl-unit')?.value?.trim() || 'bale',
           description:  '',
@@ -1488,6 +1492,7 @@ export async function openInvoiceForm(container, existing = null) {
           qty,
           unit: effectiveUnit,
           crop_year: effectiveCropYear,
+          grade: sl.grade || '',
           description: slDesc || '',
           income_files: batchFiles,
           lines: batchLines,
