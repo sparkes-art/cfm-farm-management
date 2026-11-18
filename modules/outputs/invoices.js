@@ -1,10 +1,10 @@
 // modules/outputs/invoices.js
 // Full invoice management — contract sales, cash sales, line items, deductions
 
-import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794960944958';
-import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794960944958';
-import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1794960944958';
-import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1794960944958';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js?v=1794964462914';
+import { getActiveFarm, getSession, canWrite, getActiveSeason } from '../../js/app-state.js?v=1794964462914';
+import { toast, openModal, formatCurrency, formatDate, commodityBadge, statusBadge, qs, currentSeason, formatNumber } from '../../js/ui.js?v=1794964462914';
+import { getCommodities, loadCommodities } from '../../js/commodities.js?v=1794964462914';
 
 let _invoices = [];
 let _contracts = [];
@@ -145,23 +145,23 @@ function _filtered() {
         ? !i.forward_contract_id
         : i.forward_contract_id === contract;
     if (!season) return commodityMatch && contractMatch && monthMatch;
-    // Season match: invoice belongs in a season if its invoice_date falls within
-    // that season's year, using the farm's configured year start month.
-    // crop_year on batch lines is a label for the crop, not a filter gate —
-    // carryover income from a prior crop received in the current season still shows here.
+    // Season match: invoice belongs in a season if:
+    // (a) invoice_date falls within the season's date range, OR
+    // (b) any batch line's crop_year matches the active season
+    //     (handles historical data entry where invoice_date may not match)
     const farm = getActiveFarm();
     const ym = parseInt(farm?.settings?.yearStartMonth || 7);
     const [sy] = season.split('-').map(Number);
-    // Season "2026-27" with Oct start = 1 Oct 2026 – 30 Sep 2027
-    // Season "2026-27" with Jul start = 1 Jul 2026 – 30 Jun 2027
-    // Season "2026-27" with Jan start = 1 Jan 2026 – 31 Dec 2026
-    // In all cases: start = month ym of year sy; end = month ym of year sy+1
     const mm = String(ym).padStart(2, '0');
     const seasonStart = `${sy}-${mm}-01`;
     const seasonEnd   = `${sy + 1}-${mm}-01`;
     const d = i.invoice_date?.slice(0, 10) || '';
     const dateInSeason = d >= seasonStart && d < seasonEnd;
-    return dateInSeason && commodityMatch && contractMatch && monthMatch;
+    // Also match on crop_year from batch lines (for historical invoice entry)
+    const batchesArr = i.batches ? (typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches) : [];
+    const cropYearMatch = batchesArr.some(b => b.crop_year === season) ||
+      (i.season === season);
+    return (dateInSeason || cropYearMatch) && commodityMatch && contractMatch && monthMatch;
   });
 }
 
