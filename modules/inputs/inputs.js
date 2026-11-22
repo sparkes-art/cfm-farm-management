@@ -20,7 +20,7 @@
 
 import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js';
-import { toast, openModal, formatCurrency, formatDate, qs, setContent } from '../../js/ui.js';
+import { toast, openModal, formatCurrency, formatDate, qs } from '../../js/ui.js';
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 let _container = null;
@@ -50,7 +50,7 @@ const FIXED_CARDS = [
 
 export async function mountInputs(container) {
   _container = container;
-  setContent(container, `<div class="module-loading">Loading inputs…</div>`);
+  container.innerHTML = `<div class="module-loading">Loading inputs…</div>`;
 
   await _loadAll();
   _render();
@@ -161,7 +161,7 @@ function _render() {
       ${FIXED_CARDS.map(c => _renderFixedCard(c, write)).join('')}
     </div>`;
 
-  setContent(_container, html);
+  _container.innerHTML = html;
   _bindEvents();
 }
 
