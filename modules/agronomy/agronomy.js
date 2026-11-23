@@ -1241,6 +1241,9 @@ function cpMatrixRowHTML(pk, seasons, idx, rowIndex, currentSeason) {
           ${!isSubRow ? `<button class="cp-add-subblock-btn btn-link" data-paddock="${esc(paddock_name)}"
             style="opacity:0;font-size:0.7rem;color:var(--hint);padding:1px 5px;border:1px dashed var(--border);border-radius:3px;white-space:nowrap;transition:opacity 0.1s"
             title="Add sub-block">+ sub</button>` : ''}
+          <button class="cp-rec-btn btn-link" data-paddock="${esc(paddock_name)}" data-subblock="${esc(sub_block || '')}"
+            style="opacity:0;font-size:0.7rem;color:var(--blue,#3b82f6);padding:1px 5px;border:1px solid var(--blue,#3b82f6);border-radius:3px;white-space:nowrap;transition:opacity 0.1s;line-height:1"
+            title="Recommendations">Rec</button>
           <button class="cp-expand-btn btn-link" data-paddock="${esc(paddock_name)}" data-subblock="${esc(sub_block || '')}"
             style="opacity:0;font-size:0.75rem;color:var(--hint);padding:1px 5px;border:1px solid var(--border);border-radius:3px;transition:opacity 0.1s;line-height:1"
             title="Show detail">···</button>
@@ -1361,6 +1364,7 @@ function bindMatrixEdit(container) {
     row.style.background = on ? 'color-mix(in srgb, var(--blue) 4%, transparent)' : '';
     row.querySelector('.cp-del-row-btn')?.style      && (row.querySelector('.cp-del-row-btn').style.opacity      = on ? '1' : '0');
     row.querySelector('.cp-add-subblock-btn')?.style && (row.querySelector('.cp-add-subblock-btn').style.opacity = on ? '1' : '0');
+    row.querySelector('.cp-rec-btn')?.style          && (row.querySelector('.cp-rec-btn').style.opacity          = on ? '1' : '0');
     row.querySelector('.cp-expand-btn')?.style       && (row.querySelector('.cp-expand-btn').style.opacity       = on ? '1' : '0');
   };
   table.addEventListener('mouseover', e => _setRowHover(e.target.closest('tr.cp-matrix-row'), true));
@@ -1374,6 +1378,17 @@ function bindMatrixEdit(container) {
     const paddockName = btn.dataset.paddock;
     const allSeasons  = sortSeasons([...new Set(allCropPlan.map(c => c.season_label).filter(Boolean))]);
     _openAddSubBlockModal(paddockName, allSeasons);
+  });
+
+  // Recommendations
+  table.addEventListener('click', e => {
+    const btn = e.target.closest('.cp-rec-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const paddockName = btn.dataset.paddock;
+    const subBlock    = btn.dataset.subblock || null;
+    const latestSeason = sortSeasons([...new Set(allCropPlan.map(c => c.season_label).filter(Boolean))]).at(-1) || null;
+    openRecsModal(paddockName, subBlock, latestSeason);
   });
 
   // Expand row detail
@@ -1927,6 +1942,9 @@ function openBulkAssignModal(allSeasons, currentSeason) {
         <label class="form-label" style="margin:0">Select paddocks</label>
         <button type="button" id="ba-select-all" style="margin-left:12px;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">Select all</button>
         <button type="button" id="ba-select-none" style="margin-left:8px;font-size:11px;color:var(--hint);background:none;border:none;cursor:pointer;padding:0;text-decoration:underline">None</button>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--hint);cursor:pointer">
+          <input type="checkbox" id="ba-use-map-area" checked> Pre-fill area from map
+        </label>
       </div>
       <div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px 12px" id="ba-paddock-list">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px" id="ba-paddock-grid">
@@ -2004,9 +2022,13 @@ function openBulkAssignModal(allSeasons, currentSeason) {
       // Bulk assign always overwrites — it's a planning tool, not a planting record.
       // For paddocks that already have an entry for this season, upsert updates them.
       // For paddocks with no entry, upsert creates one.
+      const useMapArea = overlay.querySelector('#ba-use-map-area')?.checked ?? true;
       const rows = checked.map(name => {
         const pd = allPaddocks.find(p => p.name === name);
-        const ha = pd?.area_ha != null ? parseFloat(pd.area_ha) : null;
+        // Prefer map_area (surveyed/drawn area) over area_ha; fall back to either
+        const ha = useMapArea
+          ? (pd?.map_area != null ? parseFloat(pd.map_area) : (pd?.area_ha != null ? parseFloat(pd.area_ha) : null))
+          : null;
         const row = {
           farm_id:      farmId,
           paddock_name: name,
@@ -2045,6 +2067,227 @@ function openBulkAssignModal(allSeasons, currentSeason) {
       }
 
       toast(`${rows.length} paddock${rows.length > 1 ? 's' : ''} assigned`, 'success');
+      refreshAll();
+    },
+  });
+}
+
+// ── Recommendations Modal ──────────────────────────────────────────────────
+// Covers: Planting (seed rate, variety, chemicals, fertilisers)
+// Future sections: Incrop sprays, Incrop fert/irrigation, Harvest, Post-harvest
+async function openRecsModal(paddockName, subBlock, latestSeason) {
+  const farm   = getActiveFarm();
+  const farmId = farm?.id || farm;
+
+  // Find the most recent crop plan entry for this paddock/subblock
+  const entries = allCropPlan
+    .filter(c => c.paddock_name === paddockName && (c.sub_block || null) === (subBlock || null))
+    .sort((a, b) => (b.season_label || '').localeCompare(a.season_label || ''));
+  const entry = entries[0] || null;
+
+  // Season selector — only seasons that have an entry for this paddock
+  const entrySeasons = entries.map(e => e.season_label).filter(Boolean);
+  const activeEntry  = entry;
+
+  // Load seed stock items for variety dropdown (grass/cotton seed)
+  let seedItems = [];
+  try {
+    seedItems = await dbSelect('stock_items',
+      `farm_id=eq.${farmId}&category=eq.grain&is_seed=eq.true&active=eq.true&order=subgroup,name`
+    );
+  } catch (_) {}
+
+  const seedOpts = seedItems.length
+    ? `<option value="">— none / not applicable —</option>` +
+      seedItems.map(si => {
+        const disp = si.name.replace(/^seed\s+(cotton\s+)?/i, '').trim();
+        return `<option value="${esc(si.name)}"${(activeEntry?.variety || '') === si.name ? ' selected' : ''}>${esc(disp)}</option>`;
+      }).join('')
+    : `<option value="">No seed varieties in stocktake</option>`;
+
+  const paddockMeta = allPaddocks.find(p => p.name === paddockName);
+  const plannedHa   = activeEntry?.planned_ha ? parseFloat(activeEntry.planned_ha) : (paddockMeta?.map_area ? parseFloat(paddockMeta.map_area) : null);
+  const seedRate    = activeEntry?.seed_rate_kg_ha ? parseFloat(activeEntry.seed_rate_kg_ha) : null;
+
+  // Existing rec_chemicals / rec_fertilisers arrays
+  const recChems  = Array.isArray(activeEntry?.rec_chemicals)   ? activeEntry.rec_chemicals   : [];
+  const recFerts  = Array.isArray(activeEntry?.rec_fertilisers) ? activeEntry.rec_fertilisers : [];
+
+  function buildPlaceholderRows(items, idPrefix) {
+    if (!items.length) return `<tr><td colspan="4" style="padding:8px 10px;font-size:12px;color:var(--hint);font-style:italic">No items added yet</td></tr>`;
+    return items.map((it, i) => `
+      <tr>
+        <td style="padding:4px 6px"><input class="form-input ${idPrefix}-name" data-idx="${i}" style="font-size:12px;padding:4px 6px" value="${esc(it.name || '')}" placeholder="Product name"></td>
+        <td style="padding:4px 6px"><input class="form-input ${idPrefix}-rate" data-idx="${i}" type="number" min="0" step="0.01" style="font-size:12px;padding:4px 6px;width:70px" value="${esc(it.rate || '')}" placeholder="Rate"></td>
+        <td style="padding:4px 6px"><input class="form-input ${idPrefix}-unit" data-idx="${i}" style="font-size:12px;padding:4px 6px;width:60px" value="${esc(it.unit || '')}" placeholder="L/ha"></td>
+        <td style="padding:4px 6px"><input class="form-input ${idPrefix}-notes" data-idx="${i}" style="font-size:12px;padding:4px 6px" value="${esc(it.notes || '')}" placeholder="Notes"></td>
+        <td style="padding:4px 2px"><button type="button" class="${idPrefix}-del" data-idx="${i}" style="background:none;border:none;color:var(--red,#ef4444);cursor:pointer;font-size:14px;padding:2px 4px" title="Remove">✕</button></td>
+      </tr>`).join('');
+  }
+
+  function sectionHeader(title, hint) {
+    return `<div style="display:flex;align-items:baseline;gap:8px;margin:18px 0 8px">
+      <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.07em;color:var(--fg)">${title}</span>
+      ${hint ? `<span style="font-size:11px;color:var(--hint)">${hint}</span>` : ''}
+    </div>`;
+  }
+
+  function placeholderSection(title) {
+    return `<div style="margin:14px 0 4px;padding:10px 12px;border:1px dashed var(--border);border-radius:6px;background:color-mix(in srgb,var(--surface) 60%,transparent)">
+      <span style="font-size:12px;font-weight:600;color:var(--hint)">${title}</span>
+      <span style="font-size:11px;color:var(--hint);margin-left:8px;font-style:italic">— coming soon</span>
+    </div>`;
+  }
+
+  openModal({
+    title: `Recommendations — ${paddockName}${subBlock ? ' / ' + subBlock : ''}`,
+    wide: true,
+    confirmLabel: 'Save',
+    bodyHTML: `
+      ${activeEntry ? '' : `<div style="padding:8px 10px;margin-bottom:12px;background:color-mix(in srgb,var(--yellow,#eab308) 12%,transparent);border-radius:6px;font-size:12px;color:var(--fg)">
+        No crop plan entry found for this paddock. Add a crop type first via Bulk assign or the crop plan table.</div>`}
+
+      ${entrySeasons.length > 1 ? `
+        <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px">
+          <label class="form-label" style="margin:0;white-space:nowrap">Season</label>
+          <select class="form-select" id="rec-season-sel" style="max-width:160px">
+            ${entrySeasons.map(s => `<option value="${esc(s)}"${s === (activeEntry?.season_label || '') ? ' selected' : ''}>${esc(s)}</option>`).join('')}
+          </select>
+          <span style="font-size:11px;color:var(--hint)">Showing ${esc(activeEntry?.commodity || '—')}</span>
+        </div>` : activeEntry ? `
+        <div style="margin-bottom:12px;font-size:12px;color:var(--hint)">
+          <strong style="color:var(--fg)">${esc(activeEntry.season_label)}</strong> · ${esc(activeEntry.commodity || '—')}
+          ${plannedHa ? ` · ${plannedHa.toFixed(1)} ha planned` : ''}
+        </div>` : ''}
+
+      ${sectionHeader('🌱 Planting', '')}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Variety / Seed</label>
+          <select class="form-select" id="rec-variety">${seedOpts}</select>
+          <div style="font-size:11px;color:var(--hint);margin-top:3px">Or type a variety name below if not in stocktake</div>
+          <input class="form-input" id="rec-variety-text" style="margin-top:4px;font-size:12px"
+            value="${esc(activeEntry?.variety || '')}" placeholder="Free-text variety (overrides dropdown)">
+        </div>
+        <div>
+          <div class="form-group" style="margin:0 0 8px">
+            <label class="form-label">Target seed rate (kg/ha)</label>
+            <input class="form-input" id="rec-seed-rate" type="number" min="0" step="0.1"
+              value="${seedRate != null ? seedRate : ''}" placeholder="e.g. 14.5">
+          </div>
+          ${plannedHa ? `<div id="rec-seed-total" style="font-size:12px;color:var(--hint);padding:4px 0">
+            Total seed needed: <strong>—</strong>
+          </div>` : ''}
+        </div>
+      </div>
+
+      ${sectionHeader('Chemicals at planting', 'Placeholders only — full inputs module coming')}
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px" id="rec-chem-table">
+          <thead><tr style="border-bottom:1px solid var(--border)">
+            <th style="padding:4px 6px;font-weight:600;text-align:left">Product</th>
+            <th style="padding:4px 6px;font-weight:600;text-align:left">Rate</th>
+            <th style="padding:4px 6px;font-weight:600;text-align:left">Unit</th>
+            <th style="padding:4px 6px;font-weight:600;text-align:left">Notes</th>
+            <th style="width:28px"></th>
+          </tr></thead>
+          <tbody id="rec-chem-body">${buildPlaceholderRows(recChems, 'rc')}</tbody>
+        </table>
+      </div>
+      <button type="button" id="rec-add-chem" style="margin-top:6px;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;padding:2px 0;text-decoration:underline">+ Add chemical</button>
+
+      ${sectionHeader('Fertilisers at planting', 'Placeholders only — full inputs module coming')}
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px" id="rec-fert-table">
+          <thead><tr style="border-bottom:1px solid var(--border)">
+            <th style="padding:4px 6px;font-weight:600;text-align:left">Product</th>
+            <th style="padding:4px 6px;font-weight:600;text-align:left">Rate</th>
+            <th style="padding:4px 6px;font-weight:600;text-align:left">Unit</th>
+            <th style="padding:4px 6px;font-weight:600;text-align:left">Notes</th>
+            <th style="width:28px"></th>
+          </tr></thead>
+          <tbody id="rec-fert-body">${buildPlaceholderRows(recFerts, 'rf')}</tbody>
+        </table>
+      </div>
+      <button type="button" id="rec-add-fert" style="margin-top:6px;font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;padding:2px 0;text-decoration:underline">+ Add fertiliser</button>
+
+      ${placeholderSection('Incrop sprays')}
+      ${placeholderSection('Incrop fertiliser / irrigation')}
+      ${placeholderSection('Harvest')}
+      ${placeholderSection('Post-harvest')}
+    `,
+    onMounted: (overlay) => {
+      // Seed rate → total kg calculation
+      const rateEl  = overlay.querySelector('#rec-seed-rate');
+      const totalEl = overlay.querySelector('#rec-seed-total strong');
+      const updateTotal = () => {
+        if (!rateEl || !totalEl || !plannedHa) return;
+        const r = parseFloat(rateEl.value);
+        totalEl.textContent = r > 0 ? `${(r * plannedHa).toFixed(0)} kg (${plannedHa.toFixed(1)} ha × ${r} kg/ha)` : '—';
+      };
+      rateEl?.addEventListener('input', updateTotal);
+      updateTotal();
+
+      // Add chemical row
+      overlay.querySelector('#rec-add-chem')?.addEventListener('click', () => {
+        const tbody = overlay.querySelector('#rec-chem-body');
+        const i = tbody.querySelectorAll('tr').length;
+        const noRow = tbody.querySelector('td[colspan]');
+        if (noRow) tbody.innerHTML = '';
+        tbody.insertAdjacentHTML('beforeend', buildPlaceholderRows([{}], 'rc').replace(/data-idx="0"/g, `data-idx="${i}"`));
+      });
+
+      // Add fertiliser row
+      overlay.querySelector('#rec-add-fert')?.addEventListener('click', () => {
+        const tbody = overlay.querySelector('#rec-fert-body');
+        const i = tbody.querySelectorAll('tr').length;
+        const noRow = tbody.querySelector('td[colspan]');
+        if (noRow) tbody.innerHTML = '';
+        tbody.insertAdjacentHTML('beforeend', buildPlaceholderRows([{}], 'rf').replace(/data-idx="0"/g, `data-idx="${i}"`));
+      });
+
+      // Delete rows
+      overlay.querySelector('#rec-chem-body')?.addEventListener('click', e => {
+        if (e.target.classList.contains('rc-del')) { e.target.closest('tr').remove(); }
+      });
+      overlay.querySelector('#rec-fert-body')?.addEventListener('click', e => {
+        if (e.target.classList.contains('rf-del')) { e.target.closest('tr').remove(); }
+      });
+    },
+    onConfirm: async (overlay) => {
+      if (!activeEntry?.id) { toast('No crop plan entry to save to — add this paddock to the crop plan first', 'warning'); return false; }
+
+      const variety     = overlay.querySelector('#rec-variety-text')?.value?.trim()
+                       || overlay.querySelector('#rec-variety')?.value?.trim() || null;
+      const seedRateVal = parseFloat(overlay.querySelector('#rec-seed-rate')?.value) || null;
+
+      // Collect chemical rows
+      const chemRows = [...overlay.querySelectorAll('#rec-chem-body tr')]
+        .map(tr => ({
+          name:  tr.querySelector('.rc-name')?.value?.trim() || '',
+          rate:  tr.querySelector('.rc-rate')?.value?.trim() || '',
+          unit:  tr.querySelector('.rc-unit')?.value?.trim() || '',
+          notes: tr.querySelector('.rc-notes')?.value?.trim() || '',
+        }))
+        .filter(r => r.name);
+
+      // Collect fertiliser rows
+      const fertRows = [...overlay.querySelectorAll('#rec-fert-body tr')]
+        .map(tr => ({
+          name:  tr.querySelector('.rf-name')?.value?.trim() || '',
+          rate:  tr.querySelector('.rf-rate')?.value?.trim() || '',
+          unit:  tr.querySelector('.rf-unit')?.value?.trim() || '',
+          notes: tr.querySelector('.rf-notes')?.value?.trim() || '',
+        }))
+        .filter(r => r.name);
+
+      const payload = { variety: variety || null, seed_rate_kg_ha: seedRateVal };
+      if (chemRows.length) payload.rec_chemicals   = chemRows;
+      if (fertRows.length) payload.rec_fertilisers = fertRows;
+
+      await dbUpdate('crop_plan_entries', activeEntry.id, payload);
+      toast('Recommendations saved', 'success');
       refreshAll();
     },
   });
