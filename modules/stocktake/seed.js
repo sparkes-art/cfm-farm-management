@@ -156,7 +156,7 @@ async function _render(container, farm, period, allPeriods = []) {
   if (!wrap) return;
 
   // ── Fetch data ───────────────────────────────────────────────────────────
-  const [items, locations, movements, pendingPlantingMovements] = await Promise.all([
+  const [items, locations, movements, pendingPlantingMovements, procLines] = await Promise.all([
     dbSelect('stock_items',
       `farm_id=eq.${farm.id}&category=eq.grain&is_seed=eq.true&active=eq.true&order=subgroup,name`),
     dbSelect('stock_locations',
@@ -165,11 +165,28 @@ async function _render(container, farm, period, allPeriods = []) {
       `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,kg_per_bag,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`),
     dbSelect('stock_movements',
       `farm_id=eq.${farm.id}&movement_type=eq.usage&source_system=eq.operations&item_id=is.null&select=id,movement_type,qty,unit,kg_per_bag,occurred_on,note,source_ref,source_system&order=occurred_on.desc`),
+    dbSelect('procurement_lines',
+      `farm_id=eq.${farm.id}&select=item_id,unit_cost,quantity_invoiced,line_total&order=created_at.desc`).catch(() => []),
   ]);
 
   const seedItemIds  = new Set(items.map(i => i.id));
   const seedMovements = movements.filter(m => seedItemIds.has(m.item_id));
   const locById       = Object.fromEntries(locations.map(l => [l.id, l]));
+
+  // Build latest unit_cost per item_id from procurement_lines (most recent delivery cost)
+  const procCostByItem = {};
+  (procLines || []).forEach(pl => {
+    if (!pl.item_id || !pl.unit_cost) return;
+    if (!procCostByItem[pl.item_id]) procCostByItem[pl.item_id] = parseFloat(pl.unit_cost);
+  });
+
+  // Silently backfill item.attributes.unit_cost from procurement lines where missing
+  items.forEach(item => {
+    if (!item.attributes) item.attributes = {};
+    if (!item.attributes.unit_cost && procCostByItem[item.id]) {
+      item.attributes.unit_cost = procCostByItem[item.id];
+    }
+  });
 
   // ── Period window ────────────────────────────────────────────────────────
   const periodStart = period?.period_start;
@@ -680,16 +697,8 @@ function _buildUnallocatedPanel(pendingMovements, items, sessionById, locations 
 function _latestUnitCost(item, _movements) {
   // unit_cost is stored in item.attributes when a delivery invoice is matched
   const attrs = item?.attributes || {};
-  // Debug: log first time per item to show what keys are present
-  if (item && !_latestUnitCost._logged) {
-    _latestUnitCost._logged = true;
-    console.log('[seed] sample item.attributes keys:', Object.keys(attrs), 'unit_cost raw:', attrs.unit_cost, 'full attrs:', JSON.stringify(attrs).slice(0, 200));
-  }
   const attrCost = parseFloat(attrs.unit_cost);
   if (attrCost && !isNaN(attrCost)) return attrCost;
-  // Also check common alternate key names
-  const alt = parseFloat(attrs.unitCost || attrs.cost_per_kg || attrs.price_per_kg);
-  if (alt && !isNaN(alt)) return alt;
   return null;
 }
 
