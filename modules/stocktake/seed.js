@@ -357,7 +357,6 @@ async function _render(container, farm, period, allPeriods = []) {
     // Normalise: items may have subgroup = "Cotton Seed" or "Cotton" — strip trailing " Seed"
     const sgKey      = sgName.replace(/\s+seed$/i, '').trim();
     const accent     = groupAccent(sgKey);
-    const icon       = SEASON_ICON[sgKey] || '📦';
     const season     = SEASON_CONTEXT[sgKey] || '';
 
     // Group totals
@@ -365,95 +364,118 @@ async function _render(container, farm, period, allPeriods = []) {
     const sgUsedKg   = sgItems.reduce((s, i) => s + (usageKgByItem[i.id] || 0), 0);
     let   sgValue    = 0;
     sgItems.forEach(item => {
-      const kg  = closingKgByItem[item.id] || 0;
-      const uc  = _latestUnitCost(item, seedMovements);
+      const kg = closingKgByItem[item.id] || 0;
+      const uc = _latestUnitCost(item, seedMovements);
       if (kg > 0 && uc) sgValue += kg * uc;
     });
 
-    // Variety rows
-    const varRowsHtml = sgItems.map(item => {
-      const kg      = Math.max(0, closingKgByItem[item.id] || 0);
-      const kpb     = parseFloat(item.attributes?.kg_per_bag) || null;
-      const bags    = kpb && kg ? Math.round(kg / kpb) : null;
-      const unitCost= _latestUnitCost(item, seedMovements);
-      const value   = unitCost && kg ? kg * unitCost : null;
-      const lastMov = lastMovedByItem[item.id] || null;
-      const barPct  = Math.round((kg / maxKgOnHand) * 100);
-      const attrs   = item.attributes || {};
+    // Coverage estimate: total kg / avg seeding rate (40 kg/ha default)
+    const avgSeedRate = 40;
+    const coverageHa  = sgKgOnHand > 0 ? Math.round(sgKgOnHand / avgSeedRate) : null;
+
+    // Season context pill row
+    const seasonPills = season ? `
+      <div style="padding:8px 16px;border-bottom:1px solid var(--border-light);display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--hint);margin-right:2px">Season context</span>
+        <span class="sd-pill sd-pill-hint">🕐 ${esc(season)}</span>
+        ${coverageHa ? `<span class="sd-pill sd-pill-hint">▦ Stock covers est. ~${coverageHa} ha at ${avgSeedRate} kg/ha</span>` : ''}
+        <span class="sd-pill sd-pill-hint">${sgUsedKg > 0 ? `${fKg(sgUsedKg)} used this season` : '0 kg used this season'}</span>
+      </div>` : '';
+
+    // Variety rows — sorted by kg on hand desc
+    const sortedItems = [...sgItems].sort((a, b) =>
+      (closingKgByItem[b.id] || 0) - (closingKgByItem[a.id] || 0));
+
+    const varRowsHtml = sortedItems.map(item => {
+      const kg       = Math.max(0, closingKgByItem[item.id] || 0);
+      const kpb      = parseFloat(item.attributes?.kg_per_bag) || null;
+      const unitCost = _latestUnitCost(item, seedMovements);
+      const value    = unitCost && kg ? kg * unitCost : null;
+      const lastMov  = lastMovedByItem[item.id] || null;
+      // Scale bar within this group (not global) so small items are visible
+      const sgMax    = Math.max(1, ...sortedItems.map(i => closingKgByItem[i.id] || 0));
+      const barPct   = Math.round((kg / sgMax) * 100);
+      const attrs    = item.attributes || {};
+
+      // Clean display name: strip "Seed Cotton " / "Seed " prefix if present
+      const displayName = item.name
+        .replace(/^seed\s+cotton\s+/i, '')
+        .replace(/^seed\s+/i, '')
+        .trim();
+
+      // Sub-label: supplier · bag size
+      const subParts = [];
+      if (attrs.supplier)   subParts.push(esc(attrs.supplier));
+      if (kpb)              subParts.push(`${kpb} kg bags`);
+      if (attrs.source_note) subParts.push(esc(attrs.source_note));
+      const subLabel = subParts.join(' · ');
 
       // Pills
-      const costPill  = unitCost
-        ? `<span class="sd-pill sd-pill-blue" title="Unit cost">💲 ${fRate(unitCost)}</span>`
-        : '';
+      const costPill = unitCost
+        ? `<span class="sd-pill sd-pill-blue">${fRate(unitCost)}</span>`
+        : `<span class="sd-pill sd-pill-hint" style="color:var(--hint)">No cost</span>`;
       const valuePill = value
-        ? `<span class="sd-pill sd-pill-green" title="Total value">📦 ${fAud(value)}</span>`
+        ? `<span class="sd-pill sd-pill-green">${fAud(value)} value</span>`
         : '';
       const movedPill = lastMov
-        ? `<span class="sd-pill sd-pill-hint" title="Last movement">🕐 ${_relDate(lastMov)}</span>`
+        ? `<span class="sd-pill sd-pill-hint">Last moved: ${_absDate(lastMov)}</span>`
         : `<span class="sd-pill sd-pill-hint">No movements</span>`;
-
-      // Qty display
-      const qtyDisplay = bags !== null
-        ? `<div style="font-size:15px;font-weight:700;color:var(--ink);line-height:1">${fN(bags)} bags</div>
-           <div style="font-size:11px;color:var(--hint);margin-top:1px">${fKg(kg)}</div>`
-        : `<div style="font-size:15px;font-weight:700;color:var(--ink);line-height:1">${fKg(kg)}</div>`;
-
-      // Sub-label (produced year / variety details)
-      const subLabel = attrs.produced_year ? `${esc(attrs.produced_year)} season` : '';
 
       return `
         <div class="sd-var-row">
-          <!-- Variety name + sub-label -->
-          <div style="flex:0 0 220px;min-width:0">
-            <div style="font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(item.name)}</div>
-            ${subLabel ? `<div style="font-size:11px;color:var(--hint);margin-top:1px">${subLabel}</div>` : ''}
-          </div>
-          <!-- Pills -->
-          <div style="flex:1;display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-width:0">
-            ${costPill}${valuePill}${movedPill}
+          <!-- Name + sub-label -->
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;color:var(--ink)">${esc(displayName)}</div>
+            ${subLabel ? `<div style="font-size:11px;color:var(--hint);margin-top:2px">${subLabel}</div>` : ''}
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">
+              ${costPill}${valuePill}${movedPill}
+            </div>
           </div>
           <!-- Bar + qty -->
-          <div style="flex:0 0 180px;display:flex;align-items:center;gap:10px">
-            <div class="sd-bar-track">
+          <div style="flex:0 0 220px;display:flex;align-items:center;gap:12px">
+            <div class="sd-bar-track" style="flex:1">
               <div class="sd-bar-fill" style="width:${barPct}%;background:${accent.bg}"></div>
             </div>
-            <div style="text-align:right;min-width:70px">${qtyDisplay}</div>
+            <div style="text-align:right;min-width:60px">
+              <span style="font-size:16px;font-weight:700;color:var(--ink)">${Math.round(kg).toLocaleString('en-AU')}</span>
+              <span style="font-size:12px;color:var(--hint)"> kg</span>
+            </div>
           </div>
           <!-- Actions -->
           ${canWrite() ? `
-            <div style="flex-shrink:0;display:flex;gap:4px">
+            <div style="flex-shrink:0;display:flex;gap:4px;margin-left:8px">
               <button class="btn btn-ghost btn-sm sd-record-delivery"
                 data-item-id="${item.id}" data-item-name="${esc(item.name)}"
                 data-unit="${esc(item.default_unit || 'bags')}"
                 data-kpb="${kpb || ''}"
-                style="font-size:11px;color:var(--hint)" title="Record delivery">+</button>
+                style="font-size:12px;color:var(--hint)" title="Record delivery">+</button>
               <button class="btn btn-ghost btn-sm sd-edit-item"
                 data-item-id="${item.id}"
-                style="font-size:11px;color:var(--hint)" title="Edit variety">✎</button>
+                style="font-size:12px;color:var(--hint)" title="Edit variety">✎</button>
             </div>` : ''}
         </div>`;
     }).join('');
 
     return `
       <div class="card" style="margin-bottom:20px;overflow:hidden">
-        <!-- Group header -->
-        <div style="background:${accent.bg};padding:12px 16px;display:flex;align-items:center;gap:12px">
-          <span style="font-size:18px">${icon}</span>
-          <div style="flex:1;min-width:0">
-            <div style="font-size:14px;font-weight:700;color:#fff">${esc(sgKey)} Seed</div>
-            <div style="font-size:12px;color:rgba(255,255,255,.65);margin-top:2px">
-              ${fKg(sgKgOnHand)} on hand · ${sgValue > 0 ? fAud(sgValue) + ' value' : 'No cost data'}
-              ${sgUsedKg > 0 ? ` · <span style="color:rgba(255,220,180,.9)">${fKg(sgUsedKg)} used</span>` : ''}
+        <!-- Group header: light background, dot accent, qty right-aligned -->
+        <div style="padding:14px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border-light)">
+          <span style="width:10px;height:10px;border-radius:50%;background:${accent.bg};flex-shrink:0;display:inline-block"></span>
+          <div style="font-size:15px;font-weight:700;color:var(--ink);flex:1">${esc(sgKey)} Seed</div>
+          <div style="text-align:right">
+            <div>
+              <span style="font-size:22px;font-weight:800;color:var(--ink)">${Math.round(sgKgOnHand).toLocaleString('en-AU')}</span>
+              <span style="font-size:13px;color:${accent.text};font-weight:600"> kg on hand</span>
             </div>
+            ${sgValue > 0
+              ? `<div style="font-size:12px;color:var(--hint);margin-top:1px">${fAud(sgValue)} est. value</div>`
+              : `<div style="font-size:12px;color:var(--hint);margin-top:1px">No cost data</div>`}
           </div>
         </div>
-        <!-- Season context strip -->
-        ${season ? `
-          <div style="background:${accent.light};border-bottom:1px solid var(--border-light);padding:7px 16px;font-size:12px;color:${accent.text};display:flex;align-items:center;gap:6px">
-            <span style="font-size:14px">📅</span> ${esc(season)}
-          </div>` : ''}
+        <!-- Season context pills -->
+        ${seasonPills}
         <!-- Variety rows -->
-        <div style="background:var(--surface)">
+        <div>
           ${sgItems.length ? varRowsHtml : `
             <div style="padding:20px 16px;text-align:center;color:var(--hint);font-size:13px">
               No varieties — ${canWrite() ? `<button class="btn btn-ghost btn-sm sd-add-item" style="font-size:12px">+ Add variety</button>` : 'contact administrator to add varieties.'}
@@ -648,6 +670,12 @@ function _latestUnitCost(item, _movements) {
 }
 
 /** Human-readable relative date */
+/** Absolute date display: "1 Jul 2026" */
+function _absDate(dateStr) {
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 function _relDate(dateStr) {
   if (!dateStr) return '—';
   const d    = new Date(dateStr);
