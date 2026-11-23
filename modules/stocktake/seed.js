@@ -162,7 +162,7 @@ async function _render(container, farm, period, allPeriods = []) {
     dbSelect('stock_locations',
       `farm_id=eq.${farm.id}&active=eq.true&order=route_order,name`),
     dbSelect('stock_movements',
-      `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,kg_per_bag,unit_cost,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`),
+      `farm_id=eq.${farm.id}&select=id,item_id,location_id,movement_type,signed_qty,qty,unit,kg_per_bag,occurred_on,note,source_ref,source_system,reason_code&order=occurred_on.desc`),
     dbSelect('stock_movements',
       `farm_id=eq.${farm.id}&movement_type=eq.usage&source_system=eq.operations&item_id=is.null&select=id,movement_type,qty,unit,kg_per_bag,occurred_on,note,source_ref,source_system&order=occurred_on.desc`),
   ]);
@@ -636,16 +636,11 @@ function _buildUnallocatedPanel(pendingMovements, items, sessionById, locations 
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-/** Latest unit_cost from delivery movements for an item ($/kg) */
-function _latestUnitCost(item, movements) {
-  // First: check item attributes (pre-computed from last invoice)
+/** Latest unit_cost from item attributes ($/kg), set when a delivery invoice is recorded */
+function _latestUnitCost(item, _movements) {
+  // unit_cost is stored in item.attributes when a delivery invoice is matched
   const attrCost = parseFloat(item?.attributes?.unit_cost);
   if (attrCost) return attrCost;
-  // Second: scan delivery movements for a unit_cost field
-  const deliveries = (movements || [])
-    .filter(m => m.item_id === item.id && m.movement_type === 'delivery' && m.unit_cost)
-    .sort((a, b) => b.occurred_on.localeCompare(a.occurred_on));
-  if (deliveries.length) return parseFloat(deliveries[0].unit_cost);
   return null;
 }
 
