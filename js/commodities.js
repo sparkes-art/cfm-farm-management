@@ -79,6 +79,53 @@ export function isLivestock(commodityId) {
   return _commodities.find(c => c.id === commodityId)?.is_livestock || false;
 }
 
+// ── Group-aware helpers ───────────────────────────────────────────────────────
+// Returns a list of display entries for a farm, merging grouped commodities.
+// Each entry is either:
+//   { type: 'single', commodity }           — a standalone commodity
+//   { type: 'group',  groupName, members }  — 2+ commodities sharing group_name
+//
+// Hidden commodities are excluded. If ALL members of a group are hidden,
+// the group itself is excluded.
+export function getDisplayGroups(farmId = null) {
+  const active = getActiveCommodities(farmId);
+  const groups = {};
+  const singles = [];
+
+  for (const c of active) {
+    if (c.group_name) {
+      if (!groups[c.group_name]) groups[c.group_name] = [];
+      groups[c.group_name].push(c);
+    } else {
+      singles.push({ type: 'single', commodity: c });
+    }
+  }
+
+  const groupEntries = Object.entries(groups).map(([groupName, members]) => ({
+    type: 'group',
+    groupName,
+    members,
+  }));
+
+  // Sort: groups and singles interleaved alphabetically by display name
+  return [...singles, ...groupEntries].sort((a, b) => {
+    const nameA = a.type === 'group' ? a.groupName : a.commodity.name;
+    const nameB = b.type === 'group' ? b.groupName : b.commodity.name;
+    return nameA.localeCompare(nameB);
+  });
+}
+
+// All commodity names that belong to a group (by group_name or exact name match)
+// Useful for matching invoice/contract text fields against a group.
+export function getCommodityNamesForGroup(groupNameOrCommodityName) {
+  const lower = groupNameOrCommodityName.toLowerCase();
+  // Check if it's a group_name
+  const grouped = _commodities.filter(c => c.group_name?.toLowerCase() === lower);
+  if (grouped.length) return grouped.map(c => c.name);
+  // Otherwise treat as a single commodity name
+  return [groupNameOrCommodityName];
+}
+
 // Force reload (after add/delete)
 export function invalidateCache() { _loaded = false; }
 
