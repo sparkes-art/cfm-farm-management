@@ -527,8 +527,8 @@ async function _render(container, farm, period, allPeriods = []) {
       </div>`;
   }).join('');
 
-  // ── Render: movements panel (right column) ───────────────────────────────
-  const movementsPanelHtml = _buildMovementsPanel(periodMoves, items, sessionById, periodLabel);
+  // ── Render: movements table (bottom, matching mockup) ────────────────────
+  const movementsHtml = _buildMovementsTable(periodMoves, items, sessionById, periodLabel);
 
   // ── Empty state ───────────────────────────────────────────────────────────
   const emptyHtml = !items.length ? `
@@ -539,25 +539,12 @@ async function _render(container, farm, period, allPeriods = []) {
       ${canWrite() ? `<button class="btn btn-primary" id="sd-add-item-empty">+ Add seed variety</button>` : ''}
     </div>` : '';
 
-  // ── Assemble — two-column layout ──────────────────────────────────────────
-  // Left: group cards + usage. Right: sticky movements panel.
+  // ── Assemble — single column layout matching mockup ───────────────────────
   const bodyHtml = items.length ? `
-    <div style="display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start" id="sd-body-grid">
-      <div id="sd-left-col">
-        ${usageAllocHtml}
-        ${unallocatedHtml}
-        ${groupCardsHtml}
-      </div>
-      <div id="sd-right-col" style="position:sticky;top:12px">
-        ${movementsPanelHtml}
-      </div>
-    </div>
-    <style>
-      @media (max-width:900px) {
-        #sd-body-grid { grid-template-columns:1fr !important; }
-        #sd-right-col { position:static !important; }
-      }
-    </style>` : emptyHtml;
+    ${usageAllocHtml}
+    ${unallocatedHtml}
+    ${groupCardsHtml}
+    ${movementsHtml}` : emptyHtml;
 
   wrap.innerHTML =
     headerHtml +
@@ -568,57 +555,41 @@ async function _render(container, farm, period, allPeriods = []) {
   _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById, pendingPlantingMovements, openSession);
 }
 
-// ── Movements panel (right column) ────────────────────────────────────────
-function _buildMovementsPanel(periodMoves, items, sessionById, periodLabel) {
+// ── Movements table (bottom of page, matching mockup) ─────────────────────
+function _buildMovementsTable(periodMoves, items, sessionById, periodLabel) {
   const itemById = Object.fromEntries(items.map(i => [i.id, i]));
-
-  // Build filter options — unique varieties that have movements
-  const movedItemIds = [...new Set(periodMoves.map(m => m.item_id).filter(Boolean))];
-  const filterOpts   = movedItemIds.map(id => {
-    const it = itemById[id];
-    if (!it) return '';
-    // Short display name
-    const name = it.name.replace(/^seed\s+cotton\s+/i,'').replace(/^seed\s+/i,'').replace(/\s+\d+\s*k[gs]\b.*$/i,'').trim();
-    return `<option value="${esc(id)}">${esc(name)}</option>`;
-  }).join('');
 
   if (!periodMoves.length) {
     return `
-      <div class="card" style="overflow:hidden">
-        <div style="padding:12px 16px;border-bottom:1px solid var(--border-light);background:var(--page-bg);display:flex;align-items:center;justify-content:space-between">
-          <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-mid)">Movements</span>
+      <div class="card" style="overflow:hidden;margin-top:0">
+        <div style="padding:10px 16px;border-bottom:1px solid var(--border-light);background:var(--page-bg);display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-mid)">Recent movements</span>
           <span style="font-size:11px;color:var(--hint)">${esc(periodLabel)}</span>
         </div>
-        <div style="padding:32px 16px;text-align:center;color:var(--hint);font-size:13px">
-          No movements this period
-        </div>
+        <div style="padding:32px 16px;text-align:center;color:var(--hint);font-size:13px">No movements this period</div>
       </div>`;
   }
 
   const rows = periodMoves.slice(0, 100).map(m => {
-    const item   = itemById[m.item_id];
-    const mt     = MOVE_LABELS[m.movement_type] || { label: m.movement_type, color: 'var(--hint)', icon: '·' };
-    const qty    = parseFloat(m.signed_qty) || 0;
-    const kpb    = parseFloat(m.kg_per_bag) || parseFloat(item?.attributes?.kg_per_bag) || null;
-    const bags   = kpb ? Math.round(Math.abs(qty) / kpb) : null;
-    const isIn   = qty > 0;
+    const item  = itemById[m.item_id];
+    const mt    = MOVE_LABELS[m.movement_type] || { label: m.movement_type };
+    const qty   = parseFloat(m.signed_qty) || 0;
+    const isIn  = qty > 0;
 
-    // Short item name
     const rawName = (item?.name || '—')
       .replace(/^seed\s+cotton\s+/i,'').replace(/^seed\s+/i,'').trim();
     const shortName = rawName.replace(/\s+\d+\s*k[gs]\b.*$/i,'').trim();
 
-    // Note / ref
-    let note = m.note || '';
+    // Note / planting ref
+    let note = '';
     if (m.source_system === 'operations' && m.source_ref) {
       const sess = sessionById[m.source_ref];
-      note = sess ? `Planting: ${sess.field_name}${sess.sub_block ? ' / ' + sess.sub_block : ''}` : note;
+      note = sess ? ` · ${sess.field_name}${sess.sub_block ? ' / ' + sess.sub_block : ''}` : '';
+    } else if (m.note) {
+      note = ` · ${m.note}`;
     }
 
-    // Supplier from item attrs
-    const supplier = item?.attributes?.supplier || item?.attributes?.supplier_description || '';
-
-    // Type badge colour + label
+    // Type badge colours
     const typeColors = {
       delivery:    '#dcfce7:#15803d',
       usage:       '#dbeafe:#1d4ed8',
@@ -633,62 +604,43 @@ function _buildMovementsPanel(periodMoves, items, sessionById, periodLabel) {
     const canDel = canWrite() && m.movement_type !== 'usage';
 
     return `
-      <div class="sd-mv-row" data-item-id="${m.item_id || ''}" data-move-type="${esc(m.movement_type || '')}"
-        style="padding:10px 14px;border-bottom:1px solid var(--border-light);display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:start">
-        <!-- Left: date + name + note -->
-        <div style="min-width:0">
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px">
-            <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:1px 6px;border-radius:8px;background:${bgC};color:${fgC};white-space:nowrap">${mt.label}</span>
-            <span style="font-size:11px;color:var(--hint);white-space:nowrap">${m.occurred_on}</span>
-          </div>
-          <div style="font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(shortName)}</div>
-          ${supplier ? `<div style="font-size:11px;color:var(--hint);margin-top:1px">${esc(supplier)}</div>` : ''}
-          ${note ? `<div style="font-size:11px;color:var(--hint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(note)}</div>` : ''}
-        </div>
-        <!-- Right: qty + bags + delete -->
-        <div style="text-align:right;flex-shrink:0">
-          <div style="font-size:15px;font-weight:700;color:${isIn ? 'var(--green)' : 'var(--red)'};white-space:nowrap">
-            ${isIn ? '+' : '−'}${Math.round(Math.abs(qty)).toLocaleString('en-AU')} kg
-          </div>
-          ${bags !== null ? `<div style="font-size:11px;color:var(--hint)">${bags} bag${bags !== 1 ? 's' : ''}</div>` : ''}
+      <tr class="sd-mv-row" data-item-id="${m.item_id || ''}" data-move-type="${esc(m.movement_type || '')}"
+          style="border-bottom:1px solid var(--border-light)">
+        <td style="padding:8px 12px;font-size:11px;color:var(--hint);white-space:nowrap">${m.occurred_on}</td>
+        <td style="padding:8px 12px;font-size:13px;font-weight:500;color:var(--ink)">${esc(shortName)}${note ? `<span style="font-size:11px;color:var(--hint)">${esc(note)}</span>` : ''}</td>
+        <td style="padding:8px 12px">
+          <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 7px;border-radius:20px;background:${bgC};color:${fgC}">${mt.label}</span>
+        </td>
+        <td style="padding:8px 16px 8px 12px;text-align:right;font-size:13px;font-weight:600;color:${isIn ? 'var(--green)' : 'var(--red)'}">
+          ${isIn ? '+' : '−'}${Math.round(Math.abs(qty)).toLocaleString('en-AU')} kg
           ${canDel ? `<button class="btn btn-ghost btn-sm sd-delete-move"
             data-move-id="${m.id}"
             data-label="${esc(`${mt.label} ${item?.name || ''} ${m.occurred_on}`)}"
-            style="font-size:10px;color:var(--red);padding:1px 5px;margin-top:4px;opacity:.6" title="Delete">✕ delete</button>` : ''}
-        </div>
-      </div>`;
+            style="font-size:10px;color:var(--red);padding:1px 5px;margin-left:6px;opacity:.5" title="Delete">✕</button>` : ''}
+        </td>
+      </tr>`;
   }).join('');
 
   return `
-    <div class="card" style="overflow:hidden">
-      <!-- Panel header -->
-      <div style="padding:11px 14px;border-bottom:1px solid var(--border-light);background:var(--page-bg)">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-mid)">Movements</span>
-          <span style="font-size:11px;color:var(--hint)">${periodMoves.length} total · ${esc(periodLabel)}</span>
-        </div>
-        <!-- Filter row -->
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <select id="sd-mv-filter-variety"
-            style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink);flex:1;min-width:0">
-            <option value="">All varieties</option>
-            ${filterOpts}
-          </select>
-          <select id="sd-mv-filter-type"
-            style="font-size:11px;padding:3px 7px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--ink);min-width:0">
-            <option value="">All types</option>
-            <option value="delivery">Deliveries</option>
-            <option value="usage">Planting use</option>
-            <option value="adjustment">Adjustments</option>
-            <option value="opening">Opening balance</option>
-            <option value="transfer_in">Transfers in</option>
-            <option value="transfer_out">Transfers out</option>
-          </select>
-        </div>
+    <div class="card" style="overflow:hidden;margin-top:0">
+      <div style="padding:10px 16px;border-bottom:1px solid var(--border-light);background:var(--page-bg);display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-mid)">Recent movements</span>
+        <span style="font-size:11px;color:var(--hint)">${periodMoves.length} total · ${esc(periodLabel)}</span>
       </div>
-      <!-- Rows -->
-      <div id="sd-mv-list" style="max-height:calc(100vh - 260px);overflow-y:auto">
-        ${rows}
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:420px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--hint);text-align:left">Date</th>
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--hint);text-align:left">Variety</th>
+              <th style="padding:8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--hint);text-align:left">Type</th>
+              <th style="padding:8px 16px 8px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--hint);text-align:right">Qty</th>
+            </tr>
+          </thead>
+          <tbody id="sd-mv-list">
+            ${rows}
+          </tbody>
+        </table>
       </div>
     </div>`;
 }
@@ -865,19 +817,6 @@ function _wireButtons(container, wrap, farm, items, locations, period, allPeriod
 
   wrap.querySelector('#sd-start-count-btn')?.addEventListener('click',
     () => _openPhysicalStocktakeFlow(container, farm, items, period, allPeriods, openSession));
-
-  // Movements panel filters
-  function _applyMvFilters() {
-    const variety = wrap.querySelector('#sd-mv-filter-variety')?.value || '';
-    const type    = wrap.querySelector('#sd-mv-filter-type')?.value || '';
-    wrap.querySelectorAll('#sd-mv-list .sd-mv-row').forEach(row => {
-      const matchV = !variety || row.dataset.itemId === variety;
-      const matchT = !type    || row.dataset.moveType === type;
-      row.style.display = (matchV && matchT) ? '' : 'none';
-    });
-  }
-  wrap.querySelector('#sd-mv-filter-variety')?.addEventListener('change', _applyMvFilters);
-  wrap.querySelector('#sd-mv-filter-type')?.addEventListener('change', _applyMvFilters);
 
   // Variety row buttons
   wrap.querySelectorAll('.sd-edit-item').forEach(btn => {
