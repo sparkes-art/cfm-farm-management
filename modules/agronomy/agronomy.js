@@ -930,7 +930,10 @@ function renderCropPlan() {
     commoditySummary[c.commodity].varieties[vKey].planned += plannedN;
     if (isActual && actualHa != null) commoditySummary[c.commodity].varieties[vKey].actual += actualHa;
   });
-  const summaryEntries = Object.entries(commoditySummary).sort((a, b) => (b[1].actual || b[1].planned) - (a[1].actual || a[1].planned));
+  // When a crop filter is active, only show that commodity in the summary
+  const summaryEntries = Object.entries(commoditySummary)
+    .filter(([commodity]) => !_cpTypeFilter || commodity === _cpTypeFilter)
+    .sort((a, b) => (b[1].actual || b[1].planned) - (a[1].actual || a[1].planned));
 
   const hasData = paddockKeys.length > 0;
 
