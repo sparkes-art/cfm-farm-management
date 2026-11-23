@@ -519,8 +519,10 @@ async function _render(container, farm, period, allPeriods = []) {
         const isIn  = ['delivery','opening','transfer_in','adjustment'].includes(m.movement_type);
         const qtySign = isIn ? '+' : '−';
         const qtyClass = isIn ? 'sd-lqty-in' : 'sd-lqty-out';
-        const qty = Math.abs(parseFloat(m.quantity_kg) || 0);
-        const up  = parseFloat(m.unit_price) || null;
+        const qty = Math.abs(parseFloat(m.signed_qty) || 0);
+        // unit_cost lives in procurement_lines not on the movement row;
+        // show WAC (item-level) for deliveries as a proxy, dash for others
+        const up  = (m.movement_type === 'delivery' && unitCost) ? unitCost : null;
         const val = up ? qty * up : null;
         const typeKey = (m.movement_type || 'unknown').replace(/-/g,'_');
         const typeLabel = {
@@ -531,9 +533,7 @@ async function _render(container, farm, period, allPeriods = []) {
         const dateStr = m.occurred_on
           ? new Date(m.occurred_on).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'2-digit'})
           : '—';
-        const refCell = m.invoice_id
-          ? `<a class="sd-linv" href="#" data-invoice-id="${m.invoice_id}">${esc(m.reference || m.invoice_id)}</a>`
-          : (m.reference ? esc(m.reference) : '—');
+        const refCell = m.source_ref ? esc(m.source_ref) : '—';
         return `
               <tr>
                 <td class="sd-ldate">${dateStr}</td>
