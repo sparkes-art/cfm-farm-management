@@ -11,19 +11,21 @@ import {
   getCommodityByName, addCommodity, addCropType,
   setCommodityVisible, isCommodityVisible,
   getCommodityNamesForGroup, getDisplayGroups,
-} from '../../js/commodities.js?v=1795405818100';
+} from '../../js/commodities.js?v=1795408723658';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _subs   = [];
 let _modal  = null;   // currently open modal element
-let _activeTabs = {}; // incomeId → active tab name
+let _activeTabs    = {}; // incomeId → active tab name
+let _collapsedCards = {}; // cardId → true if collapsed
 
 export function unmountManagementReport() {
   _subs.forEach(s => { try { s.unsubscribe(); } catch(e) {} });
   _subs = [];
   _modal?.remove();
   _modal = null;
-  _activeTabs = {};
+  _activeTabs     = {};
+  _collapsedCards = {};
 }
 
 export async function mountManagementReport(container) {
@@ -202,6 +204,23 @@ async function _render(container) {
         await dbDelete('mgmt_crop_types', btn.dataset.deleteCt);
         toast('Deleted', 'success');
       } catch(e) { toast('Delete failed', 'error'); }
+    });
+  });
+
+  // Collapse/expand clicks
+  wrap.querySelectorAll('.mgmt-collapse-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const cardId     = btn.dataset.collapse;
+      const card       = document.getElementById(cardId);
+      if (!card) return;
+      const body       = card.querySelector('.mgmt-card-collapsible');
+      const isNowCollapsed = !body.hidden;
+      body.hidden = isNowCollapsed;
+      card.classList.toggle('mgmt-card--collapsed', isNowCollapsed);
+      btn.textContent = isNowCollapsed ? '▼' : '▲';
+      btn.title       = isNowCollapsed ? 'Expand' : 'Collapse';
+      _collapsedCards[cardId] = isNowCollapsed;
     });
   });
 
@@ -556,8 +575,10 @@ function _farmingGroupCard(groupName, rows, invoices, season) {
     rows.map(r => r.name).join(' + '),
   ].filter(Boolean).join(' · ');
 
+  const isCollapsed = !!_collapsedCards[groupId];
+
   return `
-    <div class="mgmt-card mgmt-card--group" id="${groupId}">
+    <div class="mgmt-card mgmt-card--group ${isCollapsed ? 'mgmt-card--collapsed' : ''}" id="${groupId}">
       <div class="mgmt-card-header">
         <div>
           <div class="mgmt-card-title">${esc(groupName)}</div>
@@ -566,8 +587,10 @@ function _farmingGroupCard(groupName, rows, invoices, season) {
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="mgmt-badge mgmt-badge-budget">${fC(totalBudget)} budgeted</span>
           ${totalActual > 0 ? `<span class="mgmt-badge mgmt-badge-actual">${fC(totalActual)} received</span>` : ''}
+          <button class="mgmt-collapse-btn" data-collapse="${groupId}" title="${isCollapsed ? 'Expand' : 'Collapse'}">${isCollapsed ? '▼' : '▲'}</button>
         </div>
       </div>
+      <div class="mgmt-card-collapsible" ${isCollapsed ? 'hidden' : ''}>
       <div class="mgmt-tabs">
         <div class="mgmt-tab ${activeTab==='economics' ? 'active' : ''}" data-tab="economics" data-income="${groupId}">Economics</div>
         <div class="mgmt-tab ${activeTab==='pipeline'  ? 'active' : ''}" data-tab="pipeline"  data-income="${groupId}">Sales Pipeline</div>
@@ -576,6 +599,7 @@ function _farmingGroupCard(groupName, rows, invoices, season) {
       <div class="mgmt-tab-panel" data-tab="economics" ${activeTab!=='economics' ? 'hidden' : ''}>${econTab}</div>
       <div class="mgmt-tab-panel" data-tab="pipeline"  ${activeTab!=='pipeline'  ? 'hidden' : ''}>${pipelineTab}</div>
       <div class="mgmt-tab-panel" data-tab="croptypes" ${activeTab!=='croptypes' ? 'hidden' : ''}>${cropTypesTab}</div>
+      </div>
     </div>`;
 }
 
@@ -674,8 +698,10 @@ function _farmingCard(row, invoices, season) {
       <button class="mgmt-add-btn mgmt-add-btn--sm" data-add-crop-type="${row.id}">+ Add Crop Type</button>
     </div>` : ''}`;
 
+  const cardCollapsed = !!_collapsedCards[`card-${row.id}`];
+
   return `
-    <div class="mgmt-card" id="card-${row.id}">
+    <div class="mgmt-card ${cardCollapsed ? 'mgmt-card--collapsed' : ''}" id="card-${row.id}">
       <div class="mgmt-card-header">
         <div>
           <div class="mgmt-card-title">${esc(row.name)}</div>
@@ -688,8 +714,10 @@ function _farmingCard(row, invoices, season) {
             <button class="mgmt-icon-btn" data-edit-income="${row.id}" title="Edit commodity">Edit</button>
             <button class="mgmt-icon-btn mgmt-icon-btn--red" data-delete-income="${row.id}" title="Delete">&times;</button>
           ` : ''}
+          <button class="mgmt-collapse-btn" data-collapse="card-${row.id}" title="${cardCollapsed ? 'Expand' : 'Collapse'}">${cardCollapsed ? '▼' : '▲'}</button>
         </div>
       </div>
+      <div class="mgmt-card-collapsible" ${cardCollapsed ? 'hidden' : ''}>
       <div class="mgmt-tabs">
         <div class="mgmt-tab ${activeTab==='economics'  ? 'active' : ''}" data-tab="economics"  data-income="${row.id}">Economics</div>
         <div class="mgmt-tab ${activeTab==='pipeline'   ? 'active' : ''}" data-tab="pipeline"   data-income="${row.id}">Sales Pipeline</div>
@@ -698,6 +726,7 @@ function _farmingCard(row, invoices, season) {
       <div class="mgmt-tab-panel" data-tab="economics" ${activeTab!=='economics' ? 'hidden' : ''}>${econTab}</div>
       <div class="mgmt-tab-panel" data-tab="pipeline"  ${activeTab!=='pipeline'  ? 'hidden' : ''}>${pipelineTab}</div>
       <div class="mgmt-tab-panel" data-tab="croptypes" ${activeTab!=='croptypes' ? 'hidden' : ''}>${cropTypesTab}</div>
+      </div>
     </div>`;
 }
 
@@ -1256,7 +1285,6 @@ function _openCropTypeModal(ct, row, farm, season, container) {
         </div>
         <div class="mgmt-modal-body">
           ${cropTypeInput}
-          </div>
           ${isCarry ? `
           <div class="mgmt-form-row">
             <div class="mgmt-form-group">
@@ -1456,6 +1484,14 @@ function _css() {
       padding: 14px 18px 12px;
       border-bottom: 1px solid var(--border);
     }
+    .mgmt-card--collapsed .mgmt-card-header { border-bottom: none; }
+    .mgmt-collapse-btn {
+      background: none; border: 1px solid var(--border); border-radius: 4px;
+      color: var(--hint); font-size: 10px; cursor: pointer;
+      padding: 2px 7px; line-height: 1.6; flex-shrink: 0;
+      transition: background .15s;
+    }
+    .mgmt-collapse-btn:hover { background: var(--mgmt-row-alt); color: var(--mgmt-navy); }
     .mgmt-card-title { font-size: 15px; font-weight: 700; color: var(--mgmt-navy); }
     .mgmt-card-sub   { font-size: 11px; color: var(--hint); margin-top: 3px; }
 
