@@ -111,16 +111,37 @@ async function _render(container) {
     return { qty, income, qa, totalIncome, avgPrice: qty ? totalIncome/qty : null, invoices: matched };
   };
 
+  // ── Classification helpers ──────────────────────────────────────────────────
+  // Livestock: cattle, sheep, pigs etc — use head/kg metrics not yield/ha
+  const _isLivestock = n => /cattle|livestock|sheep|pig|poultry|herd|mob/i.test(n);
+  // Carryover: budget rows tagged notes='carryover', or mixed-case name when CAPS = new season convention
+  const _isCarryOver = b => (b.notes === 'carryover') ||
+    (b.commodity && b.commodity !== b.commodity.toUpperCase() && !_isLivestock(b.commodity));
+  // Other income: agistment, interest, rent etc
+  const _isOtherIncome = n => /agistment|interest received|rent|lease|royalt/i.test(n);
+
   // ── Build commodity groups from budgets ─────────────────────────────────────
   const groups = {};
   budgets.forEach(b => {
     if (!b.commodity) return;
     const key = b.commodity.trim().toUpperCase();
-    if (!groups[key]) groups[key] = { name: b.commodity.trim(), budgets: [] };
+    if (!groups[key]) {
+      groups[key] = {
+        name: b.commodity.trim(),
+        budgets: [],
+        isLivestock: _isLivestock(b.commodity),
+        isCarryOver: _isCarryOver(b),
+        isOther: _isOtherIncome(b.commodity),
+      };
+    }
     groups[key].budgets.push(b);
   });
 
-  // Add groups from actual invoices that have no budget row
+  // Add groups from actual season invoices that have no budget row,
+  // but try to merge livestock invoices with an existing livestock budget group
+  // rather than creating phantom cards (e.g. "OTH Cattle, X 24" → "CATTLE SALES")
+  const _existingLsKey = () => Object.keys(groups).find(k => groups[k].isLivestock);
+
   seasonInvoices.forEach(inv => {
     const linked = contracts.find(c => c.id === inv.forward_contract_id);
     const batchComm = (() => {
@@ -131,7 +152,21 @@ async function _render(container) {
     const commName = linked?.commodity || batchComm || (inv.line_items||[])[0]?.commodity || '';
     if (!commName) return;
     const key = commName.trim().toUpperCase();
-    if (!groups[key]) groups[key] = { name: commName.trim(), budgets: [] };
+    if (groups[key]) return; // already have a group for this
+
+    const isLs = _isLivestock(commName);
+    if (isLs) {
+      // Merge into existing livestock budget group rather than create a phantom
+      const lsKey = _existingLsKey();
+      if (lsKey) return; // invoices for this livestock comm will match via _isLivestock in invTotals
+    }
+
+    groups[key] = {
+      name: commName.trim(), budgets: [],
+      isLivestock: isLs,
+      isCarryOver: false,
+      isOther: _isOtherIncome(commName),
+    };
   });
 
   const bField = (b, plain, prefixed) => parseFloat(b[prefixed] ?? b[plain]) || 0;
@@ -166,15 +201,14 @@ async function _render(container) {
   };
 
   // ── Totals for KPI strip ────────────────────────────────────────────────────
-  const sortedGroups  = Object.values(groups).sort((a,b) => a.name.localeCompare(b.name));
-  const isCattle      = n => /cattle|livestock/i.test(n);
-  const isCarryOver   = n => priorYearInvoices.some(inv => {
-    const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches || '[]') : (inv.batches || []);
-    return b.flatMap(x => x.lines||[]).find(l => l.type==='income' && l.description?.toUpperCase() === n.toUpperCase());
-  });
+  const sortedGroups = Object.values(groups).sort((a,b) => a.name.localeCompare(b.name));
 
-  const farmGroups = sortedGroups.filter(g => !isCattle(g.name));
-  const lsGroups   = sortedGroups.filter(g => isCattle(g.name));
+  // Split into sections using the classification flags set during group building
+  const cropGroups  = sortedGroups.filter(g => !g.isLivestock && !g.isCarryOver && !g.isOther);
+  const lsGroups    = sortedGroups.filter(g => g.isLivestock  && !g.isCarryOver);
+  const otherGroups = sortedGroups.filter(g => g.isOther && !g.isCarryOver);
+  // farmGroups = crop + other for card rendering (keep them together unless you want separate sections)
+  const farmGroups  = [...cropGroups, ...otherGroups];
 
   let totalRevenueYTD = 0, totalBudget = 0, totalContracted = 0;
   sortedGroups.forEach(g => {
@@ -207,7 +241,8 @@ async function _render(container) {
 
   // ── Build HTML ──────────────────────────────────────────────────────────────
   const kpiStrip = _buildKpiStrip({ totalRevenueYTD, revenueStillToCome, totalBudget, totalCostsBudget, forecastGM });
-  const commodityCards = farmGroups.map(g => _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTotals, getContracted, fC, fN, delta)).join('');
+  const commodityCards = cropGroups.map(g => _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTotals, getContracted, fC, fN, delta)).join('');
+  const otherCards = otherGroups.map(g => _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTotals, getContracted, fC, fN, delta)).join('');
   const lsCards  = lsGroups.map(g => _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTotals, getContracted, fC, fN, delta, true)).join('');
   const carryCard = _buildCarryoverCard(priorYearInvoices, invTotals, fC, fN);
 
@@ -429,7 +464,7 @@ async function _render(container) {
     <!-- Body -->
     <div class="mgmt-body">
 
-      ${farmGroups.length ? `
+      ${cropGroups.length ? `
         <div>
           <div class="mgmt-section-label">Cropping Income</div>
           ${commodityCards}
@@ -443,14 +478,21 @@ async function _render(container) {
         </div>
       ` : ''}
 
+      ${otherGroups.length ? `
+        <div>
+          <div class="mgmt-section-label">Other Income</div>
+          ${otherCards}
+        </div>
+      ` : ''}
+
       ${carryCard ? `
         <div>
-          <div class="mgmt-section-label">Carryover Grain</div>
+          <div class="mgmt-section-label">Carryover Grain (Prior Season)</div>
           ${carryCard}
         </div>
       ` : ''}
 
-      ${!farmGroups.length && !lsGroups.length ? `
+      ${!cropGroups.length && !lsGroups.length && !otherGroups.length ? `
         <div style="padding:40px;text-align:center;color:var(--hint)">
           <div style="font-size:40px;margin-bottom:12px">📋</div>
           <div style="font-size:14px;font-weight:600;margin-bottom:6px">No data yet for ${season}</div>
@@ -544,20 +586,27 @@ function _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTo
   const inv     = invTotals(seasonInvoices, g.name);
   const { bIncome, bYield, bPrice, bProd, bArea } = budgetForGroup(g);
   const contracted = getContracted(g.name);
-  const unit = g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't';
+  const unit = isLivestock ? 'hd'
+    : (g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't');
 
-  // Production summary for header
-  const area = bArea ? `${fN(bArea, 0)} ha` : '';
-  const prod = bProd ? `${fN(bProd, 0)} ${unit}` : (inv.qty ? `${fN(inv.qty, 1)} ${unit} invoiced` : '');
+  // Production summary for header — livestock uses head, cropping uses area + production
+  const area = (!isLivestock && bArea) ? `${fN(bArea, 0)} ha` : '';
+  const prod = isLivestock
+    ? (bProd ? `${fN(bProd, 0)} hd budgeted` : '')
+    : (bProd ? `${fN(bProd, 0)} ${unit}` : (inv.qty ? `${fN(inv.qty, 1)} ${unit} invoiced` : ''));
   const headerSub = [area, prod].filter(Boolean).join(' · ');
 
   // Badges
   const unpriced = Math.max(0, (bProd || 0) - inv.qty - contracted.qty);
-  const breakeven = bIncome && bArea && bYield ? (bIncome / bArea / bYield) : null;
+  // Breakeven only makes sense for cropping ($/t), not livestock (too variable)
+  const breakeven = (!isLivestock && bIncome && bArea && bYield) ? (bIncome / bArea / bYield) : null;
+  const displayQty = isLivestock
+    ? (inv.invoices.reduce((s,i) => s + (parseInt(i.total_head)||0), 0) || inv.qty)
+    : inv.qty;
   const badges = `
-    ${inv.qty > 0  ? `<span class="mgmt-badge mgmt-badge-invoiced">✓ ${fN(inv.qty, 1)} ${unit} invoiced</span>` : ''}
+    ${displayQty > 0 ? `<span class="mgmt-badge mgmt-badge-invoiced">✓ ${fN(displayQty, isLivestock ? 0 : 1)} ${unit} invoiced</span>` : ''}
     ${contracted.qty > 0 ? `<span class="mgmt-badge mgmt-badge-contracted">⚡ ${fN(contracted.qty, 1)} ${unit} contracted</span>` : ''}
-    ${unpriced > 1 ? `<span class="mgmt-badge mgmt-badge-unpriced">? ${fN(unpriced, 0)} ${unit} unpriced</span>` : ''}
+    ${!isLivestock && unpriced > 1 ? `<span class="mgmt-badge mgmt-badge-unpriced">? ${fN(unpriced, 0)} ${unit} unpriced</span>` : ''}
     ${breakeven ? `<span class="mgmt-badge mgmt-badge-breakeven">BE ${fC(breakeven)}/${unit}</span>` : ''}
   `;
 
@@ -566,7 +615,14 @@ function _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTo
 
   // ── Economics tab ──────────────────────────────────────────────────────────
   const econTab = (() => {
-    const rows = [
+    // Livestock: show head/kg metrics — no yield/ha/area (those don't apply)
+    // Cropping: full area, yield/ha, production, price, revenue grid
+    const rows = isLivestock ? [
+      { group: 'Sales', metric: 'Head invoiced', actual: inv.invoices.reduce((s,i) => s + (parseInt(i.total_head)||0), 0) || (inv.qty ? fN(inv.qty, 0) + ' hd' : '—'), budget: bProd ? fN(bProd, 0) + ' hd' : '—', var: '' },
+      { group: 'Sales', metric: 'Total kg (lwt)', actual: inv.invoices.reduce((s,i) => s + (parseFloat(i.total_weight)||0), 0) > 0 ? fN(inv.invoices.reduce((s,i) => s + (parseFloat(i.total_weight)||0), 0), 0) + ' kg' : '—', budget: '—', var: '' },
+      { group: 'Price', metric: 'Avg price/head', actual: inv.avgPrice ? fC(inv.avgPrice) : '—', budget: bPrice ? fC(bPrice) : '—', var: inv.avgPrice && bPrice ? delta(inv.avgPrice, bPrice) : '' },
+      { group: 'Margin', metric: 'Gross revenue', actual: inv.totalIncome ? fC(inv.totalIncome) : '—', budget: bIncome ? fC(bIncome) : '—', var: inv.totalIncome && bIncome ? delta(inv.totalIncome, bIncome) : '' },
+    ] : [
       { group: 'Yield', metric: 'Area (ha)', actual: bArea ? fN(bArea) : '—', budget: bArea ? fN(bArea) : '—', var: '' },
       { group: 'Yield', metric: `Yield (${unit}/ha)`, actual: inv.qty && bArea ? fN(inv.qty/bArea, 2) : '—', budget: bYield ? fN(bYield, 2) : '—', var: inv.qty && bArea && bYield ? delta(inv.qty/bArea, bYield) : '' },
       { group: 'Yield', metric: `Total (${unit})`, actual: inv.qty ? fN(inv.qty, 1) : '—', budget: bProd ? fN(bProd) : '—', var: inv.qty && bProd ? delta(inv.qty, bProd) : '' },
@@ -605,10 +661,12 @@ function _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTo
 
   // ── Sales Pipeline tab ─────────────────────────────────────────────────────
   const pipelineTab = (() => {
-    const totalBudget = bProd || 0;
-    const invoicedQty  = inv.qty;
-    const contractedQty = contracted.qty;
-    const unpricedQty   = Math.max(0, totalBudget - invoicedQty - contractedQty);
+    // For livestock: pipeline is revenue-based (no forward contracts/unpriced concept)
+    // For cropping: qty-based pipeline
+    const totalBudget = isLivestock ? (bIncome || 0) : (bProd || 0);
+    const invoicedQty  = isLivestock ? inv.totalIncome : inv.qty;
+    const contractedQty = isLivestock ? 0 : contracted.qty;
+    const unpricedQty   = isLivestock ? 0 : Math.max(0, totalBudget - invoicedQty - contractedQty);
 
     const pct = (n) => totalBudget > 0 ? Math.round(n / totalBudget * 100) : 0;
     const invPct  = pct(invoicedQty);
@@ -618,8 +676,8 @@ function _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTo
     const bar = `
       <div class="mgmt-pipeline-bar">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--hint);margin-bottom:5px">
-          <span>Sales position</span>
-          <span>${invPct + conPct}% priced</span>
+          <span>${isLivestock ? 'Revenue position' : 'Sales position'}</span>
+          <span>${invPct + conPct}% ${isLivestock ? 'received' : 'priced'}</span>
         </div>
         <div class="mgmt-pipeline-track">
           <div class="mgmt-pipeline-seg" style="background:var(--mgmt-green);width:${invPct}%"></div>
@@ -627,20 +685,40 @@ function _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTo
           <div class="mgmt-pipeline-seg" style="background:#e5e7eb;width:${unpPct}%"></div>
         </div>
         <div class="mgmt-pipeline-legend">
-          <div class="mgmt-pipeline-legend-item"><div class="mgmt-pipeline-dot" style="background:var(--mgmt-green)"></div>Invoiced</div>
-          <div class="mgmt-pipeline-legend-item"><div class="mgmt-pipeline-dot" style="background:var(--mgmt-blue)"></div>Contracted</div>
-          <div class="mgmt-pipeline-legend-item"><div class="mgmt-pipeline-dot" style="background:#e5e7eb"></div>Unpriced</div>
+          <div class="mgmt-pipeline-legend-item"><div class="mgmt-pipeline-dot" style="background:var(--mgmt-green)"></div>${isLivestock ? 'Revenue received' : 'Invoiced'}</div>
+          ${!isLivestock ? `<div class="mgmt-pipeline-legend-item"><div class="mgmt-pipeline-dot" style="background:var(--mgmt-blue)"></div>Contracted</div>` : ''}
+          <div class="mgmt-pipeline-legend-item"><div class="mgmt-pipeline-dot" style="background:#e5e7eb"></div>${isLivestock ? 'Still to come' : 'Unpriced'}</div>
         </div>
       </div>`;
 
-    const rows = [
+    const rows = isLivestock ? [
+      { label: 'Revenue received', qty: null, value: inv.totalIncome, price: null, color: 'var(--mgmt-green)' },
+      { label: 'Still to receive', qty: null, value: Math.max(0, (bIncome||0) - inv.totalIncome), price: null, color: 'var(--mgmt-amber)' },
+      { label: 'Full year budget',  qty: bProd ? fN(bProd,0)+' hd' : null, value: bIncome, price: bPrice, color: 'var(--ink)', bold: true },
+    ] : [
       { label: 'Invoiced',   qty: invoicedQty,   value: inv.totalIncome,  price: inv.avgPrice,        color: 'var(--mgmt-green)' },
       { label: 'Contracted', qty: contractedQty, value: contracted.value, price: contractedQty > 0 ? contracted.value / contractedQty : null, color: 'var(--mgmt-blue)' },
       { label: 'Unpriced',   qty: unpricedQty,   value: null,             price: null,                 color: 'var(--mgmt-amber)' },
       { label: 'Total budget', qty: totalBudget,  value: bIncome,          price: bPrice,               color: 'var(--ink)', bold: true },
     ];
 
-    const table = `
+    const table = isLivestock ? `
+      <table class="mgmt-pipeline-table">
+        <thead><tr>
+          <th style="text-align:left">Status</th>
+          <th>Head</th>
+          <th>Avg $/hd</th>
+          <th>Revenue</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr ${r.bold ? 'style="font-weight:700;border-top:2px solid var(--border)"' : ''}>
+            <td style="color:${r.color};font-weight:${r.bold ? 700 : 500}">${r.label}</td>
+            <td>${r.qty || '—'}</td>
+            <td>${r.price ? fC(r.price) : '—'}</td>
+            <td style="color:${r.value > 0 ? 'var(--mgmt-green)' : 'var(--hint)'}">${r.value > 0 ? fC(r.value) : '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : `
       <table class="mgmt-pipeline-table">
         <thead><tr>
           <th style="text-align:left">Status</th>
