@@ -277,13 +277,24 @@ async function _render(container, farm, period, allPeriods = []) {
 
   // ── Render: page header ──────────────────────────────────────────────────
   const eomBlocked  = !finalisedSession;
+
+  // Period selector options
+  const periodOptions = allPeriods.map(p => {
+    const label = new Date(p.period_start).toLocaleDateString('en-AU', { month: 'short', year: 'numeric' });
+    const selected = p.id === period?.id ? 'selected' : '';
+    return `<option value="${esc(p.id)}" ${selected}>${esc(label)}</option>`;
+  }).join('');
+
   const headerHtml  = `
     <div style="background:var(--navy);padding:14px 20px;display:flex;align-items:center;gap:12px;border-radius:10px 10px 0 0;margin-bottom:0;flex-wrap:wrap">
       <div style="flex:1;min-width:0">
         <div style="font-size:17px;font-weight:700;color:#fff">Seed Stocktake</div>
-        <div style="font-size:12px;color:rgba(255,255,255,.55);margin-top:1px">${esc(farm.name)} · ${esc(periodLabel)}</div>
+        <div style="font-size:12px;color:rgba(255,255,255,.55);margin-top:1px">${esc(farm.name)}</div>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="sd-period-select" style="background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.25);border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer">
+          ${periodOptions || `<option value="">No periods</option>`}
+        </select>
         ${canWrite() ? `
           <button class="btn btn-sm" id="sd-physical-btn"
             style="background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.25);font-size:12px">
@@ -734,6 +745,13 @@ function _currentSeasonBadge(month) {
 function _wireButtons(container, wrap, farm, items, locations, period, allPeriods, sessionById, pendingPlantingMovements, openSession) {
 
   // Header buttons
+  // Period selector
+  wrap.querySelector('#sd-period-select')?.addEventListener('change', e => {
+    const selectedId = e.target.value;
+    const selectedPeriod = allPeriods.find(p => p.id === selectedId) || null;
+    _render(container, farm, selectedPeriod, allPeriods);
+  });
+
   wrap.querySelector('#sd-add-item')?.addEventListener('click',
     () => _showAddVarietyForm(container, farm, items, period, allPeriods));
   wrap.querySelector('#sd-add-item-empty')?.addEventListener('click',
