@@ -501,8 +501,14 @@ async function _render(container, farm, period, allPeriods = []) {
       const usedVal   = unitCost ? usedKg * unitCost : null;
       const onHandVal = value; // already kg * unitCost
 
-      // Planned kg: placeholder until crop plan data wired — show dash for now
-      const plannedKg = null;
+      // Planned kg: TODO — pull from crop_plan_entries (seed_rate_kg_ha × planned_ha) once wired
+      // Hardcoded stub for Cavlcade to demonstrate planning layer: 1,220 ha × 15 kg/ha
+      const PLANNED_STUB = {
+        'cavlcade': { kg: 1220 * 15, rate: 15, ha: 1220, costPerKg: 13 },
+      };
+      const planStub = PLANNED_STUB[displayName.toLowerCase().replace(/\s+seed$/i,'').trim()];
+      const plannedKg   = planStub ? planStub.kg : null;
+      const plannedCost = planStub ? planStub.kg * planStub.costPerKg : null;
 
       // Stacked bar percentages: total = on-hand + used + planned
       const totalForBar = Math.max(1, kg + usedKg + (plannedKg || 0));
@@ -597,7 +603,9 @@ async function _render(container, farm, period, allPeriods = []) {
               </span>
               <span class="sd-vstat-num" style="color:var(--hint)">
                 ${plannedKg !== null ? Math.round(plannedKg).toLocaleString('en-AU') : '—'}
-                <span class="sd-vstat-unit">${plannedKg !== null ? 'kg est.' : 'not set'}</span>
+                <span class="sd-vstat-unit">${plannedKg !== null
+                  ? `kg${plannedCost ? ` · ${fAud(plannedCost)}` : ''}${planStub ? ` · ${planStub.ha} ha @ ${planStub.rate} kg/ha` : ''}`
+                  : 'not set'}</span>
               </span>
             </div>
             <div class="sd-bar-wrap">
