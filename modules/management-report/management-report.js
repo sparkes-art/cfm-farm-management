@@ -1,18 +1,22 @@
 // modules/management-report/management-report.js
-// Management Report — Mockup 2b card-based design
-// Commodity cards with Economics / Sales Pipeline / Crop Types tabs
-// Live data from invoices, forward_contracts, budgets, budget_costs
+// Management Report — card-based, three income sections
+// Farming Income · Other Income · Carryover Income (below the line)
+// All income configured manually via "Add" buttons — no budget import dependency.
 
-import { dbSelect, dbInsert, subscribeTable } from '../../js/supabase-client.js';
+import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js';
-import { formatCurrency, formatNumber, formatDate, qs, toast } from '../../js/ui.js';
+import { formatCurrency, formatNumber, qs, toast } from '../../js/ui.js';
 
 // ── Module state ──────────────────────────────────────────────────────────────
-let _sub = null;   // realtime subscription
-let _activeTabs = {};  // commodity key → active tab ('economics'|'pipeline'|'croptypes')
+let _subs   = [];
+let _modal  = null;   // currently open modal element
+let _activeTabs = {}; // incomeId → active tab name
 
 export function unmountManagementReport() {
-  if (_sub) { try { _sub.unsubscribe(); } catch(e) {} _sub = null; }
+  _subs.forEach(s => { try { s.unsubscribe(); } catch(e) {} });
+  _subs = [];
+  _modal?.remove();
+  _modal = null;
   _activeTabs = {};
 }
 
@@ -20,796 +24,952 @@ export async function mountManagementReport(container) {
   container.innerHTML = `<div id="mgmt-wrap"><div class="mgmt-loading">Loading…</div></div>`;
   await _render(container);
 
-  // Realtime: re-render when invoices or contracts change
   const farm = getActiveFarm();
   if (farm) {
-    _sub = subscribeTable('invoices', farm.id, () => _render(container));
+    _subs.push(subscribeTable('mgmt_income',     farm.id, () => _render(container)));
+    _subs.push(subscribeTable('mgmt_crop_types', farm.id, () => _render(container)));
+    _subs.push(subscribeTable('invoices',        farm.id, () => _render(container)));
   }
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const fC = (n, dp = 0) => n != null && !isNaN(n) ? formatCurrency(n, dp) : '—';
+const fN = (n, dp = 0) => n != null && !isNaN(n) ? formatNumber(n, dp)   : '—';
+const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const monthName = m => m ? ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1] : null;
 
 // ── Main render ───────────────────────────────────────────────────────────────
 async function _render(container) {
   const farm   = getActiveFarm();
   const season = getActiveSeason();
+  const wrap   = qs('#mgmt-wrap', container) || container;
+
   if (!farm || !season) {
-    container.innerHTML = `<div class="mgmt-loading">Select a farm and season to view the report.</div>`;
+    wrap.innerHTML = `<div class="mgmt-loading">Select a farm and season to view the report.</div>`;
     return;
   }
 
   // ── Data fetch ──────────────────────────────────────────────────────────────
-  const [contracts, allInvoices, budgets, budgetCosts] = await Promise.all([
-    dbSelect('forward_contracts', `farm_id=eq.${farm.id}&crop_year=eq.${season}&select=*`).catch(() => []),
-    dbSelect('invoices', `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`).catch(() => []),
-    dbSelect('budgets', `farm_id=eq.${farm.id}&season=eq.${season}&select=*`).catch(() => []),
-    dbSelect('budget_costs', `farm_id=eq.${farm.id}&financial_year=eq.${season}&select=*`).catch(() => []),
+  const [incomeRows, cropTypeRows, invoices] = await Promise.all([
+    dbSelect('mgmt_income',     `farm_id=eq.${farm.id}&season=eq.${season}&order=sort_order.asc,created_at.asc`).catch(() => []),
+    dbSelect('mgmt_crop_types', `farm_id=eq.${farm.id}&season=eq.${season}&order=sort_order.asc,created_at.asc`).catch(() => []),
+    dbSelect('invoices',        `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`).catch(() => []),
   ]);
 
-  // ── Season timing ───────────────────────────────────────────────────────────
-  const seasonYear        = parseInt(season.split('-')[0]);
-  const now               = new Date();
-  const yearStartMonth    = farm.settings?.yearStartMonth || 7;
-  const seasonStartMonthIdx = yearStartMonth - 1;
-  let monthsElapsed = (now.getFullYear() - seasonYear) * 12 + (now.getMonth() - seasonStartMonthIdx);
-  if (monthsElapsed < 0)  monthsElapsed = 0;
-  if (monthsElapsed > 12) monthsElapsed = 12;
-  const ytdMonths   = Math.min(monthsElapsed + 1, 12);
-  const ytdFraction = ytdMonths / 12;
+  // Attach crop types to their parent income row
+  const incomeWithTypes = incomeRows.map(row => ({
+    ...row,
+    cropTypes: cropTypeRows.filter(ct => ct.income_id === row.id)
+  }));
 
-  // ── Invoice helpers ─────────────────────────────────────────────────────────
-  const isPriorYear = inv => {
-    if (!inv.batches) return false;
-    const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-    return b.some(batch => batch.prior_year_income);
-  };
+  const farmingRows   = incomeWithTypes.filter(r => r.section === 'farming');
+  const otherRows     = incomeWithTypes.filter(r => r.section === 'other');
+  const carryoverRows = incomeWithTypes.filter(r => r.section === 'carryover');
 
-  const seasonInvoices = allInvoices.filter(inv => {
-    if (isPriorYear(inv)) return false;
-    if (inv.season === season) return true;
-    if (inv.batches) {
-      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-      if (b.some(batch => batch.crop_year === season)) return true;
-    }
-    const linked = contracts.find(c => c.id === inv.forward_contract_id);
-    if (linked?.crop_year === season) return true;
-    return false;
-  });
+  // ── KPI summary (top strip) ─────────────────────────────────────────────────
+  const farmingBudget = farmingRows.reduce((sum, r) => {
+    const price = r.budget_price || 0;
+    const prod  = r.cropTypes.reduce((s, ct) => {
+      const p = ct.budget_production || (ct.area_ha && ct.budget_yield ? ct.area_ha * ct.budget_yield : 0);
+      return s + p;
+    }, 0);
+    return sum + prod * price;
+  }, 0);
 
-  const priorYearInvoices = allInvoices.filter(isPriorYear);
+  const otherBudget    = otherRows.reduce((s, r) => s + (r.budget_amount || 0), 0);
+  const carryoverBudget = carryoverRows.reduce((sum, r) => {
+    return sum + r.cropTypes.reduce((s, ct) => {
+      const price = ct.price_override ?? r.budget_price ?? 0;
+      return s + (ct.budget_units || 0) * price;
+    }, 0);
+  }, 0);
 
-  // Get invoice totals for a commodity
-  const invTotals = (invList, commName) => {
-    let qty = 0, income = 0, qa = 0;
-    const matched = [];
-    const targetKey = commName ? commName.trim().toUpperCase() : null;
-    invList.forEach(inv => {
-      const linked  = contracts.find(c => c.id === inv.forward_contract_id);
-      const batchComm = (() => {
-        if (!inv.batches) return '';
-        const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-        return b.flatMap(x => x.lines||[]).find(l => l.type==='income' && l.description)?.description || '';
-      })();
-      const iComm    = linked?.commodity || batchComm || (inv.line_items||[])[0]?.commodity || '';
-      const iCommKey = iComm.trim().toUpperCase();
-      if (targetKey) {
-        const invIsLs = /cattle|livestock/i.test(iComm);
-        const tgtIsLs = /cattle|livestock/i.test(targetKey);
-        if (tgtIsLs && invIsLs) { /* match */ }
-        else if (iCommKey !== targetKey) return;
-      }
-      matched.push(inv);
-      if (inv.batches) {
-        const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-        qty += b.filter(x => (x.lines||[]).some(l => l.type==='income' && l.line_type!=='qa'))
-                .reduce((s, x) => s + (parseFloat(x.qty)||0), 0);
-      } else {
-        qty += parseFloat(inv.total_qty) || 0;
-      }
-      income += parseFloat(inv.gross_amount) || 0;
-      qa     += parseFloat(inv.total_quality_adj) || 0;
-    });
-    const totalIncome = income + qa;
-    return { qty, income, qa, totalIncome, avgPrice: qty ? totalIncome/qty : null, invoices: matched };
-  };
+  const totalBudget = farmingBudget + otherBudget;
 
-  // ── Classification helpers ──────────────────────────────────────────────────
-  // Livestock: cattle, sheep, pigs etc — use head/kg metrics not yield/ha
-  const _isLivestock = n => /cattle|livestock|sheep|pig|poultry|herd|mob/i.test(n);
-  // Carryover: budget rows tagged notes='carryover', or mixed-case name when CAPS = new season convention
-  const _isCarryOver = b => (b.notes === 'carryover') ||
-    (b.commodity && b.commodity !== b.commodity.toUpperCase() && !_isLivestock(b.commodity));
-  // Other income: agistment, interest, rent etc
-  const _isOtherIncome = n => /agistment|interest received|rent|lease|royalt/i.test(n);
+  const write = canWrite();
+  const now   = new Date();
 
-  // ── Build commodity groups from budgets ─────────────────────────────────────
-  const groups = {};
-  budgets.forEach(b => {
-    if (!b.commodity) return;
-    const key = b.commodity.trim().toUpperCase();
-    if (!groups[key]) {
-      groups[key] = {
-        name: b.commodity.trim(),
-        budgets: [],
-        isLivestock: _isLivestock(b.commodity),
-        isCarryOver: _isCarryOver(b),
-        isOther: _isOtherIncome(b.commodity),
-      };
-    }
-    groups[key].budgets.push(b);
-  });
-
-  // Add groups from actual season invoices that have no budget row,
-  // but try to merge livestock invoices with an existing livestock budget group
-  // rather than creating phantom cards (e.g. "OTH Cattle, X 24" → "CATTLE SALES")
-  const _existingLsKey = () => Object.keys(groups).find(k => groups[k].isLivestock);
-
-  seasonInvoices.forEach(inv => {
-    const linked = contracts.find(c => c.id === inv.forward_contract_id);
-    const batchComm = (() => {
-      if (!inv.batches) return '';
-      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-      return b.flatMap(x => x.lines||[]).find(l => l.type==='income' && l.description)?.description || '';
-    })();
-    const commName = linked?.commodity || batchComm || (inv.line_items||[])[0]?.commodity || '';
-    if (!commName) return;
-    const key = commName.trim().toUpperCase();
-    if (groups[key]) return; // already have a group for this
-
-    const isLs = _isLivestock(commName);
-    if (isLs) {
-      // Merge into existing livestock budget group rather than create a phantom
-      const lsKey = _existingLsKey();
-      if (lsKey) return; // invoices for this livestock comm will match via _isLivestock in invTotals
-    }
-
-    groups[key] = {
-      name: commName.trim(), budgets: [],
-      isLivestock: isLs,
-      isCarryOver: false,
-      isOther: _isOtherIncome(commName),
-    };
-  });
-
-  const bField = (b, plain, prefixed) => parseFloat(b[prefixed] ?? b[plain]) || 0;
-
-  const budgetForGroup = g => {
-    if (!g.budgets.length) return { bIncome: null, bYield: null, bPrice: null, bProd: null, bArea: null };
-    const bArea  = g.budgets.reduce((s, b) => s + (parseFloat(b.area_ha)||0), 0);
-    const bYield = bArea
-      ? g.budgets.reduce((s, b) => s + bField(b,'yield_per_ha','budgeted_yield_per_ha') * (parseFloat(b.area_ha)||0), 0) / bArea
-      : 0;
-    const bProd  = bArea && bYield ? Math.round(bArea * bYield) : g.budgets.reduce((s,b) => s + (parseFloat(b.budgeted_production)||0), 0) || null;
-    const bPrice = g.budgets.reduce((s, b) => s + bField(b,'price','budgeted_price'), 0) / g.budgets.length;
-    const bIncome = (bProd && bPrice) ? bProd * bPrice
-      : g.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_gross_revenue)||0), 0) || null;
-    return { bIncome, bYield, bPrice, bProd, bArea };
-  };
-
-  // Contracted but not yet invoiced: forward contracts with unfilled qty
-  const getContracted = (commName) => {
-    const targetKey = commName.trim().toUpperCase();
-    const commContracts = contracts.filter(c => c.commodity?.toUpperCase() === targetKey);
-    let contractedQty = 0, contractedValue = 0;
-    commContracts.forEach(c => {
-      const contracted = parseFloat(c.tonnes_contracted) || parseFloat(c.quantity) || 0;
-      const invoiced   = parseFloat(c.tonnes_invoiced) || 0;
-      const remaining  = Math.max(0, contracted - invoiced);
-      const price      = parseFloat(c.price_per_tonne) || parseFloat(c.price) || 0;
-      contractedQty   += remaining;
-      contractedValue += remaining * price;
-    });
-    return { qty: contractedQty, value: contractedValue };
-  };
-
-  // ── Totals for KPI strip ────────────────────────────────────────────────────
-  const sortedGroups = Object.values(groups).sort((a,b) => a.name.localeCompare(b.name));
-
-  // Split into sections using the classification flags set during group building
-  const cropGroups  = sortedGroups.filter(g => !g.isLivestock && !g.isCarryOver && !g.isOther);
-  const lsGroups    = sortedGroups.filter(g => g.isLivestock  && !g.isCarryOver);
-  const otherGroups = sortedGroups.filter(g => g.isOther && !g.isCarryOver);
-  // farmGroups = crop + other for card rendering (keep them together unless you want separate sections)
-  const farmGroups  = [...cropGroups, ...otherGroups];
-
-  let totalRevenueYTD = 0, totalBudget = 0, totalContracted = 0;
-  sortedGroups.forEach(g => {
-    const inv = invTotals(seasonInvoices, g.name);
-    const { bIncome } = budgetForGroup(g);
-    const contracted = getContracted(g.name);
-    totalRevenueYTD  += inv.totalIncome;
-    totalBudget      += bIncome || 0;
-    totalContracted  += contracted.value;
-  });
-
-  // Cost totals from budget
-  const totalCostsBudget = budgetCosts.reduce((s, c) => s + (parseFloat(c.budget_amount)||0), 0);
-  const forecastGM       = totalBudget - totalCostsBudget;
-  const revenueStillToCome = Math.max(0, totalBudget - totalRevenueYTD - totalContracted);
-
-  // ── Formatting helpers ──────────────────────────────────────────────────────
-  const fC  = (n, dp=0) => n != null ? formatCurrency(n, dp) : '—';
-  const fN  = (n, dp=0) => n != null && !isNaN(n) ? formatNumber(n, dp) : '—';
-  const pct = (a, b) => (b && b !== 0) ? Math.round((a - b) / Math.abs(b) * 100) : null;
-  const delta = (actual, budget, higherIsBetter = true) => {
-    if (budget == null || actual == null) return '';
-    const v = actual - budget;
-    const p = pct(actual, budget);
-    const good = higherIsBetter ? v >= 0 : v <= 0;
-    const color = good ? 'var(--mgmt-green)' : 'var(--mgmt-red)';
-    const sign  = v >= 0 ? '+' : '';
-    return `<span class="mgmt-delta" style="color:${color}">${sign}${fC(v)}${p != null ? ` (${p >= 0 ? '+' : ''}${p}%)` : ''}</span>`;
-  };
-
-  // ── Build HTML ──────────────────────────────────────────────────────────────
-  const kpiStrip = _buildKpiStrip({ totalRevenueYTD, revenueStillToCome, totalBudget, totalCostsBudget, forecastGM });
-  const commodityCards = cropGroups.map(g => _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTotals, getContracted, fC, fN, delta)).join('');
-  const otherCards = otherGroups.map(g => _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTotals, getContracted, fC, fN, delta)).join('');
-  const lsCards  = lsGroups.map(g => _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTotals, getContracted, fC, fN, delta, true)).join('');
-  const carryCard = _buildCarryoverCard(priorYearInvoices, invTotals, fC, fN);
-
-  const wrap = qs('#mgmt-wrap', container) || container;
   wrap.innerHTML = `
-    <style>
-      :root {
-        --mgmt-navy:  #1e3a5f;
-        --mgmt-green: #0a7c4e;
-        --mgmt-amber: #a05c00;
-        --mgmt-red:   #c0392b;
-        --mgmt-blue:  #1a5fb4;
-        --mgmt-teal:  #0e7490;
-      }
-
-      .mgmt-loading { padding: 60px; text-align: center; color: var(--hint); }
-
-      /* ── Top bar ── */
-      .mgmt-topbar {
-        background: var(--mgmt-navy);
-        padding: 14px 24px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 10px;
-      }
-      .mgmt-topbar-title { color: white; font-size: 15px; font-weight: 700; }
-      .mgmt-topbar-sub   { color: rgba(255,255,255,.65); font-size: 12px; margin-top: 2px; }
-      .mgmt-topbar-meta  { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-      .mgmt-topbar-asof  { color: rgba(255,255,255,.7); font-size: 11px; }
-      .mgmt-topbar-btn   {
-        background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
-        color: white; border-radius: 6px; padding: 5px 12px; font-size: 11px; cursor: pointer;
-      }
-      .mgmt-topbar-btn:hover { background: rgba(255,255,255,.2); }
-
-      /* ── KPI strip ── */
-      .mgmt-kpi-strip {
-        background: var(--mgmt-navy);
-        padding: 0 24px 16px;
-        display: flex; gap: 10px; flex-wrap: wrap;
-      }
-      .mgmt-kpi {
-        flex: 1; min-width: 150px;
-        background: rgba(255,255,255,.08);
-        border: 1px solid rgba(255,255,255,.12);
-        border-radius: 8px;
-        padding: 12px 14px;
-      }
-      .mgmt-kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: rgba(255,255,255,.6); margin-bottom: 4px; }
-      .mgmt-kpi-value { font-size: 22px; font-weight: 700; color: white; }
-      .mgmt-kpi-delta { font-size: 11px; margin-top: 3px; }
-      .mgmt-delta     { font-weight: 600; font-size: 11px; }
-
-      /* ── Body ── */
-      .mgmt-body { padding: 20px 24px; max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
-
-      /* ── Section header ── */
-      .mgmt-section-label {
-        font-size: 10px; text-transform: uppercase; letter-spacing: .1em;
-        color: var(--hint); font-weight: 600; margin-bottom: 8px; padding-left: 2px;
-      }
-
-      /* ── Commodity card ── */
-      .mgmt-card {
-        background: white;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        overflow: hidden;
-      }
-      .mgmt-card-header {
-        display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px;
-        padding: 14px 18px 12px;
-        border-bottom: 1px solid var(--border);
-      }
-      .mgmt-card-title { font-size: 15px; font-weight: 700; color: var(--mgmt-navy); }
-      .mgmt-card-sub   { font-size: 11px; color: var(--hint); margin-top: 2px; }
-      .mgmt-badges     { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-      .mgmt-badge {
-        display: inline-flex; align-items: center; gap: 4px;
-        padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600;
-        white-space: nowrap;
-      }
-      .mgmt-badge-unpriced { background: #fff3e0; color: var(--mgmt-amber); border: 1px solid #ffd180; }
-      .mgmt-badge-invoiced { background: #e8f5e9; color: var(--mgmt-green); border: 1px solid #a5d6a7; }
-      .mgmt-badge-contracted { background: #e3f2fd; color: var(--mgmt-blue); border: 1px solid #90caf9; }
-      .mgmt-badge-breakeven { background: #fce4ec; color: var(--mgmt-red); border: 1px solid #f48fb1; }
-
-      /* ── Tabs ── */
-      .mgmt-tabs { display: flex; border-bottom: 1px solid var(--border); padding: 0 18px; }
-      .mgmt-tab {
-        padding: 10px 14px; font-size: 12px; font-weight: 500; color: var(--hint);
-        cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
-        transition: color .15s;
-      }
-      .mgmt-tab:hover  { color: var(--mgmt-navy); }
-      .mgmt-tab.active { color: var(--mgmt-navy); border-bottom-color: var(--mgmt-navy); font-weight: 600; }
-
-      .mgmt-tab-content { padding: 16px 18px; }
-
-      /* ── Economics grid ── */
-      .mgmt-econ-grid {
-        display: grid; grid-template-columns: 1fr 1fr; gap: 0;
-        border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
-      }
-      .mgmt-econ-col { }
-      .mgmt-econ-col-header {
-        background: var(--page-bg); padding: 7px 12px;
-        font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
-        color: var(--hint); font-weight: 600; border-bottom: 1px solid var(--border);
-      }
-      .mgmt-econ-row {
-        display: grid; grid-template-columns: auto 1fr 1fr 1fr;
-        border-bottom: 1px solid var(--border-light);
-      }
-      .mgmt-econ-row:last-child { border-bottom: none; }
-      .mgmt-econ-row.group-header {
-        background: var(--page-bg);
-      }
-      .mgmt-econ-cell {
-        padding: 7px 10px; font-size: 12px; color: var(--ink);
-      }
-      .mgmt-econ-cell.label { color: var(--hint); font-size: 11px; }
-      .mgmt-econ-cell.num   { text-align: right; font-variant-numeric: tabular-nums; }
-      .mgmt-econ-cell.good  { color: var(--mgmt-green); font-weight: 600; }
-      .mgmt-econ-cell.bad   { color: var(--mgmt-red); font-weight: 600; }
-      .mgmt-econ-cell.head  {
-        font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
-        color: var(--hint); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border);
-      }
-      .mgmt-econ-table {
-        width: 100%; border-collapse: collapse;
-      }
-      .mgmt-econ-table th {
-        padding: 6px 10px; font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
-        color: var(--hint); font-weight: 600; border-bottom: 2px solid var(--border);
-        text-align: right;
-      }
-      .mgmt-econ-table th:first-child { text-align: left; }
-      .mgmt-econ-table td {
-        padding: 7px 10px; font-size: 12px; border-bottom: 1px solid var(--border-light);
-        font-variant-numeric: tabular-nums; text-align: right; color: var(--ink);
-      }
-      .mgmt-econ-table td:first-child { text-align: left; color: var(--hint); font-size: 11px; }
-      .mgmt-econ-table tr:last-child td { border-bottom: none; }
-      .mgmt-econ-table tr.group-row td { font-weight: 700; background: var(--page-bg); font-size: 11px; color: var(--hint); text-transform: uppercase; letter-spacing: .06em; }
-      .mgmt-econ-table tr.total-row td { font-weight: 700; border-top: 2px solid var(--border); }
-
-      /* ── Pipeline ── */
-      .mgmt-pipeline-bar { margin-bottom: 16px; }
-      .mgmt-pipeline-track {
-        height: 20px; border-radius: 10px; background: var(--border-light);
-        overflow: hidden; display: flex;
-      }
-      .mgmt-pipeline-seg { height: 100%; transition: width .3s; }
-      .mgmt-pipeline-legend { display: flex; gap: 16px; margin-top: 8px; flex-wrap: wrap; }
-      .mgmt-pipeline-legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--hint); }
-      .mgmt-pipeline-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-
-      .mgmt-pipeline-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-      .mgmt-pipeline-table th {
-        padding: 6px 10px; font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
-        color: var(--hint); font-weight: 600; border-bottom: 2px solid var(--border);
-        text-align: right;
-      }
-      .mgmt-pipeline-table th:first-child { text-align: left; }
-      .mgmt-pipeline-table td {
-        padding: 8px 10px; font-size: 12px; border-bottom: 1px solid var(--border-light);
-        font-variant-numeric: tabular-nums; text-align: right;
-      }
-      .mgmt-pipeline-table td:first-child { text-align: left; font-weight: 500; }
-      .mgmt-pipeline-table tr:last-child td { border-bottom: none; font-weight: 700; }
-
-      /* ── Carryover card ── */
-      .mgmt-carryover-card {
-        background: #fffbf2;
-        border: 1px solid #f0d080;
-        border-radius: 10px;
-        overflow: hidden;
-      }
-      .mgmt-carryover-header {
-        background: #fef3c7; border-bottom: 1px solid #f0d080;
-        padding: 12px 18px;
-        display: flex; align-items: center; gap: 10px;
-      }
-      .mgmt-carryover-title { font-size: 13px; font-weight: 700; color: var(--mgmt-amber); }
-      .mgmt-carryover-sub   { font-size: 11px; color: #92400e; margin-top: 1px; }
-
-      /* ── Recon footer ── */
-      .mgmt-recon {
-        background: var(--mgmt-navy);
-        border-radius: 10px;
-        padding: 16px 20px;
-        display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
-      }
-      .mgmt-recon-item { flex: 1; min-width: 140px; }
-      .mgmt-recon-label { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: rgba(255,255,255,.55); margin-bottom: 3px; }
-      .mgmt-recon-value { font-size: 18px; font-weight: 700; color: white; }
-      .mgmt-recon-op { color: rgba(255,255,255,.4); font-size: 20px; padding-top: 14px; flex: none; }
-      .mgmt-recon-equals { font-size: 24px; color: rgba(255,255,255,.4); padding-top: 10px; flex: none; }
-    </style>
+    ${_css()}
 
     <!-- Top bar -->
     <div class="mgmt-topbar">
       <div>
         <div class="mgmt-topbar-title">${esc(farm.name)} — Management Report</div>
-        <div class="mgmt-topbar-sub">Season ${season}</div>
+        <div class="mgmt-topbar-sub">Season ${esc(season)}</div>
       </div>
       <div class="mgmt-topbar-meta">
         <span class="mgmt-topbar-asof">As at ${now.toLocaleDateString('en-AU',{day:'numeric',month:'long',year:'numeric'})}</span>
-        ${canWrite() ? `<button class="mgmt-topbar-btn" id="mgmt-add-note">+ Note</button>` : ''}
       </div>
     </div>
 
     <!-- KPI strip -->
-    ${kpiStrip}
+    <div class="mgmt-kpi-strip">
+      ${_kpiTile('Farming Income (budget)', fC(farmingBudget), 'white')}
+      ${_kpiTile('Other Income (budget)',   fC(otherBudget),   '#93c5fd')}
+      ${_kpiTile('Total Revenue (budget)',  fC(totalBudget),   '#86efac')}
+      ${_kpiTile('Carryover (below line)',  fC(carryoverBudget), '#fcd34d')}
+    </div>
 
     <!-- Body -->
     <div class="mgmt-body">
 
-      ${cropGroups.length ? `
-        <div>
-          <div class="mgmt-section-label">Cropping Income</div>
-          ${commodityCards}
+      <!-- FARMING INCOME -->
+      <div class="mgmt-section">
+        <div class="mgmt-section-header">
+          <span class="mgmt-section-label">Farming Income</span>
+          ${write ? `<button class="mgmt-add-btn" data-section="farming">+ Add Commodity</button>` : ''}
         </div>
-      ` : ''}
+        ${farmingRows.length
+          ? farmingRows.map(r => _farmingCard(r, invoices, season)).join('')
+          : _emptyState('No farming income added yet.', write, 'farming')}
+      </div>
 
-      ${lsGroups.length ? `
-        <div>
-          <div class="mgmt-section-label">Livestock Income</div>
-          ${lsCards}
+      <!-- OTHER INCOME -->
+      <div class="mgmt-section">
+        <div class="mgmt-section-header">
+          <span class="mgmt-section-label">Other Income</span>
+          ${write ? `<button class="mgmt-add-btn" data-section="other">+ Add Item</button>` : ''}
         </div>
-      ` : ''}
+        ${otherRows.length
+          ? _otherTable(otherRows, write)
+          : _emptyState('No other income added yet.', write, 'other')}
+      </div>
 
-      ${otherGroups.length ? `
-        <div>
-          <div class="mgmt-section-label">Other Income</div>
-          ${otherCards}
+      <!-- CARRYOVER INCOME -->
+      <div class="mgmt-section mgmt-section--carryover">
+        <div class="mgmt-section-header">
+          <span class="mgmt-section-label">Carryover Income <span class="mgmt-below-line">below the line</span></span>
+          ${write ? `<button class="mgmt-add-btn mgmt-add-btn--amber" data-section="carryover">+ Add Carryover</button>` : ''}
         </div>
-      ` : ''}
-
-      ${carryCard ? `
-        <div>
-          <div class="mgmt-section-label">Carryover Grain (Prior Season)</div>
-          ${carryCard}
+        <div class="mgmt-carryover-note">
+          Prior season commodities sold in this season. These receipts are excluded from farming income KPIs.
         </div>
-      ` : ''}
-
-      ${!cropGroups.length && !lsGroups.length && !otherGroups.length ? `
-        <div style="padding:40px;text-align:center;color:var(--hint)">
-          <div style="font-size:40px;margin-bottom:12px">📋</div>
-          <div style="font-size:14px;font-weight:600;margin-bottom:6px">No data yet for ${season}</div>
-          <div style="font-size:12px">Add budgets in the Budgeting module or enter invoices in Outputs to populate this report.</div>
-        </div>
-      ` : ''}
-
-      <!-- Reconciliation footer -->
-      <div class="mgmt-recon">
-        <div class="mgmt-recon-item">
-          <div class="mgmt-recon-label">Season GM (forecast)</div>
-          <div class="mgmt-recon-value">${fC(forecastGM)}</div>
-        </div>
-        <div class="mgmt-recon-op">+</div>
-        <div class="mgmt-recon-item">
-          <div class="mgmt-recon-label">Carryover receipts</div>
-          <div class="mgmt-recon-value">${fC(priorYearInvoices.reduce((s,i) => s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0), 0))}</div>
-        </div>
-        <div class="mgmt-recon-equals">=</div>
-        <div class="mgmt-recon-item">
-          <div class="mgmt-recon-label">Xero Cash Receipts (est.)</div>
-          <div class="mgmt-recon-value">${fC(totalRevenueYTD)}</div>
-        </div>
-        <div style="flex:none;padding-top:12px">
-          <span style="font-size:10px;color:rgba(255,255,255,.4)">Reconcile in Xero →</span>
-        </div>
+        ${carryoverRows.length
+          ? carryoverRows.map(r => _carryoverCard(r, invoices, season)).join('')
+          : _emptyState('No carryover income added yet.', write, 'carryover')}
       </div>
 
     </div>
   `;
 
-  // ── Wire up tab clicks ──────────────────────────────────────────────────────
-  wrap.querySelectorAll('.mgmt-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      const card   = tab.closest('.mgmt-card, .mgmt-carryover-card');
-      const tabKey = tab.dataset.tab;
-      const commKey = tab.dataset.comm;
-      // Update active tab
-      card.querySelectorAll('.mgmt-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      // Show/hide panels
-      card.querySelectorAll('.mgmt-tab-content').forEach(panel => {
-        panel.hidden = panel.dataset.tab !== tabKey;
-      });
-      if (commKey) _activeTabs[commKey] = tabKey;
+  // ── Wire events ─────────────────────────────────────────────────────────────
+  wrap.querySelectorAll('.mgmt-add-btn').forEach(btn => {
+    btn.addEventListener('click', () => _openAddModal(btn.dataset.section, farm, season, container));
+  });
+
+  wrap.querySelectorAll('[data-edit-income]').forEach(btn => {
+    const id = btn.dataset.editIncome;
+    const row = incomeRows.find(r => r.id === id);
+    if (row) btn.addEventListener('click', () => _openEditModal(row, farm, season, container));
+  });
+
+  wrap.querySelectorAll('[data-delete-income]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this income item and all its crop types?')) return;
+      try {
+        await dbDelete('mgmt_income', btn.dataset.deleteIncome);
+        toast('Deleted', 'success');
+      } catch(e) { toast('Delete failed', 'error'); }
     });
   });
 
-  // ── Note button ────────────────────────────────────────────────────────────
-  qs('#mgmt-add-note', wrap)?.addEventListener('click', async () => {
-    const text = prompt('Add a season note:');
-    if (!text?.trim()) return;
-    const session = getSession();
-    try {
-      await dbInsert('management_comments', {
-        farm_id: farm.id, season,
-        comment: text.trim(),
-        created_by: session?.user?.id,
-      });
-      toast('Note saved', 'success');
-    } catch(e) {
-      toast('Could not save note', 'error');
-    }
+  wrap.querySelectorAll('[data-add-crop-type]').forEach(btn => {
+    const id = btn.dataset.addCropType;
+    const row = incomeRows.find(r => r.id === id);
+    if (row) btn.addEventListener('click', () => _openCropTypeModal(null, row, farm, season, container));
+  });
+
+  wrap.querySelectorAll('[data-edit-ct]').forEach(btn => {
+    const ctId = btn.dataset.editCt;
+    const incId = btn.dataset.incomeId;
+    const ct  = cropTypeRows.find(c => c.id === ctId);
+    const row = incomeRows.find(r => r.id === incId);
+    if (ct && row) btn.addEventListener('click', () => _openCropTypeModal(ct, row, farm, season, container));
+  });
+
+  wrap.querySelectorAll('[data-delete-ct]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this crop type?')) return;
+      try {
+        await dbDelete('mgmt_crop_types', btn.dataset.deleteCt);
+        toast('Deleted', 'success');
+      } catch(e) { toast('Delete failed', 'error'); }
+    });
+  });
+
+  // Tab clicks
+  wrap.querySelectorAll('.mgmt-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const card   = tab.closest('.mgmt-card');
+      const tabKey = tab.dataset.tab;
+      const incId  = tab.dataset.income;
+      card.querySelectorAll('.mgmt-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      card.querySelectorAll('.mgmt-tab-panel').forEach(p => { p.hidden = p.dataset.tab !== tabKey; });
+      if (incId) _activeTabs[incId] = tabKey;
+    });
   });
 }
 
-// ── KPI strip ─────────────────────────────────────────────────────────────────
-function _buildKpiStrip({ totalRevenueYTD, revenueStillToCome, totalBudget, totalCostsBudget, forecastGM }) {
-  const fC = (n) => n != null ? formatCurrency(n, 0) : '—';
-  const tiles = [
-    { label: 'Revenue YTD (actual)',    value: fC(totalRevenueYTD),     delta: null, color: 'white' },
-    { label: 'Revenue still to come',   value: fC(revenueStillToCome),  delta: null, color: '#93c5fd' },
-    { label: 'Forecast season revenue', value: fC(totalBudget),         delta: null, color: '#86efac' },
-    { label: 'Total costs (budget)',     value: fC(totalCostsBudget),    delta: null, color: '#fca5a5' },
-    { label: 'Forecast season GM',      value: fC(forecastGM),          delta: null,
-      color: forecastGM >= 0 ? '#86efac' : '#fca5a5' },
-  ];
-  return `
-    <div class="mgmt-kpi-strip">
-      ${tiles.map(t => `
-        <div class="mgmt-kpi">
-          <div class="mgmt-kpi-label">${t.label}</div>
-          <div class="mgmt-kpi-value" style="color:${t.color}">${t.value}</div>
-        </div>`).join('')}
-    </div>`;
-}
+// ── Farming income card ───────────────────────────────────────────────────────
+function _farmingCard(row, invoices, season) {
+  const write    = canWrite();
+  const activeTab = _activeTabs[row.id] || 'economics';
 
-// ── Commodity card ─────────────────────────────────────────────────────────────
-function _buildCommodityCard(g, seasonInvoices, contracts, budgetForGroup, invTotals, getContracted, fC, fN, delta, isLivestock = false) {
-  const commKey = g.name.toUpperCase().replace(/\s+/g, '_');
-  const inv     = invTotals(seasonInvoices, g.name);
-  const { bIncome, bYield, bPrice, bProd, bArea } = budgetForGroup(g);
-  const contracted = getContracted(g.name);
-  const unit = isLivestock ? 'hd'
-    : (g.budgets[0]?.unit || contracts.find(c => c.commodity?.toUpperCase() === g.name.toUpperCase())?.unit || 't');
+  // Commodity-level aggregates
+  const totalBudgetProd = row.cropTypes.reduce((s, ct) => {
+    return s + (ct.budget_production || (ct.area_ha && ct.budget_yield ? ct.area_ha * ct.budget_yield : 0));
+  }, 0);
+  const totalArea = row.cropTypes.reduce((s, ct) => s + (ct.area_ha || 0), 0);
+  const budgetIncome = totalBudgetProd * (row.budget_price || 0);
 
-  // Production summary for header — livestock uses head, cropping uses area + production
-  const area = (!isLivestock && bArea) ? `${fN(bArea, 0)} ha` : '';
-  const prod = isLivestock
-    ? (bProd ? `${fN(bProd, 0)} hd budgeted` : '')
-    : (bProd ? `${fN(bProd, 0)} ${unit}` : (inv.qty ? `${fN(inv.qty, 1)} ${unit} invoiced` : ''));
-  const headerSub = [area, prod].filter(Boolean).join(' · ');
+  // Actual invoices for this commodity (match by name, case-insensitive)
+  const matched = _matchInvoices(invoices, row.name, season);
+  const actualIncome = matched.reduce((s, inv) => s + (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0), 0);
+  const variance = budgetIncome ? actualIncome - budgetIncome : null;
 
-  // Badges
-  const unpriced = Math.max(0, (bProd || 0) - inv.qty - contracted.qty);
-  // Breakeven only makes sense for cropping ($/t), not livestock (too variable)
-  const breakeven = (!isLivestock && bIncome && bArea && bYield) ? (bIncome / bArea / bYield) : null;
-  const displayQty = isLivestock
-    ? (inv.invoices.reduce((s,i) => s + (parseInt(i.total_head)||0), 0) || inv.qty)
-    : inv.qty;
-  const badges = `
-    ${displayQty > 0 ? `<span class="mgmt-badge mgmt-badge-invoiced">✓ ${fN(displayQty, isLivestock ? 0 : 1)} ${unit} invoiced</span>` : ''}
-    ${contracted.qty > 0 ? `<span class="mgmt-badge mgmt-badge-contracted">⚡ ${fN(contracted.qty, 1)} ${unit} contracted</span>` : ''}
-    ${!isLivestock && unpriced > 1 ? `<span class="mgmt-badge mgmt-badge-unpriced">? ${fN(unpriced, 0)} ${unit} unpriced</span>` : ''}
-    ${breakeven ? `<span class="mgmt-badge mgmt-badge-breakeven">BE ${fC(breakeven)}/${unit}</span>` : ''}
-  `;
-
-  // Tabs
-  const activeTab = _activeTabs[commKey] || 'economics';
+  const headerSub = [
+    totalArea ? `${fN(totalArea, 0)} ha total` : '',
+    row.budget_price ? `${fC(row.budget_price, 2)}/${row.unit}` : '',
+    totalBudgetProd ? `${fN(totalBudgetProd, 0)} ${row.unit} budgeted` : '',
+  ].filter(Boolean).join(' · ');
 
   // ── Economics tab ──────────────────────────────────────────────────────────
-  const econTab = (() => {
-    // Livestock: show head/kg metrics — no yield/ha/area (those don't apply)
-    // Cropping: full area, yield/ha, production, price, revenue grid
-    const rows = isLivestock ? [
-      { group: 'Sales', metric: 'Head invoiced', actual: inv.invoices.reduce((s,i) => s + (parseInt(i.total_head)||0), 0) || (inv.qty ? fN(inv.qty, 0) + ' hd' : '—'), budget: bProd ? fN(bProd, 0) + ' hd' : '—', var: '' },
-      { group: 'Sales', metric: 'Total kg (lwt)', actual: inv.invoices.reduce((s,i) => s + (parseFloat(i.total_weight)||0), 0) > 0 ? fN(inv.invoices.reduce((s,i) => s + (parseFloat(i.total_weight)||0), 0), 0) + ' kg' : '—', budget: '—', var: '' },
-      { group: 'Price', metric: 'Avg price/head', actual: inv.avgPrice ? fC(inv.avgPrice) : '—', budget: bPrice ? fC(bPrice) : '—', var: inv.avgPrice && bPrice ? delta(inv.avgPrice, bPrice) : '' },
-      { group: 'Margin', metric: 'Gross revenue', actual: inv.totalIncome ? fC(inv.totalIncome) : '—', budget: bIncome ? fC(bIncome) : '—', var: inv.totalIncome && bIncome ? delta(inv.totalIncome, bIncome) : '' },
-    ] : [
-      { group: 'Yield', metric: 'Area (ha)', actual: bArea ? fN(bArea) : '—', budget: bArea ? fN(bArea) : '—', var: '' },
-      { group: 'Yield', metric: `Yield (${unit}/ha)`, actual: inv.qty && bArea ? fN(inv.qty/bArea, 2) : '—', budget: bYield ? fN(bYield, 2) : '—', var: inv.qty && bArea && bYield ? delta(inv.qty/bArea, bYield) : '' },
-      { group: 'Yield', metric: `Total (${unit})`, actual: inv.qty ? fN(inv.qty, 1) : '—', budget: bProd ? fN(bProd) : '—', var: inv.qty && bProd ? delta(inv.qty, bProd) : '' },
-      { group: 'Price', metric: `Avg price (/${unit})`, actual: inv.avgPrice ? fC(inv.avgPrice) : '—', budget: bPrice ? fC(bPrice) : '—', var: inv.avgPrice && bPrice ? delta(inv.avgPrice, bPrice) : '' },
-      { group: 'Margin', metric: 'Gross revenue', actual: inv.totalIncome ? fC(inv.totalIncome) : '—', budget: bIncome ? fC(bIncome) : '—', var: inv.totalIncome && bIncome ? delta(inv.totalIncome, bIncome) : '' },
-    ];
+  const econTab = `
+    <table class="mgmt-table">
+      <thead><tr>
+        <th>Metric</th><th>Budget</th><th>Actual</th><th>Variance</th>
+      </tr></thead>
+      <tbody>
+        <tr class="mgmt-table-group"><td colspan="4">Revenue</td></tr>
+        <tr>
+          <td class="mgmt-table-label">Budget price (/${row.unit})</td>
+          <td>${fC(row.budget_price, 2)}</td>
+          <td>—</td><td>—</td>
+        </tr>
+        <tr>
+          <td class="mgmt-table-label">Total production (${row.unit})</td>
+          <td>${totalBudgetProd ? fN(totalBudgetProd, 1) : '—'}</td>
+          <td>—</td><td>—</td>
+        </tr>
+        <tr class="mgmt-table-total">
+          <td>Gross income</td>
+          <td>${fC(budgetIncome)}</td>
+          <td>${fC(actualIncome)}</td>
+          <td>${variance != null ? _varSpan(variance) : '—'}</td>
+        </tr>
+      </tbody>
+    </table>`;
 
-    let currentGroup = '';
-    const tableRows = rows.map(r => {
-      let groupRow = '';
-      if (r.group !== currentGroup) {
-        currentGroup = r.group;
-        groupRow = `<tr class="group-row"><td colspan="4">${r.group}</td></tr>`;
-      }
-      return groupRow + `<tr>
-        <td style="padding-left:20px">${r.metric}</td>
-        <td>${r.actual}</td>
-        <td>${r.budget}</td>
-        <td>${r.var}</td>
-      </tr>`;
-    }).join('');
+  // ── Crop Types tab ─────────────────────────────────────────────────────────
+  const cropTypesTab = `
+    <table class="mgmt-table">
+      <thead><tr>
+        <th>Crop Type</th>
+        <th class="num">Area (ha)</th>
+        <th class="num">Yield (${row.unit}/ha)</th>
+        <th class="num">Production (${row.unit})</th>
+        <th class="num">Income ($)</th>
+        ${write ? '<th></th>' : ''}
+      </tr></thead>
+      <tbody>
+        ${row.cropTypes.length ? row.cropTypes.map(ct => {
+          const prod = ct.budget_production || (ct.area_ha && ct.budget_yield ? ct.area_ha * ct.budget_yield : null);
+          const inc  = prod && row.budget_price ? prod * row.budget_price : null;
+          return `<tr>
+            <td style="font-weight:600">${esc(ct.crop_type)}</td>
+            <td class="num">${fN(ct.area_ha, 1)}</td>
+            <td class="num">${fN(ct.budget_yield, 2)}</td>
+            <td class="num">${fN(prod, 1)}</td>
+            <td class="num" style="color:var(--mgmt-green)">${fC(inc)}</td>
+            ${write ? `<td class="num actions">
+              <button class="mgmt-row-btn" data-edit-ct="${ct.id}" data-income-id="${row.id}">Edit</button>
+              <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-ct="${ct.id}">✕</button>
+            </td>` : ''}
+          </tr>`;
+        }).join('') : `<tr><td colspan="${write ? 6 : 5}" style="color:var(--hint);padding:16px;text-align:center">No crop types added — click below to add.</td></tr>`}
+        ${row.cropTypes.length ? `
+        <tr class="mgmt-table-total">
+          <td>Total</td>
+          <td class="num">${fN(totalArea, 1)}</td>
+          <td class="num">—</td>
+          <td class="num">${fN(totalBudgetProd, 1)}</td>
+          <td class="num" style="color:var(--mgmt-green)">${fC(budgetIncome)}</td>
+          ${write ? '<td></td>' : ''}
+        </tr>` : ''}
+      </tbody>
+    </table>
+    ${write ? `<div style="padding:10px 18px 14px">
+      <button class="mgmt-add-btn mgmt-add-btn--sm" data-add-crop-type="${row.id}">+ Add Crop Type</button>
+    </div>` : ''}`;
 
-    return `
-      <table class="mgmt-econ-table">
-        <thead>
-          <tr>
-            <th style="text-align:left">Metric</th>
-            <th>Actual</th>
-            <th>Budget</th>
-            <th>Variance</th>
-          </tr>
-        </thead>
-        <tbody>${tableRows}</tbody>
-      </table>`;
-  })();
-
-  // ── Sales Pipeline tab ─────────────────────────────────────────────────────
-  const pipelineTab = (() => {
-    // For livestock: pipeline is revenue-based (no forward contracts/unpriced concept)
-    // For cropping: qty-based pipeline
-    const totalBudget = isLivestock ? (bIncome || 0) : (bProd || 0);
-    const invoicedQty  = isLivestock ? inv.totalIncome : inv.qty;
-    const contractedQty = isLivestock ? 0 : contracted.qty;
-    const unpricedQty   = isLivestock ? 0 : Math.max(0, totalBudget - invoicedQty - contractedQty);
-
-    const pct = (n) => totalBudget > 0 ? Math.round(n / totalBudget * 100) : 0;
-    const invPct  = pct(invoicedQty);
-    const conPct  = pct(contractedQty);
-    const unpPct  = Math.max(0, 100 - invPct - conPct);
-
-    const bar = `
-      <div class="mgmt-pipeline-bar">
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--hint);margin-bottom:5px">
-          <span>${isLivestock ? 'Revenue position' : 'Sales position'}</span>
-          <span>${invPct + conPct}% ${isLivestock ? 'received' : 'priced'}</span>
-        </div>
-        <div class="mgmt-pipeline-track">
-          <div class="mgmt-pipeline-seg" style="background:var(--mgmt-green);width:${invPct}%"></div>
-          <div class="mgmt-pipeline-seg" style="background:var(--mgmt-blue);width:${conPct}%"></div>
-          <div class="mgmt-pipeline-seg" style="background:#e5e7eb;width:${unpPct}%"></div>
-        </div>
-        <div class="mgmt-pipeline-legend">
-          <div class="mgmt-pipeline-legend-item"><div class="mgmt-pipeline-dot" style="background:var(--mgmt-green)"></div>${isLivestock ? 'Revenue received' : 'Invoiced'}</div>
-          ${!isLivestock ? `<div class="mgmt-pipeline-legend-item"><div class="mgmt-pipeline-dot" style="background:var(--mgmt-blue)"></div>Contracted</div>` : ''}
-          <div class="mgmt-pipeline-legend-item"><div class="mgmt-pipeline-dot" style="background:#e5e7eb"></div>${isLivestock ? 'Still to come' : 'Unpriced'}</div>
-        </div>
-      </div>`;
-
-    const rows = isLivestock ? [
-      { label: 'Revenue received', qty: null, value: inv.totalIncome, price: null, color: 'var(--mgmt-green)' },
-      { label: 'Still to receive', qty: null, value: Math.max(0, (bIncome||0) - inv.totalIncome), price: null, color: 'var(--mgmt-amber)' },
-      { label: 'Full year budget',  qty: bProd ? fN(bProd,0)+' hd' : null, value: bIncome, price: bPrice, color: 'var(--ink)', bold: true },
-    ] : [
-      { label: 'Invoiced',   qty: invoicedQty,   value: inv.totalIncome,  price: inv.avgPrice,        color: 'var(--mgmt-green)' },
-      { label: 'Contracted', qty: contractedQty, value: contracted.value, price: contractedQty > 0 ? contracted.value / contractedQty : null, color: 'var(--mgmt-blue)' },
-      { label: 'Unpriced',   qty: unpricedQty,   value: null,             price: null,                 color: 'var(--mgmt-amber)' },
-      { label: 'Total budget', qty: totalBudget,  value: bIncome,          price: bPrice,               color: 'var(--ink)', bold: true },
-    ];
-
-    const table = isLivestock ? `
-      <table class="mgmt-pipeline-table">
-        <thead><tr>
-          <th style="text-align:left">Status</th>
-          <th>Head</th>
-          <th>Avg $/hd</th>
-          <th>Revenue</th>
-        </tr></thead>
-        <tbody>
-          ${rows.map(r => `<tr ${r.bold ? 'style="font-weight:700;border-top:2px solid var(--border)"' : ''}>
-            <td style="color:${r.color};font-weight:${r.bold ? 700 : 500}">${r.label}</td>
-            <td>${r.qty || '—'}</td>
-            <td>${r.price ? fC(r.price) : '—'}</td>
-            <td style="color:${r.value > 0 ? 'var(--mgmt-green)' : 'var(--hint)'}">${r.value > 0 ? fC(r.value) : '—'}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>` : `
-      <table class="mgmt-pipeline-table">
-        <thead><tr>
-          <th style="text-align:left">Status</th>
-          <th>${unit}</th>
-          <th>Avg price</th>
-          <th>Value</th>
-        </tr></thead>
-        <tbody>
-          ${rows.map(r => `<tr ${r.bold ? 'style="font-weight:700;border-top:2px solid var(--border)"' : ''}>
-            <td style="color:${r.color};font-weight:${r.bold ? 700 : 500}">${r.label}</td>
-            <td>${r.qty > 0 ? fN(r.qty, 1) : '—'}</td>
-            <td>${r.price ? fC(r.price) : '—'}</td>
-            <td style="color:${r.value ? 'var(--mgmt-green)' : 'var(--hint)'}">${r.value ? fC(r.value) : '—'}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>`;
-
-    return bar + table;
-  })();
-
-  // ── Tabs HTML ──────────────────────────────────────────────────────────────
   return `
-    <div class="mgmt-card">
+    <div class="mgmt-card" id="card-${row.id}">
       <div class="mgmt-card-header">
         <div>
-          <div class="mgmt-card-title">${esc(g.name)}</div>
+          <div class="mgmt-card-title">${esc(row.name)}</div>
           ${headerSub ? `<div class="mgmt-card-sub">${headerSub}</div>` : ''}
         </div>
-        <div class="mgmt-badges">${badges}</div>
-      </div>
-      <div class="mgmt-tabs">
-        <div class="mgmt-tab ${activeTab === 'economics' ? 'active' : ''}" data-tab="economics" data-comm="${commKey}">Economics</div>
-        <div class="mgmt-tab ${activeTab === 'pipeline'  ? 'active' : ''}" data-tab="pipeline"  data-comm="${commKey}">Sales Pipeline</div>
-      </div>
-      <div class="mgmt-tab-content" data-tab="economics" ${activeTab !== 'economics' ? 'hidden' : ''}>${econTab}</div>
-      <div class="mgmt-tab-content" data-tab="pipeline"  ${activeTab !== 'pipeline'  ? 'hidden' : ''}>${pipelineTab}</div>
-    </div>`;
-}
-
-// ── Carryover card ────────────────────────────────────────────────────────────
-function _buildCarryoverCard(priorYearInvoices, invTotals, fC, fN) {
-  if (!priorYearInvoices.length) return '';
-
-  const total = priorYearInvoices.reduce((s, i) => {
-    return s + (parseFloat(i.gross_amount)||0) + (parseFloat(i.total_quality_adj)||0);
-  }, 0);
-
-  const rows = priorYearInvoices.map(inv => {
-    const batches = typeof inv.batches === 'string' ? JSON.parse(inv.batches || '[]') : (inv.batches || []);
-    const commName = batches.flatMap(b => b.lines||[]).find(l => l.type==='income' && l.description)?.description || 'Grain';
-    const qty   = batches.filter(x => (x.lines||[]).some(l => l.type==='income' && l.line_type!=='qa'))
-                        .reduce((s, x) => s + (parseFloat(x.qty)||0), 0) || parseFloat(inv.total_qty) || 0;
-    const inc   = (parseFloat(inv.gross_amount)||0) + (parseFloat(inv.total_quality_adj)||0);
-    const price = qty && inc ? inc / qty : null;
-    return `<tr>
-      <td>${esc(commName)}</td>
-      <td>${inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-AU',{day:'numeric',month:'short'}) : '—'}</td>
-      <td>${esc(inv.buyer || '—')}</td>
-      <td>${qty ? fN(qty, 1) + ' t' : '—'}</td>
-      <td>${price ? fC(price) + '/t' : '—'}</td>
-      <td style="color:var(--mgmt-green);font-weight:600">${inc ? fC(inc) : '—'}</td>
-    </tr>`;
-  }).join('');
-
-  return `
-    <div class="mgmt-carryover-card">
-      <div class="mgmt-carryover-header">
-        <div>
-          <div class="mgmt-carryover-title">⚠ Prior Season Carryover</div>
-          <div class="mgmt-carryover-sub">Grain from last season sold this season · Total received: ${fC(total)}</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="mgmt-badge mgmt-badge-budget">${fC(budgetIncome)} budgeted</span>
+          ${actualIncome > 0 ? `<span class="mgmt-badge mgmt-badge-actual">${fC(actualIncome)} received</span>` : ''}
+          ${write ? `
+            <button class="mgmt-icon-btn" data-edit-income="${row.id}" title="Edit commodity">✎</button>
+            <button class="mgmt-icon-btn mgmt-icon-btn--red" data-delete-income="${row.id}" title="Delete">✕</button>
+          ` : ''}
         </div>
       </div>
-      <div style="padding:14px 18px">
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead>
-            <tr style="border-bottom:2px solid #f0d080">
-              <th style="text-align:left;padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--mgmt-amber)">Commodity</th>
-              <th style="text-align:left;padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--mgmt-amber)">Date</th>
-              <th style="text-align:left;padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--mgmt-amber)">Buyer</th>
-              <th style="text-align:right;padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--mgmt-amber)">Qty</th>
-              <th style="text-align:right;padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--mgmt-amber)">Price</th>
-              <th style="text-align:right;padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--mgmt-amber)">Amount</th>
-            </tr>
-          </thead>
-          <tbody style="color:var(--ink)">${rows}</tbody>
-        </table>
+      <div class="mgmt-tabs">
+        <div class="mgmt-tab ${activeTab==='economics'  ? 'active' : ''}" data-tab="economics"  data-income="${row.id}">Economics</div>
+        <div class="mgmt-tab ${activeTab==='croptypes'  ? 'active' : ''}" data-tab="croptypes"  data-income="${row.id}">Crop Types</div>
       </div>
+      <div class="mgmt-tab-panel" data-tab="economics" ${activeTab!=='economics' ? 'hidden' : ''}>${econTab}</div>
+      <div class="mgmt-tab-panel" data-tab="croptypes" ${activeTab!=='croptypes' ? 'hidden' : ''}>${cropTypesTab}</div>
     </div>`;
 }
 
-// ── Escape HTML ───────────────────────────────────────────────────────────────
-function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// ── Other income table ────────────────────────────────────────────────────────
+function _otherTable(rows, write) {
+  const total = rows.reduce((s, r) => s + (r.budget_amount || 0), 0);
+  return `
+    <div class="mgmt-card">
+      <table class="mgmt-table">
+        <thead><tr>
+          <th>Item</th>
+          <th class="num">Budget ($)</th>
+          <th>Expected</th>
+          <th>Notes</th>
+          ${write ? '<th></th>' : ''}
+        </tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr>
+            <td style="font-weight:600">${esc(r.name)}</td>
+            <td class="num">${fC(r.budget_amount)}</td>
+            <td>${r.expected_month ? monthName(r.expected_month) : '—'}</td>
+            <td style="color:var(--hint);font-size:11px">${esc(r.notes || '')}</td>
+            ${write ? `<td class="actions">
+              <button class="mgmt-row-btn" data-edit-income="${r.id}">Edit</button>
+              <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-income="${r.id}">✕</button>
+            </td>` : ''}
+          </tr>`).join('')}
+          <tr class="mgmt-table-total">
+            <td>Total other income</td>
+            <td class="num">${fC(total)}</td>
+            <td colspan="${write ? 3 : 2}"></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ── Carryover income card ─────────────────────────────────────────────────────
+function _carryoverCard(row, invoices, season) {
+  const write = canWrite();
+  const activeTab = _activeTabs[row.id] || 'lots';
+
+  const totalUnits = row.cropTypes.reduce((s, ct) => s + (ct.budget_units || 0), 0);
+  const totalIncome = row.cropTypes.reduce((s, ct) => {
+    const price = ct.price_override ?? row.budget_price ?? 0;
+    return s + (ct.budget_units || 0) * price;
+  }, 0);
+
+  const headerSub = [
+    totalUnits ? `${fN(totalUnits, 1)} ${row.unit}` : '',
+    totalIncome ? fC(totalIncome) : '',
+  ].filter(Boolean).join(' · ');
+
+  const lotsTab = `
+    <table class="mgmt-table">
+      <thead><tr>
+        <th>Lot / Description</th>
+        <th class="num">Units (${row.unit})</th>
+        <th class="num">Price (/${row.unit})</th>
+        <th class="num">Income ($)</th>
+        <th>Expected</th>
+        ${write ? '<th></th>' : ''}
+      </tr></thead>
+      <tbody>
+        ${row.cropTypes.length ? row.cropTypes.map(ct => {
+          const price = ct.price_override ?? row.budget_price ?? null;
+          const inc   = ct.budget_units && price ? ct.budget_units * price : null;
+          return `<tr>
+            <td style="font-weight:600">${esc(ct.crop_type)}</td>
+            <td class="num">${fN(ct.budget_units, 1)}</td>
+            <td class="num">${price ? fC(price, 2) : '—'}</td>
+            <td class="num" style="color:var(--mgmt-amber)">${fC(inc)}</td>
+            <td>${ct.expected_month ? monthName(ct.expected_month) : '—'}</td>
+            ${write ? `<td class="actions">
+              <button class="mgmt-row-btn" data-edit-ct="${ct.id}" data-income-id="${row.id}">Edit</button>
+              <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-ct="${ct.id}">✕</button>
+            </td>` : ''}
+          </tr>`;
+        }).join('') : `<tr><td colspan="${write ? 6 : 5}" style="color:var(--hint);padding:16px;text-align:center">No lots added yet.</td></tr>`}
+        ${row.cropTypes.length ? `
+        <tr class="mgmt-table-total">
+          <td>Total</td>
+          <td class="num">${fN(totalUnits, 1)}</td>
+          <td class="num">—</td>
+          <td class="num" style="color:var(--mgmt-amber)">${fC(totalIncome)}</td>
+          <td colspan="${write ? 2 : 1}"></td>
+        </tr>` : ''}
+      </tbody>
+    </table>
+    ${write ? `<div style="padding:10px 18px 14px">
+      <button class="mgmt-add-btn mgmt-add-btn--sm mgmt-add-btn--amber" data-add-crop-type="${row.id}">+ Add Lot</button>
+    </div>` : ''}`;
+
+  return `
+    <div class="mgmt-card mgmt-card--carryover" id="card-${row.id}">
+      <div class="mgmt-card-header">
+        <div>
+          <div class="mgmt-card-title">${esc(row.name)}</div>
+          ${headerSub ? `<div class="mgmt-card-sub">${headerSub}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="mgmt-badge mgmt-badge-carryover">${fC(totalIncome)} budgeted</span>
+          ${write ? `
+            <button class="mgmt-icon-btn" data-edit-income="${row.id}" title="Edit">✎</button>
+            <button class="mgmt-icon-btn mgmt-icon-btn--red" data-delete-income="${row.id}" title="Delete">✕</button>
+          ` : ''}
+        </div>
+      </div>
+      <div class="mgmt-tab-panel" data-tab="lots">${lotsTab}</div>
+    </div>`;
+}
+
+// ── Match invoices to a commodity by name ─────────────────────────────────────
+function _matchInvoices(invoices, commName, season) {
+  const key = commName.trim().toUpperCase();
+  return invoices.filter(inv => {
+    if (inv.season !== season) return false;
+    const linked = inv.forward_contract_id;
+    const batchComm = (() => {
+      if (!inv.batches) return '';
+      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+      return b.flatMap(x => x.lines||[]).find(l => l.type==='income' && l.description)?.description || '';
+    })();
+    const iComm = batchComm || (inv.line_items||[])[0]?.commodity || '';
+    return iComm.trim().toUpperCase() === key;
+  });
+}
+
+// ── Variance span ─────────────────────────────────────────────────────────────
+function _varSpan(v) {
+  const good  = v >= 0;
+  const color = good ? 'var(--mgmt-green)' : 'var(--mgmt-red)';
+  const sign  = v >= 0 ? '+' : '';
+  return `<span style="color:${color};font-weight:600">${sign}${fC(v)}</span>`;
+}
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+function _emptyState(msg, write, section) {
+  return `
+    <div class="mgmt-empty">
+      <div class="mgmt-empty-msg">${msg}</div>
+      ${write ? `<button class="mgmt-add-btn" data-section="${section}">+ Add</button>` : ''}
+    </div>`;
+}
+
+// ── KPI tile ──────────────────────────────────────────────────────────────────
+function _kpiTile(label, value, color) {
+  return `
+    <div class="mgmt-kpi">
+      <div class="mgmt-kpi-label">${label}</div>
+      <div class="mgmt-kpi-value" style="color:${color}">${value}</div>
+    </div>`;
+}
+
+// ── Modals ────────────────────────────────────────────────────────────────────
+
+function _openAddModal(section, farm, season, container) {
+  const isOther = section === 'other';
+  const isCarry = section === 'carryover';
+
+  const html = `
+    <div class="mgmt-modal-backdrop">
+      <div class="mgmt-modal">
+        <div class="mgmt-modal-header">
+          <div class="mgmt-modal-title">${
+            isOther ? 'Add Other Income' :
+            isCarry ? 'Add Carryover Income' :
+                      'Add Farming Income Commodity'
+          }</div>
+          <button class="mgmt-modal-close">✕</button>
+        </div>
+        <div class="mgmt-modal-body">
+          <div class="mgmt-form-group">
+            <label>Name</label>
+            <input id="mi-name" type="text" class="mgmt-input"
+              placeholder="${isOther ? 'e.g. Agistment, Water entitlement sale' : isCarry ? 'e.g. Wheat — 2024-25 season' : 'e.g. Cotton, Wheat, Sorghum'}"
+              autocomplete="off">
+          </div>
+          ${!isOther ? `
+          <div class="mgmt-form-row">
+            <div class="mgmt-form-group">
+              <label>Unit</label>
+              <select id="mi-unit" class="mgmt-input">
+                <option value="t">Tonnes (t)</option>
+                <option value="bales">Bales</option>
+                <option value="hd">Head (hd)</option>
+                <option value="kg">Kilograms (kg)</option>
+                <option value="ML">Megalitres (ML)</option>
+              </select>
+            </div>
+            <div class="mgmt-form-group">
+              <label>Budget price ($/unit)</label>
+              <input id="mi-price" type="number" step="0.01" class="mgmt-input" placeholder="e.g. 580.00">
+            </div>
+          </div>` : `
+          <div class="mgmt-form-row">
+            <div class="mgmt-form-group">
+              <label>Budget amount ($)</label>
+              <input id="mi-amount" type="number" step="1" class="mgmt-input" placeholder="e.g. 45000">
+            </div>
+            <div class="mgmt-form-group">
+              <label>Expected month</label>
+              <select id="mi-month" class="mgmt-input">
+                <option value="">— Select —</option>
+                ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i) =>
+                  `<option value="${i+1}">${m}</option>`).join('')}
+              </select>
+            </div>
+          </div>`}
+          <div class="mgmt-form-group">
+            <label>Notes (optional)</label>
+            <input id="mi-notes" type="text" class="mgmt-input" placeholder="Optional notes">
+          </div>
+        </div>
+        <div class="mgmt-modal-footer">
+          <button class="mgmt-btn mgmt-btn--ghost" id="mi-cancel">Cancel</button>
+          <button class="mgmt-btn mgmt-btn--primary" id="mi-save">Save</button>
+        </div>
+      </div>
+    </div>`;
+
+  _modal?.remove();
+  _modal = document.createElement('div');
+  _modal.innerHTML = html;
+  document.body.appendChild(_modal);
+
+  _modal.querySelector('#mi-cancel').onclick = () => { _modal?.remove(); _modal = null; };
+  _modal.querySelector('.mgmt-modal-close').onclick = () => { _modal?.remove(); _modal = null; };
+
+  _modal.querySelector('#mi-save').onclick = async () => {
+    const name = _modal.querySelector('#mi-name').value.trim();
+    if (!name) { toast('Enter a name', 'warning'); return; }
+
+    const payload = {
+      farm_id: farm.id,
+      season,
+      section,
+      name,
+      unit: isOther ? '$' : (_modal.querySelector('#mi-unit')?.value || 't'),
+      budget_price: !isOther ? (parseFloat(_modal.querySelector('#mi-price')?.value) || null) : null,
+      budget_amount: isOther ? (parseFloat(_modal.querySelector('#mi-amount')?.value) || null) : null,
+      expected_month: isOther ? (parseInt(_modal.querySelector('#mi-month')?.value) || null) : null,
+      notes: _modal.querySelector('#mi-notes').value.trim() || null,
+      sort_order: Date.now(),
+      created_by: getSession()?.user?.id || null,
+    };
+
+    try {
+      await dbInsert('mgmt_income', payload);
+      toast('Saved', 'success');
+      _modal?.remove(); _modal = null;
+    } catch(e) {
+      console.error(e);
+      toast('Save failed — check console', 'error');
+    }
+  };
+}
+
+function _openEditModal(row, farm, season, container) {
+  const isOther = row.section === 'other';
+  const isCarry = row.section === 'carryover';
+
+  const html = `
+    <div class="mgmt-modal-backdrop">
+      <div class="mgmt-modal">
+        <div class="mgmt-modal-header">
+          <div class="mgmt-modal-title">Edit — ${esc(row.name)}</div>
+          <button class="mgmt-modal-close">✕</button>
+        </div>
+        <div class="mgmt-modal-body">
+          <div class="mgmt-form-group">
+            <label>Name</label>
+            <input id="mi-name" type="text" class="mgmt-input" value="${esc(row.name)}">
+          </div>
+          ${!isOther ? `
+          <div class="mgmt-form-row">
+            <div class="mgmt-form-group">
+              <label>Unit</label>
+              <select id="mi-unit" class="mgmt-input">
+                ${['t','bales','hd','kg','ML'].map(u =>
+                  `<option value="${u}" ${row.unit===u?'selected':''}>${u}</option>`).join('')}
+              </select>
+            </div>
+            <div class="mgmt-form-group">
+              <label>Budget price ($/unit)</label>
+              <input id="mi-price" type="number" step="0.01" class="mgmt-input" value="${row.budget_price || ''}">
+            </div>
+          </div>` : `
+          <div class="mgmt-form-row">
+            <div class="mgmt-form-group">
+              <label>Budget amount ($)</label>
+              <input id="mi-amount" type="number" step="1" class="mgmt-input" value="${row.budget_amount || ''}">
+            </div>
+            <div class="mgmt-form-group">
+              <label>Expected month</label>
+              <select id="mi-month" class="mgmt-input">
+                <option value="">— Select —</option>
+                ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i) =>
+                  `<option value="${i+1}" ${row.expected_month===i+1?'selected':''}>${m}</option>`).join('')}
+              </select>
+            </div>
+          </div>`}
+          <div class="mgmt-form-group">
+            <label>Notes</label>
+            <input id="mi-notes" type="text" class="mgmt-input" value="${esc(row.notes || '')}">
+          </div>
+        </div>
+        <div class="mgmt-modal-footer">
+          <button class="mgmt-btn mgmt-btn--ghost" id="mi-cancel">Cancel</button>
+          <button class="mgmt-btn mgmt-btn--primary" id="mi-save">Save changes</button>
+        </div>
+      </div>
+    </div>`;
+
+  _modal?.remove();
+  _modal = document.createElement('div');
+  _modal.innerHTML = html;
+  document.body.appendChild(_modal);
+
+  _modal.querySelector('#mi-cancel').onclick = () => { _modal?.remove(); _modal = null; };
+  _modal.querySelector('.mgmt-modal-close').onclick = () => { _modal?.remove(); _modal = null; };
+
+  _modal.querySelector('#mi-save').onclick = async () => {
+    const name = _modal.querySelector('#mi-name').value.trim();
+    if (!name) { toast('Enter a name', 'warning'); return; }
+
+    const patch = {
+      name,
+      unit: isOther ? '$' : (_modal.querySelector('#mi-unit')?.value || row.unit),
+      budget_price: !isOther ? (parseFloat(_modal.querySelector('#mi-price')?.value) || null) : null,
+      budget_amount: isOther ? (parseFloat(_modal.querySelector('#mi-amount')?.value) || null) : null,
+      expected_month: isOther ? (parseInt(_modal.querySelector('#mi-month')?.value) || null) : null,
+      notes: _modal.querySelector('#mi-notes').value.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    try {
+      await dbUpdate('mgmt_income', row.id, patch);
+      toast('Saved', 'success');
+      _modal?.remove(); _modal = null;
+    } catch(e) {
+      console.error(e);
+      toast('Save failed', 'error');
+    }
+  };
+}
+
+function _openCropTypeModal(ct, row, farm, season, container) {
+  const isCarry = row.section === 'carryover';
+  const isEdit  = !!ct;
+
+  const html = `
+    <div class="mgmt-modal-backdrop">
+      <div class="mgmt-modal">
+        <div class="mgmt-modal-header">
+          <div class="mgmt-modal-title">${isEdit ? 'Edit' : 'Add'} ${isCarry ? 'Lot' : 'Crop Type'} — ${esc(row.name)}</div>
+          <button class="mgmt-modal-close">✕</button>
+        </div>
+        <div class="mgmt-modal-body">
+          <div class="mgmt-form-group">
+            <label>${isCarry ? 'Lot / Description' : 'Crop Type'}</label>
+            <input id="ct-name" type="text" class="mgmt-input"
+              placeholder="${isCarry ? 'e.g. Lot 1, Dec delivery' : 'e.g. Dryland, Irrigated, Main Season'}"
+              value="${esc(ct?.crop_type || '')}">
+          </div>
+          ${isCarry ? `
+          <div class="mgmt-form-row">
+            <div class="mgmt-form-group">
+              <label>Units (${row.unit})</label>
+              <input id="ct-units" type="number" step="0.1" class="mgmt-input"
+                value="${ct?.budget_units || ''}" placeholder="e.g. 1250">
+            </div>
+            <div class="mgmt-form-group">
+              <label>Price ($/unit) <span style="color:var(--hint);font-size:10px">leave blank to use commodity price ${row.budget_price ? '($'+fC(row.budget_price,2)+')' : ''}</span></label>
+              <input id="ct-price" type="number" step="0.01" class="mgmt-input"
+                value="${ct?.price_override || ''}" placeholder="${row.budget_price || 'e.g. 320.00'}">
+            </div>
+          </div>
+          <div class="mgmt-form-group">
+            <label>Expected month</label>
+            <select id="ct-month" class="mgmt-input">
+              <option value="">— Select —</option>
+              ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i) =>
+                `<option value="${i+1}" ${ct?.expected_month===i+1?'selected':''}>${m}</option>`).join('')}
+            </select>
+          </div>` : `
+          <div class="mgmt-form-row">
+            <div class="mgmt-form-group">
+              <label>Area (ha)</label>
+              <input id="ct-area" type="number" step="0.1" class="mgmt-input"
+                value="${ct?.area_ha || ''}" placeholder="e.g. 450">
+            </div>
+            <div class="mgmt-form-group">
+              <label>Yield (${row.unit}/ha)</label>
+              <input id="ct-yield" type="number" step="0.01" class="mgmt-input"
+                value="${ct?.budget_yield || ''}" placeholder="e.g. 10.5">
+            </div>
+          </div>
+          <div class="mgmt-form-group">
+            <label>Production override (${row.unit}) <span style="color:var(--hint);font-size:10px">leave blank to calculate from area × yield</span></label>
+            <input id="ct-prod" type="number" step="1" class="mgmt-input"
+              value="${ct?.budget_production || ''}" placeholder="calculated automatically">
+          </div>`}
+          <div class="mgmt-form-group">
+            <label>Notes (optional)</label>
+            <input id="ct-notes" type="text" class="mgmt-input" value="${esc(ct?.notes || '')}">
+          </div>
+        </div>
+        <div class="mgmt-modal-footer">
+          <button class="mgmt-btn mgmt-btn--ghost" id="ct-cancel">Cancel</button>
+          <button class="mgmt-btn mgmt-btn--primary" id="ct-save">${isEdit ? 'Save changes' : 'Add'}</button>
+        </div>
+      </div>
+    </div>`;
+
+  _modal?.remove();
+  _modal = document.createElement('div');
+  _modal.innerHTML = html;
+  document.body.appendChild(_modal);
+
+  _modal.querySelector('#ct-cancel').onclick = () => { _modal?.remove(); _modal = null; };
+  _modal.querySelector('.mgmt-modal-close').onclick = () => { _modal?.remove(); _modal = null; };
+
+  _modal.querySelector('#ct-save').onclick = async () => {
+    const name = _modal.querySelector('#ct-name').value.trim();
+    if (!name) { toast('Enter a name', 'warning'); return; }
+
+    const payload = isCarry ? {
+      income_id:    row.id,
+      farm_id:      farm.id,
+      season,
+      crop_type:    name,
+      budget_units: parseFloat(_modal.querySelector('#ct-units')?.value) || null,
+      price_override: parseFloat(_modal.querySelector('#ct-price')?.value) || null,
+      expected_month: parseInt(_modal.querySelector('#ct-month')?.value) || null,
+      notes:        _modal.querySelector('#ct-notes').value.trim() || null,
+    } : {
+      income_id:    row.id,
+      farm_id:      farm.id,
+      season,
+      crop_type:    name,
+      area_ha:      parseFloat(_modal.querySelector('#ct-area')?.value) || null,
+      budget_yield: parseFloat(_modal.querySelector('#ct-yield')?.value) || null,
+      budget_production: parseFloat(_modal.querySelector('#ct-prod')?.value) || null,
+      notes:        _modal.querySelector('#ct-notes').value.trim() || null,
+    };
+
+    try {
+      if (isEdit) {
+        await dbUpdate('mgmt_crop_types', ct.id, { ...payload, updated_at: new Date().toISOString() });
+      } else {
+        await dbInsert('mgmt_crop_types', payload);
+      }
+      toast('Saved', 'success');
+      _modal?.remove(); _modal = null;
+    } catch(e) {
+      console.error(e);
+      toast('Save failed', 'error');
+    }
+  };
+}
+
+// ── CSS ───────────────────────────────────────────────────────────────────────
+function _css() {
+  return `<style>
+    :root {
+      --mgmt-navy:  #1e3a5f;
+      --mgmt-green: #0a7c4e;
+      --mgmt-amber: #a05c00;
+      --mgmt-red:   #c0392b;
+      --mgmt-blue:  #1a5fb4;
+    }
+
+    /* Layout */
+    #mgmt-wrap { display: flex; flex-direction: column; min-height: 100%; }
+    .mgmt-loading { padding: 60px; text-align: center; color: var(--hint); }
+
+    /* Top bar */
+    .mgmt-topbar {
+      background: var(--mgmt-navy);
+      padding: 14px 24px;
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    }
+    .mgmt-topbar-title { color: white; font-size: 15px; font-weight: 700; }
+    .mgmt-topbar-sub   { color: rgba(255,255,255,.65); font-size: 12px; margin-top: 2px; }
+    .mgmt-topbar-meta  { display: flex; align-items: center; gap: 12px; }
+    .mgmt-topbar-asof  { color: rgba(255,255,255,.6); font-size: 11px; }
+
+    /* KPI strip */
+    .mgmt-kpi-strip {
+      background: var(--mgmt-navy);
+      padding: 0 24px 16px;
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .mgmt-kpi {
+      flex: 1; min-width: 150px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .mgmt-kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: rgba(255,255,255,.55); margin-bottom: 4px; }
+    .mgmt-kpi-value { font-size: 22px; font-weight: 700; }
+
+    /* Body */
+    .mgmt-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 24px; max-width: 1100px; margin: 0 auto; width: 100%; }
+
+    /* Section */
+    .mgmt-section { display: flex; flex-direction: column; gap: 12px; }
+    .mgmt-section-header { display: flex; align-items: center; justify-content: space-between; }
+    .mgmt-section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--hint); font-weight: 700; }
+    .mgmt-below-line { background: var(--mgmt-amber); color: white; border-radius: 4px; padding: 1px 6px; font-size: 9px; letter-spacing: .05em; margin-left: 6px; }
+    .mgmt-carryover-note { font-size: 11px; color: var(--hint); padding: 4px 0 0; }
+    .mgmt-section--carryover .mgmt-section-label { color: var(--mgmt-amber); }
+
+    /* Card */
+    .mgmt-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .mgmt-card--carryover { border-color: #f0d080; background: #fffdf5; }
+    .mgmt-card-header {
+      display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+      padding: 14px 18px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .mgmt-card-title { font-size: 15px; font-weight: 700; color: var(--mgmt-navy); }
+    .mgmt-card-sub   { font-size: 11px; color: var(--hint); margin-top: 3px; }
+
+    /* Badges */
+    .mgmt-badge {
+      display: inline-flex; align-items: center;
+      padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600;
+    }
+    .mgmt-badge-budget   { background: #e3f2fd; color: var(--mgmt-blue);  border: 1px solid #90caf9; }
+    .mgmt-badge-actual   { background: #e8f5e9; color: var(--mgmt-green); border: 1px solid #a5d6a7; }
+    .mgmt-badge-carryover { background: #fff8e1; color: var(--mgmt-amber); border: 1px solid #ffe082; }
+
+    /* Tabs */
+    .mgmt-tabs { display: flex; border-bottom: 1px solid var(--border); padding: 0 18px; }
+    .mgmt-tab {
+      padding: 10px 14px; font-size: 12px; font-weight: 500; color: var(--hint);
+      cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    .mgmt-tab:hover { color: var(--mgmt-navy); }
+    .mgmt-tab.active { color: var(--mgmt-navy); border-bottom-color: var(--mgmt-navy); font-weight: 600; }
+    .mgmt-tab-panel { padding: 0; }
+
+    /* Tables */
+    .mgmt-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .mgmt-table th {
+      padding: 7px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+      color: var(--hint); font-weight: 600; border-bottom: 2px solid var(--border);
+      text-align: left;
+    }
+    .mgmt-table th.num { text-align: right; }
+    .mgmt-table td {
+      padding: 8px 12px; border-bottom: 1px solid var(--border-light);
+      color: var(--ink);
+    }
+    .mgmt-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .mgmt-table td.actions { text-align: right; white-space: nowrap; }
+    .mgmt-table tr:last-child td { border-bottom: none; }
+    .mgmt-table-label { color: var(--hint) !important; padding-left: 20px !important; }
+    .mgmt-table-group td { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--hint); font-weight: 700; background: var(--page-bg); padding: 6px 12px !important; }
+    .mgmt-table-total td { font-weight: 700; border-top: 2px solid var(--border) !important; }
+
+    /* Buttons */
+    .mgmt-add-btn {
+      background: var(--mgmt-navy); color: white;
+      border: none; border-radius: 6px; padding: 6px 14px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .mgmt-add-btn:hover { opacity: .88; }
+    .mgmt-add-btn--amber { background: var(--mgmt-amber); }
+    .mgmt-add-btn--sm { background: var(--page-bg); color: var(--mgmt-navy); border: 1px solid var(--border); font-size: 11px; padding: 5px 12px; }
+    .mgmt-add-btn--sm:hover { background: var(--border-light); }
+    .mgmt-add-btn--sm.mgmt-add-btn--amber { background: #fff8e1; color: var(--mgmt-amber); border-color: #ffe082; }
+
+    .mgmt-icon-btn {
+      background: none; border: 1px solid var(--border); border-radius: 5px;
+      padding: 3px 7px; font-size: 12px; cursor: pointer; color: var(--hint);
+    }
+    .mgmt-icon-btn:hover { background: var(--border-light); }
+    .mgmt-icon-btn--red:hover { background: #fce4ec; color: var(--mgmt-red); border-color: var(--mgmt-red); }
+
+    .mgmt-row-btn {
+      background: none; border: none; font-size: 11px; cursor: pointer;
+      color: var(--mgmt-blue); padding: 2px 6px;
+    }
+    .mgmt-row-btn:hover { text-decoration: underline; }
+    .mgmt-row-btn--red { color: var(--mgmt-red); }
+
+    /* Empty state */
+    .mgmt-empty {
+      background: var(--page-bg); border: 1px dashed var(--border);
+      border-radius: 10px; padding: 28px; text-align: center;
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+    }
+    .mgmt-empty-msg { font-size: 12px; color: var(--hint); }
+
+    /* Modal */
+    .mgmt-modal-backdrop {
+      position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center;
+      padding: 16px;
+    }
+    .mgmt-modal {
+      background: white; border-radius: 12px; width: 100%; max-width: 480px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+      display: flex; flex-direction: column; max-height: 90vh;
+    }
+    .mgmt-modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+    }
+    .mgmt-modal-title { font-size: 14px; font-weight: 700; color: var(--mgmt-navy); }
+    .mgmt-modal-close { background: none; border: none; font-size: 16px; cursor: pointer; color: var(--hint); padding: 4px 8px; }
+    .mgmt-modal-body { padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+    .mgmt-modal-footer { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+
+    .mgmt-form-group { display: flex; flex-direction: column; gap: 5px; }
+    .mgmt-form-group label { font-size: 11px; font-weight: 600; color: var(--hint); text-transform: uppercase; letter-spacing: .05em; }
+    .mgmt-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .mgmt-input {
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 7px 10px; font-size: 13px; color: var(--ink);
+      background: white; width: 100%; box-sizing: border-box;
+    }
+    .mgmt-input:focus { outline: 2px solid var(--mgmt-navy); border-color: transparent; }
+
+    .mgmt-btn {
+      border-radius: 6px; padding: 7px 18px; font-size: 13px; font-weight: 600; cursor: pointer; border: none;
+    }
+    .mgmt-btn--primary { background: var(--mgmt-navy); color: white; }
+    .mgmt-btn--primary:hover { opacity: .88; }
+    .mgmt-btn--ghost { background: none; color: var(--hint); border: 1px solid var(--border); }
+    .mgmt-btn--ghost:hover { background: var(--border-light); }
+
+    @media (max-width: 600px) {
+      .mgmt-body { padding: 14px 14px; }
+      .mgmt-form-row { grid-template-columns: 1fr; }
+    }
+  </style>`;
 }
