@@ -252,7 +252,8 @@ async function _render(container, farm, period, allPeriods = []) {
   // ── Group items by subgroup ──────────────────────────────────────────────
   const subgroups = {};
   items.forEach(item => {
-    const sg = item.subgroup || 'Other';
+    // Normalise subgroup — DB may store "Cotton Seed" or "Cotton"; unify to canonical key
+    const sg = (item.subgroup || 'Other').replace(/\s+seed$/i, '').trim() || 'Other';
     if (!subgroups[sg]) subgroups[sg] = [];
     subgroups[sg].push(item);
   });
@@ -353,9 +354,11 @@ async function _render(container, farm, period, allPeriods = []) {
   const maxKgOnHand = Math.max(1, ...Object.values(closingKgByItem));
 
   const groupCardsHtml = Object.entries(subgroups).map(([sgName, sgItems]) => {
-    const accent     = groupAccent(sgName);
-    const icon       = SEASON_ICON[sgName] || '📦';
-    const season     = SEASON_CONTEXT[sgName] || '';
+    // Normalise: items may have subgroup = "Cotton Seed" or "Cotton" — strip trailing " Seed"
+    const sgKey      = sgName.replace(/\s+seed$/i, '').trim();
+    const accent     = groupAccent(sgKey);
+    const icon       = SEASON_ICON[sgKey] || '📦';
+    const season     = SEASON_CONTEXT[sgKey] || '';
 
     // Group totals
     const sgKgOnHand = sgItems.reduce((s, i) => s + Math.max(0, closingKgByItem[i.id] || 0), 0);
@@ -437,7 +440,7 @@ async function _render(container, farm, period, allPeriods = []) {
         <div style="background:${accent.bg};padding:12px 16px;display:flex;align-items:center;gap:12px">
           <span style="font-size:18px">${icon}</span>
           <div style="flex:1;min-width:0">
-            <div style="font-size:14px;font-weight:700;color:#fff">${esc(sgName)} Seed</div>
+            <div style="font-size:14px;font-weight:700;color:#fff">${esc(sgKey)} Seed</div>
             <div style="font-size:12px;color:rgba(255,255,255,.65);margin-top:2px">
               ${fKg(sgKgOnHand)} on hand · ${sgValue > 0 ? fAud(sgValue) + ' value' : 'No cost data'}
               ${sgUsedKg > 0 ? ` · <span style="color:rgba(255,220,180,.9)">${fKg(sgUsedKg)} used</span>` : ''}
