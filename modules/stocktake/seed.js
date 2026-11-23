@@ -397,16 +397,31 @@ async function _render(container, farm, period, allPeriods = []) {
       const barPct   = Math.round((kg / sgMax) * 100);
       const attrs    = item.attributes || {};
 
-      // Clean display name: strip "Seed Cotton " / "Seed " prefix if present
-      const displayName = item.name
+      // Clean display name: strip "Seed Cotton " / "Seed " prefix
+      // Then strip trailing bag-size + supplier tokens like "20KG Agency CSD" / "20KS Bags"
+      const rawName = item.name
         .replace(/^seed\s+cotton\s+/i, '')
         .replace(/^seed\s+/i, '')
         .trim();
 
-      // Sub-label: supplier · bag size
+      // Extract trailing "NNkg ..." or "NNks ..." token from name if no attrs.kg_per_bag
+      // e.g. "SIOKRA 253B3XF V2C 20KG Agency CSD" → display "SIOKRA 253B3XF V2C", sub "20 kg bags · Agency CSD"
+      let displayName = rawName;
+      let nameSubParts = [];
+      const bagMatch = rawName.match(/^(.*?)\s+(\d+)\s*k[gs]\b(.*)$/i);
+      if (bagMatch && !attrs.kg_per_bag && !attrs.supplier) {
+        displayName = bagMatch[1].trim();
+        const bagKg  = parseInt(bagMatch[2]);
+        const rest   = bagMatch[3].trim();
+        if (bagKg)  nameSubParts.push(`${bagKg} kg bags`);
+        if (rest)   nameSubParts.push(esc(rest));
+      }
+
+      // Sub-label: from attributes first, fall back to parsed name tokens
       const subParts = [];
-      if (attrs.supplier)   subParts.push(esc(attrs.supplier));
-      if (kpb)              subParts.push(`${kpb} kg bags`);
+      if (attrs.supplier)    subParts.push(esc(attrs.supplier));
+      else if (nameSubParts.length) subParts.push(...nameSubParts);
+      if (attrs.supplier && kpb) subParts.push(`${kpb} kg bags`); // only if supplier came from attrs
       if (attrs.source_note) subParts.push(esc(attrs.source_note));
       const subLabel = subParts.join(' · ');
 
@@ -664,8 +679,17 @@ function _buildUnallocatedPanel(pendingMovements, items, sessionById, locations 
 /** Latest unit_cost from item attributes ($/kg), set when a delivery invoice is recorded */
 function _latestUnitCost(item, _movements) {
   // unit_cost is stored in item.attributes when a delivery invoice is matched
-  const attrCost = parseFloat(item?.attributes?.unit_cost);
-  if (attrCost) return attrCost;
+  const attrs = item?.attributes || {};
+  // Debug: log first time per item to show what keys are present
+  if (item && !_latestUnitCost._logged) {
+    _latestUnitCost._logged = true;
+    console.log('[seed] sample item.attributes keys:', Object.keys(attrs), 'unit_cost raw:', attrs.unit_cost, 'full attrs:', JSON.stringify(attrs).slice(0, 200));
+  }
+  const attrCost = parseFloat(attrs.unit_cost);
+  if (attrCost && !isNaN(attrCost)) return attrCost;
+  // Also check common alternate key names
+  const alt = parseFloat(attrs.unitCost || attrs.cost_per_kg || attrs.price_per_kg);
+  if (alt && !isNaN(alt)) return alt;
   return null;
 }
 
