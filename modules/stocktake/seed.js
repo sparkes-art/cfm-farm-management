@@ -1409,7 +1409,6 @@ async function _showDeliveryForm(container, farm, items, locations, preItemId, p
         qty,
         unit:          'kg',
         kg_per_bag:    kpb || null,
-        unit_cost:     invUnitCost,
         occurred_on:   date,
         counterparty:  supplier,
         source_ref:    invNumber || null,
