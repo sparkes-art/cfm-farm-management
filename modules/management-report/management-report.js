@@ -11,7 +11,7 @@ import {
   getCommodityByName, addCommodity, addCropType,
   setCommodityVisible, isCommodityVisible,
   getCommodityNamesForGroup, getDisplayGroups,
-} from '../../js/commodities.js?v=1795397900639';
+} from '../../js/commodities.js?v=1795398275253';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _subs   = [];
@@ -395,7 +395,7 @@ function _farmingCard(row, invoices, season) {
             <td class="num" style="color:var(--mgmt-green)">${fC(inc)}</td>
             ${write ? `<td class="num actions">
               <button class="mgmt-row-btn" data-edit-ct="${ct.id}" data-income-id="${row.id}">Edit</button>
-              <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-ct="${ct.id}">✕</button>
+              <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-ct="${ct.id}">&times;</button>
             </td>` : ''}
           </tr>`;
         }).join('') : `<tr><td colspan="${write ? 6 : 5}" style="color:var(--hint);padding:16px;text-align:center">No crop types added — click below to add.</td></tr>`}
@@ -425,8 +425,8 @@ function _farmingCard(row, invoices, season) {
           <span class="mgmt-badge mgmt-badge-budget">${fC(budgetIncome)} budgeted</span>
           ${actualIncome > 0 ? `<span class="mgmt-badge mgmt-badge-actual">${fC(actualIncome)} received</span>` : ''}
           ${write ? `
-            <button class="mgmt-icon-btn" data-edit-income="${row.id}" title="Edit commodity">✎</button>
-            <button class="mgmt-icon-btn mgmt-icon-btn--red" data-delete-income="${row.id}" title="Delete">✕</button>
+            <button class="mgmt-icon-btn" data-edit-income="${row.id}" title="Edit commodity">Edit</button>
+            <button class="mgmt-icon-btn mgmt-icon-btn--red" data-delete-income="${row.id}" title="Delete">&times;</button>
           ` : ''}
         </div>
       </div>
@@ -460,7 +460,7 @@ function _otherTable(rows, write) {
             <td style="color:var(--hint);font-size:11px">${esc(r.notes || '')}</td>
             ${write ? `<td class="actions">
               <button class="mgmt-row-btn" data-edit-income="${r.id}">Edit</button>
-              <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-income="${r.id}">✕</button>
+              <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-income="${r.id}">&times;</button>
             </td>` : ''}
           </tr>`).join('')}
           <tr class="mgmt-table-total">
@@ -511,7 +511,7 @@ function _carryoverCard(row, invoices, season) {
             <td>${ct.expected_month ? monthName(ct.expected_month) : '—'}</td>
             ${write ? `<td class="actions">
               <button class="mgmt-row-btn" data-edit-ct="${ct.id}" data-income-id="${row.id}">Edit</button>
-              <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-ct="${ct.id}">✕</button>
+              <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-ct="${ct.id}">&times;</button>
             </td>` : ''}
           </tr>`;
         }).join('') : `<tr><td colspan="${write ? 6 : 5}" style="color:var(--hint);padding:16px;text-align:center">No lots added yet.</td></tr>`}
@@ -539,8 +539,8 @@ function _carryoverCard(row, invoices, season) {
         <div style="display:flex;gap:8px;align-items:center">
           <span class="mgmt-badge mgmt-badge-carryover">${fC(totalIncome)} budgeted</span>
           ${write ? `
-            <button class="mgmt-icon-btn" data-edit-income="${row.id}" title="Edit">✎</button>
-            <button class="mgmt-icon-btn mgmt-icon-btn--red" data-delete-income="${row.id}" title="Delete">✕</button>
+            <button class="mgmt-icon-btn" data-edit-income="${row.id}" title="Edit">Edit</button>
+            <button class="mgmt-icon-btn mgmt-icon-btn--red" data-delete-income="${row.id}" title="Delete">&times;</button>
           ` : ''}
         </div>
       </div>
