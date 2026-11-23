@@ -10,7 +10,8 @@ import {
   loadCommodities, getActiveCommodities, getCropTypes,
   getCommodityByName, addCommodity, addCropType,
   setCommodityVisible, isCommodityVisible,
-} from '../../js/commodities.js';
+  getCommodityNamesForGroup, getDisplayGroups,
+} from '../../js/commodities.js?v=1795397900639';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _subs   = [];
@@ -31,7 +32,6 @@ export async function mountManagementReport(container) {
   await loadCommodities(farm?.id);
   await _render(container);
 
-  const farm = getActiveFarm();
   if (farm) {
     _subs.push(subscribeTable('mgmt_income',     farm.id, () => _render(container)));
     _subs.push(subscribeTable('mgmt_crop_types', farm.id, () => _render(container)));
@@ -128,7 +128,7 @@ async function _render(container) {
           ${write ? `<button class="mgmt-add-btn" data-section="farming">+ Add Commodity</button>` : ''}
         </div>
         ${farmingRows.length
-          ? farmingRows.map(r => _farmingCard(r, invoices, season)).join('')
+          ? _renderFarmingGroups(farmingRows, invoices, season, farm)
           : _emptyState('No farming income added yet.', write, 'farming')}
       </div>
 
@@ -217,6 +217,109 @@ async function _render(container) {
       if (incId) _activeTabs[incId] = tabKey;
     });
   });
+}
+
+// ── Farming income grouped renderer ──────────────────────────────────────────
+// Renders each display group: single commodities get one card; grouped commodities
+// (e.g. Cotton Lint + Cotton Seed under "Cotton") get a combined card.
+function _renderFarmingGroups(farmingRows, invoices, season, farm) {
+  const groups = getDisplayGroups(farm?.id);
+  const rendered = [];
+
+  for (const entry of groups) {
+    if (entry.type === 'single') {
+      // Find mgmt_income rows matching this commodity name
+      const matchNames = [entry.commodity.name];
+      const rows = farmingRows.filter(r => matchNames.includes(r.commodity));
+      if (!rows.length) continue;
+      rendered.push(rows.map(r => _farmingCard(r, invoices, season)).join(''));
+
+    } else {
+      // Grouped commodity (e.g. Cotton = Lint + Seed)
+      const matchNames = getCommodityNamesForGroup(entry.groupName);
+      const rows = farmingRows.filter(r => matchNames.includes(r.commodity));
+      if (!rows.length) continue;
+      if (rows.length === 1) {
+        // Only one sub-commodity has data — render as a normal card
+        rendered.push(_farmingCard(rows[0], invoices, season));
+      } else {
+        // Multiple sub-commodities — render a combined group card
+        rendered.push(_farmingGroupCard(entry.groupName, rows, invoices, season));
+      }
+    }
+  }
+
+  // Catch any rows whose commodity didn't match any display group
+  // (e.g. a commodity added after cache was built) — render individually
+  const allHandled = new Set(
+    groups.flatMap(e =>
+      e.type === 'single'
+        ? [e.commodity.name]
+        : getCommodityNamesForGroup(e.groupName)
+    )
+  );
+  const unmatched = farmingRows.filter(r => !allHandled.has(r.commodity));
+  if (unmatched.length) {
+    rendered.push(unmatched.map(r => _farmingCard(r, invoices, season)).join(''));
+  }
+
+  return rendered.join('') || _emptyState('No farming income added yet.', canWrite(), 'farming');
+}
+
+// ── Combined group card (e.g. Cotton Lint + Cotton Seed rolled up as "Cotton") ─
+// Renders a wrapper card showing aggregated totals, then embeds each member's
+// full _farmingCard HTML as a collapsible sub-section.
+function _farmingGroupCard(groupName, rows, invoices, season) {
+  // Aggregate budget and actual across all member rows
+  let totalBudgetIncome = 0;
+  let totalActualIncome = 0;
+  for (const row of rows) {
+    const totalBudgetProd = (row.cropTypes || []).reduce((s, ct) =>
+      s + (ct.budget_production || (ct.area_ha && ct.budget_yield ? ct.area_ha * ct.budget_yield : 0)), 0);
+    totalBudgetIncome += totalBudgetProd * (row.budget_price || 0);
+
+    const matched = _matchInvoices(invoices, row.commodity, season);
+    totalActualIncome += matched.reduce((s, inv) =>
+      s + (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0), 0);
+  }
+
+  const variance = totalActualIncome - totalBudgetIncome;
+
+  // Each member renders as a full farming card, visually inset
+  const memberCards = rows.map(row => `
+    <div class="mgmt-group-member">
+      <div class="mgmt-group-member-label">${row.commodity}</div>
+      ${_farmingCard(row, invoices, season)}
+    </div>
+  `).join('');
+
+  return `
+    <div class="mgmt-card mgmt-card--group">
+      <div class="mgmt-card-header">
+        <div>
+          <span class="mgmt-card-title">${groupName}</span>
+          <span class="mgmt-card-group-members">${rows.map(r => r.commodity).join(' + ')}</span>
+        </div>
+        <div class="mgmt-header-kpis">
+          <div class="mgmt-hkpi">
+            <div class="mgmt-hkpi-label">Budget</div>
+            <div class="mgmt-hkpi-val">${fC(totalBudgetIncome)}</div>
+          </div>
+          <div class="mgmt-hkpi">
+            <div class="mgmt-hkpi-label">Actual</div>
+            <div class="mgmt-hkpi-val">${fC(totalActualIncome)}</div>
+          </div>
+          <div class="mgmt-hkpi">
+            <div class="mgmt-hkpi-label">Variance</div>
+            <div class="mgmt-hkpi-val ${variance >= 0 ? 'mgmt-positive' : 'mgmt-negative'}">${_varSpan(variance)}</div>
+          </div>
+        </div>
+      </div>
+      <div class="mgmt-group-members">
+        ${memberCards}
+      </div>
+    </div>
+  `;
 }
 
 // ── Farming income card ───────────────────────────────────────────────────────
@@ -1103,9 +1206,33 @@ function _css() {
     .mgmt-btn--ghost { background: none; color: var(--hint); border: 1px solid var(--border); }
     .mgmt-btn--ghost:hover { background: var(--border-light); }
 
+    /* Group card (e.g. Cotton = Lint + Seed) */
+    .mgmt-card--group { border-color: #c5d8f0; }
+    .mgmt-card--group .mgmt-card-header { background: #f0f6ff; }
+    .mgmt-card-group-members {
+      font-size: 11px; color: var(--hint); margin-left: 8px;
+      font-weight: 400;
+    }
+    .mgmt-header-kpis { display: flex; gap: 20px; align-items: flex-end; }
+    .mgmt-hkpi { text-align: right; }
+    .mgmt-hkpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--hint); }
+    .mgmt-hkpi-val { font-size: 14px; font-weight: 700; color: var(--mgmt-navy); margin-top: 2px; }
+    .mgmt-group-members { display: flex; flex-direction: column; }
+    .mgmt-group-member { border-top: 1px solid var(--border); }
+    .mgmt-group-member-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+      color: var(--mgmt-blue); font-weight: 700;
+      padding: 8px 18px 0;
+    }
+    /* Strip the outer card border/radius from nested farming cards inside a group */
+    .mgmt-group-member .mgmt-card {
+      border: none; border-radius: 0; box-shadow: none;
+    }
+
     @media (max-width: 600px) {
       .mgmt-body { padding: 14px 14px; }
       .mgmt-form-row { grid-template-columns: 1fr; }
+      .mgmt-header-kpis { gap: 10px; }
     }
   </style>`;
 }
