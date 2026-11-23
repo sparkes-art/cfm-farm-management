@@ -11,7 +11,7 @@ import {
   getCommodityByName, addCommodity, addCropType,
   setCommodityVisible, isCommodityVisible,
   getCommodityNamesForGroup, getDisplayGroups,
-} from '../../js/commodities.js?v=1795402070306';
+} from '../../js/commodities.js?v=1795405710770';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _subs   = [];
@@ -266,60 +266,317 @@ function _renderFarmingGroups(farmingRows, invoices, season, farm) {
   return rendered.join('') || _emptyState('No farming income added yet.', canWrite(), 'farming');
 }
 
-// ── Combined group card (e.g. Cotton Lint + Cotton Seed rolled up as "Cotton") ─
-// Renders a wrapper card showing aggregated totals, then embeds each member's
-// full _farmingCard HTML as a collapsible sub-section.
-function _farmingGroupCard(groupName, rows, invoices, season) {
-  // Aggregate budget and actual across all member rows
-  let totalBudgetIncome = 0;
-  let totalActualIncome = 0;
-  for (const row of rows) {
-    const totalBudgetProd = (row.cropTypes || []).reduce((s, ct) =>
-      s + (ct.budget_production || (ct.area_ha && ct.budget_yield ? ct.area_ha * ct.budget_yield : 0)), 0);
-    totalBudgetIncome += totalBudgetProd * (row.budget_price || 0);
+// ── Sales pipeline tab builder (shared by _farmingCard and _farmingGroupCard) ──
+// rows: array of mgmt_income rows (single-element for a solo card, multiple for group)
+// allMatched: array of all matched invoices across all rows
+// budgetByRow: array of {name, budgetProd, budgetIncome} per row
+function _buildPipelineTab(row, matched, totalBudgetProd, budgetIncome) {
+  // Aggregate invoiced qty and value from matched invoices
+  const invoicedValue = matched.reduce((s, inv) =>
+    s + (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0), 0);
+  const invoicedQty = matched.reduce((s, inv) => {
+    // Try to sum quantity from batches or line_items
+    if (inv.batches) {
+      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+      return s + b.reduce((bs, batch) =>
+        bs + (batch.lines || []).filter(l => l.type === 'income').reduce((ls, l) => ls + (parseFloat(l.quantity) || 0), 0), 0);
+    }
+    return s + (parseFloat(inv.quantity) || 0);
+  }, 0);
 
-    const matched = _matchInvoices(invoices, row.name, season);
-    totalActualIncome += matched.reduce((s, inv) =>
-      s + (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0), 0);
+  const budgetQty = totalBudgetProd;
+  const pctInvoiced = budgetQty > 0 ? Math.min(100, (invoicedQty / budgetQty) * 100) : 0;
+  const pctUnpriced = 100 - pctInvoiced;
+  const isPreHarvest = matched.length === 0;
+
+  // Pipeline bar
+  const pipelineBar = `
+    <div style="margin:16px 18px 8px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--hint);margin-bottom:4px">
+        <span>Invoiced</span><span>Unpriced / Outstanding</span>
+      </div>
+      <div style="height:16px;border-radius:8px;overflow:hidden;background:var(--mgmt-row-alt);display:flex">
+        ${pctInvoiced > 0 ? `<div style="width:${pctInvoiced.toFixed(1)}%;background:var(--mgmt-green);transition:width 0.3s"></div>` : ''}
+        <div style="flex:1;background:var(--mgmt-unpriced,#e0e0e0)"></div>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:6px;font-size:12px">
+        <span style="color:var(--mgmt-green)">●  ${pctInvoiced.toFixed(0)}% invoiced</span>
+        <span style="color:var(--hint)">●  ${pctUnpriced.toFixed(0)}% unpriced</span>
+      </div>
+    </div>`;
+
+  if (isPreHarvest) {
+    return `
+      ${pipelineBar}
+      <div style="padding:0 18px 12px">
+        <div style="background:var(--mgmt-row-alt);border-radius:8px;padding:12px 16px;color:var(--hint);font-size:13px;text-align:center">
+          Pre-harvest — no invoices recorded yet
+        </div>
+        <table class="mgmt-table" style="margin-top:12px">
+          <thead><tr>
+            <th>Revenue line</th>
+            <th class="num">Budget (${row.unit})</th>
+            <th class="num">Budget ($)</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td>${esc(row.name)}</td>
+              <td class="num">${fN(budgetQty, 1)}</td>
+              <td class="num" style="color:var(--mgmt-green)">${fC(budgetIncome)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
   }
 
-  const variance = totalActualIncome - totalBudgetIncome;
-
-  // Each member renders as a full farming card, visually inset
-  const memberCards = rows.map(row => `
-    <div class="mgmt-group-member">
-      <div class="mgmt-group-member-label">${row.name}</div>
-      ${_farmingCard(row, invoices, season)}
-    </div>
-  `).join('');
+  // Build invoice rows
+  const invoiceRows = matched.map(inv => {
+    const val = (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0);
+    const date = inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'}) : '—';
+    return `<tr>
+      <td>${date}</td>
+      <td>${esc(inv.invoice_number || '—')}</td>
+      <td class="num" style="color:var(--mgmt-green)">${fC(val)}</td>
+    </tr>`;
+  }).join('');
 
   return `
-    <div class="mgmt-card mgmt-card--group">
+    ${pipelineBar}
+    <div style="padding:0 18px 14px">
+      <table class="mgmt-table">
+        <thead><tr>
+          <th>Invoice date</th><th>Reference</th><th class="num">Amount</th>
+        </tr></thead>
+        <tbody>
+          ${invoiceRows}
+          <tr class="mgmt-table-total">
+            <td colspan="2">Total invoiced</td>
+            <td class="num" style="color:var(--mgmt-green)">${fC(invoicedValue)}</td>
+          </tr>
+          <tr>
+            <td colspan="2" style="color:var(--hint)">Outstanding (budget − invoiced)</td>
+            <td class="num" style="color:var(--hint)">${fC(budgetIncome - invoicedValue)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ── Combined group card (e.g. Cotton Lint + Cotton Seed rolled up as "Cotton") ─
+// Single card with Economics, Sales Pipeline, and Crop Types tabs.
+// Each revenue line (Lint / Seed) appears as a separate row in Economics.
+function _farmingGroupCard(groupName, rows, invoices, season) {
+  const write = canWrite();
+  const groupId = `group-${groupName.replace(/\s+/g, '-').toLowerCase()}`;
+  const activeTab = _activeTabs[groupId] || 'economics';
+
+  // Per-row calculations
+  const memberData = rows.map(row => {
+    const totalBudgetProd = (row.cropTypes || []).reduce((s, ct) =>
+      s + (ct.budget_production || (ct.area_ha && ct.budget_yield ? ct.area_ha * ct.budget_yield : 0)), 0);
+    const totalArea = (row.cropTypes || []).reduce((s, ct) => s + (ct.area_ha || 0), 0);
+    const budgetIncome = totalBudgetProd * (row.budget_price || 0);
+    const matched = _matchInvoices(invoices, row.name, season);
+    const actualIncome = matched.reduce((s, inv) =>
+      s + (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0), 0);
+    return { row, totalBudgetProd, totalArea, budgetIncome, actualIncome, matched };
+  });
+
+  const totalBudget  = memberData.reduce((s, d) => s + d.budgetIncome, 0);
+  const totalActual  = memberData.reduce((s, d) => s + d.actualIncome, 0);
+  const totalVariance = totalActual - totalBudget;
+  const totalArea    = memberData.reduce((s, d) => s + d.totalArea, 0);
+  const allMatched   = memberData.flatMap(d => d.matched);
+
+  // ── Economics tab: one row per member ────────────────────────────────────
+  const econRows = memberData.map(d => `
+    <tr>
+      <td class="mgmt-table-label">${esc(d.row.name)}</td>
+      <td class="num">${fN(d.totalBudgetProd, 0)} ${d.row.unit}</td>
+      <td class="num">${d.row.budget_price ? fC(d.row.budget_price, 2) + '/' + d.row.unit : '—'}</td>
+      <td class="num" style="color:var(--mgmt-green)">${fC(d.budgetIncome)}</td>
+      <td class="num">${fC(d.actualIncome)}</td>
+      <td class="num">${d.budgetIncome ? _varSpan(d.actualIncome - d.budgetIncome) : '—'}</td>
+      ${write ? `<td class="num actions">
+        <button class="mgmt-row-btn" data-edit-income="${d.row.id}">Edit</button>
+        <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-income="${d.row.id}">&times;</button>
+      </td>` : ''}
+    </tr>`).join('');
+
+  const econTab = `
+    <table class="mgmt-table">
+      <thead><tr>
+        <th>Revenue line</th>
+        <th class="num">Production</th>
+        <th class="num">$/unit</th>
+        <th class="num">Budget</th>
+        <th class="num">Actual</th>
+        <th class="num">Variance</th>
+        ${write ? '<th></th>' : ''}
+      </tr></thead>
+      <tbody>
+        ${econRows}
+        <tr class="mgmt-table-total">
+          <td colspan="3">Gross income</td>
+          <td class="num" style="color:var(--mgmt-green)">${fC(totalBudget)}</td>
+          <td class="num">${fC(totalActual)}</td>
+          <td class="num">${_varSpan(totalVariance)}</td>
+          ${write ? '<td></td>' : ''}
+        </tr>
+      </tbody>
+    </table>`;
+
+  // ── Sales Pipeline tab: combined view ─────────────────────────────────────
+  const totalBudgetProd = memberData.reduce((s, d) => s + d.totalBudgetProd, 0);
+  const invoicedValue   = allMatched.reduce((s, inv) =>
+    s + (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0), 0);
+  const pctInvoiced = totalBudget > 0 ? Math.min(100, (invoicedValue / totalBudget) * 100) : 0;
+  const pctUnpriced = 100 - pctInvoiced;
+  const isPreHarvest = allMatched.length === 0;
+
+  const pipelineBar = `
+    <div style="margin:16px 18px 8px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--hint);margin-bottom:4px">
+        <span>Invoiced</span><span>Unpriced / Outstanding</span>
+      </div>
+      <div style="height:16px;border-radius:8px;overflow:hidden;background:var(--mgmt-row-alt);display:flex">
+        ${pctInvoiced > 0 ? `<div style="width:${pctInvoiced.toFixed(1)}%;background:var(--mgmt-green);transition:width 0.3s"></div>` : ''}
+        <div style="flex:1;background:var(--mgmt-unpriced,#e0e0e0)"></div>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:6px;font-size:12px">
+        <span style="color:var(--mgmt-green)">●  ${pctInvoiced.toFixed(0)}% invoiced</span>
+        <span style="color:var(--hint)">●  ${pctUnpriced.toFixed(0)}% unpriced</span>
+      </div>
+    </div>`;
+
+  const pipelineTab = isPreHarvest ? `
+    ${pipelineBar}
+    <div style="padding:0 18px 12px">
+      <div style="background:var(--mgmt-row-alt);border-radius:8px;padding:12px 16px;color:var(--hint);font-size:13px;text-align:center">
+        Pre-harvest — no invoices recorded yet
+      </div>
+      <table class="mgmt-table" style="margin-top:12px">
+        <thead><tr>
+          <th>Revenue line</th><th class="num">Budget production</th><th class="num">Budget ($)</th>
+        </tr></thead>
+        <tbody>
+          ${memberData.map(d => `<tr>
+            <td>${esc(d.row.name)}</td>
+            <td class="num">${fN(d.totalBudgetProd, 0)} ${d.row.unit}</td>
+            <td class="num" style="color:var(--mgmt-green)">${fC(d.budgetIncome)}</td>
+          </tr>`).join('')}
+          <tr class="mgmt-table-total">
+            <td colspan="2">Total</td>
+            <td class="num" style="color:var(--mgmt-green)">${fC(totalBudget)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>` : `
+    ${pipelineBar}
+    <div style="padding:0 18px 14px">
+      <table class="mgmt-table">
+        <thead><tr><th>Invoice date</th><th>Reference</th><th>Commodity</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+          ${allMatched.map(inv => {
+            const val = (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0);
+            const date = inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-AU', {day:'numeric',month:'short',year:'numeric'}) : '—';
+            const comm = (() => {
+              if (inv.batches) {
+                const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+                return b.flatMap(x => x.lines||[]).find(l => l.type==='income' && l.description)?.description || '';
+              }
+              return (inv.line_items||[])[0]?.commodity || '';
+            })();
+            return `<tr>
+              <td>${date}</td>
+              <td>${esc(inv.invoice_number || '—')}</td>
+              <td>${esc(comm)}</td>
+              <td class="num" style="color:var(--mgmt-green)">${fC(val)}</td>
+            </tr>`;
+          }).join('')}
+          <tr class="mgmt-table-total">
+            <td colspan="3">Total invoiced</td>
+            <td class="num" style="color:var(--mgmt-green)">${fC(invoicedValue)}</td>
+          </tr>
+          <tr>
+            <td colspan="3" style="color:var(--hint)">Outstanding (budget − invoiced)</td>
+            <td class="num" style="color:var(--hint)">${fC(totalBudget - invoicedValue)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+
+  // ── Crop Types tab: combined across all member rows ────────────────────────
+  const allCropTypes = memberData.flatMap(d => (d.row.cropTypes || []).map(ct => ({...ct, _rowName: d.row.name, _budgetPrice: d.row.budget_price, _unit: d.row.unit})));
+  const ctTotalArea  = allCropTypes.reduce((s, ct) => s + (ct.area_ha || 0), 0);
+
+  const cropTypesTab = `
+    <table class="mgmt-table">
+      <thead><tr>
+        <th>Crop Type</th>
+        <th class="num">Area (ha)</th>
+        <th class="num">Yield</th>
+        <th class="num">Production</th>
+        <th class="num">Income ($)</th>
+        ${write ? '<th></th>' : ''}
+      </tr></thead>
+      <tbody>
+        ${allCropTypes.length ? allCropTypes.map(ct => {
+          const prod = ct.budget_production || (ct.area_ha && ct.budget_yield ? ct.area_ha * ct.budget_yield : null);
+          const inc  = prod && ct._budgetPrice ? prod * ct._budgetPrice : null;
+          return `<tr>
+            <td style="font-weight:600">${esc(ct.crop_type)}<span style="font-size:11px;color:var(--hint);font-weight:400;margin-left:6px">${ct._rowName}</span></td>
+            <td class="num">${fN(ct.area_ha, 1)}</td>
+            <td class="num">${fN(ct.budget_yield, 2)} ${ct._unit}/ha</td>
+            <td class="num">${fN(prod, 1)} ${ct._unit}</td>
+            <td class="num" style="color:var(--mgmt-green)">${fC(inc)}</td>
+            ${write ? `<td class="num actions">
+              <button class="mgmt-row-btn" data-edit-ct="${ct.id}" data-income-id="${ct.income_id}">Edit</button>
+              <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-ct="${ct.id}">&times;</button>
+            </td>` : ''}
+          </tr>`;
+        }).join('') : `<tr><td colspan="${write ? 6 : 5}" style="color:var(--hint);padding:16px;text-align:center">No crop types added yet.</td></tr>`}
+        ${allCropTypes.length ? `
+        <tr class="mgmt-table-total">
+          <td>Total</td>
+          <td class="num">${fN(ctTotalArea, 1)} ha</td>
+          <td class="num">—</td>
+          <td class="num">—</td>
+          <td class="num" style="color:var(--mgmt-green)">${fC(totalBudget)}</td>
+          ${write ? '<td></td>' : ''}
+        </tr>` : ''}
+      </tbody>
+    </table>
+    ${write ? `<div style="padding:10px 18px 14px;display:flex;gap:8px;flex-wrap:wrap">
+      ${rows.map(r => `<button class="mgmt-add-btn mgmt-add-btn--sm" data-add-crop-type="${r.id}">+ Add Crop Type (${r.name})</button>`).join('')}
+    </div>` : ''}`;
+
+  const headerSub = [
+    totalArea ? `${fN(totalArea, 0)} ha` : '',
+    rows.map(r => r.name).join(' + '),
+  ].filter(Boolean).join(' · ');
+
+  return `
+    <div class="mgmt-card mgmt-card--group" id="${groupId}">
       <div class="mgmt-card-header">
         <div>
-          <span class="mgmt-card-title">${groupName}</span>
-          <span class="mgmt-card-group-members">${rows.map(r => r.name).join(' + ')}</span>
+          <div class="mgmt-card-title">${esc(groupName)}</div>
+          ${headerSub ? `<div class="mgmt-card-sub">${headerSub}</div>` : ''}
         </div>
-        <div class="mgmt-header-kpis">
-          <div class="mgmt-hkpi">
-            <div class="mgmt-hkpi-label">Budget</div>
-            <div class="mgmt-hkpi-val">${fC(totalBudgetIncome)}</div>
-          </div>
-          <div class="mgmt-hkpi">
-            <div class="mgmt-hkpi-label">Actual</div>
-            <div class="mgmt-hkpi-val">${fC(totalActualIncome)}</div>
-          </div>
-          <div class="mgmt-hkpi">
-            <div class="mgmt-hkpi-label">Variance</div>
-            <div class="mgmt-hkpi-val ${variance >= 0 ? 'mgmt-positive' : 'mgmt-negative'}">${_varSpan(variance)}</div>
-          </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="mgmt-badge mgmt-badge-budget">${fC(totalBudget)} budgeted</span>
+          ${totalActual > 0 ? `<span class="mgmt-badge mgmt-badge-actual">${fC(totalActual)} received</span>` : ''}
         </div>
       </div>
-      <div class="mgmt-group-members">
-        ${memberCards}
+      <div class="mgmt-tabs">
+        <div class="mgmt-tab ${activeTab==='economics' ? 'active' : ''}" data-tab="economics" data-income="${groupId}">Economics</div>
+        <div class="mgmt-tab ${activeTab==='pipeline'  ? 'active' : ''}" data-tab="pipeline"  data-income="${groupId}">Sales Pipeline</div>
+        <div class="mgmt-tab ${activeTab==='croptypes' ? 'active' : ''}" data-tab="croptypes" data-income="${groupId}">Crop Types</div>
       </div>
-    </div>
-  `;
+      <div class="mgmt-tab-panel" data-tab="economics" ${activeTab!=='economics' ? 'hidden' : ''}>${econTab}</div>
+      <div class="mgmt-tab-panel" data-tab="pipeline"  ${activeTab!=='pipeline'  ? 'hidden' : ''}>${pipelineTab}</div>
+      <div class="mgmt-tab-panel" data-tab="croptypes" ${activeTab!=='croptypes' ? 'hidden' : ''}>${cropTypesTab}</div>
+    </div>`;
 }
 
 // ── Farming income card ───────────────────────────────────────────────────────
@@ -371,6 +628,9 @@ function _farmingCard(row, invoices, season) {
         </tr>
       </tbody>
     </table>`;
+
+  // ── Sales Pipeline tab ─────────────────────────────────────────────────────
+  const pipelineTab = _buildPipelineTab(row, matched, totalBudgetProd, budgetIncome);
 
   // ── Crop Types tab ─────────────────────────────────────────────────────────
   const cropTypesTab = `
@@ -432,9 +692,11 @@ function _farmingCard(row, invoices, season) {
       </div>
       <div class="mgmt-tabs">
         <div class="mgmt-tab ${activeTab==='economics'  ? 'active' : ''}" data-tab="economics"  data-income="${row.id}">Economics</div>
+        <div class="mgmt-tab ${activeTab==='pipeline'   ? 'active' : ''}" data-tab="pipeline"   data-income="${row.id}">Sales Pipeline</div>
         <div class="mgmt-tab ${activeTab==='croptypes'  ? 'active' : ''}" data-tab="croptypes"  data-income="${row.id}">Crop Types</div>
       </div>
       <div class="mgmt-tab-panel" data-tab="economics" ${activeTab!=='economics' ? 'hidden' : ''}>${econTab}</div>
+      <div class="mgmt-tab-panel" data-tab="pipeline"  ${activeTab!=='pipeline'  ? 'hidden' : ''}>${pipelineTab}</div>
       <div class="mgmt-tab-panel" data-tab="croptypes" ${activeTab!=='croptypes' ? 'hidden' : ''}>${cropTypesTab}</div>
     </div>`;
 }
@@ -655,6 +917,25 @@ function _openAddModal(section, farm, season, container) {
               <label>Budget price ($/unit)</label>
               <input id="mi-price" type="number" step="0.01" class="mgmt-input" placeholder="e.g. 580.00">
             </div>
+          </div>
+          <div id="mi-tonne-converter" style="display:none;background:var(--mgmt-row-alt);border-radius:8px;padding:12px 14px;margin-bottom:8px">
+            <div style="font-size:12px;font-weight:600;color:var(--hint);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">
+              $/tonne → $/bale converter
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+              <div class="mgmt-form-group" style="flex:1;min-width:110px;margin:0">
+                <label style="font-size:12px">Price ($/t)</label>
+                <input id="mi-price-per-tonne" type="number" step="0.01" class="mgmt-input" placeholder="e.g. 980.00">
+              </div>
+              <div class="mgmt-form-group" style="flex:1;min-width:110px;margin:0">
+                <label style="font-size:12px">Bale weight (kg/bale)</label>
+                <input id="mi-bale-weight" type="number" step="0.1" class="mgmt-input" value="227" placeholder="227">
+              </div>
+              <button type="button" id="mi-convert-btn" class="mgmt-btn mgmt-btn--ghost" style="flex-shrink:0;height:38px">
+                Convert →
+              </button>
+            </div>
+            <div id="mi-convert-result" style="font-size:12px;color:var(--hint);margin-top:6px"></div>
           </div>` : `
           <div class="mgmt-form-row">
             <div class="mgmt-form-group">
@@ -690,6 +971,34 @@ function _openAddModal(section, farm, season, container) {
   _modal.querySelector('#mi-cancel').onclick = () => { _modal?.remove(); _modal = null; };
   _modal.querySelector('.mgmt-modal-close').onclick = () => { _modal?.remove(); _modal = null; };
 
+  // $/tonne → $/bale converter visibility
+  const unitSel = _modal.querySelector('#mi-unit');
+  const converterDiv = _modal.querySelector('#mi-tonne-converter');
+  function _toggleConverter() {
+    if (!converterDiv || !unitSel) return;
+    converterDiv.style.display = unitSel.value === 'bales' ? 'block' : 'none';
+  }
+  if (unitSel) {
+    unitSel.addEventListener('change', _toggleConverter);
+    _toggleConverter(); // run on init
+  }
+
+  // Convert button
+  const convertBtn = _modal.querySelector('#mi-convert-btn');
+  if (convertBtn) {
+    convertBtn.addEventListener('click', () => {
+      const ppt = parseFloat(_modal.querySelector('#mi-price-per-tonne').value);
+      const bwKg = parseFloat(_modal.querySelector('#mi-bale-weight').value) || 227;
+      if (!ppt || isNaN(ppt)) return;
+      const baleWeight_t = bwKg / 1000;
+      const pricePBale = ppt * baleWeight_t;
+      const priceInput = _modal.querySelector('#mi-price');
+      if (priceInput) priceInput.value = pricePBale.toFixed(2);
+      const resultDiv = _modal.querySelector('#mi-convert-result');
+      if (resultDiv) resultDiv.textContent = `$${ppt}/t × ${bwKg}kg = $${pricePBale.toFixed(2)}/bale (filled above)`;
+    });
+  }
+
   // Commodity dropdown — auto-fill unit, show new-commodity input
   const commSel = _modal.querySelector('#mi-commodity');
   const newCommRow = _modal.querySelector('#mi-new-commodity-row');
@@ -704,10 +1013,12 @@ function _openAddModal(section, farm, season, container) {
         // Auto-fill unit from commodity
         const opt = commSel.selectedOptions[0];
         const unit = opt?.dataset?.unit;
-        const unitSel = _modal.querySelector('#mi-unit');
         if (unit && unitSel) {
           const match = [...unitSel.options].find(o => o.value === unit);
-          if (match) unitSel.value = unit;
+          if (match) {
+            unitSel.value = unit;
+            _toggleConverter();
+          }
         }
       }
     });
@@ -804,6 +1115,25 @@ function _openEditModal(row, farm, season, container) {
               <label>Budget price ($/unit)</label>
               <input id="mi-price" type="number" step="0.01" class="mgmt-input" value="${row.budget_price || ''}">
             </div>
+          </div>
+          <div id="mi-tonne-converter" style="display:${row.unit==='bales'?'block':'none'};background:var(--mgmt-row-alt);border-radius:8px;padding:12px 14px;margin-bottom:8px">
+            <div style="font-size:12px;font-weight:600;color:var(--hint);margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em">
+              $/tonne → $/bale converter
+            </div>
+            <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+              <div class="mgmt-form-group" style="flex:1;min-width:110px;margin:0">
+                <label style="font-size:12px">Price ($/t)</label>
+                <input id="mi-price-per-tonne" type="number" step="0.01" class="mgmt-input" placeholder="e.g. 980.00">
+              </div>
+              <div class="mgmt-form-group" style="flex:1;min-width:110px;margin:0">
+                <label style="font-size:12px">Bale weight (kg/bale)</label>
+                <input id="mi-bale-weight" type="number" step="0.1" class="mgmt-input" value="227" placeholder="227">
+              </div>
+              <button type="button" id="mi-convert-btn" class="mgmt-btn mgmt-btn--ghost" style="flex-shrink:0;height:38px">
+                Convert →
+              </button>
+            </div>
+            <div id="mi-convert-result" style="font-size:12px;color:var(--hint);margin-top:6px"></div>
           </div>` : `
           <div class="mgmt-form-row">
             <div class="mgmt-form-group">
@@ -838,6 +1168,28 @@ function _openEditModal(row, farm, season, container) {
 
   _modal.querySelector('#mi-cancel').onclick = () => { _modal?.remove(); _modal = null; };
   _modal.querySelector('.mgmt-modal-close').onclick = () => { _modal?.remove(); _modal = null; };
+
+  // $/tonne → $/bale converter for edit modal
+  const editUnitSel = _modal.querySelector('#mi-unit');
+  const editConverterDiv = _modal.querySelector('#mi-tonne-converter');
+  if (editUnitSel && editConverterDiv) {
+    editUnitSel.addEventListener('change', () => {
+      editConverterDiv.style.display = editUnitSel.value === 'bales' ? 'block' : 'none';
+    });
+    const editConvertBtn = _modal.querySelector('#mi-convert-btn');
+    if (editConvertBtn) {
+      editConvertBtn.addEventListener('click', () => {
+        const ppt = parseFloat(_modal.querySelector('#mi-price-per-tonne').value);
+        const bwKg = parseFloat(_modal.querySelector('#mi-bale-weight').value) || 227;
+        if (!ppt || isNaN(ppt)) return;
+        const pricePBale = ppt * (bwKg / 1000);
+        const priceInput = _modal.querySelector('#mi-price');
+        if (priceInput) priceInput.value = pricePBale.toFixed(2);
+        const resultDiv = _modal.querySelector('#mi-convert-result');
+        if (resultDiv) resultDiv.textContent = `$${ppt}/t × ${bwKg}kg = $${pricePBale.toFixed(2)}/bale (filled above)`;
+      });
+    }
+  }
 
   _modal.querySelector('#mi-save').onclick = async () => {
     const name = _modal.querySelector('#mi-name').value.trim();
@@ -1030,11 +1382,23 @@ function _openCropTypeModal(ct, row, farm, season, container) {
 function _css() {
   return `<style>
     :root {
-      --mgmt-navy:  #1e3a5f;
-      --mgmt-green: #0a7c4e;
-      --mgmt-amber: #a05c00;
-      --mgmt-red:   #c0392b;
-      --mgmt-blue:  #1a5fb4;
+      --mgmt-navy:     #1e3a5f;
+      --mgmt-green:    #0a7c4e;
+      --mgmt-amber:    #a05c00;
+      --mgmt-red:      #c0392b;
+      --mgmt-blue:     #1a5fb4;
+      --mgmt-row-alt:  rgba(0,0,0,.04);
+      --mgmt-unpriced: rgba(0,0,0,.08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --mgmt-row-alt:  rgba(255,255,255,.06);
+        --mgmt-unpriced: rgba(255,255,255,.12);
+      }
+    }
+    :root[data-theme="dark"] {
+      --mgmt-row-alt:  rgba(255,255,255,.06);
+      --mgmt-unpriced: rgba(255,255,255,.12);
     }
 
     /* Layout */
