@@ -95,15 +95,62 @@ function _injectStyles() {
     .sd-pill-amber { background:#fef9c3; color:#854d0e; }
     .sd-pill-hint  { background:var(--page-bg); color:var(--hint); border:1px solid var(--border-light); }
     .sd-var-row {
-      display:flex;align-items:center;gap:10px;padding:10px 16px;
-      border-bottom:1px solid var(--border-light);
+      display:grid;grid-template-columns:1fr 380px;gap:8px 16px;align-items:start;
+      padding:12px 16px;border-bottom:1px solid var(--border-light);
     }
     .sd-var-row:last-child { border-bottom:none; }
-    .sd-bar-track {
-      height:5px;border-radius:3px;background:var(--border-light);
-      flex:1;min-width:40px;overflow:hidden;
-    }
+    /* 3-stat right column */
+    .sd-var-right { display:flex;flex-direction:column;align-items:stretch;gap:7px; }
+    .sd-var-stats { display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px 6px;text-align:right; }
+    .sd-vstat-label { font-size:9px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--hint);white-space:nowrap; }
+    .sd-vstat-num { font-family:'Space Grotesk',sans-serif;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1;white-space:nowrap; }
+    .sd-vstat-unit { font-size:9px;color:var(--hint);font-weight:400;display:block; }
+    /* Stacked bar: used | planned | on-hand */
+    .sd-bar-wrap { width:100%; }
+    .sd-bar-track { width:100%;height:6px;border-radius:3px;background:var(--border-light);overflow:hidden;display:flex; }
+    .sd-bar-used    { height:100%; }
+    .sd-bar-planned { height:100%;background:var(--border-light);opacity:.5; }
+    .sd-bar-remain  { height:100%;transition:width .3s; }
     .sd-bar-fill { height:100%;border-radius:3px;transition:width .3s; }
+    .sd-bar-legend { display:flex;align-items:center;gap:8px;margin-top:4px; }
+    .sd-bar-leg { display:flex;align-items:center;gap:3px;font-size:9px;color:var(--hint); }
+    .sd-bar-dot { width:6px;height:6px;border-radius:50%;flex-shrink:0; }
+    /* Collapsible ledger */
+    .sd-ledger-toggle {
+      display:inline-flex;align-items:center;gap:4px;margin-top:5px;
+      font-size:10px;font-weight:600;color:var(--hint);cursor:pointer;
+      border:none;background:none;padding:0;letter-spacing:.03em;
+    }
+    .sd-ledger-toggle:hover { color:var(--ink-mid); }
+    .sd-ledger-toggle svg { transition:transform .15s; }
+    .sd-ledger-toggle.open svg { transform:rotate(90deg); }
+    .sd-ledger[hidden] { display:none!important; }
+    .sd-ledger { margin-top:8px;border-top:1px solid var(--border-light);padding-top:7px;width:100%; }
+    .sd-ledger table { width:100%;border-collapse:collapse; }
+    .sd-ledger th { font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--hint);text-align:left;padding:0 8px 4px 0;white-space:nowrap; }
+    .sd-ledger th:last-child { text-align:right;padding-right:0; }
+    .sd-ledger td { font-size:11px;color:var(--ink-mid);padding:2px 8px 2px 0;vertical-align:middle;white-space:nowrap; }
+    .sd-ledger td:last-child { text-align:right;padding-right:0; }
+    .sd-ldate { color:var(--hint); }
+    .sd-ltype { display:inline-block;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:1px 5px;border-radius:20px; }
+    .sd-ltype-opening  { background:var(--page-bg);color:var(--hint);border:1px solid var(--border-light); }
+    .sd-ltype-delivery { background:#dcfce7;color:#15803d; }
+    .sd-ltype-usage    { background:#fef9c3;color:#854d0e; }
+    .sd-ltype-adjustment { background:#fee2e2;color:#b91c1c; }
+    .sd-ltype-transfer_in  { background:#dbeafe;color:#1d4ed8; }
+    .sd-ltype-transfer_out { background:var(--page-bg);color:var(--hint); }
+    .sd-lunit { color:var(--hint);font-size:10px; }
+    .sd-lval  { color:var(--ink-mid);font-size:11px; }
+    .sd-linv  { color:var(--navy,#1c2b4a);font-size:11px;font-weight:600;text-decoration:none;border-bottom:1px dashed currentColor; }
+    .sd-lqty  { font-family:'Space Grotesk',sans-serif;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums; }
+    .sd-lqty-in  { color:var(--green,#15803d); }
+    .sd-lqty-out { color:#b45309; }
+    @media (prefers-color-scheme:dark) {
+      .sd-ltype-delivery { background:#14432a;color:#4ade80; }
+      .sd-ltype-usage    { background:#3b2a07;color:#fbbf24; }
+    }
+    :root[data-theme="dark"] .sd-ltype-delivery { background:#14432a;color:#4ade80; }
+    :root[data-theme="dark"] .sd-ltype-usage    { background:#3b2a07;color:#fbbf24; }
     .sd-stat-band {
       display:flex;gap:0;border-bottom:1px solid var(--border-light);
       overflow-x:auto;
@@ -419,10 +466,6 @@ async function _render(container, farm, period, allPeriods = []) {
       const kpb      = parseFloat(item.attributes?.kg_per_bag) || null;
       const unitCost = _latestUnitCost(item, seedMovements);
       const value    = unitCost && kg ? kg * unitCost : null;
-      const lastMov  = lastMovedByItem[item.id] || null;
-      // Scale bar within this group (not global) so small items are visible
-      const sgMax    = Math.max(1, ...sortedItems.map(i => closingKgByItem[i.id] || 0));
-      const barPct   = Math.round((kg / sgMax) * 100);
       const attrs    = item.attributes || {};
 
       // Clean display name: strip "Seed Cotton " / "Seed " prefix
@@ -453,49 +496,123 @@ async function _render(container, farm, period, allPeriods = []) {
       if (attrs.source_note) subParts.push(esc(attrs.source_note));
       const subLabel = subParts.join(' · ');
 
-      // Pills
-      const costPill = unitCost
-        ? `<span class="sd-pill sd-pill-blue">${fRate(unitCost)}</span>`
-        : `<span class="sd-pill sd-pill-hint" style="color:var(--hint)">No cost</span>`;
-      const valuePill = value
-        ? `<span class="sd-pill sd-pill-green">${fAud(value)} value</span>`
-        : '';
-      const movedPill = lastMov
-        ? `<span class="sd-pill sd-pill-hint">Last moved: ${_absDate(lastMov)}</span>`
-        : `<span class="sd-pill sd-pill-hint">No movements</span>`;
+      // ── 3-stat right column data ───────────────────────────────────────────
+      const usedKg    = usageKgByItem[item.id] || 0;
+      const usedVal   = unitCost ? usedKg * unitCost : null;
+      const onHandVal = value; // already kg * unitCost
+
+      // Planned kg: placeholder until crop plan data wired — show dash for now
+      const plannedKg = null;
+
+      // Stacked bar percentages: total = on-hand + used + planned
+      const totalForBar = Math.max(1, kg + usedKg + (plannedKg || 0));
+      const barUsedPct    = Math.round((usedKg          / totalForBar) * 100);
+      const barPlannedPct = Math.round(((plannedKg || 0) / totalForBar) * 100);
+      const barRemainPct  = Math.max(0, 100 - barUsedPct - barPlannedPct);
+
+      // Per-item movements for collapsible ledger (all movements, period already filtered upstream)
+      const itemMoves = (seedMovements || [])
+        .filter(m => m.item_id === item.id)
+        .sort((a, b) => (a.occurred_on || '').localeCompare(b.occurred_on || ''));
+
+      const ledgerRows = itemMoves.map(m => {
+        const isIn  = ['delivery','opening','transfer_in','adjustment'].includes(m.movement_type);
+        const qtySign = isIn ? '+' : '−';
+        const qtyClass = isIn ? 'sd-lqty-in' : 'sd-lqty-out';
+        const qty = Math.abs(parseFloat(m.quantity_kg) || 0);
+        const up  = parseFloat(m.unit_price) || null;
+        const val = up ? qty * up : null;
+        const typeKey = (m.movement_type || 'unknown').replace(/-/g,'_');
+        const typeLabel = {
+          opening:'Opening', delivery:'Delivery', usage:'Usage',
+          planting:'Planting', adjustment:'Adjustment',
+          transfer_in:'Transfer in', transfer_out:'Transfer out'
+        }[typeKey] || typeKey;
+        const dateStr = m.occurred_on
+          ? new Date(m.occurred_on).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'2-digit'})
+          : '—';
+        const refCell = m.invoice_id
+          ? `<a class="sd-linv" href="#" data-invoice-id="${m.invoice_id}">${esc(m.reference || m.invoice_id)}</a>`
+          : (m.reference ? esc(m.reference) : '—');
+        return `
+              <tr>
+                <td class="sd-ldate">${dateStr}</td>
+                <td><span class="sd-ltype sd-ltype-${typeKey}">${typeLabel}</span></td>
+                <td>${refCell}</td>
+                <td class="sd-lunit">${up ? fRate(up) : '—'}</td>
+                <td><span class="sd-lqty ${qtyClass}">${qtySign}${Math.round(qty).toLocaleString('en-AU')} kg</span></td>
+                <td class="sd-lval">${val ? (isIn ? '' : '−') + fAud(Math.abs(val)) : '—'}</td>
+              </tr>`;
+      }).join('');
+
+      const ledgerHtml = itemMoves.length ? `
+        <button class="sd-ledger-toggle" onclick="this.classList.toggle('open');this.nextElementSibling.hidden=!this.nextElementSibling.hidden">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 2l4 3-4 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          ${itemMoves.length} movement${itemMoves.length === 1 ? '' : 's'}
+        </button>
+        <div class="sd-ledger" hidden>
+          <table>
+            <thead><tr>
+              <th>Date</th><th>Type</th><th>Ref</th><th>Unit price</th><th>Qty</th><th>Value</th>
+            </tr></thead>
+            <tbody>${ledgerRows}</tbody>
+          </table>
+        </div>` : `<span style="font-size:10px;color:var(--hint);margin-top:5px;display:inline-block">No movements</span>`;
 
       return `
         <div class="sd-var-row">
-          <!-- Name + sub-label -->
-          <div style="flex:1;min-width:0">
-            <div style="font-size:13px;font-weight:600;color:var(--ink)">${esc(displayName)}</div>
-            ${subLabel ? `<div style="font-size:11px;color:var(--hint);margin-top:2px">${subLabel}</div>` : ''}
-            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">
-              ${costPill}${valuePill}${movedPill}
+          <!-- Left: name, sub-label, action buttons, collapsible ledger -->
+          <div style="min-width:0">
+            <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+              <span style="font-size:13px;font-weight:600;color:var(--ink)">${esc(displayName)}</span>
+              ${unitCost ? `<span class="sd-pill sd-pill-blue" style="font-size:9px">${fRate(unitCost)}</span>` : ''}
+              ${canWrite() ? `
+                <span style="margin-left:auto;display:flex;gap:4px">
+                  <button class="btn btn-ghost btn-sm sd-record-delivery"
+                    data-item-id="${item.id}" data-item-name="${esc(item.name)}"
+                    data-unit="${esc(item.default_unit || 'bags')}"
+                    data-kpb="${kpb || ''}"
+                    style="font-size:11px;color:var(--hint);padding:1px 6px" title="Record delivery">+ Delivery</button>
+                  <button class="btn btn-ghost btn-sm sd-edit-item"
+                    data-item-id="${item.id}"
+                    style="font-size:11px;color:var(--hint);padding:1px 6px" title="Edit variety">✎</button>
+                </span>` : ''}
+            </div>
+            ${subLabel ? `<div style="font-size:11px;color:var(--hint);margin-top:1px">${subLabel}</div>` : ''}
+            ${ledgerHtml}
+          </div>
+          <!-- Right: 3-stat block + stacked bar -->
+          <div class="sd-var-right">
+            <div class="sd-var-stats">
+              <span class="sd-vstat-label">On hand</span>
+              <span class="sd-vstat-label">Used</span>
+              <span class="sd-vstat-label">Planned</span>
+              <span class="sd-vstat-num" style="color:var(--ink)">
+                ${Math.round(kg).toLocaleString('en-AU')}
+                <span class="sd-vstat-unit">kg${onHandVal ? ` · ${fAud(onHandVal)}` : ''}</span>
+              </span>
+              <span class="sd-vstat-num" style="color:#d97706">
+                ${Math.round(usedKg).toLocaleString('en-AU')}
+                <span class="sd-vstat-unit">kg${usedVal ? ` · ${fAud(usedVal)}` : ''}</span>
+              </span>
+              <span class="sd-vstat-num" style="color:var(--hint)">
+                ${plannedKg !== null ? Math.round(plannedKg).toLocaleString('en-AU') : '—'}
+                <span class="sd-vstat-unit">${plannedKg !== null ? 'kg est.' : 'not set'}</span>
+              </span>
+            </div>
+            <div class="sd-bar-wrap">
+              <div class="sd-bar-track">
+                <div class="sd-bar-used"    style="width:${barUsedPct}%;background:#d97706"></div>
+                <div class="sd-bar-planned" style="width:${barPlannedPct}%"></div>
+                <div class="sd-bar-remain"  style="width:${barRemainPct}%;background:${accent.bg}"></div>
+              </div>
+              <div class="sd-bar-legend">
+                <span class="sd-bar-leg"><span class="sd-bar-dot" style="background:#d97706"></span>Used</span>
+                <span class="sd-bar-leg"><span class="sd-bar-dot" style="background:var(--border-light)"></span>Planned</span>
+                <span class="sd-bar-leg"><span class="sd-bar-dot" style="background:${accent.bg}"></span>On hand</span>
+              </div>
             </div>
           </div>
-          <!-- Bar + qty -->
-          <div style="flex:0 0 220px;display:flex;align-items:center;gap:12px">
-            <div class="sd-bar-track" style="flex:1">
-              <div class="sd-bar-fill" style="width:${barPct}%;background:${accent.bg}"></div>
-            </div>
-            <div style="text-align:right;min-width:60px">
-              <span style="font-size:16px;font-weight:700;color:var(--ink)">${Math.round(kg).toLocaleString('en-AU')}</span>
-              <span style="font-size:12px;color:var(--hint)"> kg</span>
-            </div>
-          </div>
-          <!-- Actions -->
-          ${canWrite() ? `
-            <div style="flex-shrink:0;display:flex;gap:4px;margin-left:8px">
-              <button class="btn btn-ghost btn-sm sd-record-delivery"
-                data-item-id="${item.id}" data-item-name="${esc(item.name)}"
-                data-unit="${esc(item.default_unit || 'bags')}"
-                data-kpb="${kpb || ''}"
-                style="font-size:12px;color:var(--hint)" title="Record delivery">+</button>
-              <button class="btn btn-ghost btn-sm sd-edit-item"
-                data-item-id="${item.id}"
-                style="font-size:12px;color:var(--hint)" title="Edit variety">✎</button>
-            </div>` : ''}
         </div>`;
     }).join('');
 
