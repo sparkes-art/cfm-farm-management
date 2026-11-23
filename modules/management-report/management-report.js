@@ -11,7 +11,7 @@ import {
   getCommodityByName, addCommodity, addCropType,
   setCommodityVisible, isCommodityVisible,
   getCommodityNamesForGroup, getDisplayGroups,
-} from '../../js/commodities.js?v=1795405710770';
+} from '../../js/commodities.js?v=1795405818100';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _subs   = [];
@@ -1433,7 +1433,7 @@ function _css() {
     .mgmt-kpi-value { font-size: 22px; font-weight: 700; }
 
     /* Body */
-    .mgmt-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 24px; max-width: 1100px; margin: 0 auto; width: 100%; }
+    .mgmt-body { padding: 20px 24px; display: flex; flex-direction: column; gap: 24px; box-sizing: border-box; }
 
     /* Section */
     .mgmt-section { display: flex; flex-direction: column; gap: 12px; }
