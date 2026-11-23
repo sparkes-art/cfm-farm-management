@@ -11,7 +11,7 @@ import {
   getCommodityByName, addCommodity, addCropType,
   setCommodityVisible, isCommodityVisible,
   getCommodityNamesForGroup, getDisplayGroups,
-} from '../../js/commodities.js?v=1795408723658';
+} from '../../js/commodities.js?v=1795410299988';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _subs   = [];
@@ -109,6 +109,18 @@ async function _render(container) {
       </div>
       <div class="mgmt-topbar-meta">
         <span class="mgmt-topbar-asof">As at ${now.toLocaleDateString('en-AU',{day:'numeric',month:'long',year:'numeric'})}</span>
+        <label class="mgmt-ytd-label">YTD to end of</label>
+        <select class="mgmt-ytd-sel" id="mgmt-ytd-month">
+          ${(() => {
+            const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const SEASON = [7,8,9,10,11,12,1,2,3,4,5,6];
+            const curM = now.getMonth() + 1;
+            return SEASON.map(m => {
+              const sel = m === curM ? ' selected' : '';
+              return `<option value="${m}"${sel}>${MONTHS[m-1]}</option>`;
+            }).join('');
+          })()}
+        </select>
       </div>
     </div>
 
@@ -145,14 +157,14 @@ async function _render(container) {
           : _emptyState('No other income added yet.', write, 'other')}
       </div>
 
-      <!-- CARRYOVER INCOME -->
+      <!-- ON-HAND INVENTORY (carryover) -->
       <div class="mgmt-section mgmt-section--carryover">
         <div class="mgmt-section-header">
-          <span class="mgmt-section-label">Carryover Income <span class="mgmt-below-line">below the line</span></span>
-          ${write ? `<button class="mgmt-add-btn mgmt-add-btn--amber" data-section="carryover">+ Add Carryover</button>` : ''}
+          <span class="mgmt-section-label">On-Hand Inventory <span class="mgmt-below-line">below the line</span></span>
+          ${write ? `<button class="mgmt-add-btn mgmt-add-btn--amber" data-section="carryover">+ Add Item</button>` : ''}
         </div>
         <div class="mgmt-carryover-note">
-          Prior season commodities sold in this season. These receipts are excluded from farming income KPIs.
+          Prior season commodities on hand and sold in this season. These receipts are excluded from farming income KPIs.
         </div>
         ${carryoverRows.length
           ? carryoverRows.map(r => _carryoverCard(r, invoices, season)).join('')
@@ -234,8 +246,157 @@ async function _render(container) {
       tab.classList.add('active');
       card.querySelectorAll('.mgmt-tab-panel').forEach(p => { p.hidden = p.dataset.tab !== tabKey; });
       if (incId) _activeTabs[incId] = tabKey;
+      // Render YTD panel on first open
+      if (tabKey === 'ytd') {
+        const panel = card.querySelector('.mgmt-ytd-panel');
+        if (panel && panel.querySelector('.mgmt-ytd-loading')) _renderYtdPanel(panel);
+      }
     });
   });
+
+  // ── YTD: wire master month selector ─────────────────────────────────────────
+  const ytdSel = wrap.querySelector('#mgmt-ytd-month');
+  function _getYtdMonth() {
+    return ytdSel ? parseInt(ytdSel.value) : (new Date().getMonth() + 1);
+  }
+
+  // Compute YTD budget for a row given a month
+  function _ytdBudget(budget, scheduleJson, toMonth) {
+    if (!budget) return 0;
+    let sched = null;
+    try { sched = scheduleJson ? JSON.parse(scheduleJson) : null; } catch(e) {}
+    if (!sched || !sched.length) {
+      // Even distribution across 12 months; count season months up to toMonth
+      const SEASON = [7,8,9,10,11,12,1,2,3,4,5,6];
+      const idx = SEASON.indexOf(toMonth);
+      return budget * ((idx + 1) / 12);
+    }
+    // Sum pct for all months ≤ toMonth in the season
+    const SEASON = [7,8,9,10,11,12,1,2,3,4,5,6];
+    const toIdx  = SEASON.indexOf(toMonth);
+    let pctSum = 0;
+    for (const entry of sched) {
+      if (SEASON.indexOf(entry.month) <= toIdx) pctSum += (entry.pct || 0);
+    }
+    return budget * (pctSum / 100);
+  }
+
+  // Render a YTD panel given the panel element
+  function _renderYtdPanel(panel) {
+    const toMonth  = _getYtdMonth();
+    const budget   = parseFloat(panel.dataset.budget) || 0;
+    const actual   = parseFloat(panel.dataset.actual) || 0;
+    const schedRaw = panel.dataset.schedule || '';
+    let sched = null;
+    try { sched = schedRaw ? JSON.parse(schedRaw) : null; } catch(e) {}
+
+    const ytdBud = _ytdBudget(budget, schedRaw, toMonth);
+    const ytdVar = actual - ytdBud;
+    const pctBehind = ytdBud > 0 ? ((ytdBud - actual) / ytdBud) * 100 : 0;
+
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const SEASON = [7,8,9,10,11,12,1,2,3,4,5,6];
+    const toIdx  = SEASON.indexOf(toMonth);
+
+    // Build schedule rows
+    let schedRows = '';
+    if (!sched || !sched.length) {
+      const evenPct = (100/12).toFixed(1);
+      schedRows = SEASON.map((m, i) => {
+        const isFuture  = i > toIdx;
+        const isCurrent = i === toIdx;
+        const rowBud    = budget / 12;
+        const rowClass  = isFuture ? 'future' : (isCurrent ? 'current' : '');
+        return `<tr class="${rowClass}">
+          <td>${MONTHS[m-1]}</td>
+          <td class="num">${evenPct}%</td>
+          <td class="num">${fC(rowBud)}</td>
+          <td class="num">${isFuture ? '—' : (m === toMonth ? fC(actual - _ytdBudget(budget, schedRaw, SEASON[i-1]||0)) : '—')}</td>
+          <td class="num">${isFuture ? '—' : '—'}</td>
+        </tr>`;
+      }).join('');
+    } else {
+      // Map sched by month
+      const schedMap = {};
+      for (const e of sched) schedMap[e.month] = e.pct;
+      schedRows = SEASON.map((m, i) => {
+        const pct       = schedMap[m] || 0;
+        const isFuture  = i > toIdx;
+        const isCurrent = i === toIdx;
+        const rowBud    = budget * (pct / 100);
+        const rowClass  = isFuture ? 'future' : (isCurrent ? 'current' : '');
+        return `<tr class="${rowClass}">
+          <td>${MONTHS[m-1]}</td>
+          <td class="num">${pct > 0 ? pct + '%' : '—'}</td>
+          <td class="num">${pct > 0 ? fC(rowBud) : '—'}</td>
+          <td class="num">—</td>
+          <td class="num">—</td>
+        </tr>`;
+      }).join('');
+    }
+
+    const noSchedNote = (!sched || !sched.length) ? `
+      <div class="mgmt-ytd-no-sched">No payment schedule set — showing even distribution across 12 months. Set a schedule via the commodity edit to track payment timing accurately.</div>` : '';
+
+    panel.innerHTML = `
+      ${noSchedNote}
+      <div class="mgmt-ytd-kpis">
+        <div class="mgmt-ytd-kpi">
+          <div class="mgmt-ytd-kpi-label">YTD Budget (to ${MONTHS[toMonth-1]})</div>
+          <div class="mgmt-ytd-kpi-val" style="color:var(--mgmt-blue)">${fC(ytdBud)}</div>
+        </div>
+        <div class="mgmt-ytd-kpi">
+          <div class="mgmt-ytd-kpi-label">YTD Received</div>
+          <div class="mgmt-ytd-kpi-val" style="color:var(--mgmt-green)">${fC(actual)}</div>
+        </div>
+        <div class="mgmt-ytd-kpi">
+          <div class="mgmt-ytd-kpi-label">YTD Variance</div>
+          <div class="mgmt-ytd-kpi-val" style="color:${ytdVar >= 0 ? 'var(--mgmt-green)' : 'var(--mgmt-red)'}">${ytdVar >= 0 ? '+' : ''}${fC(ytdVar)}</div>
+        </div>
+      </div>
+      <table class="mgmt-ytd-table">
+        <thead><tr>
+          <th>Month</th>
+          <th class="num">Sched %</th>
+          <th class="num">Budget $</th>
+          <th class="num">Received $</th>
+          <th class="num">Variance</th>
+        </tr></thead>
+        <tbody>${schedRows}</tbody>
+      </table>`;
+  }
+
+  // Update all YTD chips and open YTD panels when month changes
+  function _refreshYtd() {
+    const toMonth  = _getYtdMonth();
+    const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    wrap.querySelectorAll('.mgmt-ytd-panel').forEach(panel => {
+      const budget   = parseFloat(panel.dataset.budget) || 0;
+      const actual   = parseFloat(panel.dataset.actual) || 0;
+      const schedRaw = panel.dataset.schedule || '';
+      const ytdBud   = _ytdBudget(budget, schedRaw, toMonth);
+      const pctBehind = ytdBud > 0 ? ((ytdBud - actual) / ytdBud) * 100 : 0;
+      // Update chip
+      const incId = panel.dataset.ytdIncome;
+      const chip  = wrap.querySelector(`.mgmt-ytd-chip[data-ytd-income="${incId}"]`);
+      if (chip) {
+        let cls = 'no-schedule', label = 'YTD';
+        if (budget > 0) {
+          if (pctBehind <= 10)      { cls = 'on-track'; label = `YTD ✓`; }
+          else if (pctBehind <= 25) { cls = 'behind';   label = `YTD ${pctBehind.toFixed(0)}% behind`; }
+          else                      { cls = 'at-risk';  label = `YTD ${pctBehind.toFixed(0)}% behind`; }
+        }
+        chip.className = `mgmt-ytd-chip ${cls}`;
+        chip.textContent = label;
+      }
+      // Re-render panel if visible
+      if (!panel.hidden) _renderYtdPanel(panel);
+    });
+  }
+
+  if (ytdSel) ytdSel.addEventListener('change', _refreshYtd);
+  // Run once on mount to set initial chip states
+  setTimeout(_refreshYtd, 0);
 }
 
 // ── Farming income grouped renderer ──────────────────────────────────────────
@@ -587,6 +748,7 @@ function _farmingGroupCard(groupName, rows, invoices, season) {
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="mgmt-badge mgmt-badge-budget">${fC(totalBudget)} budgeted</span>
           ${totalActual > 0 ? `<span class="mgmt-badge mgmt-badge-actual">${fC(totalActual)} received</span>` : ''}
+          <span class="mgmt-ytd-chip" data-ytd-income="${groupId}">YTD</span>
           <button class="mgmt-collapse-btn" data-collapse="${groupId}" title="${isCollapsed ? 'Expand' : 'Collapse'}">${isCollapsed ? '▼' : '▲'}</button>
         </div>
       </div>
@@ -595,10 +757,14 @@ function _farmingGroupCard(groupName, rows, invoices, season) {
         <div class="mgmt-tab ${activeTab==='economics' ? 'active' : ''}" data-tab="economics" data-income="${groupId}">Economics</div>
         <div class="mgmt-tab ${activeTab==='pipeline'  ? 'active' : ''}" data-tab="pipeline"  data-income="${groupId}">Sales Pipeline</div>
         <div class="mgmt-tab ${activeTab==='croptypes' ? 'active' : ''}" data-tab="croptypes" data-income="${groupId}">Crop Types</div>
+        <div class="mgmt-tab ${activeTab==='ytd'       ? 'active' : ''}" data-tab="ytd"       data-income="${groupId}">YTD Budget vs Actual</div>
       </div>
       <div class="mgmt-tab-panel" data-tab="economics" ${activeTab!=='economics' ? 'hidden' : ''}>${econTab}</div>
       <div class="mgmt-tab-panel" data-tab="pipeline"  ${activeTab!=='pipeline'  ? 'hidden' : ''}>${pipelineTab}</div>
       <div class="mgmt-tab-panel" data-tab="croptypes" ${activeTab!=='croptypes' ? 'hidden' : ''}>${cropTypesTab}</div>
+      <div class="mgmt-tab-panel mgmt-ytd-panel" data-tab="ytd" data-ytd-income="${groupId}" data-budget="${totalBudget}" data-schedule="" data-actual="${totalActual}" ${activeTab!=='ytd' ? 'hidden' : ''}>
+        <div class="mgmt-ytd-loading">Loading YTD…</div>
+      </div>
       </div>
     </div>`;
 }
@@ -707,9 +873,10 @@ function _farmingCard(row, invoices, season) {
           <div class="mgmt-card-title">${esc(row.name)}</div>
           ${headerSub ? `<div class="mgmt-card-sub">${headerSub}</div>` : ''}
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="mgmt-badge mgmt-badge-budget">${fC(budgetIncome)} budgeted</span>
           ${actualIncome > 0 ? `<span class="mgmt-badge mgmt-badge-actual">${fC(actualIncome)} received</span>` : ''}
+          <span class="mgmt-ytd-chip" data-ytd-income="${row.id}">YTD</span>
           ${write ? `
             <button class="mgmt-icon-btn" data-edit-income="${row.id}" title="Edit commodity">Edit</button>
             <button class="mgmt-icon-btn mgmt-icon-btn--red" data-delete-income="${row.id}" title="Delete">&times;</button>
@@ -722,10 +889,14 @@ function _farmingCard(row, invoices, season) {
         <div class="mgmt-tab ${activeTab==='economics'  ? 'active' : ''}" data-tab="economics"  data-income="${row.id}">Economics</div>
         <div class="mgmt-tab ${activeTab==='pipeline'   ? 'active' : ''}" data-tab="pipeline"   data-income="${row.id}">Sales Pipeline</div>
         <div class="mgmt-tab ${activeTab==='croptypes'  ? 'active' : ''}" data-tab="croptypes"  data-income="${row.id}">Crop Types</div>
+        <div class="mgmt-tab ${activeTab==='ytd'        ? 'active' : ''}" data-tab="ytd"        data-income="${row.id}">YTD Budget vs Actual</div>
       </div>
       <div class="mgmt-tab-panel" data-tab="economics" ${activeTab!=='economics' ? 'hidden' : ''}>${econTab}</div>
       <div class="mgmt-tab-panel" data-tab="pipeline"  ${activeTab!=='pipeline'  ? 'hidden' : ''}>${pipelineTab}</div>
       <div class="mgmt-tab-panel" data-tab="croptypes" ${activeTab!=='croptypes' ? 'hidden' : ''}>${cropTypesTab}</div>
+      <div class="mgmt-tab-panel mgmt-ytd-panel" data-tab="ytd" data-ytd-income="${row.id}" data-budget="${budgetIncome}" data-schedule="${esc(JSON.stringify(row.payment_schedule||null))}" data-actual="${actualIncome}" ${activeTab!=='ytd' ? 'hidden' : ''}>
+        <div class="mgmt-ytd-loading">Loading YTD…</div>
+      </div>
       </div>
     </div>`;
 }
@@ -767,7 +938,7 @@ function _otherTable(rows, write) {
 // ── Carryover income card ─────────────────────────────────────────────────────
 function _carryoverCard(row, invoices, season) {
   const write = canWrite();
-  const activeTab = _activeTabs[row.id] || 'lots';
+  const activeTab = _activeTabs[row.id] || 'items';
 
   const totalUnits = row.cropTypes.reduce((s, ct) => s + (ct.budget_units || 0), 0);
   const totalIncome = row.cropTypes.reduce((s, ct) => {
@@ -783,7 +954,7 @@ function _carryoverCard(row, invoices, season) {
   const lotsTab = `
     <table class="mgmt-table">
       <thead><tr>
-        <th>Lot / Description</th>
+        <th>Item / Description</th>
         <th class="num">Units (${row.unit})</th>
         <th class="num">Price (/${row.unit})</th>
         <th class="num">Income ($)</th>
@@ -805,7 +976,7 @@ function _carryoverCard(row, invoices, season) {
               <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-ct="${ct.id}">&times;</button>
             </td>` : ''}
           </tr>`;
-        }).join('') : `<tr><td colspan="${write ? 6 : 5}" style="color:var(--hint);padding:16px;text-align:center">No lots added yet.</td></tr>`}
+        }).join('') : `<tr><td colspan="${write ? 6 : 5}" style="color:var(--hint);padding:16px;text-align:center">No items added yet.</td></tr>`}
         ${row.cropTypes.length ? `
         <tr class="mgmt-table-total">
           <td>Total</td>
@@ -817,7 +988,7 @@ function _carryoverCard(row, invoices, season) {
       </tbody>
     </table>
     ${write ? `<div style="padding:10px 18px 14px">
-      <button class="mgmt-add-btn mgmt-add-btn--sm mgmt-add-btn--amber" data-add-crop-type="${row.id}">+ Add Lot</button>
+      <button class="mgmt-add-btn mgmt-add-btn--sm mgmt-add-btn--amber" data-add-crop-type="${row.id}">+ Add Item</button>
     </div>` : ''}`;
 
   return `
@@ -835,7 +1006,7 @@ function _carryoverCard(row, invoices, season) {
           ` : ''}
         </div>
       </div>
-      <div class="mgmt-tab-panel" data-tab="lots">${lotsTab}</div>
+      <div class="mgmt-tab-panel" data-tab="items">${lotsTab}</div>
     </div>`;
 }
 
@@ -1254,9 +1425,9 @@ function _openCropTypeModal(ct, row, farm, season, container) {
 
   const cropTypeInput = isCarry ? `
     <div class="mgmt-form-group">
-      <label>Lot / Description</label>
+      <label>Item / Description</label>
       <input id="ct-name" type="text" class="mgmt-input"
-        placeholder="e.g. Lot 1, Dec delivery"
+        placeholder="e.g. Wheat Bin 3, Dec delivery"
         value="${esc(ct?.crop_type || '')}">
     </div>` : masterCropTypes.length ? `
     <div class="mgmt-form-group">
@@ -1280,7 +1451,7 @@ function _openCropTypeModal(ct, row, farm, season, container) {
     <div class="mgmt-modal-backdrop">
       <div class="mgmt-modal">
         <div class="mgmt-modal-header">
-          <div class="mgmt-modal-title">${isEdit ? 'Edit' : 'Add'} ${isCarry ? 'Lot' : 'Crop Type'} — ${esc(row.name)}</div>
+          <div class="mgmt-modal-title">${isEdit ? 'Edit' : 'Add'} ${isCarry ? 'Item' : 'Crop Type'} — ${esc(row.name)}</div>
           <button class="mgmt-modal-close">✕</button>
         </div>
         <div class="mgmt-modal-body">
@@ -1629,6 +1800,59 @@ function _css() {
     /* Strip the outer card border/radius from nested farming cards inside a group */
     .mgmt-group-member .mgmt-card {
       border: none; border-radius: 0; box-shadow: none;
+    }
+
+    /* YTD month selector in topbar */
+    .mgmt-ytd-label {
+      color: rgba(255,255,255,.65); font-size: 11px;
+    }
+    .mgmt-ytd-sel {
+      background: rgba(255,255,255,.15); color: white;
+      border: 1px solid rgba(255,255,255,.25); border-radius: 6px;
+      padding: 4px 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .mgmt-ytd-sel option { background: #1e3a5f; color: white; }
+
+    /* YTD status chip on card headers */
+    .mgmt-ytd-chip {
+      display: inline-flex; align-items: center;
+      padding: 3px 9px; border-radius: 20px;
+      font-size: 11px; font-weight: 700;
+      background: rgba(0,0,0,.08); color: var(--hint);
+      border: 1px solid var(--border); cursor: default;
+    }
+    .mgmt-ytd-chip.on-track  { background: #d4edda; color: #155724; border-color: #a5d6a7; }
+    .mgmt-ytd-chip.behind    { background: #fff3cd; color: #856404; border-color: #ffc107; }
+    .mgmt-ytd-chip.at-risk   { background: #f8d7da; color: #842029; border-color: #f5c6cb; }
+    .mgmt-ytd-chip.no-schedule { background: rgba(0,0,0,.06); color: var(--hint); border-color: var(--border); }
+
+    /* YTD panel */
+    .mgmt-ytd-panel { padding: 14px 18px; }
+    .mgmt-ytd-loading { color: var(--hint); font-size: 12px; padding: 20px; text-align: center; }
+    .mgmt-ytd-kpis {
+      display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;
+    }
+    .mgmt-ytd-kpi {
+      flex: 1; min-width: 120px;
+      background: var(--mgmt-row-alt); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px;
+    }
+    .mgmt-ytd-kpi-label { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--hint); margin-bottom: 3px; }
+    .mgmt-ytd-kpi-val   { font-size: 16px; font-weight: 700; }
+    .mgmt-ytd-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+    .mgmt-ytd-table th {
+      padding: 6px 10px; font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+      color: var(--hint); font-weight: 600; border-bottom: 2px solid var(--border); text-align: left;
+    }
+    .mgmt-ytd-table th.num { text-align: right; }
+    .mgmt-ytd-table td { padding: 7px 10px; border-bottom: 1px solid var(--border-light); }
+    .mgmt-ytd-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .mgmt-ytd-table tr.future td { opacity: .45; font-style: italic; }
+    .mgmt-ytd-table tr.current td { font-weight: 600; }
+    .mgmt-ytd-no-sched {
+      background: var(--mgmt-row-alt); border: 1px dashed var(--border);
+      border-radius: 8px; padding: 14px 16px; font-size: 12px; color: var(--hint);
+      margin-bottom: 10px;
     }
 
     @media (max-width: 600px) {
