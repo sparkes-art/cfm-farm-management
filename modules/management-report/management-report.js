@@ -752,7 +752,6 @@ function _openAddModal(section, farm, season, container) {
       budget_amount: isOther ? (parseFloat(_modal.querySelector('#mi-amount')?.value) || null) : null,
       expected_month: isOther ? (parseInt(_modal.querySelector('#mi-month')?.value) || null) : null,
       notes: _modal.querySelector('#mi-notes').value.trim() || null,
-      sort_order: Date.now(),
       created_by: getSession()?.user?.id || null,
     };
 
