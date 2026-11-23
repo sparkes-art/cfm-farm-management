@@ -511,9 +511,12 @@ async function _render(container, farm, period, allPeriods = []) {
       const plannedCost = planStub ? planStub.kg * planStub.costPerKg : null;
 
       // Stacked bar percentages: total = on-hand + used + planned
-      const totalForBar = Math.max(1, kg + usedKg + (plannedKg || 0));
-      const barUsedPct    = Math.round((usedKg          / totalForBar) * 100);
-      const barPlannedPct = Math.round(((plannedKg || 0) / totalForBar) * 100);
+      // Bar represents total requirement: used + planned need + on-hand surplus/deficit
+      // Total = max(on-hand, used + planned) so bar always fills 100%
+      const totalNeed   = usedKg + (plannedKg || 0);
+      const totalForBar = Math.max(1, Math.max(kg, totalNeed));
+      const barUsedPct    = Math.min(100, Math.round((usedKg          / totalForBar) * 100));
+      const barPlannedPct = Math.min(100 - barUsedPct, Math.round(((plannedKg || 0) / totalForBar) * 100));
       const barRemainPct  = Math.max(0, 100 - barUsedPct - barPlannedPct);
 
       // Per-item movements for collapsible ledger (all movements, period already filtered upstream)
@@ -522,7 +525,11 @@ async function _render(container, farm, period, allPeriods = []) {
         .sort((a, b) => (a.occurred_on || '').localeCompare(b.occurred_on || ''));
 
       const ledgerRows = itemMoves.map(m => {
-        const isIn  = ['delivery','opening','transfer_in','adjustment'].includes(m.movement_type);
+        const typeKey = (m.movement_type || 'unknown').replace(/-/g,'_');
+        // Treat the earliest adjustment as the opening balance for display
+        const isOpeningBalance = m.movement_type === 'adjustment'
+          && itemMoves[0]?.id === m.id; // itemMoves sorted asc, so [0] is oldest
+        const isIn  = ['delivery','transfer_in','reclass_in','natural_increase','harvest_inload'].includes(m.movement_type) || isOpeningBalance;
         const qtySign = isIn ? '+' : '−';
         const qtyClass = isIn ? 'sd-lqty-in' : 'sd-lqty-out';
         const qty = Math.abs(parseFloat(m.signed_qty) || 0);
@@ -530,10 +537,6 @@ async function _render(container, farm, period, allPeriods = []) {
         // show WAC (item-level) for delivery and opening balance rows as a proxy, dash for others
         const up  = (m.movement_type === 'delivery' || isOpeningBalance) && unitCost ? unitCost : null;
         const val = up ? qty * up : null;
-        const typeKey = (m.movement_type || 'unknown').replace(/-/g,'_');
-        // Treat the earliest adjustment as the opening balance for display
-        const isOpeningBalance = m.movement_type === 'adjustment'
-          && itemMoves[0]?.id === m.id; // first (oldest) movement for this item
         const typeLabel = isOpeningBalance ? 'Opening' : ({
           delivery:'Delivery', usage:'Usage',
           planting:'Planting', adjustment:'Adjustment',
