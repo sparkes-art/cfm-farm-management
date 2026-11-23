@@ -1197,9 +1197,16 @@ async function _showEditVarietyForm(container, farm, item, allItems, period, all
             <input class="form-input" id="ev-kpb" type="number" min="1" step="0.1" value="${currentKpb}" placeholder="e.g. 20">
           </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Supplier description</label>
-          <input class="form-input" id="ev-supplier-desc" type="text" value="${esc(attrs.supplier_description || '')}" placeholder="e.g. SEED COTTON SIC 711RRF V2C 20KG AGENCY CS">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Unit cost ($/kg)</label>
+            <input class="form-input" id="ev-unit-cost" type="number" min="0" step="0.01"
+              value="${esc(attrs.unit_cost || '')}" placeholder="e.g. 14.45">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Supplier description</label>
+            <input class="form-input" id="ev-supplier-desc" type="text" value="${esc(attrs.supplier_description || '')}" placeholder="e.g. Agency CSD">
+          </div>
         </div>
         <div class="form-group">
           <label class="form-label">Internal notes (optional)</label>
@@ -1212,6 +1219,8 @@ async function _showEditVarietyForm(container, farm, item, allItems, period, all
       const variety      = modal.querySelector('#ev-variety')?.value?.trim();
       const unit         = modal.querySelector('#ev-unit')?.value;
       const kpb          = parseFloat(modal.querySelector('#ev-kpb')?.value) || null;
+      const unitCostRaw  = modal.querySelector('#ev-unit-cost')?.value?.trim();
+      const unitCost     = unitCostRaw ? parseFloat(unitCostRaw) : null;
       const supplierDesc = modal.querySelector('#ev-supplier-desc')?.value?.trim() || null;
       const notes        = modal.querySelector('#ev-notes')?.value?.trim() || null;
       if (!crop || !variety) { toast('Crop and variety are required', 'error'); return false; }
@@ -1219,7 +1228,7 @@ async function _showEditVarietyForm(container, farm, item, allItems, period, all
         name:         variety,
         subgroup:     crop,
         default_unit: unit,
-        attributes:   { ...attrs, variety, supplier_description: supplierDesc, ...(kpb ? { kg_per_bag: kpb } : { kg_per_bag: null }) },
+        attributes:   { ...attrs, variety, supplier_description: supplierDesc, ...(kpb ? { kg_per_bag: kpb } : { kg_per_bag: null }), ...(unitCost ? { unit_cost: unitCost } : { unit_cost: null }) },
         notes,
       });
       toast('Variety updated', 'success');
