@@ -527,8 +527,8 @@ async function _render(container, farm, period, allPeriods = []) {
         const qtyClass = isIn ? 'sd-lqty-in' : 'sd-lqty-out';
         const qty = Math.abs(parseFloat(m.signed_qty) || 0);
         // unit_cost lives in procurement_lines not on the movement row;
-        // show WAC (item-level) for deliveries as a proxy, dash for others
-        const up  = (m.movement_type === 'delivery' && unitCost) ? unitCost : null;
+        // show WAC (item-level) for delivery and opening rows as a proxy, dash for others
+        const up  = (['delivery','opening'].includes(m.movement_type) && unitCost) ? unitCost : null;
         const val = up ? qty * up : null;
         const typeKey = (m.movement_type || 'unknown').replace(/-/g,'_');
         const typeLabel = {
