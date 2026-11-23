@@ -64,7 +64,7 @@ const MODULE_LOADERS = {
     return { mount: m.mountBudget, unmount: m.unmountBudget };
   },
   'management-report': async () => {
-    const m = await import('../modules/management-report/mgmt-report.js?v=1794969436166');
+    const m = await import('../modules/management-report/management-report.js');
     return { mount: m.mountManagementReport, unmount: m.unmountManagementReport };
   },
   acquisitions: async () => {
