@@ -11,7 +11,7 @@ import {
   getCommodityByName, addCommodity, addCropType,
   setCommodityVisible, isCommodityVisible,
   getCommodityNamesForGroup, getDisplayGroups,
-} from '../../js/commodities.js?v=1795401815117';
+} from '../../js/commodities.js?v=1795402070306';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _subs   = [];
@@ -1146,9 +1146,10 @@ function _css() {
     .mgmt-add-btn--sm.mgmt-add-btn--amber { background: #fff8e1; color: var(--mgmt-amber); border-color: #ffe082; }
 
     .mgmt-icon-btn {
-      background: var(--page-bg); border: 1px solid #c8d0da; border-radius: 5px;
+      background: #fff; border: 1px solid #c8d0da; border-radius: 5px;
       padding: 3px 9px; font-size: 12px; cursor: pointer; color: #555e6d;
-      font-weight: 500; line-height: 1.4; white-space: nowrap;
+      font-weight: 500; line-height: 1.4; white-space: nowrap; display: inline-flex;
+      align-items: center;
     }
     .mgmt-icon-btn:hover { background: #eef1f5; border-color: #a8b4c0; color: #2c3e50; }
     .mgmt-icon-btn--red { color: #c0392b; border-color: #e8b4b8; background: #fff5f5; }
