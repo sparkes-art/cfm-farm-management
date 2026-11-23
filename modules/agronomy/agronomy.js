@@ -836,9 +836,14 @@ function renderCropPlan() {
   // Columns: paddock name | sub-block | ...one column per season...
   // Each season cell shows: commodity (small, coloured) / planned ha / planted ha
 
-  // All unique commodities in use for the CURRENT season only (for Crop filter chips)
+  // All unique commodities for the active season (for Crop filter chips)
+  // Use the same season-match logic as the summary: exact match or endsWith.
+  // This keeps filter chips in sync with what the summary actually shows.
+  const _chipSeason = getActiveSeason() || '';
   const usedCropTypes = [...new Set(
-    allCropPlan.filter(c => c.season_label === latestSeason).map(c => c.commodity).filter(Boolean)
+    allCropPlan
+      .filter(c => c.season_label && (c.season_label === _chipSeason || c.season_label.endsWith(_chipSeason)))
+      .map(c => c.commodity).filter(Boolean)
   )].sort();
 
   // All unique paddock types from the paddock list (for filter chips)
@@ -909,13 +914,26 @@ function renderCropPlan() {
   });
 
   // Summary by commodity + variety — entries matching the global season picker
-  // The global picker returns e.g. "2026-27"; crop plan labels may be "Summer 2026-27" or "2026-27"
+  // The global picker returns e.g. "2026-27"; crop plan labels may be "Summer 2026-27" or "Annual 2026-27"
+  // IMPORTANT: a paddock can have entries in BOTH "Summer 2026-27" AND "Annual 2026-27".
+  // We must count each paddock key only ONCE — using the entry for the season label that
+  // matches most precisely (exact match wins; otherwise the entry for the active season type).
+  // Using .endsWith() without deduplication caused double-counting (e.g. Cavalcade appearing
+  // under Barley Dryland because two season-type entries for the same paddock were both summed).
   const activeSeason = getActiveSeason() || '';
   const summarySeasonEntries = allCropPlan.filter(c =>
     c.season_label && (c.season_label === activeSeason || c.season_label.endsWith(activeSeason))
   );
-  const commoditySummary = {};
+  // Deduplicate: one entry per paddock key — exact season label match wins over endsWith match
+  const summaryByPaddock = {};
   summarySeasonEntries.forEach(c => {
+    const pk = c.paddock_name + '|' + (c.sub_block || '');
+    const existing = summaryByPaddock[pk];
+    const isExact = c.season_label === activeSeason;
+    if (!existing || isExact) summaryByPaddock[pk] = c;
+  });
+  const commoditySummary = {};
+  Object.values(summaryByPaddock).forEach(c => {
     if (!c.commodity) return;
     if (!commoditySummary[c.commodity]) commoditySummary[c.commodity] = { planned: 0, actual: 0, varieties: {} };
     const plannedN = parseFloat(c.planned_ha) || 0;
