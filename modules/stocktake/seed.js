@@ -527,15 +527,21 @@ async function _render(container, farm, period, allPeriods = []) {
         const qtyClass = isIn ? 'sd-lqty-in' : 'sd-lqty-out';
         const qty = Math.abs(parseFloat(m.signed_qty) || 0);
         // unit_cost lives in procurement_lines not on the movement row;
-        // show WAC (item-level) for delivery and opening rows as a proxy, dash for others
-        const up  = (['delivery','opening'].includes(m.movement_type) && unitCost) ? unitCost : null;
+        // show WAC (item-level) for delivery and opening balance rows as a proxy, dash for others
+        const up  = (m.movement_type === 'delivery' || isOpeningBalance) && unitCost ? unitCost : null;
         const val = up ? qty * up : null;
         const typeKey = (m.movement_type || 'unknown').replace(/-/g,'_');
-        const typeLabel = {
-          opening:'Opening', delivery:'Delivery', usage:'Usage',
+        // Treat the earliest adjustment as the opening balance for display
+        const isOpeningBalance = m.movement_type === 'adjustment'
+          && itemMoves[0]?.id === m.id; // first (oldest) movement for this item
+        const typeLabel = isOpeningBalance ? 'Opening' : ({
+          delivery:'Delivery', usage:'Usage',
           planting:'Planting', adjustment:'Adjustment',
-          transfer_in:'Transfer in', transfer_out:'Transfer out'
-        }[typeKey] || typeKey;
+          transfer_in:'Transfer in', transfer_out:'Transfer out',
+          write_off:'Write-off', sale:'Sale', harvest_inload:'Harvest inload',
+          reclass_in:'Reclass in', reclass_out:'Reclass out',
+        }[typeKey] || typeKey);
+        const typeKeyDisplay = isOpeningBalance ? 'opening' : typeKey;
         const dateStr = m.occurred_on
           ? new Date(m.occurred_on).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'2-digit'})
           : '—';
@@ -543,7 +549,7 @@ async function _render(container, farm, period, allPeriods = []) {
         return `
               <tr>
                 <td class="sd-ldate">${dateStr}</td>
-                <td><span class="sd-ltype sd-ltype-${typeKey}">${typeLabel}</span></td>
+                <td><span class="sd-ltype sd-ltype-${typeKeyDisplay}">${typeLabel}</span></td>
                 <td>${refCell}</td>
                 <td class="sd-lunit">${up ? fRate(up) : '—'}</td>
                 <td><span class="sd-lqty ${qtyClass}">${qtySign}${Math.round(qty).toLocaleString('en-AU')} kg</span></td>
