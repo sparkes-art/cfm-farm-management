@@ -2,26 +2,69 @@
 // Shared commodity and crop type data layer
 // Loads once per session, provides dynamic lists to all modules
 
-import { dbSelect, dbInsert, dbDelete } from './supabase-client.js?v=1794969436166';
+import { dbSelect, dbInsert, dbDelete, dbUpdate } from './supabase-client.js?v=1794969436166';
 
 let _commodities = [];
 let _cropTypes = [];
+let _farmVisibility = {}; // { [farmId]: Set<commodityId> } — IDs that are hidden (active=false)
 let _loaded = false;
 
 // ── Load once ─────────────────────────────────────────────────
-export async function loadCommodities() {
+export async function loadCommodities(farmId = null) {
   if (_loaded) return;
-  [_commodities, _cropTypes] = await Promise.all([
+  const fetches = [
     dbSelect('commodities', 'select=*&order=name'),
     dbSelect('crop_types', 'select=*&order=name'),
-  ]);
+  ];
+  if (farmId) fetches.push(dbSelect('farm_commodities', `farm_id=eq.${farmId}&select=*`));
+  const [comms, types, farmRows = []] = await Promise.all(fetches);
+  _commodities = comms;
+  _cropTypes   = types;
+  // Build hidden-set for this farm: commodity_ids where active = false
+  if (farmId) {
+    _farmVisibility[farmId] = new Set(
+      farmRows.filter(r => r.active === false).map(r => r.commodity_id)
+    );
+  }
   _loaded = true;
 }
 
+// All commodities (global master list)
 export function getCommodities() { return _commodities; }
+
+// Commodities visible for a given farm (excludes hidden ones)
+export function getActiveCommodities(farmId = null) {
+  if (!farmId) return _commodities;
+  const hidden = _farmVisibility[farmId] || new Set();
+  return _commodities.filter(c => !hidden.has(c.id));
+}
+
 export function getCropTypes(commodityId = null) {
   if (!commodityId) return _cropTypes;
   return _cropTypes.filter(ct => ct.commodity_id === commodityId);
+}
+
+// Toggle a commodity's visibility for a farm
+export async function setCommodityVisible(farmId, commodityId, active) {
+  // Upsert into farm_commodities
+  const existing = await dbSelect('farm_commodities', `farm_id=eq.${farmId}&commodity_id=eq.${commodityId}`);
+  if (existing.length) {
+    await dbUpdate('farm_commodities', existing[0].id, { active, updated_at: new Date().toISOString() });
+  } else {
+    await dbInsert('farm_commodities', { farm_id: farmId, commodity_id: commodityId, active });
+  }
+  // Update local cache
+  if (!_farmVisibility[farmId]) _farmVisibility[farmId] = new Set();
+  if (active) {
+    _farmVisibility[farmId].delete(commodityId);
+  } else {
+    _farmVisibility[farmId].add(commodityId);
+  }
+}
+
+export function isCommodityVisible(farmId, commodityId) {
+  if (!farmId) return true;
+  return !(_farmVisibility[farmId]?.has(commodityId));
 }
 
 export function getCommodityById(id) {
@@ -69,8 +112,10 @@ export async function deleteCropType(id) {
 
 // ── Commodity select HTML helper ──────────────────────────────
 // Returns <option> tags for a commodity dropdown
-export function commodityOptions(selectedId = null) {
-  return _commodities.map(c =>
+// farmId: if supplied, filters to active-only for that farm
+export function commodityOptions(selectedId = null, farmId = null) {
+  const list = farmId ? getActiveCommodities(farmId) : _commodities;
+  return list.map(c =>
     `<option value="${c.id}" data-livestock="${c.is_livestock}" ${c.id === selectedId ? 'selected' : ''}>${c.name}</option>`
   ).join('');
 }

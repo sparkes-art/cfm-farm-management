@@ -6,6 +6,11 @@
 import { dbSelect, dbInsert, dbUpdate, dbDelete, subscribeTable } from '../../js/supabase-client.js';
 import { getActiveFarm, getActiveSeason, getSession, canWrite } from '../../js/app-state.js';
 import { formatCurrency, formatNumber, qs, toast } from '../../js/ui.js';
+import {
+  loadCommodities, getActiveCommodities, getCropTypes,
+  getCommodityByName, addCommodity, addCropType,
+  setCommodityVisible, isCommodityVisible,
+} from '../../js/commodities.js';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _subs   = [];
@@ -22,6 +27,8 @@ export function unmountManagementReport() {
 
 export async function mountManagementReport(container) {
   container.innerHTML = `<div id="mgmt-wrap"><div class="mgmt-loading">Loading…</div></div>`;
+  const farm = getActiveFarm();
+  await loadCommodities(farm?.id);
   await _render(container);
 
   const farm = getActiveFarm();
@@ -480,11 +487,35 @@ function _kpiTile(label, value, color) {
     </div>`;
 }
 
+// ── Helpers for master commodity/crop type lists ──────────────────────────────
+function _getMasterCropTypes(commodityName) {
+  const all = getActiveCommodities();
+  const comm = all.find(c => c.name.toLowerCase() === commodityName.toLowerCase());
+  if (!comm) return [];
+  return getCropTypes(comm.id);
+}
+
 // ── Modals ────────────────────────────────────────────────────────────────────
 
 function _openAddModal(section, farm, season, container) {
   const isOther = section === 'other';
   const isCarry = section === 'carryover';
+
+  // Build commodity options filtered to this farm
+  const activeCommodities = getActiveCommodities(farm.id);
+
+  const commoditySelectHTML = isOther ? '' : `
+    <div class="mgmt-form-group">
+      <label>${isCarry ? 'Commodity (prior season)' : 'Commodity'}</label>
+      <select id="mi-commodity" class="mgmt-input">
+        <option value="">— Select commodity —</option>
+        ${activeCommodities.map(c => `<option value="${c.id}" data-unit="${_unitForCommodity(c)}">${c.name}</option>`).join('')}
+        <option value="__new__" style="color:#1a5fb4;font-weight:600">＋ Add new commodity…</option>
+      </select>
+      <div id="mi-new-commodity-row" style="display:none;margin-top:6px;display:none">
+        <input id="mi-new-commodity-name" type="text" class="mgmt-input" placeholder="New commodity name">
+      </div>
+    </div>`;
 
   const html = `
     <div class="mgmt-modal-backdrop">
@@ -498,12 +529,13 @@ function _openAddModal(section, farm, season, container) {
           <button class="mgmt-modal-close">✕</button>
         </div>
         <div class="mgmt-modal-body">
+          ${commoditySelectHTML}
+          ${isOther ? `
           <div class="mgmt-form-group">
             <label>Name</label>
             <input id="mi-name" type="text" class="mgmt-input"
-              placeholder="${isOther ? 'e.g. Agistment, Water entitlement sale' : isCarry ? 'e.g. Wheat — 2024-25 season' : 'e.g. Cotton, Wheat, Sorghum'}"
-              autocomplete="off">
-          </div>
+              placeholder="e.g. Agistment, Water entitlement sale" autocomplete="off">
+          </div>` : ''}
           ${!isOther ? `
           <div class="mgmt-form-row">
             <div class="mgmt-form-group">
@@ -555,16 +587,64 @@ function _openAddModal(section, farm, season, container) {
   _modal.querySelector('#mi-cancel').onclick = () => { _modal?.remove(); _modal = null; };
   _modal.querySelector('.mgmt-modal-close').onclick = () => { _modal?.remove(); _modal = null; };
 
+  // Commodity dropdown — auto-fill unit, show new-commodity input
+  const commSel = _modal.querySelector('#mi-commodity');
+  const newCommRow = _modal.querySelector('#mi-new-commodity-row');
+  if (commSel) {
+    commSel.addEventListener('change', () => {
+      if (commSel.value === '__new__') {
+        newCommRow.style.display = 'block';
+        _modal.querySelector('#mi-new-commodity-name')?.focus();
+        commSel.value = '';
+      } else {
+        newCommRow.style.display = 'none';
+        // Auto-fill unit from commodity
+        const opt = commSel.selectedOptions[0];
+        const unit = opt?.dataset?.unit;
+        const unitSel = _modal.querySelector('#mi-unit');
+        if (unit && unitSel) {
+          const match = [...unitSel.options].find(o => o.value === unit);
+          if (match) unitSel.value = unit;
+        }
+      }
+    });
+  }
+
   _modal.querySelector('#mi-save').onclick = async () => {
-    const name = _modal.querySelector('#mi-name').value.trim();
-    if (!name) { toast('Enter a name', 'warning'); return; }
+    let name, unit;
+
+    if (isOther) {
+      name = _modal.querySelector('#mi-name').value.trim();
+      unit = '$';
+    } else {
+      // Resolve commodity — existing or new
+      const commSelVal = commSel?.value;
+      const newName = _modal.querySelector('#mi-new-commodity-name')?.value.trim();
+
+      if (newName) {
+        // Create new commodity
+        try {
+          const newComm = await addCommodity(newName);
+          name = newComm.name;
+        } catch(e) {
+          toast('Failed to create commodity', 'error'); return;
+        }
+      } else if (commSelVal) {
+        const c = activeCommodities.find(x => x.id === commSelVal);
+        name = c?.name;
+      }
+
+      unit = _modal.querySelector('#mi-unit')?.value || 't';
+    }
+
+    if (!name) { toast('Select or enter a commodity name', 'warning'); return; }
 
     const payload = {
       farm_id: farm.id,
       season,
       section,
       name,
-      unit: isOther ? '$' : (_modal.querySelector('#mi-unit')?.value || 't'),
+      unit,
       budget_price: !isOther ? (parseFloat(_modal.querySelector('#mi-price')?.value) || null) : null,
       budget_amount: isOther ? (parseFloat(_modal.querySelector('#mi-amount')?.value) || null) : null,
       expected_month: isOther ? (parseInt(_modal.querySelector('#mi-month')?.value) || null) : null,
@@ -582,6 +662,15 @@ function _openAddModal(section, farm, season, container) {
       toast('Save failed — check console', 'error');
     }
   };
+}
+
+// Helper: pick the most likely unit for a commodity based on its name
+function _unitForCommodity(c) {
+  if (c.is_livestock) return 'hd';
+  const n = c.name.toLowerCase();
+  if (n.includes('cotton')) return 'bales';
+  if (n.includes('water') || n.includes('ml')) return 'ML';
+  return 't';
 }
 
 function _openEditModal(row, farm, season, container) {
@@ -677,6 +766,33 @@ function _openCropTypeModal(ct, row, farm, season, container) {
   const isCarry = row.section === 'carryover';
   const isEdit  = !!ct;
 
+  // Find the master commodity to get its crop types
+  const masterCropTypes = !isCarry ? _getMasterCropTypes(row.name) : [];
+
+  const cropTypeInput = isCarry ? `
+    <div class="mgmt-form-group">
+      <label>Lot / Description</label>
+      <input id="ct-name" type="text" class="mgmt-input"
+        placeholder="e.g. Lot 1, Dec delivery"
+        value="${esc(ct?.crop_type || '')}">
+    </div>` : masterCropTypes.length ? `
+    <div class="mgmt-form-group">
+      <label>Crop Type</label>
+      <select id="ct-name-sel" class="mgmt-input">
+        <option value="">— Select crop type —</option>
+        ${masterCropTypes.map(t => `<option value="${esc(t.name)}" ${ct?.crop_type === t.name ? 'selected' : ''}>${t.name}</option>`).join('')}
+        <option value="__new__" style="color:#1a5fb4;font-weight:600">＋ Add new crop type…</option>
+      </select>
+      <input id="ct-name" type="text" class="mgmt-input" style="display:none;margin-top:6px"
+        placeholder="New crop type name" value="">
+    </div>` : `
+    <div class="mgmt-form-group">
+      <label>Crop Type</label>
+      <input id="ct-name" type="text" class="mgmt-input"
+        placeholder="e.g. Dryland, Irrigated, Main Season"
+        value="${esc(ct?.crop_type || '')}">
+    </div>`;
+
   const html = `
     <div class="mgmt-modal-backdrop">
       <div class="mgmt-modal">
@@ -685,11 +801,7 @@ function _openCropTypeModal(ct, row, farm, season, container) {
           <button class="mgmt-modal-close">✕</button>
         </div>
         <div class="mgmt-modal-body">
-          <div class="mgmt-form-group">
-            <label>${isCarry ? 'Lot / Description' : 'Crop Type'}</label>
-            <input id="ct-name" type="text" class="mgmt-input"
-              placeholder="${isCarry ? 'e.g. Lot 1, Dec delivery' : 'e.g. Dryland, Irrigated, Main Season'}"
-              value="${esc(ct?.crop_type || '')}">
+          ${cropTypeInput}
           </div>
           ${isCarry ? `
           <div class="mgmt-form-row">
@@ -749,8 +861,32 @@ function _openCropTypeModal(ct, row, farm, season, container) {
   _modal.querySelector('#ct-cancel').onclick = () => { _modal?.remove(); _modal = null; };
   _modal.querySelector('.mgmt-modal-close').onclick = () => { _modal?.remove(); _modal = null; };
 
+  // Wire crop type select → show text input for "new"
+  const ctSel = _modal.querySelector('#ct-name-sel');
+  const ctInput = _modal.querySelector('#ct-name');
+  if (ctSel && ctInput) {
+    ctSel.addEventListener('change', () => {
+      if (ctSel.value === '__new__') {
+        ctInput.style.display = 'block';
+        ctInput.focus();
+        ctSel.value = '';
+      } else {
+        ctInput.style.display = 'none';
+        ctInput.value = '';
+      }
+    });
+  }
+
   _modal.querySelector('#ct-save').onclick = async () => {
-    const name = _modal.querySelector('#ct-name').value.trim();
+    // Resolve name from select or text input
+    let name;
+    if (ctSel) {
+      name = ctSel.value === '__new__' || !ctSel.value
+        ? ctInput?.value.trim()
+        : ctSel.value;
+    } else {
+      name = ctInput?.value.trim();
+    }
     if (!name) { toast('Enter a name', 'warning'); return; }
 
     const payload = isCarry ? {
