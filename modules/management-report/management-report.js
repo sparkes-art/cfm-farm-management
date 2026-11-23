@@ -11,7 +11,7 @@ import {
   getCommodityByName, addCommodity, addCropType,
   setCommodityVisible, isCommodityVisible,
   getCommodityNamesForGroup, getDisplayGroups,
-} from '../../js/commodities.js?v=1795401098035';
+} from '../../js/commodities.js?v=1795401815117';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _subs   = [];
@@ -298,7 +298,7 @@ function _farmingGroupCard(groupName, rows, invoices, season) {
       <div class="mgmt-card-header">
         <div>
           <span class="mgmt-card-title">${groupName}</span>
-          <span class="mgmt-card-group-members">${rows.map(r => r.commodity).join(' + ')}</span>
+          <span class="mgmt-card-group-members">${rows.map(r => r.name).join(' + ')}</span>
         </div>
         <div class="mgmt-header-kpis">
           <div class="mgmt-hkpi">
@@ -1146,11 +1146,13 @@ function _css() {
     .mgmt-add-btn--sm.mgmt-add-btn--amber { background: #fff8e1; color: var(--mgmt-amber); border-color: #ffe082; }
 
     .mgmt-icon-btn {
-      background: none; border: 1px solid var(--border); border-radius: 5px;
-      padding: 3px 7px; font-size: 12px; cursor: pointer; color: var(--hint);
+      background: var(--page-bg); border: 1px solid #c8d0da; border-radius: 5px;
+      padding: 3px 9px; font-size: 12px; cursor: pointer; color: #555e6d;
+      font-weight: 500; line-height: 1.4; white-space: nowrap;
     }
-    .mgmt-icon-btn:hover { background: var(--border-light); }
-    .mgmt-icon-btn--red:hover { background: #fce4ec; color: var(--mgmt-red); border-color: var(--mgmt-red); }
+    .mgmt-icon-btn:hover { background: #eef1f5; border-color: #a8b4c0; color: #2c3e50; }
+    .mgmt-icon-btn--red { color: #c0392b; border-color: #e8b4b8; background: #fff5f5; }
+    .mgmt-icon-btn--red:hover { background: #fce4ec; border-color: #c0392b; }
 
     .mgmt-row-btn {
       background: none; border: none; font-size: 11px; cursor: pointer;
