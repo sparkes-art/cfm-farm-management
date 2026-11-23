@@ -21,7 +21,10 @@ export async function mountManagementReport(container) {
   await _render(container);
 
   // Realtime: re-render when invoices or contracts change
-  _sub = subscribeTable('invoices', farm.id, () => _render(container));
+  const farm = getActiveFarm();
+  if (farm) {
+    _sub = subscribeTable('invoices', farm.id, () => _render(container));
+  }
 }
 
 // ── Main render ───────────────────────────────────────────────────────────────
