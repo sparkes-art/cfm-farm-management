@@ -11,7 +11,7 @@ import {
   getCommodityByName, addCommodity, addCropType,
   setCommodityVisible, isCommodityVisible,
   getCommodityNamesForGroup, getDisplayGroups,
-} from '../../js/commodities.js?v=1795398275253';
+} from '../../js/commodities.js?v=1795401098035';
 
 // ── Module state ──────────────────────────────────────────────────────────────
 let _subs   = [];
@@ -228,16 +228,16 @@ function _renderFarmingGroups(farmingRows, invoices, season, farm) {
 
   for (const entry of groups) {
     if (entry.type === 'single') {
-      // Find mgmt_income rows matching this commodity name
+      // Find mgmt_income rows matching this commodity name (stored in row.name)
       const matchNames = [entry.commodity.name];
-      const rows = farmingRows.filter(r => matchNames.includes(r.commodity));
+      const rows = farmingRows.filter(r => matchNames.includes(r.name));
       if (!rows.length) continue;
       rendered.push(rows.map(r => _farmingCard(r, invoices, season)).join(''));
 
     } else {
       // Grouped commodity (e.g. Cotton = Lint + Seed)
       const matchNames = getCommodityNamesForGroup(entry.groupName);
-      const rows = farmingRows.filter(r => matchNames.includes(r.commodity));
+      const rows = farmingRows.filter(r => matchNames.includes(r.name));
       if (!rows.length) continue;
       if (rows.length === 1) {
         // Only one sub-commodity has data — render as a normal card
@@ -249,7 +249,7 @@ function _renderFarmingGroups(farmingRows, invoices, season, farm) {
     }
   }
 
-  // Catch any rows whose commodity didn't match any display group
+  // Catch any rows whose name didn't match any display group
   // (e.g. a commodity added after cache was built) — render individually
   const allHandled = new Set(
     groups.flatMap(e =>
@@ -258,7 +258,7 @@ function _renderFarmingGroups(farmingRows, invoices, season, farm) {
         : getCommodityNamesForGroup(e.groupName)
     )
   );
-  const unmatched = farmingRows.filter(r => !allHandled.has(r.commodity));
+  const unmatched = farmingRows.filter(r => !allHandled.has(r.name));
   if (unmatched.length) {
     rendered.push(unmatched.map(r => _farmingCard(r, invoices, season)).join(''));
   }
@@ -278,7 +278,7 @@ function _farmingGroupCard(groupName, rows, invoices, season) {
       s + (ct.budget_production || (ct.area_ha && ct.budget_yield ? ct.area_ha * ct.budget_yield : 0)), 0);
     totalBudgetIncome += totalBudgetProd * (row.budget_price || 0);
 
-    const matched = _matchInvoices(invoices, row.commodity, season);
+    const matched = _matchInvoices(invoices, row.name, season);
     totalActualIncome += matched.reduce((s, inv) =>
       s + (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0), 0);
   }
@@ -288,7 +288,7 @@ function _farmingGroupCard(groupName, rows, invoices, season) {
   // Each member renders as a full farming card, visually inset
   const memberCards = rows.map(row => `
     <div class="mgmt-group-member">
-      <div class="mgmt-group-member-label">${row.commodity}</div>
+      <div class="mgmt-group-member-label">${row.name}</div>
       ${_farmingCard(row, invoices, season)}
     </div>
   `).join('');
