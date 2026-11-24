@@ -35,9 +35,10 @@ export async function mountManagementReport(container) {
   await _render(container);
 
   if (farm) {
-    _subs.push(subscribeTable('mgmt_income',     farm.id, () => _render(container)));
-    _subs.push(subscribeTable('mgmt_crop_types', farm.id, () => _render(container)));
-    _subs.push(subscribeTable('invoices',        farm.id, () => _render(container)));
+    _subs.push(subscribeTable('mgmt_income',      farm.id, () => _render(container)));
+    _subs.push(subscribeTable('mgmt_crop_types',  farm.id, () => _render(container)));
+    _subs.push(subscribeTable('invoices',         farm.id, () => _render(container)));
+    _subs.push(subscribeTable('harvest_records',  farm.id, () => _render(container)));
   }
 }
 
@@ -59,10 +60,11 @@ async function _render(container) {
   }
 
   // ── Data fetch ──────────────────────────────────────────────────────────────
-  const [incomeRows, cropTypeRows, invoices] = await Promise.all([
-    dbSelect('mgmt_income',     `farm_id=eq.${farm.id}&season=eq.${season}&order=sort_order.asc,created_at.asc`).catch(() => []),
-    dbSelect('mgmt_crop_types', `farm_id=eq.${farm.id}&season=eq.${season}&order=sort_order.asc,created_at.asc`).catch(() => []),
-    dbSelect('invoices',        `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`).catch(() => []),
+  const [incomeRows, cropTypeRows, invoices, harvestRows] = await Promise.all([
+    dbSelect('mgmt_income',      `farm_id=eq.${farm.id}&season=eq.${season}&order=sort_order.asc,created_at.asc`).catch(() => []),
+    dbSelect('mgmt_crop_types',  `farm_id=eq.${farm.id}&season=eq.${season}&order=sort_order.asc,created_at.asc`).catch(() => []),
+    dbSelect('invoices',         `farm_id=eq.${farm.id}&select=*&order=invoice_date.asc`).catch(() => []),
+    dbSelect('harvest_records',  `farm_id=eq.${farm.id}&season=eq.${season}`).catch(() => []),
   ]);
 
   // Attach crop types to their parent income row
@@ -142,7 +144,7 @@ async function _render(container) {
           ${write ? `<button class="mgmt-add-btn" data-section="farming">+ Add Commodity</button>` : ''}
         </div>
         ${farmingRows.length
-          ? _renderFarmingGroups(farmingRows, invoices, season, farm)
+          ? _renderFarmingGroups(farmingRows, invoices, harvestRows, season, farm)
           : _emptyState('No farming income added yet.', write, 'farming')}
       </div>
 
@@ -402,35 +404,29 @@ async function _render(container) {
 // ── Farming income grouped renderer ──────────────────────────────────────────
 // Renders each display group: single commodities get one card; grouped commodities
 // (e.g. Cotton Lint + Cotton Seed under "Cotton") get a combined card.
-function _renderFarmingGroups(farmingRows, invoices, season, farm) {
+function _renderFarmingGroups(farmingRows, invoices, harvestRows, season, farm) {
   const groups = getDisplayGroups(farm?.id);
   const rendered = [];
 
   for (const entry of groups) {
     if (entry.type === 'single') {
-      // Find mgmt_income rows matching this commodity name (stored in row.name)
       const matchNames = [entry.commodity.name];
       const rows = farmingRows.filter(r => matchNames.includes(r.name));
       if (!rows.length) continue;
-      rendered.push(rows.map(r => _farmingCard(r, invoices, season)).join(''));
+      rendered.push(rows.map(r => _farmingCard(r, invoices, harvestRows, season)).join(''));
 
     } else {
-      // Grouped commodity (e.g. Cotton = Lint + Seed)
       const matchNames = getCommodityNamesForGroup(entry.groupName);
       const rows = farmingRows.filter(r => matchNames.includes(r.name));
       if (!rows.length) continue;
       if (rows.length === 1) {
-        // Only one sub-commodity has data — render as a normal card
-        rendered.push(_farmingCard(rows[0], invoices, season));
+        rendered.push(_farmingCard(rows[0], invoices, harvestRows, season));
       } else {
-        // Multiple sub-commodities — render a combined group card
-        rendered.push(_farmingGroupCard(entry.groupName, rows, invoices, season));
+        rendered.push(_farmingGroupCard(entry.groupName, rows, invoices, harvestRows, season));
       }
     }
   }
 
-  // Catch any rows whose name didn't match any display group
-  // (e.g. a commodity added after cache was built) — render individually
   const allHandled = new Set(
     groups.flatMap(e =>
       e.type === 'single'
@@ -440,7 +436,7 @@ function _renderFarmingGroups(farmingRows, invoices, season, farm) {
   );
   const unmatched = farmingRows.filter(r => !allHandled.has(r.name));
   if (unmatched.length) {
-    rendered.push(unmatched.map(r => _farmingCard(r, invoices, season)).join(''));
+    rendered.push(unmatched.map(r => _farmingCard(r, invoices, harvestRows, season)).join(''));
   }
 
   return rendered.join('') || _emptyState('No farming income added yet.', canWrite(), 'farming');
@@ -545,7 +541,7 @@ function _buildPipelineTab(row, matched, totalBudgetProd, budgetIncome) {
 // ── Combined group card (e.g. Cotton Lint + Cotton Seed rolled up as "Cotton") ─
 // Single card with Economics, Sales Pipeline, and Crop Types tabs.
 // Each revenue line (Lint / Seed) appears as a separate row in Economics.
-function _farmingGroupCard(groupName, rows, invoices, season) {
+function _farmingGroupCard(groupName, rows, invoices, harvestRows, season) {
   const write = canWrite();
   const groupId = `group-${groupName.replace(/\s+/g, '-').toLowerCase()}`;
   const activeTab = _activeTabs[groupId] || 'economics';
@@ -770,7 +766,7 @@ function _farmingGroupCard(groupName, rows, invoices, season) {
 }
 
 // ── Farming income card ───────────────────────────────────────────────────────
-function _farmingCard(row, invoices, season) {
+function _farmingCard(row, invoices, harvestRows, season) {
   const write    = canWrite();
   const activeTab = _activeTabs[row.id] || 'economics';
 
@@ -781,10 +777,22 @@ function _farmingCard(row, invoices, season) {
   const totalArea = row.cropTypes.reduce((s, ct) => s + (ct.area_ha || 0), 0);
   const budgetIncome = totalBudgetProd * (row.budget_price || 0);
 
-  // Actual invoices for this commodity (match by name, case-insensitive)
+  // Harvested tonnes — sum all crop types for this commodity/season
+  const harvestForComm = (harvestRows || []).filter(h =>
+    h.commodity.trim().toLowerCase() === row.name.trim().toLowerCase()
+  );
+  const totalHarvestedQty = harvestForComm.reduce((s, h) => s + (parseFloat(h.harvested_qty) || 0), 0);
+  const harvestUnit = harvestForComm[0]?.unit || row.unit || 't';
+  const hasHarvest = totalHarvestedQty > 0;
+
+  // Invoiced actuals
   const matched = _matchInvoices(invoices, row.name, season);
-  const actualIncome = matched.reduce((s, inv) => s + (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0), 0);
-  const variance = budgetIncome ? actualIncome - budgetIncome : null;
+  const invoicedQty   = matched.reduce((s, inv) => s + (parseFloat(inv.total_qty) || 0), 0);
+  const actualIncome  = matched.reduce((s, inv) => s + (parseFloat(inv.gross_amount) || 0) + (parseFloat(inv.total_quality_adj) || 0), 0);
+  const avgRealisedPrice = invoicedQty > 0 ? actualIncome / invoicedQty : null;
+
+  const incomeVariance = budgetIncome ? actualIncome - budgetIncome : null;
+  const prodVariance   = totalBudgetProd && hasHarvest ? totalHarvestedQty - totalBudgetProd : null;
 
   const headerSub = [
     totalArea ? `${fN(totalArea, 0)} ha total` : '',
@@ -792,29 +800,35 @@ function _farmingCard(row, invoices, season) {
     totalBudgetProd ? `${fN(totalBudgetProd, 0)} ${row.unit} budgeted` : '',
   ].filter(Boolean).join(' · ');
 
-  // ── Economics tab ──────────────────────────────────────────────────────────
+  // ── Economics tab — 3 columns: Budget | Harvested | Invoiced ───────────────
   const econTab = `
     <table class="mgmt-table">
       <thead><tr>
-        <th>Metric</th><th>Budget</th><th>Actual</th><th>Variance</th>
+        <th>Metric</th><th class="num">Budget</th><th class="num">Harvested</th><th class="num">Invoiced</th><th class="num">Variance</th>
       </tr></thead>
       <tbody>
-        <tr class="mgmt-table-group"><td colspan="4">Revenue</td></tr>
-        <tr>
-          <td class="mgmt-table-label">Budget price (/${row.unit})</td>
-          <td>${fC(row.budget_price, 2)}</td>
-          <td>—</td><td>—</td>
-        </tr>
+        <tr class="mgmt-table-group"><td colspan="5">Production</td></tr>
         <tr>
           <td class="mgmt-table-label">Total production (${row.unit})</td>
-          <td>${totalBudgetProd ? fN(totalBudgetProd, 1) : '—'}</td>
-          <td>—</td><td>—</td>
+          <td class="num">${totalBudgetProd ? fN(totalBudgetProd, 1) : '—'}</td>
+          <td class="num" style="${hasHarvest ? 'font-weight:600' : 'color:var(--hint)'}">${hasHarvest ? fN(totalHarvestedQty, 1)+' '+harvestUnit : '—'}</td>
+          <td class="num" style="color:var(--hint)">${invoicedQty ? fN(invoicedQty, 1)+' '+row.unit : '—'}</td>
+          <td class="num">${prodVariance != null ? _varSpan(prodVariance) : '—'}</td>
+        </tr>
+        <tr class="mgmt-table-group"><td colspan="5">Revenue</td></tr>
+        <tr>
+          <td class="mgmt-table-label">Price (/${row.unit})</td>
+          <td class="num">${fC(row.budget_price, 2)}</td>
+          <td class="num">—</td>
+          <td class="num" style="color:var(--hint)">${avgRealisedPrice ? fC(avgRealisedPrice, 2)+' avg realised' : '—'}</td>
+          <td class="num">—</td>
         </tr>
         <tr class="mgmt-table-total">
           <td>Gross income</td>
-          <td>${fC(budgetIncome)}</td>
-          <td>${fC(actualIncome)}</td>
-          <td>${variance != null ? _varSpan(variance) : '—'}</td>
+          <td class="num">${fC(budgetIncome)}</td>
+          <td class="num">—</td>
+          <td class="num">${fC(actualIncome)}</td>
+          <td class="num">${incomeVariance != null ? _varSpan(incomeVariance) : '—'}</td>
         </tr>
       </tbody>
     </table>`;
@@ -822,14 +836,15 @@ function _farmingCard(row, invoices, season) {
   // ── Sales Pipeline tab ─────────────────────────────────────────────────────
   const pipelineTab = _buildPipelineTab(row, matched, totalBudgetProd, budgetIncome);
 
-  // ── Crop Types tab ─────────────────────────────────────────────────────────
+  // ── Crop Types tab — includes harvested qty per crop type ──────────────────
   const cropTypesTab = `
     <table class="mgmt-table">
       <thead><tr>
         <th>Crop Type</th>
         <th class="num">Area (ha)</th>
         <th class="num">Yield (${row.unit}/ha)</th>
-        <th class="num">Production (${row.unit})</th>
+        <th class="num">Budget (${row.unit})</th>
+        <th class="num">Harvested (${harvestUnit})</th>
         <th class="num">Income ($)</th>
         ${write ? '<th></th>' : ''}
       </tr></thead>
@@ -837,24 +852,28 @@ function _farmingCard(row, invoices, season) {
         ${row.cropTypes.length ? row.cropTypes.map(ct => {
           const prod = ct.budget_production || (ct.area_ha && ct.budget_yield ? ct.area_ha * ct.budget_yield : null);
           const inc  = prod && row.budget_price ? prod * row.budget_price : null;
+          const hr   = harvestForComm.find(h => h.crop_type.trim().toLowerCase() === ct.crop_type.trim().toLowerCase());
+          const harvestedQty = hr ? parseFloat(hr.harvested_qty) : null;
           return `<tr>
             <td style="font-weight:600">${esc(ct.crop_type)}</td>
             <td class="num">${fN(ct.area_ha, 1)}</td>
             <td class="num">${fN(ct.budget_yield, 2)}</td>
             <td class="num">${fN(prod, 1)}</td>
+            <td class="num" style="${harvestedQty != null ? 'font-weight:600' : 'color:var(--hint)'}">${harvestedQty != null ? fN(harvestedQty, 1) : '—'}</td>
             <td class="num" style="color:var(--mgmt-green)">${fC(inc)}</td>
             ${write ? `<td class="num actions">
               <button class="mgmt-row-btn" data-edit-ct="${ct.id}" data-income-id="${row.id}">Edit</button>
               <button class="mgmt-row-btn mgmt-row-btn--red" data-delete-ct="${ct.id}">&times;</button>
             </td>` : ''}
           </tr>`;
-        }).join('') : `<tr><td colspan="${write ? 6 : 5}" style="color:var(--hint);padding:16px;text-align:center">No crop types added — click below to add.</td></tr>`}
+        }).join('') : `<tr><td colspan="${write ? 7 : 6}" style="color:var(--hint);padding:16px;text-align:center">No crop types added — click below to add.</td></tr>`}
         ${row.cropTypes.length ? `
         <tr class="mgmt-table-total">
           <td>Total</td>
           <td class="num">${fN(totalArea, 1)}</td>
           <td class="num">—</td>
           <td class="num">${fN(totalBudgetProd, 1)}</td>
+          <td class="num" style="${hasHarvest ? 'font-weight:600' : ''}">${hasHarvest ? fN(totalHarvestedQty, 1) : '—'}</td>
           <td class="num" style="color:var(--mgmt-green)">${fC(budgetIncome)}</td>
           ${write ? '<td></td>' : ''}
         </tr>` : ''}
@@ -875,6 +894,7 @@ function _farmingCard(row, invoices, season) {
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span class="mgmt-badge mgmt-badge-budget">${fC(budgetIncome)} budgeted</span>
+          ${hasHarvest ? `<span class="mgmt-badge" style="background:#f0fdf4;color:#166534;border:1px solid #bbf7d0">${fN(totalHarvestedQty,1)} ${harvestUnit} harvested</span>` : ''}
           ${actualIncome > 0 ? `<span class="mgmt-badge mgmt-badge-actual">${fC(actualIncome)} received</span>` : ''}
           <span class="mgmt-ytd-chip" data-ytd-income="${row.id}">YTD</span>
           ${write ? `
