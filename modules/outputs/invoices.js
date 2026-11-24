@@ -324,13 +324,20 @@ function _renderTable(container) {
               <td><strong>${inv.buyer || '—'}</strong></td>
               <td class="muted text-sm">${commodities}${inv.grade ? `<span style="font-size:10px;background:var(--page-bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:4px">${inv.grade}</span>` : ''}</td>
               <td class="num text-sm">${(() => {
+                // Group qty by unit — never add bales + tonnes
+                const unitMap = {};
                 if (inv.batches && inv.batches.length) {
                   const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-                  const qty = b.filter(x => (x.lines||[]).some(l => l.type==='income')).reduce((s,x) => s+(parseFloat(x.qty)||0), 0);
-                  const unit = inv.master_unit || '';
-                  return qty ? formatNumber(qty,2)+' '+unit : '—';
+                  b.filter(x => (x.lines||[]).some(l => l.type==='income')).forEach(x => {
+                    const u = x.unit || inv.master_unit || '';
+                    const q = parseFloat(x.qty) || 0;
+                    if (q) unitMap[u] = (unitMap[u]||0) + q;
+                  });
+                } else if (inv.total_qty && inv.master_unit) {
+                  unitMap[inv.master_unit] = parseFloat(inv.total_qty)||0;
                 }
-                return inv.total_qty ? formatNumber(inv.total_qty,2)+' '+(inv.master_unit||'') : '—';
+                const parts = Object.entries(unitMap).map(([u,q]) => formatNumber(q,2)+' '+u);
+                return parts.length ? parts.join(' / ') : '—';
               })()}</td>
               <td class="num">${formatCurrency(inv.gross_amount, 0)}</td>
               <td class="num" style="color:${(inv.total_quality_adj||0)>0?'var(--green)':(inv.total_quality_adj||0)<0?'var(--red)':'inherit'}">${inv.total_quality_adj ? ((inv.total_quality_adj>0?'+':'')+formatCurrency(inv.total_quality_adj,0)) : '—'}</td>
@@ -1614,7 +1621,8 @@ export async function openInvoiceForm(container, existing = null) {
       });
 
       // Aggregate totals across all batches
-      const totalQty   = saleLines.reduce((s, l) => s + l.qty, 0);
+      // total_qty: only sum lines sharing the same unit as masterUnit — never add bales + tonnes
+      const totalQty   = saleLines.filter(l => (l.unit||'bale') === masterUnit).reduce((s, l) => s + l.qty, 0);
       const totalGross = saleLines.reduce((s, l) => s + l.gross, 0);
       const totalQA    = saleLines.reduce((s, l) => s + l.qa, 0);
 
