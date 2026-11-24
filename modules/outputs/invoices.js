@@ -48,6 +48,13 @@ export async function mountInvoices(container) {
         </div>
 
         <div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Buyer</div>
+          <select id="inv-filter-buyer" class="form-select" style="width:100%;font-size:12px">
+            <option value="">All buyers</option>
+          </select>
+        </div>
+
+        <div>
           <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:5px">Contract</div>
           <select id="inv-filter-contract" class="form-select" style="width:100%;font-size:12px">
             <option value="">All contracts</option>
@@ -97,7 +104,7 @@ export async function mountInvoices(container) {
     picker.querySelector('#pick-cancel').addEventListener('click', () => picker.remove());
     picker.addEventListener('click', e => { if (e.target === picker) picker.remove(); });
   });
-  ['#inv-filter-commodity', '#inv-filter-contract'].forEach(sel => {
+  ['#inv-filter-commodity', '#inv-filter-buyer', '#inv-filter-contract'].forEach(sel => {
     qs(sel, container)?.addEventListener('change', () => _renderTable(container));
   });
   document.addEventListener('cfm:seasonchange', () => _renderTable(container));
@@ -129,8 +136,9 @@ function _filtered() {
   const commodity = document.getElementById('inv-filter-commodity')?.value || '';
   const contract = document.getElementById('inv-filter-contract')?.value || '';
   const month = document.getElementById('inv-filter-month')?.value || '';
+  const buyer = document.getElementById('inv-filter-buyer')?.value || '';
   return _invoices.filter(i => {
-    const commodityMatch = !commodity || 
+    const commodityMatch = !commodity ||
       (i.line_items||[]).some(l => l.commodity === commodity) ||
       (() => {
         if (!i.batches) return false;
@@ -139,12 +147,13 @@ function _filtered() {
       })() ||
       _contracts.find(c => c.id === i.forward_contract_id)?.commodity === commodity;
     const monthMatch = !month || (i.invoice_date && i.invoice_date.slice(0,7) === month);
+    const buyerMatch = !buyer || (i.buyer || '').trim() === buyer;
     const contractMatch = !contract
       ? true
       : contract === 'cash'
         ? !i.forward_contract_id
         : i.forward_contract_id === contract;
-    if (!season) return commodityMatch && contractMatch && monthMatch;
+    if (!season) return commodityMatch && contractMatch && monthMatch && buyerMatch;
     // Season match: invoice belongs in a season if:
     // (a) invoice_date falls within the season's date range, OR
     // (b) any batch line's crop_year matches the active season
@@ -161,7 +170,7 @@ function _filtered() {
     const batchesArr = i.batches ? (typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches) : [];
     const cropYearMatch = batchesArr.some(b => b.crop_year === season) ||
       (i.season === season);
-    return (dateInSeason || cropYearMatch) && commodityMatch && contractMatch && monthMatch;
+    return (dateInSeason || cropYearMatch) && commodityMatch && contractMatch && monthMatch && buyerMatch;
   });
 }
 
@@ -213,6 +222,16 @@ function _renderTable(container) {
     _commodSel.innerHTML = '<option value="">All commodities</option>' +
       commodities.map(c => `<option value="${c}" ${_cv2===c?'selected':''}>${c}</option>`).join('');
     if (!_commodSel.dataset.wired) { _commodSel.dataset.wired = '1'; _commodSel.addEventListener('change', () => _renderTable(container)); }
+  }
+
+  // Rebuild buyer filter
+  const _buyerSel = document.getElementById('inv-filter-buyer');
+  if (_buyerSel) {
+    const _bv = _buyerSel.value;
+    const buyers = [...new Set(_invoices.map(i => (i.buyer || '').trim()).filter(Boolean))].sort();
+    _buyerSel.innerHTML = '<option value="">All buyers</option>' +
+      buyers.map(b => `<option value="${b}" ${_bv===b?'selected':''}>${b}</option>`).join('');
+    if (!_buyerSel.dataset.wired) { _buyerSel.dataset.wired = '1'; _buyerSel.addEventListener('change', () => _renderTable(container)); }
   }
 
   // Rebuild contract filter — season-scoped
