@@ -285,22 +285,19 @@ function _renderTable(container) {
     </div>
 
     </div>
-    <table class="data-table">
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+    <table class="data-table" style="min-width:700px">
       <thead>
         <tr>
-          <th>Date</th>
-          <!-- Season hidden -->
+          <th style="white-space:nowrap">Date</th>
           <th>Type</th>
           <th>Buyer</th>
           <th>Commodities</th>
           <th class="num">Qty</th>
           <th class="num">Gross</th>
-          <th class="num">Quality adj</th>
-          <th class="num">Total income</th>
-
-          <th>Documents</th>
-          <th style="min-width:70px;max-width:90px">Xero ref</th>
-          <th>Status</th>
+          <th class="num">Adj</th>
+          <th class="num">Total</th>
+          <th>Docs / Status</th>
           ${canWrite() ? '<th></th>' : ''}
         </tr>
       </thead>
@@ -339,25 +336,20 @@ function _renderTable(container) {
               <td class="num" style="color:${(inv.total_quality_adj||0)>0?'var(--green)':(inv.total_quality_adj||0)<0?'var(--red)':'inherit'}">${inv.total_quality_adj ? ((inv.total_quality_adj>0?'+':'')+formatCurrency(inv.total_quality_adj,0)) : '—'}</td>
               <td class="num">${formatCurrency((parseFloat(inv.gross_amount)||0)+(parseFloat(inv.total_quality_adj)||0), 0)}</td>
 
-              <td style="white-space:nowrap;font-size:12px">
-                ${(() => {
-                  const rctiCount = (inv.rcti_files||[]).length || (inv.rcti_url ? 1 : 0);
-                  const ginCount = (inv.gin_files||[]).length || (inv.gin_url ? 1 : 0);
-                  const rctiUrl = (inv.rcti_files||[])[0]?.url || inv.rcti_url;
-                  const ginUrl = (inv.gin_files||[])[0]?.url || inv.gin_url;
-                  return (rctiUrl ? `<a href="${rctiUrl}" target="_blank" style="color:var(--blue);text-decoration:none;margin-right:6px" onclick="event.stopPropagation()" title="Merchant RCTI">📄 RCTI${rctiCount>1?' ('+rctiCount+')':''}</a>` : '') +
-                    (ginUrl ? `<a href="${ginUrl}" target="_blank" style="color:var(--blue);text-decoration:none;margin-right:6px" onclick="event.stopPropagation()" title="Ginning Advice">🧾 Gin${ginCount>1?' ('+ginCount+')':''}</a>` : '') +
-                    (inv.xero_invoice_url ? `<a href="${inv.xero_invoice_url}" target="_blank" style="color:var(--blue);text-decoration:none" onclick="event.stopPropagation()" title="Xero Invoice">📋 Xero</a>` : '') +
-                    (!rctiUrl && !ginUrl && !inv.xero_invoice_url ? '<span style="color:var(--hint)">—</span>' : '');
-                })()}
-              </td>
-              <td class="muted text-sm">
-                ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" value="${inv.xero_invoice_number || ''}" style="border:none;background:transparent;width:65px;font-size:11px;color:var(--hint)" placeholder="—">` : inv.xero_invoice_number || '—'}
-              </td>
-              <td>
-                <span class="badge ${inv.status === 'complete' ? 'badge-paid' : 'badge-amber'}" style="${inv.status !== 'complete' ? 'background:var(--amber-light);color:var(--amber-text)' : ''}">
-                  ${inv.status === 'complete' ? 'Complete' : 'Pending'}
-                </span>
+              <td style="font-size:11px;min-width:0">
+                <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+                  ${(() => {
+                    const rctiUrl = (inv.rcti_files||[])[0]?.url || inv.rcti_url;
+                    const ginUrl  = (inv.gin_files||[])[0]?.url  || inv.gin_url;
+                    return (rctiUrl ? `<a href="${rctiUrl}" target="_blank" style="color:var(--blue);text-decoration:none" onclick="event.stopPropagation()" title="RCTI">📄</a>` : '') +
+                      (ginUrl  ? `<a href="${ginUrl}"  target="_blank" style="color:var(--blue);text-decoration:none" onclick="event.stopPropagation()" title="Gin">🧾</a>` : '') +
+                      (inv.xero_invoice_url ? `<a href="${inv.xero_invoice_url}" target="_blank" style="color:var(--blue);text-decoration:none" onclick="event.stopPropagation()" title="Xero">📋</a>` : '');
+                  })()}
+                  <span class="badge ${inv.status === 'complete' ? 'badge-paid' : 'badge-amber'}" style="${inv.status !== 'complete' ? 'background:var(--amber-light);color:var(--amber-text)' : ''}">
+                    ${inv.status === 'complete' ? 'Complete' : 'Pending'}
+                  </span>
+                  ${canWrite() ? `<input class="xero-ref-input" data-id="${inv.id}" value="${inv.xero_invoice_number || ''}" style="border:1px solid var(--border);border-radius:3px;background:transparent;width:60px;font-size:10px;color:var(--hint);padding:1px 4px" placeholder="Xero #">` : (inv.xero_invoice_number ? `<span style="color:var(--hint)">${inv.xero_invoice_number}</span>` : '')}
+                </div>
               </td>
               ${canWrite() ? `
                 <td>
@@ -376,6 +368,7 @@ function _renderTable(container) {
         }).join('')}
       </tbody>
     </table>
+    </div>
   `;
 
   // Row click → detail view
@@ -978,13 +971,33 @@ export async function openInvoiceForm(container, existing = null) {
         </div>
 
         <!-- Line headers -->
-        <div style="display:grid;grid-template-columns:100px 1fr 70px 60px 80px 90px 110px 80px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
-          ${['Season','Crop','Grade','Unit','Qty','Price ($/u)','Gross ($)','Adj ($)',''].map(h =>
+        <div style="display:grid;grid-template-columns:95px 1fr 80px 55px 75px 90px 110px 100px 30px;gap:6px;padding:4px 6px;background:var(--page-bg);border-radius:var(--radius-sm);margin-bottom:4px">
+          ${['Season','Crop','Del. Grade','Unit','Qty','Price ($/u)','Line Total ($)','Adj ($) inferred',''].map(h =>
             `<div style="font-size:9px;font-weight:600;color:var(--hint);text-transform:uppercase;letter-spacing:.07em">${h}</div>`
           ).join('')}
         </div>
 
         <div id="f-lines"></div>
+
+        <!-- Reconciliation row (grain invoices with contract) -->
+        <div id="f-recon" style="display:none;margin-top:10px;padding:10px 14px;background:var(--blue-light,#eff6ff);border:1px solid var(--blue-border,#bfdbfe);border-radius:var(--radius-md);font-size:12px">
+          <div style="font-weight:600;color:var(--blue-text,#1d4ed8);margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em">Grade reconciliation</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+            <div>
+              <div style="font-size:10px;color:var(--hint);margin-bottom:2px">Contracted value</div>
+              <div id="recon-contracted" style="font-weight:600;font-family:var(--font-mono,monospace)">—</div>
+              <div style="font-size:10px;color:var(--hint)" id="recon-contracted-note"></div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--hint);margin-bottom:2px">Actual received</div>
+              <div id="recon-actual" style="font-weight:600;font-family:var(--font-mono,monospace)">—</div>
+            </div>
+            <div>
+              <div style="font-size:10px;color:var(--hint);margin-bottom:2px">Grade adjustment total</div>
+              <div id="recon-adj" style="font-weight:700;font-family:var(--font-mono,monospace)">—</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Totals display -->
@@ -1253,6 +1266,15 @@ export async function openInvoiceForm(container, existing = null) {
         }
         updateContractSummary();
         _updateGradeVisibility(c?.commodity);
+        // Auto-fill contracted grade from forward contract
+        const gradeInput = modal.querySelector('#f-grade');
+        if (gradeInput && c?.grade && !gradeInput.value) {
+          gradeInput.value = c.grade;
+        }
+        // Store contract price for per-line adj inference
+        modal._contractPricePerUnit = c?.price_per_unit || null;
+        // Refresh line items to show/hide grade column
+        _refreshLineGradeVisibility(c?.commodity);
       });
     });
   };
@@ -1282,7 +1304,10 @@ export async function openInvoiceForm(container, existing = null) {
   if (existing?.grade) modal.querySelector('#f-grade-section').style.display = '';
   if (existing?.forward_contract_id) {
     const c = _contracts.find(x => x.id === existing.forward_contract_id);
-    if (c) _updateGradeVisibility(c.commodity);
+    if (c) {
+      _updateGradeVisibility(c.commodity);
+      modal._contractPricePerUnit = c.price_per_unit || null;
+    }
   }
 
   // ── Multi-line crop sale lines ──────────────────────────────
@@ -1302,9 +1327,21 @@ export async function openInvoiceForm(container, existing = null) {
   const [curY] = (activeSeason || '').split('-').map(Number);
   const allSeasons = curY ? [0,1,2,3,4,5,6,7].map(n => `${curY-n}-${String(curY-n+1).slice(-2)}`) : (activeSeason ? [activeSeason] : []);
 
+  // Delivered grade options for grain lines
+  const GRAIN_GRADES = ['APH1','APW1','APW2','ASW','ASW2','ANW','AH','Feed','SFW1','HPS1','SRS1','AGP1','CanolaSQ','Malt','Malting','Biscuit','Other'];
+
+  // Show/hide delivered grade column on existing line items
+  function _refreshLineGradeVisibility(commodity) {
+    const isGrain = commodity && GRAIN_COMMODITIES.some(g => commodity.toLowerCase().includes(g));
+    linesWrap.querySelectorAll('.cl-delgrade-wrap').forEach(el => {
+      el.style.display = isGrain ? '' : 'none';
+    });
+    _updateReconRow();
+  }
+
   const buildCropLine = (data = {}) => {
     const lineDiv = document.createElement('div');
-    lineDiv.style.cssText = 'display:grid;grid-template-columns:100px 1fr 70px 60px 80px 90px 110px 80px 30px;gap:6px;margin-bottom:6px;align-items:center';
+    lineDiv.style.cssText = 'display:grid;grid-template-columns:95px 1fr 80px 55px 75px 90px 110px 100px 30px;gap:6px;margin-bottom:6px;align-items:center';
 
     const selectedSeason = data.crop_year || activeSeason;
     const seasonOpts = allSeasons.map(s =>
@@ -1317,17 +1354,29 @@ export async function openInvoiceForm(container, existing = null) {
     // Escape value for html attribute
     const esc = v => (v||'').replace(/"/g,'&quot;');
 
+    // Delivered grade dropdown — hidden for non-grain commodities
+    const isCotton = (data.commodity||'').toLowerCase().includes('cotton');
+    const gradeOpts = GRAIN_GRADES.map(g => `<option value="${g}"${g===(data.delivered_grade||'')?' selected':''}>${g}</option>`).join('');
+    const gradeHidden = isCotton ? 'display:none' : '';
+
     lineDiv.innerHTML = `
       <select class="form-select cl-season" style="font-size:11px;padding:4px 6px">${seasonOpts}</select>
       <select class="form-select cl-commodity" style="font-size:12px;padding:5px 6px">
         ${cropOpts(data.commodity||'')}
       </select>
-      <input class="form-input cl-grade" type="text" placeholder="e.g. APH1" value="${esc(data.grade||'')}" style="font-size:11px;padding:4px 6px" title="Grade (e.g. APH1, H2, HPS1)">
+      <div class="cl-delgrade-wrap" style="${gradeHidden}">
+        <select class="form-select cl-delgrade" style="font-size:11px;padding:4px 6px" title="Delivered grade">
+          <option value="">— grade —</option>${gradeOpts}
+        </select>
+      </div>
       <select class="form-select cl-unit" style="font-size:11px;padding:4px 6px">${['bale','t','kg','head','each'].map(u=>`<option value="${u}"${(data.unit||'bale')===u?' selected':''}>${u}</option>`).join('')}</select>
       <input class="form-input cl-qty" type="number" step="any" min="0" placeholder="0" value="${data.qty||''}" style="font-size:12px;padding:6px 8px">
       <input class="form-input cl-price" type="number" step="0.0001" placeholder="0.0000" value="${initPrice||''}" style="font-size:12px;padding:6px 8px">
-      <input class="form-input cl-gross" type="number" step="0.01" placeholder="0.00" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600">
-      <input class="form-input cl-qa" type="number" step="0.01" placeholder="0.00" value="${data.qa||''}" style="font-size:12px;padding:6px 8px" title="Quality adjustment (negative = discount)">
+      <input class="form-input cl-gross" type="number" step="0.01" placeholder="Line total" value="${data.gross||''}" style="font-size:12px;padding:6px 8px;font-weight:600" title="Type the actual line total — adj is inferred from contract price">
+      <div style="position:relative">
+        <input class="form-input cl-qa" type="number" step="0.01" placeholder="0.00" value="${data.qa||''}" style="font-size:11px;padding:5px 7px;background:var(--page-bg)" title="Quality adjustment (inferred or manual)">
+        <div class="cl-qa-hint" style="font-size:9px;color:var(--hint);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+      </div>
       <button class="btn btn-ghost cl-remove" type="button" style="padding:4px;font-size:16px;color:var(--hint)">✕</button>
     `;
 
@@ -1335,42 +1384,66 @@ export async function openInvoiceForm(container, existing = null) {
 
     // Season change — commodity list is farm-wide, no repopulation needed
 
-    // Two-way price ↔ gross calculation
-    // Gross typed → recalc price; Price typed → recalc gross
+    // Show/hide grade col when commodity changes
+    lineDiv.querySelector('.cl-commodity').addEventListener('change', e => {
+      const isCot = e.target.value.toLowerCase().includes('cotton');
+      lineDiv.querySelector('.cl-delgrade-wrap').style.display = isCot ? 'none' : '';
+      _updateReconRow();
+    });
+
+    // Two-way price ↔ gross calculation + grade adj inference
+    // Gross typed → recalc price + infer adj from contract price
+    // Price typed → recalc gross
     const qtyEl   = lineDiv.querySelector('.cl-qty');
     const priceEl = lineDiv.querySelector('.cl-price');
     const grossEl = lineDiv.querySelector('.cl-gross');
+    const qaEl    = lineDiv.querySelector('.cl-qa');
+    const qaHint  = lineDiv.querySelector('.cl-qa-hint');
+
+    const inferAdj = () => {
+      const qty = parseFloat(qtyEl.value);
+      const gross = parseFloat(grossEl.value);
+      const contractPrice = modal._contractPricePerUnit;
+      if (qty && gross && contractPrice) {
+        const contracted = qty * contractPrice;
+        const adj = Math.round((gross - contracted) * 100) / 100;
+        qaEl.value = adj !== 0 ? adj : '';
+        const adjPerT = Math.round((gross / qty - contractPrice) * 10000) / 10000;
+        qaHint.textContent = adj !== 0 ? `${adjPerT>0?'+':''}${adjPerT}/u vs contract` : '';
+      }
+      _updateReconRow();
+      recalcTotals();
+    };
 
     const updatePriceFromGross = () => {
       const qty = parseFloat(qtyEl.value);
       const gross = parseFloat(grossEl.value);
       if (qty && gross) priceEl.value = Math.round(gross / qty * 10000) / 10000;
-      recalcTotals();
+      inferAdj();
     };
 
     const updateGrossFromPrice = () => {
       const qty = parseFloat(qtyEl.value);
       const price = parseFloat(priceEl.value);
       if (qty && price) { grossEl.value = Math.round(qty * price * 100) / 100; }
-      recalcTotals();
+      inferAdj();
     };
 
     const updateBothFromQty = () => {
       const qty = parseFloat(qtyEl.value);
       const price = parseFloat(priceEl.value);
       const gross = parseFloat(grossEl.value);
-      // Qty changed: if price is set, recompute gross; else if gross is set, recompute price
       if (qty && price) { grossEl.value = Math.round(qty * price * 100) / 100; }
       else if (qty && gross) { priceEl.value = Math.round(gross / qty * 10000) / 10000; }
-      recalcTotals();
+      inferAdj();
     };
 
     grossEl.addEventListener('input', updatePriceFromGross);
     priceEl.addEventListener('input', updateGrossFromPrice);
     qtyEl.addEventListener('input', updateBothFromQty);
 
-    lineDiv.querySelector('.cl-qa').addEventListener('input', recalcTotals);
-    lineDiv.querySelector('.cl-remove').addEventListener('click', () => { lineDiv.remove(); recalcTotals(); });
+    qaEl.addEventListener('input', () => { qaHint.textContent = ''; recalcTotals(); _updateReconRow(); });
+    lineDiv.querySelector('.cl-remove').addEventListener('click', () => { lineDiv.remove(); recalcTotals(); _updateReconRow(); });
     return lineDiv;
   };
 
@@ -1390,6 +1463,36 @@ export async function openInvoiceForm(container, existing = null) {
     if (tt) { tt.textContent = total ? formatCurrency(total, 2) : '—'; tt.style.color = total < 0 ? 'var(--red)' : 'var(--blue)'; }
   }
 
+  // ── Reconciliation row (grain invoices with contract) ─────────
+  function _updateReconRow() {
+    const reconEl = modal.querySelector('#f-recon');
+    if (!reconEl) return;
+    const contractPrice = modal._contractPricePerUnit;
+    if (!contractPrice) { reconEl.style.display = 'none'; return; }
+
+    let totalQty = 0, totalActual = 0, totalAdj = 0;
+    linesWrap.querySelectorAll(':scope > div').forEach(div => {
+      const qty   = parseFloat(div.querySelector('.cl-qty')?.value)   || 0;
+      const gross = parseFloat(div.querySelector('.cl-gross')?.value) || 0;
+      const qa    = parseFloat(div.querySelector('.cl-qa')?.value)    || 0;
+      totalQty    += qty;
+      totalActual += gross;
+      totalAdj    += qa;
+    });
+
+    if (!totalQty && !totalActual) { reconEl.style.display = 'none'; return; }
+
+    const contracted = Math.round(totalQty * contractPrice * 100) / 100;
+    reconEl.style.display = '';
+    const adjColor = totalAdj > 0 ? 'var(--green,#16a34a)' : totalAdj < 0 ? 'var(--red,#dc2626)' : 'inherit';
+    modal.querySelector('#recon-contracted').textContent = formatCurrency(contracted, 2);
+    modal.querySelector('#recon-contracted-note').textContent = totalQty ? `${formatNumber(totalQty,3)} × ${formatCurrency(contractPrice,4)}/u` : '';
+    modal.querySelector('#recon-actual').textContent = formatCurrency(totalActual, 2);
+    const adjEl = modal.querySelector('#recon-adj');
+    adjEl.textContent = totalAdj ? (totalAdj>0?'+':'')+formatCurrency(totalAdj,2) : formatCurrency(totalActual - contracted, 2);
+    adjEl.style.color = adjColor;
+  }
+
   // Render initial lines (or one blank if new invoice)
   const initLines = existingLines.length ? existingLines : [{}];
   initLines.forEach(d => linesWrap.appendChild(buildCropLine(d)));
@@ -1397,8 +1500,15 @@ export async function openInvoiceForm(container, existing = null) {
     // Default new line's season to active season
     linesWrap.appendChild(buildCropLine({ crop_year: activeSeason }));
     recalcTotals();
+    _updateReconRow();
   });
   recalcTotals();
+  _updateReconRow();
+  // Apply grade col visibility to initial lines
+  if (existing?.forward_contract_id) {
+    const c = _contracts.find(x => x.id === existing.forward_contract_id);
+    if (c) _refreshLineGradeVisibility(c.commodity);
+  }
 
 
   // ── Save ─────────────────────────────────────────────────────
@@ -1426,9 +1536,10 @@ export async function openInvoiceForm(container, existing = null) {
         const qa    = parseFloat(div.querySelector('.cl-qa')?.value)    || 0;
         if (!gross && !qty) return; // skip empty lines
         saleLines.push({
-          commodity:    div.querySelector('.cl-commodity')?.value?.trim() || selectedContract?.commodity || 'Sale',
-          grade:        div.querySelector('.cl-grade')?.value?.trim() || '',
-          crop_year:    div.querySelector('.cl-season')?.value || activeSeason,
+          commodity:      div.querySelector('.cl-commodity')?.value?.trim() || selectedContract?.commodity || 'Sale',
+          grade:          div.querySelector('.cl-grade')?.value?.trim() || '',
+          delivered_grade: div.querySelector('.cl-delgrade')?.value?.trim() || '',
+          crop_year:      div.querySelector('.cl-season')?.value || activeSeason,
           unit:         div.querySelector('.cl-unit')?.value?.trim() || 'bale',
           description:  '',
           qty,
@@ -1493,6 +1604,7 @@ export async function openInvoiceForm(container, existing = null) {
           unit: effectiveUnit,
           crop_year: effectiveCropYear,
           grade: sl.grade || '',
+          delivered_grade: sl.delivered_grade || '',
           description: slDesc || '',
           income_files: batchFiles,
           lines: batchLines,
