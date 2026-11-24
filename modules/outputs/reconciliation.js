@@ -101,11 +101,15 @@ async function _renderReconciliation(container, farm) {
     ]);
 
     // Filter invoices to those on or before asAt date
-    const paidInvoices = invoices.filter(i =>
-      i.status === 'complete' &&
-      i.invoice_date <= asAt &&
-      (i.line_items || []).some(l => !l.season || l.season === season)
-    );
+    // Include batch invoices (no line_items) and legacy line_items invoices
+    const paidInvoices = invoices.filter(i => {
+      if (i.status !== 'complete') return false;
+      if (i.invoice_date > asAt) return false;
+      // Batch format — season is on the batch, checked when processing
+      if (i.batches && i.batches.length) return true;
+      // Legacy line_items — must have at least one line matching the season
+      return (i.line_items || []).some(l => !l.season || l.season === season);
+    });
 
     // Build commodity list from budgets + contracts
     const masterCommodities = getCommodities();
@@ -130,18 +134,23 @@ async function _renderReconciliation(container, farm) {
       if (inv.batches && inv.batches.length) {
         const batches = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
         batches.forEach(b => {
+          // Season filter: batch crop_year must match the active season
+          const batchSeason = b.crop_year || inv.season || '';
+          if (batchSeason && batchSeason !== season) return;
           const saleLines = (b.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa');
           if (!saleLines.length) return;
           const batchQty = parseFloat(b.qty) || 0;
           const batchTotal = saleLines.reduce((s, l) => s + (parseFloat(l.amount)||0), 0);
-          const commodity = inv.commodity_type || (inv.line_items||[])[0]?.commodity || null;
-          const key = commodity ? Object.keys(commMap).find(k => commMap[k].name === commodity || commMap[k].id === inv.commodity_id) : null;
+          // Get commodity from the batch's own sale line description (not inv.commodity_type
+          // which is a top-level field that would match all batches to the same commodity)
+          const commodity = saleLines[0]?.description || inv.commodity_type || null;
+          const key = commodity ? Object.keys(commMap).find(k => commMap[k].name === commodity) : null;
           if (key) commMap[key].paidLines.push({
             qty: batchQty,
             total: batchTotal,
             price: batchQty ? batchTotal / batchQty : 0,
             docket: b.income_docket || '',
-            season: b.crop_year || season,
+            season: batchSeason || season,
             invoice: inv,
           });
         });
