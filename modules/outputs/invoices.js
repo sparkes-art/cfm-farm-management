@@ -322,22 +322,33 @@ function _renderTable(container) {
               </td>
               <td><span class="badge ${inv.sale_type === 'against_contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'against_contract' ? 'Contract' : 'Cash'}</span></td>
               <td><strong>${inv.buyer || '—'}</strong></td>
-              <td class="muted text-sm">${commodities}${inv.grade ? `<span style="font-size:10px;background:var(--page-bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:4px">${inv.grade}</span>` : ''}</td>
-              <td class="num text-sm">${(() => {
-                // Group qty by unit — never add bales + tonnes
-                const unitMap = {};
+              <td class="muted text-sm" style="padding-top:4px;padding-bottom:4px">${(() => {
+                // Show each commodity on its own line
                 if (inv.batches && inv.batches.length) {
                   const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-                  b.filter(x => (x.lines||[]).some(l => l.type==='income')).forEach(x => {
-                    const u = x.unit || inv.master_unit || '';
-                    const q = parseFloat(x.qty) || 0;
-                    if (q) unitMap[u] = (unitMap[u]||0) + q;
-                  });
-                } else if (inv.total_qty && inv.master_unit) {
-                  unitMap[inv.master_unit] = parseFloat(inv.total_qty)||0;
+                  const incomeLines = b.filter(x => (x.lines||[]).some(l => l.type==='income'));
+                  if (incomeLines.length > 1) {
+                    return incomeLines.map(x => `<div style="line-height:1.6">${x.description || x.commodity || '—'}</div>`).join('');
+                  }
                 }
-                const parts = Object.entries(unitMap).map(([u,q]) => formatNumber(q,2)+' '+u);
-                return parts.length ? parts.join(' / ') : '—';
+                return commodities + (inv.grade ? `<span style="font-size:10px;background:var(--page-bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:4px">${inv.grade}</span>` : '');
+              })()}</td>
+              <td class="num text-sm" style="padding-top:4px;padding-bottom:4px">${(() => {
+                // Show each line's qty separately — never sum across different commodities
+                if (inv.batches && inv.batches.length) {
+                  const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+                  const incomeLines = b.filter(x => (x.lines||[]).some(l => l.type==='income'));
+                  if (incomeLines.length > 1) {
+                    return incomeLines.map(x => `<div style="line-height:1.6">${formatNumber(parseFloat(x.qty)||0,2)} ${x.unit||''}</div>`).join('');
+                  }
+                  // Single line
+                  const u = incomeLines[0]?.unit || inv.master_unit || '';
+                  const q = parseFloat(incomeLines[0]?.qty) || 0;
+                  return q ? formatNumber(q,2)+' '+u : '—';
+                } else if (inv.total_qty && inv.master_unit) {
+                  return formatNumber(parseFloat(inv.total_qty)||0,2)+' '+inv.master_unit;
+                }
+                return '—';
               })()}</td>
               <td class="num">${formatCurrency(inv.gross_amount, 0)}</td>
               <td class="num" style="color:${(inv.total_quality_adj||0)>0?'var(--green)':(inv.total_quality_adj||0)<0?'var(--red)':'inherit'}">${inv.total_quality_adj ? ((inv.total_quality_adj>0?'+':'')+formatCurrency(inv.total_quality_adj,0)) : '—'}</td>
@@ -2197,48 +2208,72 @@ function _exportCSV(container) {
     'Xero Ref', 'Status',
   ];
 
-  const csvRows = rows.map(inv => {
-    const lines = inv.line_items || [];
+  // Expand each invoice into one row per line item so commodity qtys are separate
+  const csvRows = rows.flatMap(inv => {
     const contract = _contracts.find(c => c.id === inv.forward_contract_id);
-    const contractCommodity = contract?.commodity;
-    const commodities = contractCommodity ||
-      [...new Set(lines.map(l => l.commodity).filter(Boolean))].join('; ') ||
-      (() => {
-        if (!inv.batches) return null;
-        const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-        const descs = [...new Set(b.flatMap(batch => (batch.lines||[]).filter(l=>l.type==='income'&&l.line_type!=='qa').map(l=>l.description).filter(Boolean)))];
-        return descs.join('; ');
-      })() || inv.commodity_type || '';
-
-    let qty = '';
-    if (inv.batches && inv.batches.length) {
-      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-      qty = b.filter(x => (x.lines||[]).some(l => l.type==='income')).reduce((s,x) => s+(parseFloat(x.qty)||0), 0);
-    } else {
-      qty = inv.total_qty || '';
-    }
-
+    const saleType = inv.sale_type === 'against_contract' ? 'Contract' : 'Cash';
     const gross = parseFloat(inv.gross_amount) || 0;
     const qa = parseFloat(inv.total_quality_adj) || 0;
     const totalIncome = gross + qa;
-    const saleType = inv.sale_type === 'against_contract' ? 'Contract' : 'Cash';
 
-    return [
+    // Get income line items from batches
+    let lineItems = [];
+    if (inv.batches && inv.batches.length) {
+      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+      lineItems = b.filter(x => (x.lines||[]).some(l => l.type==='income'));
+    }
+
+    if (lineItems.length > 1) {
+      // Multi-commodity: one CSV row per line item; financials only on first row
+      return lineItems.map((item, idx) => [
+        esc(inv.invoice_date),
+        esc(inv.invoice_number),
+        esc(saleType),
+        esc(inv.buyer),
+        esc(item.description || item.commodity || ''),
+        esc(contract?.contract_number || ''),
+        esc(item.crop_year || inv.season),
+        esc(parseFloat(item.qty) || ''),
+        esc(item.unit || inv.master_unit || ''),
+        esc(idx === 0 ? (gross || '') : ''),
+        esc(idx === 0 ? (qa || '') : ''),
+        esc(idx === 0 ? (totalIncome || '') : ''),
+        esc(idx === 0 ? inv.xero_invoice_number : ''),
+        esc(idx === 0 ? inv.status : ''),
+      ].join(','));
+    }
+
+    // Single commodity invoice
+    const lines = inv.line_items || [];
+    const commodity = contract?.commodity ||
+      [...new Set(lines.map(l => l.commodity).filter(Boolean))].join('; ') ||
+      (() => {
+        if (!lineItems.length) return null;
+        const descs = [...new Set(lineItems.map(x => x.description).filter(Boolean))];
+        return descs.join('; ');
+      })() || inv.commodity_type || '';
+
+    const qty = lineItems.length
+      ? parseFloat(lineItems[0]?.qty) || inv.total_qty || ''
+      : inv.total_qty || '';
+    const unit = lineItems[0]?.unit || inv.master_unit || '';
+
+    return [[
       esc(inv.invoice_date),
       esc(inv.invoice_number),
       esc(saleType),
       esc(inv.buyer),
-      esc(commodities),
+      esc(commodity),
       esc(contract?.contract_number || ''),
       esc(inv.season),
       esc(qty),
-      esc(inv.master_unit),
+      esc(unit),
       esc(gross || ''),
       esc(qa || ''),
       esc(totalIncome || ''),
       esc(inv.xero_invoice_number),
       esc(inv.status),
-    ].join(',');
+    ].join(',')];
   });
 
   const csv = [headers.map(esc).join(','), ...csvRows].join('\r\n');
@@ -2253,5 +2288,5 @@ function _exportCSV(container) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  toast(`Exported ${rows.length} invoice${rows.length !== 1 ? 's' : ''}`, 'success');
+  toast(`Exported ${rows.length} invoice${rows.length !== 1 ? 's' : ''} (${csvRows.length} rows)`, 'success');
 }
