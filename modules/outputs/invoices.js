@@ -824,7 +824,7 @@ export async function openInvoiceForm(container, existing = null) {
   formEl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;overflow-y:auto;padding:20px';
 
   const modal = document.createElement('div');
-  modal.style.cssText = 'background:var(--white);border-radius:var(--radius-xl);max-width:760px;margin:0 auto;display:flex;flex-direction:column;overflow:hidden';
+  modal.style.cssText = 'background:var(--white);border-radius:var(--radius-xl);max-width:1060px;margin:0 auto;display:flex;flex-direction:column;overflow:hidden';
 
   // Existing data — parse batches into per-line data for the multi-line form
   const existingBatches = existing?.batches
@@ -929,7 +929,7 @@ export async function openInvoiceForm(container, existing = null) {
         <label class="form-label">Forward contract</label>
         <div style="position:relative" id="f-contract-wrap">
           <input type="text" id="f-contract-search" class="form-input" placeholder="Search contracts…" autocomplete="off"
-            value="${existing?.forward_contract_id ? (() => { const c = _contracts.find(x=>x.id===existing.forward_contract_id); return c ? (c.contract_number||'')+'  —  '+(c.commodity||'')+' — '+formatNumber(c.quantity,0)+' '+(c.unit||'')+' @ '+formatCurrency(c.price_per_unit,2) : ''; })() : ''}"
+            value="${existing?.forward_contract_id ? (() => { const c = _contracts.find(x=>x.id===existing.forward_contract_id); return c ? (c.counterparty||c.buyer||'')+'  |  '+(c.contract_number||'')+'  —  '+(c.commodity||'')+' — '+formatNumber(c.quantity,0)+' '+(c.unit||'')+' @ '+formatCurrency(c.price_per_unit,2) : ''; })() : ''}"
             style="width:100%">
           <input type="hidden" id="f-contract" value="${existing?.forward_contract_id||''}">
           <div id="f-contract-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:200;background:white;border:1px solid var(--border);border-radius:var(--radius-md);margin-top:2px;max-height:220px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1)">
@@ -1125,7 +1125,7 @@ export async function openInvoiceForm(container, existing = null) {
         );
         if (matchedContract && !contractHidden.value) {
           contractHidden.value = matchedContract.id;
-          contractSearch.value = (matchedContract.contract_number||'') + '  —  ' + (matchedContract.commodity||'') +
+          contractSearch.value = (matchedContract.counterparty||matchedContract.buyer||'') + '  |  ' + (matchedContract.contract_number||'') + '  —  ' + (matchedContract.commodity||'') +
             ' — ' + formatNumber(matchedContract.quantity,0) + ' ' + (matchedContract.unit||'') +
             ' @ ' + formatCurrency(matchedContract.price_per_unit,2);
           updateContractSummary();
@@ -1241,7 +1241,8 @@ export async function openInvoiceForm(container, existing = null) {
     });
     contractOpts.innerHTML = matches.length
       ? matches.map(c => `<div class="con-opt" data-id="${c.id}" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border-light);font-size:13px">
-          <strong>${c.contract_number||'—'}</strong> — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}
+          <span style="color:var(--hint);font-size:11px">${c.counterparty||c.buyer||''}</span>
+          <strong style="margin-left:4px">${c.contract_number||'—'}</strong> — ${c.commodity||''} — ${formatNumber(c.quantity,0)} ${c.unit||''} @ ${formatCurrency(c.price_per_unit,2)}
           ${priorYearMode ? `<span style="font-size:10px;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;margin-left:6px">${c.crop_year||''}</span>` : ''}
         </div>`).join('')
       : `<div style="padding:10px 14px;color:var(--hint);font-size:13px">${priorYearMode ? `No contracts found for ${priorSeason||'prior season'}` : 'No contracts found'}</div>`;
@@ -1250,7 +1251,7 @@ export async function openInvoiceForm(container, existing = null) {
         e.preventDefault();
         const c = _contracts.find(x => x.id === opt.dataset.id);
         contractHidden.value = opt.dataset.id;
-        contractSearch.value = (c?.contract_number||'') + '  —  ' + (c?.commodity||'') + ' — ' + formatNumber(c?.quantity,0) + ' ' + (c?.unit||'') + ' @ ' + formatCurrency(c?.price_per_unit,2);
+        contractSearch.value = (c?.counterparty||c?.buyer||'') + '  |  ' + (c?.contract_number||'') + '  —  ' + (c?.commodity||'') + ' — ' + formatNumber(c?.quantity,0) + ' ' + (c?.unit||'') + ' @ ' + formatCurrency(c?.price_per_unit,2);
         contractDropdown.style.display = 'none';
         // Pre-fill buyer from contract if empty
         const buyerEl = modal.querySelector('#f-buyer');

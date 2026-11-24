@@ -507,7 +507,17 @@ body {
 .form-input[type="number"] {
   font-family: var(--font-data);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 0;
   text-align: right;
+}
+/* Remove scroll-to-change on all number inputs */
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .form-helper { font-size: var(--text-xs); color: var(--muted); margin-top: 2px; }
 .form-row {
