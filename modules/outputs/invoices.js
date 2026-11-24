@@ -328,7 +328,10 @@ function _renderTable(container) {
                   const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
                   const incomeLines = b.filter(x => (x.lines||[]).some(l => l.type==='income'));
                   if (incomeLines.length > 1) {
-                    return incomeLines.map(x => `<div style="line-height:1.6">${x.description || x.commodity || '—'}</div>`).join('');
+                    return incomeLines.map(x => {
+                      const comm = x.lines?.find(l => l.type==='income' && l.line_type==='sale')?.description || x.description || x.commodity || '—';
+                      return `<div style="line-height:1.6">${comm}</div>`;
+                    }).join('');
                   }
                 }
                 return commodities + (inv.grade ? `<span style="font-size:10px;background:var(--page-bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:4px">${inv.grade}</span>` : '');
