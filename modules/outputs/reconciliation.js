@@ -91,6 +91,13 @@ async function _renderReconciliation(container, farm) {
   const contingencyPct = parseFloat(qs('#rec-contingency', container)?.value || -5);
   const filterCommodity = qs('#rec-commodity', container)?.value || '';
 
+  // Compute season date range from farm settings
+  const ym = parseInt(farm?.settings?.yearStartMonth || 7);
+  const [sy] = season.split('-').map(Number);
+  const mm = String(ym).padStart(2, '0');
+  const seasonStart = `${sy}-${mm}-01`;
+  const seasonEnd   = `${sy + 1}-${mm}-01`;
+
   try {
     const [invoices, contracts, budgets, forecasts, prices] = await Promise.all([
       dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
@@ -100,15 +107,20 @@ async function _renderReconciliation(container, farm) {
       dbSelect('market_prices', 'price_date=lte.' + asAt + '&select=commodity_id,price_per_unit,price_date&order=price_date.desc&limit=200'),
     ]);
 
-    // Filter invoices to those on or before asAt date
-    // Include batch invoices (no line_items) and legacy line_items invoices
+    // Filter invoices: complete, on or before asAt, and belonging to the active season.
+    // Season membership = invoice_date in season range OR any batch crop_year matches season.
     const paidInvoices = invoices.filter(i => {
       if (i.status !== 'complete') return false;
       if (i.invoice_date > asAt) return false;
-      // Batch format — season is on the batch, checked when processing
-      if (i.batches && i.batches.length) return true;
-      // Legacy line_items — must have at least one line matching the season
-      return (i.line_items || []).some(l => !l.season || l.season === season);
+      const d = i.invoice_date?.slice(0, 10) || '';
+      const dateInSeason = d >= seasonStart && d < seasonEnd;
+      if (dateInSeason) return true;
+      // Also include if any batch explicitly tags this season (handles cross-season invoice dates)
+      if (i.batches && i.batches.length) {
+        const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
+        if (b.some(batch => batch.crop_year === season)) return true;
+      }
+      return (i.line_items || []).some(l => l.season === season);
     });
 
     // Build commodity list from budgets + contracts
@@ -134,15 +146,17 @@ async function _renderReconciliation(container, farm) {
       if (inv.batches && inv.batches.length) {
         const batches = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
         batches.forEach(b => {
-          // Season filter: batch crop_year must match the active season
-          const batchSeason = b.crop_year || inv.season || '';
-          if (batchSeason && batchSeason !== season) return;
+          // If batch has an explicit crop_year it must match — otherwise the invoice-level
+          // season filter already guarantees this invoice belongs to the active season.
+          const batchCropYear = b.crop_year || '';
+          if (batchCropYear && batchCropYear !== season) return;
           const saleLines = (b.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa');
           if (!saleLines.length) return;
           const batchQty = parseFloat(b.qty) || 0;
           const batchTotal = saleLines.reduce((s, l) => s + (parseFloat(l.amount)||0), 0);
-          // Get commodity from the batch's own sale line description (not inv.commodity_type
-          // which is a top-level field that would match all batches to the same commodity)
+          // Commodity comes from the batch's own sale line description — each batch is one
+          // commodity delivery. Fall back to invoice-level commodity_type only for single-
+          // commodity invoices where it is reliably correct.
           const commodity = saleLines[0]?.description || inv.commodity_type || null;
           const key = commodity ? Object.keys(commMap).find(k => commMap[k].name === commodity) : null;
           if (key) commMap[key].paidLines.push({
@@ -150,7 +164,6 @@ async function _renderReconciliation(container, farm) {
             total: batchTotal,
             price: batchQty ? batchTotal / batchQty : 0,
             docket: b.income_docket || '',
-            season: batchSeason || season,
             invoice: inv,
           });
         });
