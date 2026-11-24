@@ -249,9 +249,34 @@ function _renderTable(container) {
   const totalPending  = rows.filter(i=>i.status==='pending').reduce((s,i)=>s+(parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0),0);
   const totalComplete = rows.filter(i=>i.status==='complete').reduce((s,i)=>s+(parseFloat(i.gross_amount)||0)+(parseFloat(i.total_quality_adj)||0),0);
 
+  // Total qty for crop rows — sum across batches to handle multi-commodity invoices
+  // Build a map of unit → total qty
+  const qtyByUnit = {};
+  for (const inv of cropRows) {
+    if (inv.batches && inv.batches.length) {
+      const b = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+      const incomeLines = b.filter(x => (x.lines||[]).some(l => l.type==='income'));
+      for (const item of incomeLines) {
+        const u = item.unit || inv.master_unit || 't';
+        qtyByUnit[u] = (qtyByUnit[u] || 0) + (parseFloat(item.qty) || 0);
+      }
+    } else {
+      const u = inv.master_unit || 't';
+      qtyByUnit[u] = (qtyByUnit[u] || 0) + (parseFloat(inv.total_qty) || 0);
+    }
+  }
+  const qtyUnits = Object.keys(qtyByUnit);
+  const totalQtyDisplay = qtyUnits.length === 1
+    ? `${formatNumber(qtyByUnit[qtyUnits[0]], 2)} ${qtyUnits[0]}`
+    : qtyUnits.map(u => `${formatNumber(qtyByUnit[u], 2)} ${u}`).join(' · ');
+
   wrap.innerHTML = `
     <div style="display:flex;gap:0;flex-wrap:wrap;border-bottom:1px solid var(--border-light)">
       ${cropRows.length ? `
+      <div style="padding:12px 18px;border-right:1px solid var(--border-light)">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Total qty</div>
+        <div style="font-size:18px;font-weight:700;color:var(--ink)">${totalQtyDisplay || '—'}</div>
+      </div>
       <div style="padding:12px 18px;border-right:1px solid var(--border-light)">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Gross proceeds</div>
         <div style="font-size:18px;font-weight:700;color:var(--ink)">${formatCurrency(totalGross, 0)}</div>
