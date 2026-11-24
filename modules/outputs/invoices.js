@@ -95,12 +95,17 @@ export async function mountInvoices(container) {
             <span style="font-size:20px;margin-right:10px">🐄</span>
             <span><strong>Livestock</strong><br><span style="font-weight:400;font-size:12px">Cattle or sheep sale</span></span>
           </button>
+          <button id="pick-seed" class="btn btn-secondary" style="justify-content:flex-start;padding:14px 16px;text-align:left">
+            <span style="font-size:20px;margin-right:10px">🌱</span>
+            <span><strong>Seed sale / transfer</strong><br><span style="font-weight:400;font-size:12px">Internal or external seed transfer</span></span>
+          </button>
           <button id="pick-cancel" class="btn btn-ghost" style="margin-top:4px">Cancel</button>
         </div>
       </div>`;
     document.body.appendChild(picker);
     picker.querySelector('#pick-crop').addEventListener('click', () => { picker.remove(); openInvoiceForm(container); });
     picker.querySelector('#pick-livestock').addEventListener('click', () => { picker.remove(); openLivestockForm(container); });
+    picker.querySelector('#pick-seed').addEventListener('click', () => { picker.remove(); openInvoiceForm(container, null, 'seed'); });
     picker.querySelector('#pick-cancel').addEventListener('click', () => picker.remove());
     picker.addEventListener('click', e => { if (e.target === picker) picker.remove(); });
   });
@@ -364,7 +369,7 @@ function _renderTable(container) {
                 ${inv.invoice_date ? new Date(inv.invoice_date+'T00:00:00').toLocaleDateString('en-AU',{day:'2-digit',month:'numeric',year:'2-digit'}) : '—'}
                 ${(() => { const b = inv.batches ? (typeof inv.batches==='string'?JSON.parse(inv.batches):inv.batches) : []; const isPY = b.some(x=>x.prior_year_income); return isPY ? `<span style="font-size:9px;background:#fef3c7;color:#92400e;border-radius:3px;padding:1px 5px;margin-left:3px;font-weight:600">Prior yr ${inv.season||''}</span>` : inv.season && inv.season !== (getActiveSeason()||'') ? `<span style="font-size:9px;background:var(--blue-light);color:var(--blue-text);border-radius:3px;padding:1px 4px;margin-left:3px">${inv.season}</span>` : ''; })()}
               </td>
-              <td><span class="badge ${inv.sale_type === 'against_contract' ? 'badge-issued' : 'badge-draft'}">${inv.sale_type === 'against_contract' ? 'Contract' : 'Cash'}</span></td>
+              <td><span class="badge ${inv.sale_type === 'against_contract' ? 'badge-issued' : inv.sale_type === 'seed_transfer' ? 'badge-pending' : 'badge-draft'}">${inv.sale_type === 'against_contract' ? 'Contract' : inv.sale_type === 'seed_transfer' ? 'Seed' : 'Cash'}</span></td>
               <td><strong>${inv.buyer || '—'}</strong></td>
               <td class="muted text-sm" style="padding-top:4px;padding-bottom:4px">${(() => {
                 // Show each commodity on its own line
@@ -548,7 +553,7 @@ function _openDetail(inv, container) {
   const season = lines.find(l => l.season)?.season || inv.season || '—';
 
   openModal({
-    title: (inv.sale_type === 'against_contract' ? 'Contract sale' : 'Cash sale') + ' — ' + (inv.buyer || ''),
+    title: (inv.sale_type === 'against_contract' ? 'Contract sale' : inv.sale_type === 'seed_transfer' ? 'Seed sale / transfer' : 'Cash sale') + ' — ' + (inv.buyer || ''),
     confirmLabel: canWrite() ? 'Edit' : null,
     confirmClass: 'btn-secondary',
     onConfirm: canWrite() ? async () => {
@@ -875,7 +880,7 @@ function _getPastDescriptions(type) {
   return [...descs].sort();
 }
 
-export async function openInvoiceForm(container, existing = null) {
+export async function openInvoiceForm(container, existing = null, defaultSaleType = null) {
   const farm = getActiveFarm();
   const isEdit = !!existing;
   const activeSeason = getActiveSeason() || '';
@@ -986,6 +991,10 @@ export async function openInvoiceForm(container, existing = null) {
         <div id="inv-opt-cash" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer">
           <p style="font-size:13px;font-weight:600;color:var(--ink-mid)">Cash sale</p>
           <p style="font-size:11px;color:var(--hint);margin-top:2px">Price set at time of sale</p>
+        </div>
+        <div id="inv-opt-seed" style="flex:1;border:1px solid var(--border);border-radius:var(--radius-md);padding:10px 14px;cursor:pointer">
+          <p style="font-size:13px;font-weight:600;color:var(--ink-mid)">Seed sale / transfer</p>
+          <p style="font-size:11px;color:var(--hint);margin-top:2px">Internal or external seed transfer</p>
         </div>
       </div>
 
@@ -1239,21 +1248,34 @@ export async function openInvoiceForm(container, existing = null) {
   });
 
   // ── Sale type toggle ─────────────────────────────────────────
-  let saleType = existing?.sale_type === 'against_contract' ? 'contract' : (existing?.sale_type || 'contract');
+  let saleType = existing?.sale_type === 'against_contract' ? 'contract' : existing?.sale_type === 'seed_transfer' ? 'seed' : (defaultSaleType || existing?.sale_type || 'contract');
   function setSaleType(t) {
     saleType = t;
     const contractEl = modal.querySelector('#inv-opt-contract');
     const cashEl = modal.querySelector('#inv-opt-cash');
+    const seedEl = modal.querySelector('#inv-opt-seed');
     const contractSection = modal.querySelector('#f-contract-section');
+    const buyerWrap = modal.querySelector('#f-buyer')?.closest('.form-group');
+    // Contract tile
     contractEl.style.border = t==='contract' ? '2px solid var(--blue)' : '1px solid var(--border)';
     contractEl.style.background = t==='contract' ? 'var(--blue-light)' : '';
     contractEl.querySelector('p').style.color = t==='contract' ? 'var(--blue-text)' : 'var(--ink-mid)';
+    // Cash tile
     cashEl.style.border = t==='cash' ? '2px solid var(--blue)' : '1px solid var(--border)';
     cashEl.style.background = t==='cash' ? 'var(--blue-light)' : '';
+    cashEl.querySelector('p').style.color = t==='cash' ? 'var(--blue-text)' : 'var(--ink-mid)';
+    // Seed tile
+    seedEl.style.border = t==='seed' ? '2px solid var(--blue)' : '1px solid var(--border)';
+    seedEl.style.background = t==='seed' ? 'var(--blue-light)' : '';
+    seedEl.querySelector('p').style.color = t==='seed' ? 'var(--blue-text)' : 'var(--ink-mid)';
+    // Show/hide contract section (only for contract type)
     contractSection.style.display = t==='contract' ? '' : 'none';
+    // Show/hide buyer field (hidden for seed transfers)
+    if (buyerWrap) buyerWrap.style.display = t==='seed' ? 'none' : '';
   }
   modal.querySelector('#inv-opt-contract').addEventListener('click', () => setSaleType('contract'));
   modal.querySelector('#inv-opt-cash').addEventListener('click', () => setSaleType('cash'));
+  modal.querySelector('#inv-opt-seed').addEventListener('click', () => setSaleType('seed'));
   setSaleType(saleType);
 
   // ── Contract selector ────────────────────────────────────────
@@ -1592,7 +1614,7 @@ export async function openInvoiceForm(container, existing = null) {
       const grade = modal.querySelector('#f-grade')?.value?.trim() || '';
 
       if (!date) throw new Error('Please enter a date');
-      if (!buyer) throw new Error('Please enter a buyer');
+      if (saleType !== 'seed' && !buyer) throw new Error('Please enter a buyer');
 
       // Collect lines from the multi-line UI
       const saleLines = [];
@@ -1700,10 +1722,10 @@ export async function openInvoiceForm(container, existing = null) {
 
       const row = {
         farm_id: farm.id,
-        buyer,
+        buyer: saleType === 'seed' ? (buyer || 'Seed Transfer') : buyer,
         invoice_date: date,
         forward_contract_id: contractId,
-        sale_type: contractId ? 'against_contract' : 'cash',
+        sale_type: saleType === 'seed' ? 'seed_transfer' : (contractId ? 'against_contract' : 'cash'),
         gst_type: 'ex',
         master_unit: masterUnit,
         season: primarySeason,
@@ -2258,7 +2280,7 @@ function _exportCSV(container) {
   // Expand each invoice into one row per line item so commodity qtys are separate
   const csvRows = rows.flatMap(inv => {
     const contract = _contracts.find(c => c.id === inv.forward_contract_id);
-    const saleType = inv.sale_type === 'against_contract' ? 'Contract' : 'Cash';
+    const saleType = inv.sale_type === 'against_contract' ? 'Contract' : inv.sale_type === 'seed_transfer' ? 'Seed Transfer' : 'Cash';
     const gross = parseFloat(inv.gross_amount) || 0;
     const qa = parseFloat(inv.total_quality_adj) || 0;
     const totalIncome = gross + qa;
