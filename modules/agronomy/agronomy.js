@@ -811,6 +811,89 @@ async function renderReporting() {
   }
 }
 
+// ── Sync crop plan from closed planting sessions ───────────────────────────
+// Scans ALL closed planting sessions for the active farm and reconciles
+// crop_plan_entries.planted_ha / status. This fixes entries created before
+// the automatic link was in place, or where the link was missing.
+async function syncCropPlanFromOps() {
+  const farm = getActiveFarm();
+  if (!farm) { toast('Select a farm first', 'error'); return; }
+
+  const btn = document.getElementById('cp-sync-ops-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '↺ Syncing…'; }
+
+  try {
+    // Load all closed sessions for this farm
+    const sessions = await dbSelect('planting_sessions',
+      `farm_id=eq.${farm.id}&status=eq.closed&order=created_at.asc`
+    );
+    // Load all planting rows
+    const allRowSets = sessions.length
+      ? await Promise.all(sessions.map(s =>
+          dbSelect('planting_rows', `session_id=eq.${s.id}&select=id,session_id,hectares,cotton_bags,bulk_kg,kg_per_bag`).catch(() => [])
+        ))
+      : [];
+    const rowsBySession = {};
+    sessions.forEach((s, i) => { rowsBySession[s.id] = allRowSets[i] || []; });
+
+    // Helper: total ha for a session from its rows
+    const sessionHa = s => (rowsBySession[s.id] || []).reduce((t, r) => t + (parseFloat(r.hectares) || 0), 0);
+
+    // For each crop_plan_entry, find all closed sessions that match it
+    // Match by: paddock_name, sub_block, season_label (same logic as _findCropPlan)
+    let updatedCount = 0;
+    let skippedCount = 0;
+
+    for (const entry of allCropPlan) {
+      // Skip hardcoded historical entries (no id or already harvested with planted_ha set)
+      if (!entry.id) continue;
+
+      const matched = sessions.filter(s =>
+        s.field_name === entry.paddock_name &&
+        (s.sub_block || '') === (entry.sub_block || '') &&
+        (s.season_label === entry.season_label ||
+          (s.season_label && entry.season_label && s.season_label.endsWith(entry.season_label)) ||
+          (s.season_label && entry.season_label && entry.season_label.endsWith(s.season_label)))
+      );
+
+      if (!matched.length) {
+        skippedCount++;
+        continue;
+      }
+
+      const totalHa = matched.reduce((t, s) => t + sessionHa(s), 0);
+      if (totalHa <= 0) { skippedCount++; continue; }
+
+      // Only update if the status isn't already past 'planted' (don't overwrite growing/harvested)
+      const shouldUpdate = !['growing', 'harvested'].includes(entry.status);
+      if (!shouldUpdate) { skippedCount++; continue; }
+
+      // Update planted_ha and status
+      await dbUpdate('crop_plan_entries', entry.id, {
+        planted_ha: totalHa,
+        status: 'planted',
+      });
+
+      // Also fix any sessions missing crop_plan_entry_id
+      for (const s of matched) {
+        if (!s.crop_plan_entry_id) {
+          await dbUpdate('planting_sessions', s.id, { crop_plan_entry_id: entry.id }).catch(() => {});
+        }
+      }
+
+      updatedCount++;
+    }
+
+    toast(`Sync complete — ${updatedCount} entr${updatedCount === 1 ? 'y' : 'ies'} updated`, 'success');
+    await refreshAll();
+  } catch (e) {
+    console.error('[CFM] Sync from Ops failed:', e);
+    toast('Sync failed: ' + (e.message || 'unknown error'), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↺ Sync from Ops'; }
+  }
+}
+
 function renderCropPlan() {
   const el = document.getElementById('agro-tab-cropplan');
   if (!el) return;
@@ -962,6 +1045,7 @@ function renderCropPlan() {
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-secondary" id="cp-bulk-assign-btn">☑ Bulk assign</button>
+        <button class="btn btn-secondary" id="cp-sync-ops-btn" title="Scan closed planting sessions and update crop plan planted ha / status">↺ Sync from Ops</button>
         <button class="btn btn-secondary" id="cp-plan-season-btn">+ Plan season</button>
         <button class="btn btn-secondary" id="cp-add-paddock-btn">+ Add paddock</button>
       </div>
@@ -1191,6 +1275,7 @@ function renderCropPlan() {
   el.querySelector('#cp-plan-season-btn')?.addEventListener('click', () => openPlanSeasonModal(allSeasons, latestSeason));
   el.querySelector('#cp-add-season-btn')?.addEventListener('click', () => openPlanSeasonModal(allSeasons, latestSeason));
   el.querySelector('#cp-bulk-assign-btn')?.addEventListener('click', () => openBulkAssignModal(allSeasons, latestSeason));
+  el.querySelector('#cp-sync-ops-btn')?.addEventListener('click', () => syncCropPlanFromOps());
 
   // Delete row wiring
   el.querySelectorAll('.cp-del-row-btn').forEach(btn => {

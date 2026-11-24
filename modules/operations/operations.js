@@ -1413,8 +1413,8 @@ async function _confirmDeleteSession(session) {
         );
         const siblingHa = siblings.reduce((t, s) => t + _sessionTotalHa(s.id), 0);
         if (siblings.length === 0) {
-          // No more closed sessions — revert to planned status with no planted_ha
-          await dbUpdate('crop_plan_entries', cpId, { planted_ha: null, status: 'planned' });
+          // No more closed sessions — revert to budget status with no planted_ha
+          await dbUpdate('crop_plan_entries', cpId, { planted_ha: null, status: 'budget' });
         } else {
           await dbUpdate('crop_plan_entries', cpId, { planted_ha: siblingHa });
         }
@@ -1558,11 +1558,30 @@ function _showCloseSessionModal(session) {
 
       // Auto-update crop plan entry planted_ha (non-fatal)
       try {
-        const cpId = session.crop_plan_entry_id;
+        // Prefer stored link; fall back to dynamic lookup by paddock+season so sessions
+        // created before the crop plan entry existed still trigger the update.
+        let cpId = session.crop_plan_entry_id;
+        if (!cpId) {
+          const cpMatch = _findCropPlan(session.field_name, session.sub_block, session.season_label);
+          if (cpMatch) {
+            cpId = cpMatch.id;
+            // Persist the link so future closes / deletes stay in sync
+            await dbUpdate('planting_sessions', session.id, { crop_plan_entry_id: cpId }).catch(() => {});
+            session.crop_plan_entry_id = cpId;
+          }
+        }
         if (cpId) {
           // Sum ha across ALL closed sessions linked to this crop plan entry
+          // Also pick up sibling sessions that share paddock+season but may not have cpId stored yet
           const siblingHa = _sessions
-            .filter(s => s.crop_plan_entry_id === cpId && (s.id === session.id || s.status === 'closed'))
+            .filter(s => {
+              if (s.id === session.id) return true; // current (just closed)
+              if (s.status !== 'closed') return false;
+              if (s.crop_plan_entry_id === cpId) return true;
+              // Also match by paddock+season for unlinked siblings
+              const siblMatch = _findCropPlan(s.field_name, s.sub_block, s.season_label);
+              return siblMatch?.id === cpId;
+            })
             .reduce((t, s) => t + _sessionTotalHa(s.id), 0);
           const plantedHa = siblingHa > 0 ? siblingHa : _sessionTotalHa(session.id) || null;
           if (plantedHa != null) {
