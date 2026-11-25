@@ -6,28 +6,22 @@ import { getActiveFarm, getActiveSeason } from '../../js/app-state.js?v=17949694
 import { formatCurrency, formatNumber, formatDate, qs, currentSeason, toast } from '../../js/ui.js?v=1794969436166';
 import { getCommodities } from '../../js/commodities.js?v=1794969436166';
 
+// Per-commodity on-hand prices entered by user (session-only, not persisted)
+const _onHandPrices = {};
+
 export async function mountReconciliation(container) {
   const farm = getActiveFarm();
   if (!farm) return;
 
   container.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-
-      <select id="rec-commodity" class="form-select" style="width:160px">
-        <option value="">All commodities</option>
-      </select>
       <div style="display:flex;align-items:center;gap:6px">
-        <label style="font-size:var(--text-sm);color:var(--muted)">As at</label>
+        <label style="font-size:var(--text-sm);color:var(--muted);font-weight:600">As at</label>
         <input id="rec-date" class="form-input" type="date" value="${new Date().toISOString().slice(0,10)}" style="width:150px">
       </div>
-      <div style="display:flex;align-items:center;gap:6px">
-        <label style="font-size:var(--text-sm);color:var(--muted)">Quality contingency</label>
-        <input id="rec-contingency" class="form-input num" type="number" value="-5" step="0.1" style="width:70px">
-        <span style="font-size:var(--text-sm);color:var(--muted)">%</span>
-      </div>
       <div style="margin-left:auto;display:flex;gap:8px">
-        <button class="btn btn-secondary" id="btn-rec-refresh">Refresh</button>
-        <button class="btn btn-primary" id="btn-rec-print"><i class="ti ti-printer" style="margin-right:4px" aria-hidden="true"></i>Print</button>
+        <button class="btn btn-secondary" id="btn-rec-refresh">↻ Refresh</button>
+        <button class="btn btn-primary" id="btn-rec-print">🖨 Print</button>
       </div>
     </div>
     <div id="rec-output">
@@ -35,50 +29,12 @@ export async function mountReconciliation(container) {
     </div>
   `;
 
-  await _populateCommodities(container, farm.id, getActiveSeason() || currentSeason());
   await _renderReconciliation(container, farm);
 
   qs('#btn-rec-refresh', container)?.addEventListener('click', () => _renderReconciliation(container, farm));
-  qs('#btn-rec-print', container)?.addEventListener('click', () => _print(container, farm));
-
-  qs('#rec-commodity', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
-  document.addEventListener('cfm:seasonchange', async () => {
-    await _populateCommodities(container, farm.id, getActiveSeason());
-    await _renderReconciliation(container, farm);
-  });
-  qs('#rec-date', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
-  qs('#rec-contingency', container)?.addEventListener('change', () => _renderReconciliation(container, farm));
-}
-
-function _seasonOptions(selected) {
-  const current = getActiveSeason() || currentSeason();
-  const [y] = current.split('-').map(Number);
-  return Array.from({ length: 5 }, (_, i) => {
-    const s = `${y + 1 - i}-${String(y + 2 - i).slice(2)}`;
-    return `<option value="${s}" ${s === selected ? 'selected' : ''}>${s}</option>`;
-  }).join('');
-}
-
-async function _populateCommodities(container, farmId, season) {
-  try {
-    const budgets = await dbSelect('budgets', 'farm_id=eq.' + farmId + '&season=eq.' + season + '&select=commodity,commodity_id');
-    const contracts = await dbSelect('forward_contracts', 'farm_id=eq.' + farmId + '&crop_year=eq.' + season + '&select=commodity,commodity_id');
-    const seen = new Set();
-    const commodities = [];
-    [...budgets, ...contracts].forEach(r => {
-      const key = r.commodity_id || r.commodity;
-      if (key && !seen.has(key)) { seen.add(key); commodities.push({ id: r.commodity_id, name: r.commodity }); }
-    });
-    const sel = qs('#rec-commodity', container);
-    if (!sel) return;
-    while (sel.options.length > 1) sel.remove(1);
-    commodities.forEach(c => {
-      const o = document.createElement('option');
-      o.value = c.id || c.name;
-      o.textContent = c.name;
-      sel.appendChild(o);
-    });
-  } catch {}
+  qs('#btn-rec-print',   container)?.addEventListener('click', () => _print(container, farm));
+  qs('#rec-date',        container)?.addEventListener('change', () => _renderReconciliation(container, farm));
+  document.addEventListener('cfm:seasonchange', () => _renderReconciliation(container, farm));
 }
 
 async function _renderReconciliation(container, farm) {
@@ -87,11 +43,9 @@ async function _renderReconciliation(container, farm) {
   output.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span></div>';
 
   const season = getActiveSeason() || currentSeason();
-  const asAt = qs('#rec-date', container)?.value || new Date().toISOString().slice(0, 10);
-  const contingencyPct = parseFloat(qs('#rec-contingency', container)?.value || -5);
-  const filterCommodity = qs('#rec-commodity', container)?.value || '';
+  const asAt   = qs('#rec-date', container)?.value || new Date().toISOString().slice(0, 10);
 
-  // Compute season date range from farm settings
+  // Season date range
   const ym = parseInt(farm?.settings?.yearStartMonth || 7);
   const [sy] = season.split('-').map(Number);
   const mm = String(ym).padStart(2, '0');
@@ -99,23 +53,20 @@ async function _renderReconciliation(container, farm) {
   const seasonEnd   = `${sy + 1}-${mm}-01`;
 
   try {
-    const [invoices, contracts, budgets, forecasts, prices] = await Promise.all([
-      dbSelect('invoices', 'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.desc'),
-      dbSelect('forward_contracts', 'farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&sale_date=lte.' + asAt + '&select=*'),
-      dbSelect('budgets', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*'),
-      dbSelect('forecasts', 'farm_id=eq.' + farm.id + '&season=eq.' + season + '&forecast_date=lte.' + asAt + '&select=*&order=forecast_date.desc'),
-      dbSelect('market_prices', 'price_date=lte.' + asAt + '&select=commodity_id,price_per_unit,price_date&order=price_date.desc&limit=200'),
+    const [invoices, contracts, mgmtIncome, mgmtCropTypes, harvestRecords] = await Promise.all([
+      dbSelect('invoices',         'farm_id=eq.' + farm.id + '&select=*&order=invoice_date.asc'),
+      dbSelect('forward_contracts','farm_id=eq.' + farm.id + '&crop_year=eq.' + season + '&select=*&order=sale_date.asc'),
+      dbSelect('mgmt_income',      'farm_id=eq.' + farm.id + '&season=eq.' + season + '&section=eq.farming&select=*&order=sort_order.asc,created_at.asc').catch(() => []),
+      dbSelect('mgmt_crop_types',  'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*&order=sort_order.asc,created_at.asc').catch(() => []),
+      dbSelect('harvest_records',  'farm_id=eq.' + farm.id + '&season=eq.' + season + '&select=*').catch(() => []),
     ]);
 
-    // Filter invoices: complete, on or before asAt, and belonging to the active season.
-    // Season membership = invoice_date in season range OR any batch crop_year matches season.
-    const paidInvoices = invoices.filter(i => {
-      if (i.status !== 'complete') return false;
+    // ── Filter invoices to this season ──────────────────────────────────────
+    const seasonInvoices = invoices.filter(i => {
       if (i.invoice_date > asAt) return false;
       const d = i.invoice_date?.slice(0, 10) || '';
       const dateInSeason = d >= seasonStart && d < seasonEnd;
       if (dateInSeason) return true;
-      // Also include if any batch explicitly tags this season (handles cross-season invoice dates)
       if (i.batches && i.batches.length) {
         const b = typeof i.batches === 'string' ? JSON.parse(i.batches) : i.batches;
         if (b.some(batch => batch.crop_year === season)) return true;
@@ -123,368 +74,530 @@ async function _renderReconciliation(container, farm) {
       return (i.line_items || []).some(l => l.season === season);
     });
 
-    // Build commodity list from budgets + contracts
-    const masterCommodities = getCommodities();
-    const commMap = {};
+    const completeInvoices = seasonInvoices.filter(i => i.status === 'complete');
+    const contractInvoices = completeInvoices.filter(i => i.sale_type === 'against_contract');
+    const cashInvoices     = completeInvoices.filter(i => i.sale_type === 'cash');
+    const seedInvoices     = completeInvoices.filter(i => i.sale_type === 'seed_transfer');
 
-    const addComm = (id, name) => {
-      if (!id && !name) return;
-      const key = id || name;
-      if (!commMap[key]) {
-        const master = masterCommodities.find(c => c.id === id || c.name === name);
-        commMap[key] = { id: id || master?.id, name: name || master?.name || key, budgets: [], contracts: [], paidLines: [], forecasts: [] };
-      }
-    };
+    // ── Build commodity list from mgmt_income (farming section) ─────────────
+    // Fall back to contracts if mgmt_income is empty
+    const commNames = new Set();
+    mgmtIncome.forEach(r => commNames.add(r.name));
+    contracts.forEach(c => commNames.add(c.commodity));
 
-    budgets.forEach(b => { addComm(b.commodity_id, b.commodity); commMap[b.commodity_id || b.commodity]?.budgets.push(b); });
-    contracts.forEach(c => { addComm(c.commodity_id, c.commodity); commMap[c.commodity_id || c.commodity]?.contracts.push(c); });
-    forecasts.forEach(f => { addComm(f.commodity_id, f.commodity); commMap[f.commodity_id || f.commodity]?.forecasts.push(f); });
-
-    // Match paid invoice lines to commodities — only sale/income lines, not expenses or QA
-    paidInvoices.forEach(inv => {
-      // Use batches if available (new format)
-      if (inv.batches && inv.batches.length) {
-        const batches = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
-        batches.forEach(b => {
-          // If batch has an explicit crop_year it must match — otherwise the invoice-level
-          // season filter already guarantees this invoice belongs to the active season.
-          const batchCropYear = b.crop_year || '';
-          if (batchCropYear && batchCropYear !== season) return;
-          const saleLines = (b.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa');
-          if (!saleLines.length) return;
-          const batchQty = parseFloat(b.qty) || 0;
-          const batchTotal = saleLines.reduce((s, l) => s + (parseFloat(l.amount)||0), 0);
-          // Commodity comes from the batch's own sale line description — each batch is one
-          // commodity delivery. Fall back to invoice-level commodity_type only for single-
-          // commodity invoices where it is reliably correct.
-          const commodity = saleLines[0]?.description || inv.commodity_type || null;
-          const key = commodity ? Object.keys(commMap).find(k => commMap[k].name === commodity) : null;
-          if (key) commMap[key].paidLines.push({
-            qty: batchQty,
-            total: batchTotal,
-            price: batchQty ? batchTotal / batchQty : 0,
-            docket: b.income_docket || '',
-            invoice: inv,
-          });
-        });
-        return;
-      }
-      // Legacy line_items — filter to sale lines only (not expenses, not qa)
-      const lines = (inv.line_items || []).filter(l =>
-        (!l.season || l.season === season) &&
-        l.type !== 'expense' &&
-        l.line_type !== 'qa'
-      );
-      // Deduplicate by docket to avoid counting same qty multiple times
-      const seen = new Set();
-      lines.forEach(l => {
-        const key = Object.keys(commMap).find(k => commMap[k].name === l.commodity || commMap[k].id === l.commodity_id);
-        if (!key) return;
-        const dedupKey = (l.docket || '') + '_' + (l.commodity || '') + '_' + inv.id;
-        if (seen.has(dedupKey)) return;
-        seen.add(dedupKey);
-        commMap[key].paidLines.push({ ...l, invoice: inv });
-      });
-    });
-
-    // Latest market price per commodity (most recent by price_date)
-    const latestPrices = {};
-    // Sort by date desc so first occurrence is latest
-    const sortedPrices = [...prices].sort((a, b) => b.price_date.localeCompare(a.price_date));
-    sortedPrices.forEach(p => {
-      if (p.commodity_id && !latestPrices[p.commodity_id]) {
-        latestPrices[p.commodity_id] = parseFloat(p.price_per_unit);
-      }
-    });
-
-    // Filter if specific commodity selected
-    const commodities = Object.values(commMap).filter(c => {
-      if (!filterCommodity) return true;
-      return c.id === filterCommodity || c.name === filterCommodity;
-    });
-
-    if (!commodities.length) {
-      output.innerHTML = '<div class="empty-state"><p>No data for selected season and commodity.</p></div>';
+    if (!commNames.size) {
+      output.innerHTML = '<div class="empty-state"><p>No commodities found for this season. Set up farming income rows in the Management Report first.</p></div>';
       return;
     }
 
-    output.innerHTML = commodities.map(com => _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm)).join('');
+    // ── Helper: extract batch lines from an invoice for a given commodity ───
+    function batchLinesForComm(inv, commName) {
+      const results = [];
+      if (inv.batches && inv.batches.length) {
+        const batches = typeof inv.batches === 'string' ? JSON.parse(inv.batches) : inv.batches;
+        batches.forEach(b => {
+          const bCropYear = b.crop_year || '';
+          if (bCropYear && bCropYear !== season) return;
+          const saleLines = (b.lines || []).filter(l => l.type === 'income' && l.line_type !== 'qa');
+          if (!saleLines.length) return;
+          const lineCommodity = saleLines[0]?.description || inv.commodity_type || '';
+          if (commName && lineCommodity.trim().toLowerCase() !== commName.trim().toLowerCase()) return;
+          const qty   = parseFloat(b.qty) || 0;
+          const gross = saleLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+          // Also capture QA lines
+          const qaLines = (b.lines || []).filter(l => l.type === 'income' && l.line_type === 'qa');
+          const qa = qaLines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+          results.push({ qty, gross, qa, total: gross + qa, docket: b.income_docket || '', inv });
+        });
+      } else {
+        // Legacy line_items
+        (inv.line_items || []).forEach(l => {
+          if (l.type === 'expense') return;
+          if (!l.season || l.season !== season) return;
+          if (commName && (l.commodity||'').trim().toLowerCase() !== commName.trim().toLowerCase()) return;
+          const qty   = parseFloat(l.qty)   || 0;
+          const gross = l.line_type === 'qa' ? 0 : (parseFloat(l.total) || 0);
+          const qa    = l.line_type === 'qa' ? (parseFloat(l.total) || 0) : 0;
+          results.push({ qty, gross, qa, total: gross + qa, docket: l.docket || '', inv });
+        });
+      }
+      return results;
+    }
+
+    // ── Render all commodity sections ────────────────────────────────────────
+    const sections = [...commNames].map(commName => {
+      const incomeRow  = mgmtIncome.find(r => r.name.trim().toLowerCase() === commName.trim().toLowerCase());
+      const cropTypes  = incomeRow ? mgmtCropTypes.filter(ct => ct.income_id === incomeRow.id) : [];
+      const harvests   = harvestRecords.filter(h => h.commodity.trim().toLowerCase() === commName.trim().toLowerCase());
+      const unit       = incomeRow?.unit || contracts.find(c => c.commodity === commName)?.unit || 't';
+      const commContracts = contracts.filter(c => c.commodity.trim().toLowerCase() === commName.trim().toLowerCase());
+
+      // Contract invoices for this commodity
+      const commContractInvs = contractInvoices.filter(inv =>
+        batchLinesForComm(inv, commName).length > 0
+      );
+      // Cash invoices for this commodity
+      const commCashInvs = cashInvoices.filter(inv =>
+        batchLinesForComm(inv, commName).length > 0
+      );
+      // Seed transfer invoices for this commodity
+      const commSeedInvs = seedInvoices.filter(inv =>
+        batchLinesForComm(inv, commName).length > 0
+      );
+
+      return _buildCommSection({
+        commName, unit, incomeRow, cropTypes, harvests,
+        contracts: commContracts,
+        contractInvs: commContractInvs,
+        cashInvs: commCashInvs,
+        seedInvs: commSeedInvs,
+        season, asAt,
+        batchLinesForComm,
+      });
+    });
+
+    const asAtFmt = new Date(asAt + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
+    output.innerHTML = `
+      <div style="margin-bottom:20px;padding:12px 16px;background:var(--page-bg);border-radius:var(--radius-md);border:1px solid var(--border)">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);margin-bottom:4px">Reconciliation date</div>
+        <div style="font-size:17px;font-weight:700;color:var(--ink)">${farm.name} · ${season} · As at ${asAtFmt}</div>
+        <div style="font-size:11px;color:var(--hint);margin-top:4px">All figures are as at this date — invoices dated after this date are excluded. Only completed invoices are included.</div>
+      </div>
+      ${sections.join('')}
+    `;
+
+    // Wire up on-hand price inputs after render
+    output.querySelectorAll('.rec-onhand-price').forEach(input => {
+      input.addEventListener('change', () => {
+        const comm = input.dataset.comm;
+        _onHandPrices[comm] = parseFloat(input.value) || 0;
+        _updateOnHandRow(output, comm);
+      });
+    });
 
   } catch (err) {
     output.innerHTML = `<div class="empty-state"><p>Failed to load: ${err.message}</p></div>`;
-    console.error(err);
+    console.error('[Rec]', err);
   }
 }
 
-function _buildCommSection(com, season, asAt, contingencyPct, latestPrices, farm) {
-  const marketPrice = latestPrices[com.id] || null;
+function _buildCommSection({ commName, unit, incomeRow, cropTypes, harvests, contracts, contractInvs, cashInvs, seedInvs, season, asAt, batchLinesForComm }) {
+  const fC  = (v, d=0) => v != null && !isNaN(v) ? formatCurrency(v, d) : '—';
+  const fN  = (v, d=2) => v != null && !isNaN(v) ? formatNumber(v, d) : '—';
+  const fN0 = (v)      => fN(v, 0);
+  const fN1 = (v)      => fN(v, 1);
+  const fNd = (v, d)   => fN(v, d);
 
-  // Paid to date
-  const paidLines = com.paidLines || [];
-  const paidQty = paidLines.reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
-  // l.total already includes quality adj - don't add it again
-  const paidGross = paidLines.reduce((s, l) => s + (parseFloat(l.total)||0), 0);
-  const paidAvgUnit = paidQty ? paidGross / paidQty : 0;
-
-  // Contracted (not yet paid)
-  const contracts = com.contracts || [];
-  const contractedQty = contracts.reduce((s, c) => s + (parseFloat(c.quantity) || 0), 0);
-
-  // How much of contracts already invoiced (paid)
-  const alreadyPaidQty = paidQty;
-  const contractedUnpaidQty = Math.max(0, contractedQty - alreadyPaidQty);
-
-  // Forecast production
-  const latestPerBudget = {};
-  (com.forecasts || []).forEach(f => {
-    const k = f.budget_id || 'default';
-    if (!latestPerBudget[k] || f.forecast_date > latestPerBudget[k].forecast_date) latestPerBudget[k] = f;
+  // ── PRODUCTION ──────────────────────────────────────────────────────────
+  // Budget: from mgmt_crop_types (area_ha × budget_yield or budget_production)
+  // Harvested: from harvest_records
+  const prodRows = cropTypes.map(ct => {
+    const budgetQty = ct.budget_production || (ct.area_ha && ct.budget_yield ? ct.area_ha * ct.budget_yield : null);
+    const hr = harvests.find(h => h.crop_type?.trim().toLowerCase() === ct.crop_type?.trim().toLowerCase());
+    const harvestedQty = hr ? parseFloat(hr.harvested_qty) : null;
+    const yieldPerHa = (harvestedQty != null && ct.area_ha) ? harvestedQty / ct.area_ha : null;
+    return { cropType: ct.crop_type, areaHa: ct.area_ha, budgetQty, harvestedQty, yieldPerHa };
   });
-  const forecastProd = Object.values(latestPerBudget).reduce((s, f) =>
-    s + (parseFloat(f.forecast_production) || (parseFloat(f.area_ha)||0) * (parseFloat(f.yield_per_ha)||0)), 0
-  ) || com.budgets.reduce((s, b) => s + ((parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0)), 0);
 
-  // Budget production
-  const budgetProd = com.budgets.reduce((s, b) => s + (parseFloat(b.budgeted_production) || ((parseFloat(b.area_ha)||0) * (parseFloat(b.yield_per_ha)||0))), 0);
-  const denominator = forecastProd || budgetProd;
+  // If no crop types in mgmt but we have harvest records, build rows from harvests
+  if (!prodRows.length && harvests.length) {
+    harvests.forEach(h => {
+      prodRows.push({
+        cropType: h.crop_type,
+        areaHa: null,
+        budgetQty: null,
+        harvestedQty: parseFloat(h.harvested_qty),
+        yieldPerHa: null,
+      });
+    });
+  }
 
-  // Unpriced = forecast - total contracted (not just unpaid contracts)
-  const unit = com.contracts[0]?.unit || com.budgets[0]?.unit || 't';
-  const totalContractedQty = contracts.reduce((s, c) => s + (parseFloat(c.quantity)||0), 0);
-  const unpricedQty = Math.max(0, denominator - totalContractedQty);
+  const totalAreaHa     = prodRows.reduce((s, r) => s + (r.areaHa || 0), 0);
+  const totalBudgetQty  = prodRows.reduce((s, r) => s + (r.budgetQty || 0), 0);
+  const totalHarvestedQty = prodRows.reduce((s, r) => s + (r.harvestedQty || 0), 0);
+  const totalYieldPerHa = totalAreaHa ? totalHarvestedQty / totalAreaHa : null;
+  const hasProduction   = prodRows.length > 0;
 
-  // Indicative price = market price × (1 + contingency%)
-  const contingencyMultiplier = 1 + (contingencyPct / 100);
-  const unpricedPrice = marketPrice ? marketPrice * contingencyMultiplier : null;
-  const unpricedGross = (unpricedPrice != null && unpricedQty > 0) ? unpricedPrice * unpricedQty : null;
+  const productionHtml = hasProduction ? `
+    <div class="rec-sub-header">Production</div>
+    <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+      <thead>
+        <tr style="background:var(--page-bg)">
+          <th style="${thL()}">Crop Type</th>
+          <th style="${thR()}">Area (ha)</th>
+          <th style="${thR()}">Budget (${unit})</th>
+          <th style="${thR()}">Harvested (${unit})</th>
+          <th style="${thR()}">${unit}/ha</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${prodRows.map(r => `
+          <tr>
+            <td style="${tdL()}">${r.cropType || '—'}</td>
+            <td style="${tdR()}">${r.areaHa != null ? fN1(r.areaHa) : '—'}</td>
+            <td style="${tdR()}">${r.budgetQty != null ? fN1(r.budgetQty) : '—'}</td>
+            <td style="${tdR()}" class="${r.harvestedQty != null ? 'rec-val-strong' : 'rec-val-empty'}">${r.harvestedQty != null ? fN1(r.harvestedQty) : '—'}</td>
+            <td style="${tdR()}">${r.yieldPerHa != null ? fNd(r.yieldPerHa, 2) : '—'}</td>
+          </tr>`).join('')}
+        ${prodRows.length > 1 ? `
+          <tr class="rec-total-row">
+            <td style="${tdL()}"><strong>Total</strong></td>
+            <td style="${tdR()}"><strong>${totalAreaHa ? fN1(totalAreaHa) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totalBudgetQty ? fN1(totalBudgetQty) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totalHarvestedQty ? fN1(totalHarvestedQty) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totalYieldPerHa != null ? fNd(totalYieldPerHa, 2) : '—'}</strong></td>
+          </tr>` : ''}
+      </tbody>
+    </table>
+  ` : '';
 
-  // Contract rows — calculate per-contract invoiced qty
+  // ── SOLD AGAINST CONTRACT ───────────────────────────────────────────────
+  // Per-contract rows: contracted tonnes, delivered tonnes (from invoices),
+  // paid amount (from complete invoices), implied avg $/unit
+  // Still to go: only shown if contract not marked complete
   const contractRows = contracts.map(c => {
-    const contractedQtyTotal = parseFloat(c.quantity) || 0;
-    const price = parseFloat(c.price_per_unit) || 0;
-    // Find invoices against this specific contract
-    const invoicedAgainstContract = paidLines
-      .filter(l => l.invoice?.forward_contract_id === c.id)
-      .reduce((s, l) => s + (parseFloat(l.qty) || 0), 0);
-    // paidLines already filtered to sale lines only
-    const remainingQty = Math.max(0, contractedQtyTotal - invoicedAgainstContract);
-    const gross = remainingQty * price;
-    const pct = denominator ? (gross / (denominator * (unpricedPrice || price))) * 100 : 0;
-    return { c, qty: remainingQty, contractedQty: contractedQtyTotal, invoicedQty: invoicedAgainstContract, price, gross, pct };
+    const contractedQty = parseFloat(c.quantity) || 0;
+    const price         = parseFloat(c.price_per_unit) || 0;
+    const contractValue = contractedQty * price;
+
+    // Find complete invoices against this contract
+    const againstThis = contractInvs.filter(inv => inv.forward_contract_id === c.id);
+    const deliveredLines = againstThis.flatMap(inv => batchLinesForComm(inv, commName));
+    const deliveredQty   = deliveredLines.reduce((s, l) => s + l.qty, 0);
+    const paidTotal      = deliveredLines.reduce((s, l) => s + l.total, 0); // gross + qa
+    const impliedAvg     = deliveredQty ? paidTotal / deliveredQty : null;
+
+    // Still to go
+    const isComplete     = c.is_complete && (!c.completed_at || c.completed_at.slice(0,10) <= asAt);
+    const stillToGoQty   = isComplete ? 0 : Math.max(0, contractedQty - deliveredQty);
+    const stillToGoValue = stillToGoQty * price;
+
+    return { c, contractedQty, price, contractValue, deliveredQty, paidTotal, impliedAvg, isComplete, stillToGoQty, stillToGoValue };
   });
 
-  // Contracted balance = sum of remaining (unpaid) qty per contract
-  const contractedRemainingQty = contractRows.reduce((s, r) => s + r.qty, 0);
-  const contractedGross = contractRows.reduce((s, r) => s + r.gross, 0);
-  const contractedAvgPriceCalc = contractedRemainingQty ? contractedGross / contractedRemainingQty : 0;
-  const contractedAvgPrice = contractedQty ? contractedGross / contractedQty : 0;
+  const totContractedQty  = contractRows.reduce((s, r) => s + r.contractedQty, 0);
+  const totContractValue  = contractRows.reduce((s, r) => s + r.contractValue, 0);
+  const totDeliveredQty   = contractRows.reduce((s, r) => s + r.deliveredQty, 0);
+  const totPaidTotal      = contractRows.reduce((s, r) => s + r.paidTotal, 0);
+  const totStillToGoQty   = contractRows.reduce((s, r) => s + r.stillToGoQty, 0);
+  const totStillToGoValue = contractRows.reduce((s, r) => s + r.stillToGoValue, 0);
+  const totImpliedAvg     = totDeliveredQty ? totPaidTotal / totDeliveredQty : null;
 
-  // Totals
-  const totalGross = paidGross + contractedGross + (unpricedGross || 0);
-  const totalQty = denominator || (paidQty + contractedQty);
-  const avgPrice = totalQty ? totalGross / totalQty : 0;
+  const contractHtml = `
+    <div class="rec-sub-header">Sold Against Contract</div>
+    <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+      <thead>
+        <tr style="background:var(--page-bg)">
+          <th style="${thL()}">Contract #</th>
+          <th style="${thL()}">Buyer</th>
+          <th style="${thR()}">Contracted (${unit})</th>
+          <th style="${thR()}">Delivered (${unit})</th>
+          <th style="${thR()}">Paid ($)</th>
+          <th style="${thR()}">Avg $/unit</th>
+          <th style="${thR()}">Still to go (${unit})</th>
+          <th style="${thR()}">Still to go ($)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${contracts.length === 0 ? `
+          <tr><td colspan="8" style="${emptyCell()}">No forward contracts for this season</td></tr>
+        ` : contractRows.map(r => `
+          <tr>
+            <td style="${tdL()}"><strong>${r.c.contract_number || '—'}</strong></td>
+            <td style="${tdL()}">${r.c.counterparty || r.c.buyer || '—'}</td>
+            <td style="${tdR()}">${fN1(r.contractedQty)}</td>
+            <td style="${tdR()}">${r.deliveredQty ? fN1(r.deliveredQty) : '—'}</td>
+            <td style="${tdR()}">${r.paidTotal ? fC(r.paidTotal, 0) : '—'}</td>
+            <td style="${tdR()}">${r.impliedAvg != null ? fC(r.impliedAvg, 1) : '—'}</td>
+            <td style="${tdR()}" class="${!r.isComplete && r.stillToGoQty > 0 ? 'rec-amber' : ''}">
+              ${r.isComplete ? '<span class="rec-complete-badge">✓ Complete</span>' : r.stillToGoQty > 0 ? fN1(r.stillToGoQty) : '—'}
+            </td>
+            <td style="${tdR()}">${r.isComplete ? '—' : r.stillToGoValue > 0 ? fC(r.stillToGoValue, 0) : '—'}</td>
+          </tr>`).join('')}
+        ${contracts.length > 0 ? `
+          <tr class="rec-subtotal-row">
+            <td style="${tdL()}" colspan="2"><strong>Subtotal — Contracts</strong></td>
+            <td style="${tdR()}"><strong>${fN1(totContractedQty)}</strong></td>
+            <td style="${tdR()}"><strong>${totDeliveredQty ? fN1(totDeliveredQty) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totPaidTotal ? fC(totPaidTotal, 0) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totImpliedAvg != null ? fC(totImpliedAvg, 1) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totStillToGoQty > 0 ? fN1(totStillToGoQty) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totStillToGoValue > 0 ? fC(totStillToGoValue, 0) : '—'}</strong></td>
+          </tr>` : ''}
+      </tbody>
+    </table>
+  `;
 
-  const pctOf = v => totalGross ? ((v / totalGross) * 100).toFixed(1) + '%' : '—';
-  const fmtC = (v, dec=0) => v != null ? formatCurrency(v, dec) : '—';
-  const fmtN = (v, dec=0) => v != null && !isNaN(v) ? formatNumber(v, dec) : '—';
+  // ── CASH SALES ──────────────────────────────────────────────────────────
+  // Each invoice = one row; show invoice date, buyer, qty, gross, qa, total, avg price
+  const cashRows = cashInvs.map(inv => {
+    const lines   = batchLinesForComm(inv, commName);
+    const qty     = lines.reduce((s, l) => s + l.qty,   0);
+    const gross   = lines.reduce((s, l) => s + l.gross, 0);
+    const qa      = lines.reduce((s, l) => s + l.qa,    0);
+    const total   = gross + qa;
+    const avgUnit = qty ? total / qty : null;
+    return { inv, qty, gross, qa, total, avgUnit };
+  }).filter(r => r.qty > 0 || r.total !== 0);
 
-  const budgetPrice = com.budgets[0]?.price ? parseFloat(com.budgets[0].price) : null;
-  const budgetPriceStr = budgetPrice ? formatCurrency(budgetPrice, 0) + '/' + unit : '';
+  const totCashQty   = cashRows.reduce((s, r) => s + r.qty,   0);
+  const totCashGross = cashRows.reduce((s, r) => s + r.gross, 0);
+  const totCashQa    = cashRows.reduce((s, r) => s + r.qa,    0);
+  const totCashTotal = cashRows.reduce((s, r) => s + r.total, 0);
+  const totCashAvg   = totCashQty ? totCashTotal / totCashQty : null;
 
-  return `
-    <div class="card rec-section" style="margin-bottom:24px;overflow:hidden" data-commodity="${com.name}">
+  const cashHtml = `
+    <div class="rec-sub-header">Cash Sales</div>
+    <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+      <thead>
+        <tr style="background:var(--page-bg)">
+          <th style="${thL()}">Date</th>
+          <th style="${thL()}">Invoice #</th>
+          <th style="${thL()}">Buyer</th>
+          <th style="${thR()}">Qty (${unit})</th>
+          <th style="${thR()}">Gross ($)</th>
+          <th style="${thR()}">Adj ($)</th>
+          <th style="${thR()}">Total ($)</th>
+          <th style="${thR()}">Avg $/unit</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${cashRows.length === 0 ? `
+          <tr><td colspan="8" style="${emptyCell()}">No cash sales for this season</td></tr>
+        ` : cashRows.map(r => `
+          <tr>
+            <td style="${tdL()}">${r.inv.invoice_date ? new Date(r.inv.invoice_date + 'T00:00:00').toLocaleDateString('en-AU', { day:'2-digit', month:'short', year:'numeric' }) : '—'}</td>
+            <td style="${tdL()}">${r.inv.invoice_number || r.inv.id?.slice(0,8) || '—'}</td>
+            <td style="${tdL()}">${r.inv.buyer || '—'}</td>
+            <td style="${tdR()}">${fN1(r.qty)}</td>
+            <td style="${tdR()}">${r.gross ? fC(r.gross, 0) : '—'}</td>
+            <td style="${tdR()}" class="${r.qa < 0 ? 'rec-amber' : ''}">${r.qa ? fC(r.qa, 0) : '—'}</td>
+            <td style="${tdR()}">${r.total ? fC(r.total, 0) : '—'}</td>
+            <td style="${tdR()}">${r.avgUnit != null ? fC(r.avgUnit, 1) : '—'}</td>
+          </tr>`).join('')}
+        ${cashRows.length > 0 ? `
+          <tr class="rec-subtotal-row">
+            <td style="${tdL()}" colspan="3"><strong>Subtotal — Cash sales</strong></td>
+            <td style="${tdR()}"><strong>${fN1(totCashQty)}</strong></td>
+            <td style="${tdR()}"><strong>${totCashGross ? fC(totCashGross, 0) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totCashQa ? fC(totCashQa, 0) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totCashTotal ? fC(totCashTotal, 0) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totCashAvg != null ? fC(totCashAvg, 1) : '—'}</strong></td>
+          </tr>` : ''}
+      </tbody>
+    </table>
+  `;
 
-      <!-- Commodity header -->
-      <div style="padding:10px 16px;background:var(--page-bg);border-bottom:2px solid var(--ink)">
-        <div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap">
-          <span style="font-size:var(--text-md);font-weight:700;color:var(--ink)">${com.name}</span>
-          ${forecastProd ? `<span style="font-size:var(--text-sm);color:var(--muted)">Forecast: <strong>${fmtN(forecastProd, 2)} ${unit}</strong></span>` : ''}
-          ${contractedQty ? `<span style="font-size:var(--text-sm);color:var(--muted)">Contracted: <strong>${fmtN(contractedQty, 0)} ${unit}</strong></span>` : ''}
-          ${marketPrice ? `<span style="font-size:var(--text-sm);color:var(--muted)">Market: <strong>${fmtC(marketPrice, 2)}/${unit}</strong></span>` : ''}
-          ${budgetPriceStr ? `<span style="font-size:var(--text-sm);color:var(--muted)">Budget: <strong>${budgetPriceStr}</strong></span>` : ''}
+  // ── SEED SALES / TRANSFERS ──────────────────────────────────────────────
+  const seedRows = seedInvs.map(inv => {
+    const lines  = batchLinesForComm(inv, commName);
+    const qty    = lines.reduce((s, l) => s + l.qty,   0);
+    const total  = lines.reduce((s, l) => s + l.total, 0);
+    const avgUnit = qty ? total / qty : null;
+    return { inv, qty, total, avgUnit };
+  }).filter(r => r.qty > 0 || r.total !== 0);
+
+  const totSeedQty   = seedRows.reduce((s, r) => s + r.qty,   0);
+  const totSeedTotal = seedRows.reduce((s, r) => s + r.total, 0);
+  const totSeedAvg   = totSeedQty ? totSeedTotal / totSeedQty : null;
+
+  const seedHtml = `
+    <div class="rec-sub-header">Seed Sales / Transfers</div>
+    <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+      <thead>
+        <tr style="background:var(--page-bg)">
+          <th style="${thL()}">Date</th>
+          <th style="${thL()}">Reference</th>
+          <th style="${thR()}">Qty (${unit})</th>
+          <th style="${thR()}">Value ($)</th>
+          <th style="${thR()}">Avg $/unit</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${seedRows.length === 0 ? `
+          <tr><td colspan="5" style="${emptyCell()}">No seed sales or transfers</td></tr>
+        ` : seedRows.map(r => `
+          <tr>
+            <td style="${tdL()}">${r.inv.invoice_date ? new Date(r.inv.invoice_date + 'T00:00:00').toLocaleDateString('en-AU', { day:'2-digit', month:'short', year:'numeric' }) : '—'}</td>
+            <td style="${tdL()}">${r.inv.invoice_number || r.inv.buyer || r.inv.id?.slice(0,8) || '—'}</td>
+            <td style="${tdR()}">${fN1(r.qty)}</td>
+            <td style="${tdR()}">${r.total ? fC(r.total, 0) : '—'}</td>
+            <td style="${tdR()}">${r.avgUnit != null ? fC(r.avgUnit, 1) : '—'}</td>
+          </tr>`).join('')}
+        ${seedRows.length > 0 ? `
+          <tr class="rec-subtotal-row">
+            <td style="${tdL()}" colspan="2"><strong>Subtotal — Seed</strong></td>
+            <td style="${tdR()}"><strong>${fN1(totSeedQty)}</strong></td>
+            <td style="${tdR()}"><strong>${totSeedTotal ? fC(totSeedTotal, 0) : '—'}</strong></td>
+            <td style="${tdR()}"><strong>${totSeedAvg != null ? fC(totSeedAvg, 1) : '—'}</strong></td>
+          </tr>` : ''}
+      </tbody>
+    </table>
+  `;
+
+  // ── ON HAND ─────────────────────────────────────────────────────────────
+  // Harvested − contract delivered − cash sold − seed transferred
+  const totalSoldQty   = totDeliveredQty + totCashQty + totSeedQty;
+  const onHandQty      = totalHarvestedQty > 0 ? Math.max(0, totalHarvestedQty - totalSoldQty) : null;
+  const onHandPrice    = _onHandPrices[commName] || 0;
+  const onHandValue    = (onHandQty != null && onHandPrice) ? onHandQty * onHandPrice : null;
+
+  const onHandHtml = `
+    <div class="rec-sub-header" style="background:#1a3a2a">On Hand / Carryover</div>
+    <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
+      <thead>
+        <tr style="background:var(--page-bg)">
+          <th style="${thL()}">Item</th>
+          <th style="${thR()}">Qty (${unit})</th>
+          <th style="${thR()}">Price ($/unit)</th>
+          <th style="${thR()}">Indicative Value ($)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="${tdL()}">
+            <strong>${commName} — On hand after reconciliation date</strong>
+            ${totalHarvestedQty > 0 ? `<br><span style="font-size:11px;color:var(--hint)">${fN1(totalHarvestedQty)} harvested − ${fN1(totDeliveredQty)} contract − ${fN1(totCashQty)} cash − ${fN1(totSeedQty)} seed</span>` : '<br><span style="font-size:11px;color:var(--hint)">No harvest data — enter harvested tonnes in Management Report</span>'}
+          </td>
+          <td style="${tdR()}"><strong>${onHandQty != null ? fN1(onHandQty) : '—'}</strong></td>
+          <td style="${tdR()}">
+            <input type="number" class="rec-onhand-price form-input num" data-comm="${commName}"
+              value="${onHandPrice || ''}" placeholder="Enter $/unit"
+              style="width:110px;font-size:12px;text-align:right;padding:3px 6px">
+          </td>
+          <td style="${tdR()}">
+            <strong class="rec-onhand-value-${_slugify(commName)}">${onHandValue != null ? fC(onHandValue, 0) : '—'}</strong>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+
+  // ── TOTAL SEASON POSITION ───────────────────────────────────────────────
+  const totalRealised  = totPaidTotal + totCashTotal + totSeedTotal;
+  const totalQtyMoved  = totDeliveredQty + totCashQty + totSeedQty;
+
+  const totalHtml = `
+    <div style="padding:12px 16px;background:var(--ink);color:white;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div style="font-weight:700;font-size:var(--text-sm)">${commName} — Total Season Position to ${new Date(asAt + 'T00:00:00').toLocaleDateString('en-AU', { day:'numeric', month:'short', year:'numeric' })}</div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap">
+        <div style="text-align:right">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8899aa">Qty moved</div>
+          <div style="font-size:16px;font-weight:700">${fN1(totalQtyMoved)} ${unit}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8899aa">Total realised</div>
+          <div style="font-size:16px;font-weight:700">${totalRealised ? fC(totalRealised, 0) : '—'}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#8899aa">Still to go (contracts)</div>
+          <div style="font-size:16px;font-weight:700">${totStillToGoValue ? fC(totStillToGoValue, 0) : '—'}</div>
         </div>
       </div>
+    </div>
+  `;
 
-      <!-- Table -->
+  return `
+    <div class="card rec-section" style="margin-bottom:28px;overflow:hidden" data-commodity="${commName}">
+      <div style="padding:10px 16px;background:var(--page-bg);border-bottom:2px solid var(--ink);display:flex;align-items:baseline;gap:12px">
+        <span style="font-size:var(--text-md);font-weight:700;color:var(--ink)">${commName}</span>
+        ${totalHarvestedQty ? `<span style="font-size:var(--text-sm);color:var(--hint)">${fN1(totalHarvestedQty)} ${unit} harvested</span>` : ''}
+        ${totContractedQty ? `<span style="font-size:var(--text-sm);color:var(--hint)">${fN1(totContractedQty)} ${unit} contracted</span>` : ''}
+      </div>
       <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">
-          <thead>
-            <tr style="background:var(--page-bg)">
-              <th style="${thStyle()}">Contract #</th>
-              <th style="${thStyle()}">Buyer</th>
-              <th style="${thStyle('r')}">${unit}s</th>
-              <th style="${thStyle('r')}">Price $/${unit}</th>
-              <th style="${thStyle('r')}">Contract Value</th>
-              <th style="${thStyle('r')}">Filled ${unit}s</th>
-              <th style="${thStyle('r')}">Filled Gross $</th>
-              <th style="${thStyle('r')}">Still to go ${unit}s</th>
-              <th style="${thStyle('r')}">Still to go $</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${contracts.length === 0 ? `
-              <tr><td colspan="9" style="padding:10px 16px;font-style:italic;color:var(--muted)">No forward contracts</td></tr>
-            ` : contractRows.map(row => {
-              const contractValue = row.contractedQty * row.price;
-              // filledGross = sale income + QA for this contract
-              const contractInvoices = paidLines
-                .filter(l => l.invoice?.forward_contract_id === row.c.id)
-                .map(l => l.invoice);
-              const uniqueInvoices = [...new Map(contractInvoices.map(i => [i?.id, i])).values()].filter(Boolean);
-              const filledGross = uniqueInvoices.reduce((s, inv) => {
-                // Use gross_amount + quality_adj from invoice totals
-                return s + (parseFloat(inv.gross_amount)||0) + (parseFloat(inv.total_quality_adj)||0);
-              }, 0);
-              // Only show complete if it was completed on or before the as-at date
-              const isComplete = row.c.is_complete && 
-                (!row.c.completed_at || row.c.completed_at.slice(0,10) <= asAt);
-              const stillToGoQty = isComplete ? 0 : row.qty;
-              const stillToGoGross = stillToGoQty * row.price;
-              return `
-              <tr>
-                <td style="${tdStyle()}"><strong>${row.c.contract_number || '—'}</strong></td>
-                <td style="${tdStyle()}">${row.c.counterparty || row.c.buyer || '—'}</td>
-                <td style="${tdStyle('r')}">${fmtN(row.contractedQty, 2)}</td>
-                <td style="${tdStyle('r')}">${fmtC(row.price, 0)}</td>
-                <td style="${tdStyle('r')}">${fmtC(contractValue, 0)}</td>
-                <td style="${tdStyle('r')}">${row.invoicedQty ? fmtN(row.invoicedQty, 2) : '—'}</td>
-                <td style="${tdStyle('r')}">${filledGross ? fmtC(filledGross, 0) : '—'}</td>
-                <td style="${tdStyle('r')}" class="${!isComplete && stillToGoQty > 0 ? 'text-amber' : ''}">${isComplete ? '<span style="color:var(--green);font-size:11px">✓ Complete</span>' : stillToGoQty > 0 ? fmtN(stillToGoQty, 2) : fmtN(0, 2)}</td>
-                <td style="${tdStyle('r')}">${isComplete ? '—' : stillToGoGross > 0 ? fmtC(stillToGoGross, 0) : '—'}</td>
-              </tr>`;
-            }).join('')}
-            ${contracts.length > 0 ? `
-              <tr style="background:var(--page-bg);font-weight:600;border-top:2px solid var(--border)">
-                <td style="${tdStyle()}" colspan="2"><strong>TOTAL</strong></td>
-                <td style="${tdStyle('r')}">${fmtN(contractRows.reduce((s,r)=>s+r.contractedQty,0), 2)}</td>
-                <td style="${tdStyle('r')}">—</td>
-                <td style="${tdStyle('r')}">${fmtC(contractRows.reduce((s,r)=>s+r.contractedQty*r.price,0), 0)}</td>
-                <td style="${tdStyle('r')}">${fmtN(paidQty, 2)}</td>
-                <td style="${tdStyle('r')}">${fmtC(paidGross, 0)}</td>
-                <td style="${tdStyle('r')}">${fmtN(contractedRemainingQty, 2)}</td>
-                <td style="${tdStyle('r')}">${fmtC(contractedGross, 0)}</td>
-              </tr>
-            ` : ''}
-
-            <!-- UNPRICED -->
-            <tr>
-              <td colspan="9" style="${sectionHeaderStyle('#4a1a7a')}">
-                <strong>Unpriced / Uncontracted</strong>
-                <span style="font-size:11px;font-weight:400;color:#c9aaf0;margin-left:8px">(forecast balance × market price)</span>
-              </td>
-            </tr>
-            ${unpricedQty <= 0 ? `
-              <tr><td colspan="9" style="padding:10px 16px;font-style:italic;color:var(--muted);border-bottom:1px solid var(--border-light)">No unpriced balance</td></tr>
-            ` : `
-              <tr>
-                <td style="${tdStyle()}"></td>
-                <td style="${tdStyle()}">
-                  Forecast balance ${fmtN(denominator, 2)} ${unit} forecast
-                  ${contractedQty ? ` − ${fmtN(contractedQty, 0)} contracted` : ''}
-                  <br><span style="font-size:11px;color:var(--muted)">
-                    ${marketPrice ? `${fmtC(marketPrice,2)} mkt × ${contingencyPct}% contingency = ${fmtC(unpricedPrice||0,2)}` : 'No market price available'}
-                  </span>
-                </td>
-                <td style="${tdStyle('r')}">${fmtN(unpricedQty, 2)} ${unit}</td>
-                <td style="${tdStyle('r')}">${unpricedPrice ? fmtC(unpricedPrice, 2) : '—'}</td>
-                <td style="${tdStyle('r')}">${unpricedGross ? fmtC(unpricedGross, 0) : '—'}</td>
-                <td style="${tdStyle('r')}">indicative</td>
-                <td style="${tdStyle('r')}">${unpricedGross ? fmtC(unpricedGross, 0) : '—'}</td>
-                <td style="${tdStyle('r')}">${unpricedGross ? pctOf(unpricedGross) : '—'}</td>
-              </tr>
-              <tr style="background:var(--page-bg)">
-                <td style="${tdStyle()}"></td>
-                <td style="${tdStyle()}"><strong>Unpriced subtotal (incl. contingency)</strong></td>
-                <td style="${tdStyle('r')}"><strong>${fmtN(unpricedQty, 2)} ${unit}</strong></td>
-                <td style="${tdStyle('r')}"><strong>${unpricedPrice ? fmtC(unpricedPrice, 2) : '—'}</strong></td>
-                <td style="${tdStyle('r')}"><strong>${unpricedGross ? fmtC(unpricedGross, 0) : '—'}</strong></td>
-                <td style="${tdStyle('r')}">indicative</td>
-                <td style="${tdStyle('r')}"><strong>${unpricedGross ? fmtC(unpricedGross, 0) : '—'}</strong></td>
-                <td style="${tdStyle('r')}"><strong>${unpricedGross ? pctOf(unpricedGross) : '—'}</strong></td>
-              </tr>
-            `}
-
-            <!-- TOTAL -->
-            <tr style="background:var(--ink);color:white">
-              <td style="padding:10px 16px;font-weight:700;font-size:var(--text-sm)" colspan="2">
-                ${com.name} — Total Season Position
-              </td>
-              <td style="padding:10px 16px;text-align:right;font-weight:700;font-family:inherit">${fmtN(totalQty, 2)} ${unit}</td>
-              <td style="padding:10px 16px;text-align:right;font-size:11px;color:#aab;font-family:inherit">avg ${fmtC(avgPrice, 2)}</td>
-              <td style="padding:10px 16px;text-align:right;font-weight:700;font-family:inherit">${fmtC(totalGross, 0)}</td>
-              <td style="padding:10px 16px;text-align:right;color:#aab"></td>
-              <td style="padding:10px 16px;text-align:right;font-weight:700;font-family:inherit">${fmtC(totalGross, 0)}</td>
-              <td style="padding:10px 16px;text-align:right;font-weight:700">100%</td>
-            </tr>
-
-          </tbody>
-        </table>
+        ${productionHtml}
+        ${contractHtml}
+        ${cashHtml}
+        ${seedHtml}
+        ${onHandHtml}
       </div>
-
-      <!-- Footer notes -->
-      <div style="padding:10px 16px;border-top:1px solid var(--border-light);background:var(--page-bg)">
-        <p style="font-size:11px;color:var(--hint);line-height:1.5">
-          Deductions from RCTI records only. Contracted balance deductions estimated.
-          Unpriced crop is indicative at ${formatDate(asAt)} market price.
-          ${contingencyPct !== 0 ? `Quality contingency of ${contingencyPct}% applied to unpriced value only.` : ''}
-        </p>
-      </div>
+      ${totalHtml}
     </div>
   `;
 }
 
-function thStyle(align = 'l') {
-  return `padding:7px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:400;text-align:${align === 'r' ? 'right' : 'left'};border-bottom:1px solid var(--border);white-space:nowrap`;
+function _updateOnHandRow(output, commName) {
+  const inputs = output.querySelectorAll(`.rec-onhand-price[data-comm="${commName}"]`);
+  inputs.forEach(input => {
+    const price = parseFloat(input.value) || 0;
+    _onHandPrices[commName] = price;
+    // Find the qty from the row's strong element next to the price input
+    const row = input.closest('tr');
+    if (!row) return;
+    const qtyCell = row.querySelectorAll('td')[1];
+    const qtyText = qtyCell?.querySelector('strong')?.textContent?.replace(/,/g, '') || '';
+    const qty = parseFloat(qtyText) || 0;
+    const val = qty && price ? qty * price : null;
+    const valEl = output.querySelector(`.rec-onhand-value-${_slugify(commName)}`);
+    if (valEl) valEl.textContent = val != null ? formatCurrency(val, 0) : '—';
+  });
 }
 
-function tdStyle(align = 'l') {
-  return `padding:7px 12px;border-bottom:0.5px solid var(--border-light);vertical-align:top;text-align:${align === 'r' ? 'right' : 'left'};font-family:inherit;font-size:var(--text-sm)`;
+function _slugify(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '-');
 }
 
-function sectionHeaderStyle(bg) {
-  return `padding:8px 16px;background:${bg};color:white;font-size:var(--text-sm)`;
+// ── Style helpers ──────────────────────────────────────────────────────────
+
+function thL() {
+  return 'padding:7px 12px;font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:var(--hint);font-weight:600;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--page-bg)';
 }
+function thR() {
+  return thL().replace('text-align:left', 'text-align:right');
+}
+function tdL() {
+  return 'padding:7px 12px;border-bottom:0.5px solid var(--border-light);vertical-align:middle;text-align:left;font-size:var(--text-sm)';
+}
+function tdR() {
+  return tdL().replace('text-align:left', 'text-align:right');
+}
+function emptyCell() {
+  return 'padding:10px 12px;color:var(--hint);font-style:italic;font-size:var(--text-sm)';
+}
+
+// ── Print ──────────────────────────────────────────────────────────────────
 
 function _print(container, farm) {
-  const season = getActiveSeason() || currentSeason();
-  const asAt = qs('#rec-date', container)?.value || new Date().toISOString().slice(0, 10);
-  const contingency = qs('#rec-contingency', container)?.value || '-5';
+  const season  = getActiveSeason() || currentSeason();
+  const asAt    = qs('#rec-date', container)?.value || new Date().toISOString().slice(0, 10);
   const content = qs('#rec-output', container)?.innerHTML || '';
+  const asAtFmt = new Date(asAt + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' });
 
   const win = window.open('', '_blank');
   win.document.write(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Income Reconciliation — ${farm.name}</title>
+      <title>Income Reconciliation — ${farm.name} — ${season}</title>
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: Arial, sans-serif; font-size: 11px; color: #1a1a1a; padding: 20px; }
-        h1 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
-        .meta { font-size: 11px; color: #666; margin-bottom: 20px; }
-        .rec-section { margin-bottom: 24px; border: 1px solid #ccc; border-radius: 4px; overflow: hidden; page-break-inside: avoid; }
-        table { width: 100%; border-collapse: collapse; font-size: 11px; }
-        th { padding: 5px 8px; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; color: #666; border-bottom: 1px solid #ccc; text-align: left; background: #f5f5f5; }
+        body { font-family: Arial, sans-serif; font-size: 10px; color: #1a1a1a; padding: 16px 20px; }
+        h1 { font-size: 16px; font-weight: 700; margin-bottom: 2px; }
+        .meta { font-size: 10px; color: #555; margin-bottom: 16px; }
+        .rec-section { margin-bottom: 20px; border: 1px solid #bbb; border-radius: 3px; overflow: hidden; page-break-inside: avoid; }
+        table { width: 100%; border-collapse: collapse; font-size: 10px; }
+        th { padding: 4px 8px; font-size: 8px; text-transform: uppercase; letter-spacing: .06em; color: #555; border-bottom: 1px solid #ccc; background: #f5f5f5; }
         th:not(:first-child):not(:nth-child(2)) { text-align: right; }
-        td { padding: 5px 8px; border-bottom: 0.5px solid #eee; vertical-align: top; }
-        td:not(:first-child):not(:nth-child(2)) { text-align: right;  }
-        .card { display: block; }
-        .form-select, .form-input, .btn, #btn-rec-refresh, #btn-rec-print, .loading-spinner { display: none !important; }
+        td { padding: 4px 8px; border-bottom: 0.5px solid #eee; vertical-align: middle; }
+        td:not(:first-child):not(:nth-child(2)) { text-align: right; }
+        .rec-sub-header { padding: 5px 12px; background: #2a3a50; color: white; font-size: 10px; font-weight: 600; }
+        .rec-total-row td, .rec-subtotal-row td { background: #f0f0f0; font-weight: 600; border-top: 1px solid #ccc; }
+        .rec-complete-badge { color: #2a7a2a; font-size: 9px; }
+        .rec-amber { color: #c65; }
+        .rec-val-strong { font-weight: 700; }
+        .rec-val-empty { color: #999; }
+        .btn, .form-input.rec-onhand-price { display: none !important; }
         [style*="background:var(--page-bg)"] { background: #f8f8f8 !important; }
-        [style*="background:var(--blue-light)"] { background: #eaf2fb !important; }
         [style*="background:var(--ink)"] { background: #1a2535 !important; color: white !important; }
-        .empty-state { display: none; }
-        @media print {
-          body { padding: 10px; }
-          .rec-section { page-break-inside: avoid; }
-        }
-        .logo { font-size: 13px; font-weight: 600; color: #1a2535; margin-bottom: 12px; }
+        [style*="color:white"] { color: white !important; }
+        .logo { font-size: 11px; font-weight: 600; color: #1a2535; margin-bottom: 10px; }
+        @media print { body { padding: 8px 10px; } .rec-section { page-break-inside: avoid; } }
       </style>
     </head>
     <body>
       <div class="logo">Customised Farm Management Pty Ltd</div>
       <h1>Income Reconciliation — ${farm.name}</h1>
-      <p class="meta">${farm.name} · ${season} · As at ${new Date(asAt).toLocaleDateString('en-AU', {day:'numeric',month:'long',year:'numeric'})} · ${contingency}% quality contingency on unpriced crop</p>
+      <p class="meta">${season} · As at ${asAtFmt} · Completed invoices only</p>
       ${content}
       <script>window.onload = () => { window.print(); }<\/script>
     </body>
